@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <limits>
 #include <new>
 #include <optional>
+#include <span>
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwscript/compilercontext.hpp>
@@ -229,27 +231,57 @@ namespace MWWorld::Testing
                 require(!node.hasLiveReference(), "consumed pair retained an owned node after discard");
         }
 
+        // Bitwise float witnesses include NaNs and signed zero. Also witness the
+        // allocating string payload of deliberately malformed Variant values.
+        auto namedLocalState(const ESM::Locals& locals)
+        {
+            std::vector<std::tuple<std::string, ESM::VarType, int32_t, uint32_t, std::string, const char*, size_t,
+                const char*, size_t>>
+                values;
+            for (const auto& [name, value] : locals.mVariables)
+            {
+                const auto type = value.getType();
+                const bool integer = type == ESM::VT_Int || type == ESM::VT_Short || type == ESM::VT_Long;
+                const bool string = type == ESM::VT_String;
+                values.emplace_back(name, type, integer ? value.getInteger() : 0,
+                    type == ESM::VT_Float ? std::bit_cast<uint32_t>(value.getFloat()) : 0,
+                    string ? value.getString() : std::string{}, name.data(), name.capacity(),
+                    string ? value.getString().data() : nullptr, string ? value.getString().capacity() : 0);
+            }
+            return std::tuple{ values, locals.mVariables.data(), locals.mVariables.capacity() };
+        }
+
         auto localOutputState(const ESM::Locals& locals)
         {
-            std::vector<std::pair<const char*, size_t>> strings;
-            for (const auto& [name, value] : locals.mVariables)
-                strings.emplace_back(name.data(), name.capacity());
-            return std::tuple{ locals.mVariables, locals.mVariables.data(), locals.mVariables.capacity(), strings };
+            return namedLocalState(locals);
+        }
+
+        auto positionBits(const ESM::Position& position)
+        {
+            std::array<uint32_t, 6> result;
+            for (int i = 0; i < 3; ++i)
+            {
+                result[i] = std::bit_cast<uint32_t>(position.pos[i]);
+                result[i + 3] = std::bit_cast<uint32_t>(position.rot[i]);
+            }
+            return result;
         }
 
         auto animationValues(const ESM::AnimationState& state)
         {
-            std::vector<std::tuple<std::string, float, bool, uint64_t>> result;
+            std::vector<std::tuple<std::string, uint32_t, bool, uint64_t>> result;
             for (const auto& animation : state.mScriptedAnims)
-                result.emplace_back(animation.mGroup, animation.mTime, animation.mAbsolute, animation.mLoopCount);
+                result.emplace_back(animation.mGroup, std::bit_cast<uint32_t>(animation.mTime), animation.mAbsolute,
+                    animation.mLoopCount);
             return result;
         }
 
         auto cellRefValues(const ESM::CellRef& r)
         {
-            return std::tuple{ r.mRefNum, r.mRefID, r.mScale, r.mOwner, r.mGlobalVariable, r.mSoul, r.mFaction,
-                r.mFactionRank, r.mChargeInt, r.mChargeIntRemainder, r.mEnchantmentCharge, r.mCount, r.mTeleport,
-                r.mDoorDest, r.mDestCell, r.mLockLevel, r.mIsLocked, r.mKey, r.mTrap, r.mReferenceBlocked, r.mPos };
+            return std::tuple{ r.mRefNum, r.mRefID, std::bit_cast<uint32_t>(r.mScale), r.mOwner, r.mGlobalVariable,
+                r.mSoul, r.mFaction, r.mFactionRank, r.mChargeInt, std::bit_cast<uint32_t>(r.mChargeIntRemainder),
+                std::bit_cast<uint32_t>(r.mEnchantmentCharge), r.mCount, r.mTeleport, positionBits(r.mDoorDest),
+                r.mDestCell, r.mLockLevel, r.mIsLocked, r.mKey, r.mTrap, r.mReferenceBlocked, positionBits(r.mPos) };
         }
 
         auto objectOutputState(const ESM::ObjectState& state)
@@ -263,7 +295,7 @@ namespace MWWorld::Testing
                 strings.emplace_back(animation.mGroup.data(), animation.mGroup.capacity());
             return std::tuple{ cellRefValues(r), r.mGlobalVariable.data(), r.mGlobalVariable.capacity(),
                 r.mDestCell.data(), r.mDestCell.capacity(), localOutputState(state.mLocals), lua,
-                state.mLuaScripts.mScripts.data(), state.mLuaScripts.mScripts.capacity(), state.mPosition,
+                state.mLuaScripts.mScripts.data(), state.mLuaScripts.mScripts.capacity(), positionBits(state.mPosition),
                 animationValues(state.mAnimationState), state.mAnimationState.mScriptedAnims.data(),
                 state.mAnimationState.mScriptedAnims.capacity(), strings, state.mActorIdConverter, state.mVersion,
                 state.mFlags, state.mHasLocals, state.mEnabled, state.mHasCustomState };
@@ -335,6 +367,25 @@ namespace MWWorld::Testing
             SerializedInventory mSource, mDestination;
         };
 
+        template <class Identity>
+        void serializeInventory(const PreparedContainerTransfer::MiscList& storage, Identity identity,
+            const Compiler::Locals& declarations, SerializedInventory& inventory)
+        {
+            inventory.mObjects.reserve(storage.size());
+            inventory.mProposedIdentities.reserve(storage.size());
+            size_t i = 0;
+            for (const auto& node : storage)
+            {
+                inventory.mProposedIdentities.push_back(identity(i++));
+                inventory.mObjects.emplace_back();
+                auto& object = inventory.mObjects.back();
+                object.blank();
+                node.mRef.writeState(object);
+                node.mData.write(object, declarations);
+                object.mHasCustomState = false;
+            }
+        }
+
         void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
             const Compiler::Locals& declarations, SerializedPair& output)
         {
@@ -343,26 +394,177 @@ namespace MWWorld::Testing
                 throw std::invalid_argument("ObjectState serialization requires complete resolution");
             SerializedPair staged;
             const auto serialize = [&](const auto& storage, const auto& views, SerializedInventory& inventory) {
-                inventory.mObjects.reserve(storage.size());
-                inventory.mProposedIdentities.reserve(storage.size());
-                size_t i = 0;
-                for (const auto& node : storage)
-                {
-                    const auto identity = views.at(i++).mIdentity;
-                    inventory.mProposedIdentities.push_back(
-                        identity.isSet() ? identity : pair.getDestinationIdentity());
-                    inventory.mObjects.emplace_back();
-                    auto& object = inventory.mObjects.back();
-                    object.blank();
-                    node.mRef.writeState(object);
-                    node.mData.write(object, declarations);
-                    // Only plain/initialized MWScript MISC without custom/Lua state
-                    // passes preparation. No class-specific state is staged here.
-                    object.mHasCustomState = false;
-                }
+                serializeInventory(
+                    storage,
+                    [&](size_t i) {
+                        const auto id = views.at(i).mIdentity;
+                        return id.isSet() ? id : pair.getDestinationIdentity();
+                    },
+                    declarations, inventory);
             };
             serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
             serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
+            output.mSource.swap(staged.mSource);
+            output.mDestination.swap(staged.mDestination);
+        }
+
+        // Disposable test-only composition, with exactly the stock MISC list type.
+        // Published nodes are read-only and have no WorldModel or assigned identity.
+        // Supplied records outlive this storage. No registry/script-service rebuild,
+        // selection installation, durability or notification is implied.
+        struct RestoredInventory
+        {
+            PreparedContainerTransfer::MiscList mNodes;
+            std::vector<ESM::RefNum> mProposedIdentities;
+        };
+
+        struct RestoredPair
+        {
+            RestoredInventory mSource, mDestination;
+        };
+
+        struct RestoreContent
+        {
+            std::span<const ESM::Miscellaneous* const> mBases;
+            const ESM::Script& mScript;
+            const Compiler::Locals& mDeclarations;
+        };
+
+        void validateText(std::string_view text, bool optional = true)
+        {
+            if ((!optional && text.empty()) || text.size() > 4096 || text.find('\0') != std::string_view::npos)
+                throw std::invalid_argument("Invalid detached inventory name");
+        }
+
+        void validateId(const ESM::RefId& id, bool optional = true)
+        {
+            if (optional && id.empty())
+                return;
+            if (!id.is<ESM::StringRefId>())
+                throw std::invalid_argument("Detached inventory requires TES3 string IDs");
+            validateText(id.getRefIdString(), false);
+        }
+
+        const ESM::Miscellaneous& suppliedBase(const ESM::RefId& id, const RestoreContent& content)
+        {
+            // Only search the explicit base-record collection, never a world/store.
+            for (const auto* base : content.mBases)
+                if (base->mId == id)
+                    return *base;
+            throw std::invalid_argument("Missing supplied inventory base record");
+        }
+
+        void validateRestore(const SerializedPair& input, const RestoreContent& content)
+        {
+            constexpr size_t maxObjects = 1024;
+            if (content.mBases.empty() || content.mBases.size() > maxObjects)
+                throw std::invalid_argument("Invalid supplied base count");
+            validateId(content.mScript.mId, false);
+            for (char type : { 's', 'l', 'f' })
+            {
+                if (content.mDeclarations.get(type).size() > 1024)
+                    throw std::invalid_argument("Too many supplied declarations");
+                const auto& names = content.mDeclarations.get(type);
+                for (size_t i = 0; i < names.size(); ++i)
+                {
+                    validateText(names[i], false);
+                    if (content.mDeclarations.getType(names[i]) != type
+                        || content.mDeclarations.getIndex(names[i]) != static_cast<int>(i))
+                        throw std::invalid_argument("Ambiguous supplied declaration");
+                }
+            }
+            for (size_t i = 0; i < content.mBases.size(); ++i)
+            {
+                const auto* base = content.mBases[i];
+                if (!base)
+                    throw std::invalid_argument("Null supplied base record");
+                validateId(base->mId, false);
+                validateId(base->mScript);
+                if (base->mId == "gold_001" || base->mId == "gold_005" || base->mId == "gold_010"
+                    || base->mId == "gold_025" || base->mId == "gold_100"
+                    || (!base->mScript.empty() && base->mScript != content.mScript.mId))
+                    throw std::invalid_argument("Unsupported gold or missing script declaration");
+                for (size_t j = 0; j < i; ++j)
+                    if (content.mBases[j]->mId == base->mId)
+                        throw std::invalid_argument("Ambiguous supplied base record");
+            }
+            const std::array inventories{ &input.mSource, &input.mDestination };
+            // Validate every shape before scanning identity associations or staging.
+            for (const auto* inventory : inventories)
+                if (inventory->mObjects.size() > maxObjects
+                    || inventory->mObjects.size() != inventory->mProposedIdentities.size())
+                    throw std::invalid_argument("Invalid detached inventory membership");
+            for (const auto* inventory : inventories)
+                for (size_t i = 0; i < inventory->mObjects.size(); ++i)
+                {
+                    const auto& state = inventory->mObjects[i];
+                    const auto& ref = state.mRef;
+                    const auto id = inventory->mProposedIdentities[i];
+                    if (!id.isSet() || id.mContentFile < -1 || ref.mRefNum.isSet())
+                        throw std::invalid_argument("Invalid detached identity association");
+                    size_t occurrences = 0;
+                    for (const auto* collection : inventories)
+                        occurrences += std::count(
+                            collection->mProposedIdentities.begin(), collection->mProposedIdentities.end(), id);
+                    if (occurrences != 1)
+                        throw std::invalid_argument("Duplicate proposed inventory identity");
+                    validateId(ref.mRefID, false);
+                    const auto& base = suppliedBase(ref.mRefID, content);
+                    for (const auto& key : { ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap })
+                        validateId(key); // Preserve semantic fields without resolving their targets.
+                    validateText(ref.mGlobalVariable);
+                    validateText(ref.mDestCell);
+                    // Stock signed restocking counts are retained, including zero.
+                    if (ref.mCount == std::numeric_limits<int32_t>::min() || !std::isfinite(ref.mScale)
+                        || ref.mScale <= 0 || ref.mChargeInt < -1 || !std::isfinite(ref.mChargeIntRemainder)
+                        || !std::isfinite(ref.mEnchantmentCharge) || ref.mEnchantmentCharge < -1)
+                        throw std::invalid_argument("Invalid detached CellRef numeric value");
+                    for (const auto* position : { &ref.mPos, &ref.mDoorDest })
+                        for (int axis = 0; axis < 3; ++axis)
+                            if (!std::isfinite(position->pos[axis]) || !std::isfinite(position->rot[axis]))
+                                throw std::invalid_argument("Nonfinite detached CellRef position");
+                    if (state.mLocals.mVariables.size() > 1024 || state.mAnimationState.mScriptedAnims.size() > 256)
+                        throw std::invalid_argument("Oversized detached RefData");
+                    for (const auto& [name, value] : state.mLocals.mVariables)
+                        validateText(name, false);
+                    for (const auto& animation : state.mAnimationState.mScriptedAnims)
+                        validateText(animation.mGroup, false);
+                    RefData::validateRestore(state, base.mScript, content.mDeclarations);
+                }
+        }
+
+        void restorePair(
+            const SerializedPair& input, const RestoreContent& content, std::unique_ptr<const RestoredPair>& output)
+        {
+            validateRestore(input, content);
+            auto staged = std::make_unique<RestoredPair>();
+            const auto restore = [&](const SerializedInventory& saved, RestoredInventory& inventory) {
+                inventory.mProposedIdentities = saved.mProposedIdentities;
+                for (const auto& object : saved.mObjects)
+                {
+                    const auto& base = suppliedBase(object.mRef.mRefID, content);
+                    // Actual engine CellRef/LiveCellRef construction retains every
+                    // field; RefData's explicit restore keeps strict locals/flags.
+                    inventory.mNodes.emplace_back(object.mRef, &base);
+                    inventory.mNodes.back().mData = RefData::restore(object, base.mScript, content.mDeclarations);
+                }
+            };
+            restore(input.mSource, staged->mSource);
+            restore(input.mDestination, staged->mDestination);
+            // Both lists and their associations publish through one noexcept move.
+            static_assert(noexcept(output = std::move(staged)));
+            output = std::move(staged);
+        }
+
+        void serializePair(const RestoredPair& pair, const Compiler::Locals& declarations, SerializedPair& output)
+        {
+            SerializedPair staged;
+            serializeInventory(
+                pair.mSource.mNodes, [&](size_t i) { return pair.mSource.mProposedIdentities.at(i); }, declarations,
+                staged.mSource);
+            serializeInventory(
+                pair.mDestination.mNodes, [&](size_t i) { return pair.mDestination.mProposedIdentities.at(i); },
+                declarations, staged.mDestination);
             output.mSource.swap(staged.mSource);
             output.mDestination.swap(staged.mDestination);
         }
@@ -499,26 +701,6 @@ namespace MWWorld::Testing
                 locals.mLongs.data(), locals.mLongs.capacity(), locals.mFloats.data(), locals.mFloats.capacity() };
         }
 
-        // Bitwise float witnesses include NaNs and signed zero. Also witness the
-        // allocating string payload of deliberately malformed Variant values.
-        auto namedLocalState(const ESM::Locals& locals)
-        {
-            std::vector<std::tuple<std::string, ESM::VarType, int32_t, uint32_t, std::string, const char*, size_t,
-                const char*, size_t>>
-                values;
-            for (const auto& [name, value] : locals.mVariables)
-            {
-                const auto type = value.getType();
-                const bool integer = type == ESM::VT_Int || type == ESM::VT_Short || type == ESM::VT_Long;
-                const bool string = type == ESM::VT_String;
-                values.emplace_back(name, type, integer ? value.getInteger() : 0,
-                    type == ESM::VT_Float ? std::bit_cast<uint32_t>(value.getFloat()) : 0,
-                    string ? value.getString() : std::string{}, name.data(), name.capacity(),
-                    string ? value.getString().data() : nullptr, string ? value.getString().capacity() : 0);
-            }
-            return std::tuple{ values, locals.mVariables.data(), locals.mVariables.capacity() };
-        }
-
         auto declarationState(const Compiler::Locals& declarations)
         {
             const auto capture = [&](char type) {
@@ -529,6 +711,31 @@ namespace MWWorld::Testing
                 return std::tuple{ names, names.data(), names.capacity(), strings };
             };
             return std::tuple{ capture('s'), capture('l'), capture('f') };
+        }
+
+        auto contentState(const RestoreContent& content)
+        {
+            const auto string = [](const std::string& s) { return std::tuple{ s, s.data(), s.capacity() }; };
+            const auto base = [&](const ESM::Miscellaneous& b) {
+                return std::tuple{ &b, b.mId, b.mScript, std::bit_cast<uint32_t>(b.mData.mWeight), b.mData.mValue,
+                    b.mData.mFlags, b.mRecordFlags, string(b.mName), string(b.mModel), string(b.mIcon) };
+            };
+            std::vector<decltype(base(*content.mBases.front()))> bases;
+            std::vector<const ESM::Miscellaneous*> bindings;
+            for (const auto* record : content.mBases)
+            {
+                bindings.push_back(record);
+                if (record)
+                    bases.push_back(base(*record));
+            }
+            const auto& script = content.mScript;
+            std::vector<decltype(string(script.mScriptText))> names;
+            for (const auto& name : script.mVarNames)
+                names.push_back(string(name));
+            return std::tuple{ content.mBases.data(), bindings, bases, &script, script.mId, script.mRecordFlags,
+                script.mNumShorts, script.mNumLongs, script.mNumFloats, names, script.mVarNames.data(),
+                script.mVarNames.capacity(), script.mScriptData, script.mScriptData.data(),
+                script.mScriptData.capacity(), string(script.mScriptText), declarationState(content.mDeclarations) };
         }
 
         template <class Verify>
@@ -781,6 +988,46 @@ namespace MWWorld::Testing
             return allocations;
         }
 
+        auto restoredState(const std::unique_ptr<const RestoredPair>& pair)
+        {
+            const auto inventory = [](const RestoredInventory& value) {
+                std::vector<decltype(nodeState({}))> nodes;
+                std::vector<const ESM::Miscellaneous*> bases;
+                std::vector<std::pair<const char*, size_t>> strings;
+                for (const auto& node : value.mNodes)
+                {
+                    nodes.push_back(nodeState(ConstPtr(&node)));
+                    bases.push_back(node.mBase);
+                    for (const auto& animation : node.mData.getAnimationState().mScriptedAnims)
+                        strings.emplace_back(animation.mGroup.data(), animation.mGroup.capacity());
+                }
+                return std::tuple{ nodes, bases, strings, value.mProposedIdentities, value.mProposedIdentities.data(),
+                    value.mProposedIdentities.capacity() };
+            };
+            return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination) };
+        }
+
+        RestoredPair expectedRestoration(const PreparedContainerTransfer& pair)
+        {
+            RestoredPair result;
+            const auto copy = [&](const auto& storage, const auto& views, RestoredInventory& inventory) {
+                size_t i = 0;
+                for (const auto& node : storage)
+                {
+                    auto& expected = inventory.mNodes.emplace_back(ESM::makeBlankCellRef(), node.mBase);
+                    expected.mRef = node.mRef;
+                    expected.mData = node.mData.copyForContainerTransfer();
+                    // This transient engine flag is deliberately absent from ObjectState.
+                    expected.mData.mPhysicsPostponed = false;
+                    const auto id = views[i++].mIdentity;
+                    inventory.mProposedIdentities.push_back(id.isSet() ? id : pair.getDestinationIdentity());
+                }
+            };
+            copy(pair.getSourceStorage(), pair.getRelocation().mSource, result.mSource);
+            copy(pair.getDestinationStorage(), pair.getRelocation().mDestination, result.mDestination);
+            return result;
+        }
+
         void checkSerializedData(const RefData& data, const ESM::ObjectState& output, size_t prefix = 0)
         {
             const auto& locals = data.getLocals();
@@ -829,6 +1076,319 @@ namespace MWWorld::Testing
                     && output.mKey == ref.getKey() && output.mTrap == ref.getTrap() && output.mReferenceBlocked == 1
                     && output.mPos == ref.getPosition(),
                 "serialized CellRef field mismatch");
+        }
+
+        void checkRestored(const RestoredPair& restored, const RestoredPair& expected)
+        {
+            const auto check = [](const RestoredInventory& actual, const RestoredInventory& wanted) {
+                require(actual.mProposedIdentities == wanted.mProposedIdentities
+                        && actual.mNodes.size() == wanted.mNodes.size(),
+                    "restoration lost membership/associations");
+                auto next = wanted.mNodes.begin();
+                for (const auto& node : actual.mNodes)
+                {
+                    const auto& value = *next++;
+                    require(&node != &value && node.mBase == value.mBase && node.mWorldModel == nullptr
+                            && !node.mRef.getRefNum().isSet() && !node.mData.getBaseNode()
+                            && !node.mData.getCustomData() && !node.mData.getLuaScripts(),
+                        "restoration shared nodes, assigned identities or installed unsupported state");
+                    // Compare actual engine values against a pre-destruction copy
+                    // of the prepared result, independent of the restored serializer.
+                    require(node.mData.matchesContainerTransferState(value.mData)
+                            && localValues(node.mData.getLocals()) == localValues(value.mData.getLocals())
+                            && positionBits(node.mData.getPosition()) == positionBits(value.mData.getPosition())
+                            && animationValues(node.mData.getAnimationState())
+                                == animationValues(value.mData.getAnimationState()),
+                        "restored RefData differs from expected prepared result");
+                    ESM::ObjectState ref;
+                    value.mRef.writeState(ref);
+                    checkSerializedRef(node.mRef, ref.mRef);
+                    ESM::ObjectState actualRef;
+                    node.mRef.writeState(actualRef);
+                    require(cellRefValues(actualRef.mRef) == cellRefValues(ref.mRef),
+                        "restored CellRef lost hidden fields or float bits");
+                }
+            };
+            check(restored.mSource, expected.mSource);
+            check(restored.mDestination, expected.mDestination);
+        }
+
+        void checkSavedValues(const SerializedPair& actual, const SerializedPair& expected)
+        {
+            const auto check = [](const SerializedInventory& a, const SerializedInventory& b) {
+                require(a.mProposedIdentities == b.mProposedIdentities && a.mObjects.size() == b.mObjects.size(),
+                    "save/restore/save lost membership or identities");
+                for (size_t i = 0; i < a.mObjects.size(); ++i)
+                {
+                    const auto& x = a.mObjects[i];
+                    const auto& y = b.mObjects[i];
+                    require(cellRefValues(x.mRef) == cellRefValues(y.mRef) && x.mHasLocals == y.mHasLocals
+                            && x.mLocals.mVariables == y.mLocals.mVariables && x.mFlags == y.mFlags
+                            && x.mEnabled == y.mEnabled && positionBits(x.mPosition) == positionBits(y.mPosition)
+                            && animationValues(x.mAnimationState) == animationValues(y.mAnimationState)
+                            && x.mVersion == y.mVersion && x.mActorIdConverter == nullptr && !x.mHasCustomState
+                            && x.mLuaScripts.mScripts.empty(),
+                        "save/restore/save changed owned engine values");
+                }
+            };
+            check(actual.mSource, expected.mSource);
+            check(actual.mDestination, expected.mDestination);
+        }
+
+        template <class Verify>
+        size_t checkInventoryRestore(const SerializedPair& input, const RestoreContent& content,
+            const RestoredPair& expected, Verify verifyOriginal, bool malformed, size_t& rejections)
+        {
+            const auto inputBefore = pairOutputState(input);
+            const auto contentBefore = contentState(content);
+            const auto verify = [&] {
+                require(pairOutputState(input) == inputBefore && contentState(content) == contentBefore,
+                    "restoration changed caller input or declarations/storage");
+                verifyOriginal();
+            };
+            const auto make = [&] {
+                std::unique_ptr<const RestoredPair> result;
+                restorePair(input, content, result);
+                return result;
+            };
+            Allocations::Trace validation;
+            {
+                Allocations::Observe observe(validation);
+                validateRestore(input, content);
+            }
+            require(validation.mTotal == 0, "valid inventory validation allocated before staging");
+            const auto check = [&](const auto& restored) {
+                checkRestored(*restored, expected);
+                SerializedPair saved;
+                serializePair(*restored, content.mDeclarations, saved);
+                checkSavedValues(saved, input);
+                // The second save must itself be independently restorable.
+                std::unique_ptr<const RestoredPair> again;
+                restorePair(saved, content, again);
+                checkRestored(*again, expected);
+            };
+            size_t allocations = checkSerializationAllocations(
+                make, [&](auto& output) { restorePair(input, content, output); }, restoredState, check, verify);
+            auto restored = make();
+            const auto restoredBefore = restoredState(restored);
+            allocations += checkSerializationAllocations([] { return pairOutputSentinel<true>(); },
+                [&](auto& output) { serializePair(*restored, content.mDeclarations, output); },
+                [](const auto& output) { return pairOutputState(output); },
+                [&](const auto& output) { checkSavedValues(output, input); },
+                [&] {
+                    require(restoredState(restored) == restoredBefore, "reserialization changed restored storage");
+                    verify();
+                });
+            if (!malformed)
+                return allocations;
+
+            auto reordered = input;
+            for (auto* inventory : { &reordered.mSource, &reordered.mDestination })
+                for (auto& object : inventory->mObjects)
+                    std::reverse(object.mLocals.mVariables.begin(), object.mLocals.mVariables.end());
+            const auto reorderedBefore = pairOutputState(reordered);
+            allocations += checkSerializationAllocations(
+                make, [&](auto& output) { restorePair(reordered, content, output); }, restoredState, check,
+                [&] {
+                    require(pairOutputState(reordered) == reorderedBefore, "restoration reordered caller locals");
+                    verify();
+                });
+
+            // Configured scripts with no variables must remain configured even
+            // though their vectors are indistinguishable from plain empty locals.
+            auto emptyLocals = input;
+            for (auto* inventory : { &emptyLocals.mSource, &emptyLocals.mDestination })
+                for (auto& object : inventory->mObjects)
+                    object.mLocals.mVariables.clear();
+            Compiler::Locals noDeclarations;
+            const RestoreContent emptyContent{ content.mBases, content.mScript, noDeclarations };
+            const auto emptyBefore = pairOutputState(emptyLocals);
+            allocations += checkSerializationAllocations(
+                make, [&](auto& output) { restorePair(emptyLocals, emptyContent, output); }, restoredState,
+                [&](const auto& output) {
+                    SerializedPair saved;
+                    serializePair(*output, noDeclarations, saved);
+                    checkSavedValues(saved, emptyLocals);
+                    std::unique_ptr<const RestoredPair> again;
+                    restorePair(saved, emptyContent, again);
+                    SerializedPair second;
+                    serializePair(*again, noDeclarations, second);
+                    checkSavedValues(second, emptyLocals);
+                },
+                [&] {
+                    require(pairOutputState(emptyLocals) == emptyBefore, "restoration changed empty-script input");
+                    verify();
+                });
+
+            const auto reject = [&](const SerializedPair& bad, const RestoreContent& supplied) {
+                auto output = make();
+                const auto before = restoredState(output);
+                const auto saved = pairOutputState(bad);
+                const auto suppliedBefore = contentState(supplied);
+                Allocations::Trace validationTrace;
+                {
+                    Allocations::Observe observe(validationTrace);
+                    try
+                    {
+                        validateRestore(bad, supplied);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                    }
+                }
+                Allocations::Trace trace;
+                bool caught = false;
+                {
+                    Allocations::Observe observe(trace);
+                    try
+                    {
+                        restorePair(bad, supplied, output);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                        && trace.mTotal == validationTrace.mTotal && validationTrace.mOutstanding == 0,
+                    "malformed inventory accepted or leaked staged restoration");
+                require(restoredState(output) == before && pairOutputState(bad) == saved
+                        && contentState(supplied) == suppliedBefore,
+                    "malformed restoration changed input, prior output or storage");
+                verify();
+                restorePair(input, content, output);
+                check(output);
+                check(make());
+                ++rejections;
+            };
+            const auto mutate = [&](auto change) {
+                auto bad = input;
+                change(bad);
+                reject(bad, content);
+            };
+            // Exercise errors on both sides, including the final destination node.
+            for (bool destination : { false, true })
+            {
+                const auto object = [&](auto change) {
+                    mutate([&](auto& bad) { change((destination ? bad.mDestination : bad.mSource).mObjects.back()); });
+                };
+                mutate(
+                    [&](auto& bad) { (destination ? bad.mDestination : bad.mSource).mProposedIdentities.pop_back(); });
+                mutate(
+                    [&](auto& bad) { (destination ? bad.mDestination : bad.mSource).mProposedIdentities.back() = {}; });
+                mutate([&](auto& bad) {
+                    (destination ? bad.mDestination : bad.mSource).mProposedIdentities.back().mContentFile = -2;
+                });
+                object([](auto& s) { s.mRef.mRefNum = { 19, -1 }; });
+                object([](auto& s) { s.mRef.mRefID = {}; });
+                object([](auto& s) { s.mRef.mRefID = ESM::RefId::generated(19); });
+                object([](auto& s) { s.mRef.mRefID = ESM::RefId::stringRefId("not_supplied"); });
+                object([](auto& s) { s.mRef.mRefID = ESM::RefId::stringRefId("gold_001"); });
+                object([](auto& s) { s.mRef.mCount = std::numeric_limits<int32_t>::min(); });
+                object([](auto& s) { s.mRef.mScale = 0; });
+                object([](auto& s) { s.mRef.mScale = -1; });
+                object([](auto& s) { s.mRef.mChargeInt = -2; });
+                object([](auto& s) { s.mRef.mEnchantmentCharge = -2; });
+                object([](auto& s) { s.mRef.mGlobalVariable = std::string("bad\0name", 8); });
+                object([](auto& s) { s.mRef.mDestCell = std::string(4097, 'x'); });
+                object([](auto& s) { s.mRef.mOwner = ESM::RefId::stringRefId(std::string("bad\0id", 6)); });
+                object([](auto& s) { s.mRef.mSoul = ESM::RefId::generated(17); });
+                object([](auto& s) { s.mHasLocals = 2; });
+                object([](auto& s) { s.mEnabled = 2; });
+                object([](auto& s) { s.mFlags = 8; });
+                object([](auto& s) { s.mVersion = ESM::DefaultFormatVersion + 1; });
+                object([](auto& s) { s.mHasCustomState = true; });
+                object([](auto& s) { s.mActorIdConverter = reinterpret_cast<ESM::ActorIdConverter*>(1); });
+                object([](auto& s) { s.mLuaScripts.mScripts.push_back({ 17, "unsupported", {} }); });
+                object([](auto& s) { s.mAnimationState.mScriptedAnims.front().mGroup.clear(); });
+                object([](auto& s) { s.mAnimationState.mScriptedAnims.front().mGroup = std::string("bad\0name", 8); });
+                object([](auto& s) { s.mAnimationState.mScriptedAnims.resize(257); });
+                object([](auto& s) { s.mLocals.mVariables.resize(1025); });
+                for (float value : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                         -std::numeric_limits<float>::infinity() })
+                {
+                    object([&](auto& s) { s.mRef.mScale = value; });
+                    object([&](auto& s) { s.mRef.mChargeIntRemainder = value; });
+                    object([&](auto& s) { s.mRef.mEnchantmentCharge = value; });
+                    object([&](auto& s) { s.mAnimationState.mScriptedAnims.back().mTime = value; });
+                    for (int axis = 0; axis < 3; ++axis)
+                        for (bool rotation : { false, true })
+                            for (int position = 0; position < 3; ++position)
+                                object([&](auto& s) {
+                                    auto& p = position == 0 ? s.mRef.mPos
+                                        : position == 1     ? s.mRef.mDoorDest
+                                                            : s.mPosition;
+                                    (rotation ? p.rot : p.pos)[axis] = value;
+                                });
+                }
+            }
+            mutate([](auto& bad) {
+                bad.mDestination.mProposedIdentities.back() = bad.mSource.mProposedIdentities.front();
+            });
+            mutate([](auto& bad) { bad.mSource.mProposedIdentities.back() = bad.mSource.mProposedIdentities.front(); });
+            mutate([](auto& bad) {
+                const size_t originalSize = bad.mDestination.mObjects.size();
+                bad.mDestination.mObjects.resize(1025);
+                for (size_t i = originalSize; i < bad.mDestination.mObjects.size(); ++i)
+                    bad.mDestination.mObjects[i].blank();
+                bad.mDestination.mProposedIdentities.resize(1025);
+            });
+            // This fixture has a scripted destination and a plain dormant source.
+            const auto local = [&](auto change) {
+                mutate([&](auto& bad) { change(bad.mDestination.mObjects.back().mLocals.mVariables); });
+            };
+            mutate([](auto& bad) { bad.mDestination.mObjects.back().mHasLocals = 0; });
+            mutate([](auto& bad) { bad.mSource.mObjects.back().mHasLocals = 1; });
+            mutate([](auto& bad) {
+                bad.mSource.mObjects.back().mLocals.mVariables.emplace_back("unexpected", ESM::Variant(1));
+            });
+            local([](auto& v) { v.pop_back(); });
+            local([](auto& v) { v.push_back(v.front()); });
+            local([](auto& v) { v.front().first.clear(); });
+            local([](auto& v) { v.front().first = "unknown"; });
+            local([](auto& v) { v.front().first = v.back().first; });
+            local([](auto& v) { v.front().first = std::string("bad\0name", 8); });
+            local([](auto& v) { v.front().second.setInteger(32768); });
+            local([](auto& v) { v.front().second.setInteger(-32769); });
+            local([](auto& v) { v.front().second = ESM::Variant(1.f); });
+            local([](auto& v) { v.back().second = ESM::Variant(1); });
+            local([](auto& v) { v.back().second = ESM::Variant(std::numeric_limits<float>::quiet_NaN()); });
+            for (auto type : { ESM::VT_None, ESM::VT_Short, ESM::VT_Long, ESM::VT_String })
+                local([&](auto& v) { v.front().second.setType(type); });
+            for (int shape = 0; shape < 4; ++shape)
+            {
+                Compiler::Locals badDeclarations;
+                for (char type : { 's', 'l', 'f' })
+                    for (const auto& name : content.mDeclarations.get(type))
+                    {
+                        if (type == 's' && name == content.mDeclarations.get('s').front())
+                        {
+                            if (shape == 0)
+                                continue;
+                            badDeclarations.declare(type,
+                                shape == 1       ? std::string{}
+                                    : shape == 2 ? content.mDeclarations.get('l').front()
+                                                 : std::string("bad\0name", 8));
+                        }
+                        else
+                            badDeclarations.declare(type, name);
+                    }
+                reject(input, { content.mBases, content.mScript, badDeclarations });
+            }
+            auto bases = std::vector<const ESM::Miscellaneous*>(content.mBases.begin(), content.mBases.end());
+            bases.push_back(bases.front());
+            reject(input, { bases, content.mScript, content.mDeclarations });
+            bases.back() = nullptr;
+            reject(input, { bases, content.mScript, content.mDeclarations });
+            reject(input, { {}, content.mScript, content.mDeclarations });
+            auto badScript = content.mScript;
+            badScript.mId = ESM::RefId::stringRefId("wrong_script");
+            reject(input, { content.mBases, badScript, content.mDeclarations });
+            auto gold = *content.mBases.front();
+            gold.mId = ESM::RefId::stringRefId("gold_100");
+            bases = { &gold };
+            reject(input, { bases, content.mScript, content.mDeclarations });
+            return allocations;
         }
 
         void checkPairOutput(const PreparedContainerTransfer& pair, const std::vector<ESM::ObjectState>& output)
@@ -1307,7 +1867,8 @@ namespace MWWorld::Testing
         Preparation,
         Serialization,
         ObjectState,
-        LocalsRestore
+        LocalsRestore,
+        Restore
     };
 
     static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
@@ -1316,8 +1877,9 @@ namespace MWWorld::Testing
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
         const bool localsRestore = allocationCheck == AllocationCheck::LocalsRestore;
+        const bool inventoryRestore = allocationCheck == AllocationCheck::Restore;
         const bool serialization = allocationCheck == AllocationCheck::Serialization
-            || allocationCheck == AllocationCheck::ObjectState || localsRestore;
+            || allocationCheck == AllocationCheck::ObjectState || localsRestore || inventoryRestore;
         MWClass::registerClasses();
         ESMStore store;
         const auto plainId = ESM::RefId::stringRefId("native_plain");
@@ -1410,7 +1972,8 @@ namespace MWWorld::Testing
                             if (serialization)
                             {
                                 const auto decorate = [&](const Ptr& ptr) {
-                                    if (allocationCheck == AllocationCheck::ObjectState || localsRestore)
+                                    if (allocationCheck == AllocationCheck::ObjectState || localsRestore
+                                        || inventoryRestore)
                                         ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
                                     auto& data = ptr.getRefData();
                                     data.disable();
@@ -1434,6 +1997,30 @@ namespace MWWorld::Testing
                                     animations[1].mGroup = "idle";
                                     animations[1].mTime = -0.5f;
                                     animations[1].mLoopCount = 3;
+                                    if (inventoryRestore && cursorPosition != 0)
+                                    {
+                                        data.setPosition({ { -0.f, std::numeric_limits<float>::denorm_min(), 300.f },
+                                            { 0.f, -0.f, std::numeric_limits<float>::lowest() } });
+                                        if (cursorPosition == 99)
+                                        {
+                                            data.enable();
+                                            data.activateByScript();
+                                            ptr.getCellRef()
+                                                = ptr.getCellRef().copyWithCount(-ptr.getCellRef().getCount(false));
+                                        }
+                                        else
+                                            data.onActivate();
+                                        if (!locals.getScriptId().empty())
+                                        {
+                                            locals.mShorts = { -32768, 32767 };
+                                            locals.mLongs = { std::numeric_limits<int32_t>::min(),
+                                                std::numeric_limits<int32_t>::max() };
+                                            locals.mFloats = cursorPosition == 99
+                                                ? std::vector<float>{ std::numeric_limits<float>::lowest(),
+                                                      std::numeric_limits<float>::max() }
+                                                : std::vector<float>{ -0.f, std::numeric_limits<float>::denorm_min() };
+                                        }
+                                    }
                                 };
                                 decorate(item);
                                 decorate(dormant);
@@ -1474,18 +2061,21 @@ namespace MWWorld::Testing
                                 const auto run = [&]<bool ObjectStates>() {
                                     const auto& declarations = scripts.getLocals(scriptId);
                                     std::vector<ConstPtr> nodes;
+                                    std::optional<RestoredPair> expected;
                                     auto output = pairOutputSentinel<ObjectStates>();
                                     std::optional<decltype(pairOutputState(output))> retained;
                                     {
                                         auto pair = make();
                                         nodes = ownedNodes(pair);
-                                        require(pair.getSourceItem().getCellRef().getCount(false) == 4 - quantity
+                                        const int sign = inventoryRestore && cursorPosition == 99 ? -1 : 1;
+                                        require(
+                                            pair.getSourceItem().getCellRef().getCount(false) == sign * (4 - quantity)
                                                 && pair.getDestinationItem().getCellRef().getCount(false)
-                                                    == (!scriptedItem && stack ? 7 + quantity : quantity),
+                                                    == (!scriptedItem && stack ? sign * (7 + quantity) : quantity),
                                             "serialization fixture lost full/partial removal or destination count");
                                         const bool malformed
                                             = !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0;
-                                        if (!localsRestore)
+                                        if (!localsRestore && !inventoryRestore)
                                             totals.mTotal += checkPairSerialization<ObjectStates>(
                                                 fixture, pair, declarations, verifyOriginal, malformed);
                                         // Rehearsal must retain the same read-only owned values
@@ -1493,6 +2083,8 @@ namespace MWWorld::Testing
                                         pair = fixture.rehearse(std::move(pair));
                                         serializePair(fixture, pair, declarations, output);
                                         checkPairOutput(pair, output);
+                                        if (inventoryRestore)
+                                            expected.emplace(expectedRestoration(pair));
                                         require(
                                             ownedNodes(pair) == nodes, "serialization/rehearsal replaced owned nodes");
                                         retained = pairOutputState(output);
@@ -1503,6 +2095,17 @@ namespace MWWorld::Testing
                                     verifyOriginal();
                                     if constexpr (ObjectStates)
                                     {
+                                        if (inventoryRestore)
+                                        {
+                                            const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
+                                                store.get<ESM::Miscellaneous>().find(scriptedId) };
+                                            totals.mTotal += checkInventoryRestore(output,
+                                                { bases, script, declarations }, *expected, verifyOriginal,
+                                                !shared && scriptedItem && !stack && quantity == 1
+                                                    && cursorPosition == 0,
+                                                localRejections);
+                                            requireDiscarded(nodes);
+                                        }
                                         if (localsRestore)
                                         {
                                             const auto verifyOwned = [&] {
@@ -1549,7 +2152,8 @@ namespace MWWorld::Testing
                                     checkPairOutput(fresh, output);
                                     verifyOriginal();
                                 };
-                                if (allocationCheck == AllocationCheck::ObjectState || localsRestore)
+                                if (allocationCheck == AllocationCheck::ObjectState || localsRestore
+                                    || inventoryRestore)
                                     run.template operator()<true>();
                                 else
                                     run.template operator()<false>();
@@ -1771,6 +2375,14 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (inventoryRestore)
+            {
+                require(localRejections > 0, "inventory restoration rejection coverage missing");
+                std::cout << "Inventory restoration: cases=" << cases << " individually-failed=" << totals.mTotal
+                          << " malformed-rejections=" << localRejections
+                          << " remaining-after-cleanup=0 incomplete-pairs=48\n";
+                return;
+            }
             if (localsRestore)
             {
                 require(restoredLocals > 0 && localRejections > 0, "locals restore coverage missing");
@@ -1835,5 +2447,10 @@ namespace MWWorld::Testing
     void checkTransferLocalsRestore(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::LocalsRestore);
+    }
+
+    void checkTransferRestore(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::Restore);
     }
 }

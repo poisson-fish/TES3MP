@@ -66,6 +66,7 @@ namespace MWWorld::Testing
     void checkTransferSerialization(const ESMStore& content);
     void checkTransferObjectState(const ESMStore& content);
     void checkTransferLocalsRestore(const ESMStore& content);
+    void checkTransferRestore(const ESMStore& content);
 }
 
 #endif

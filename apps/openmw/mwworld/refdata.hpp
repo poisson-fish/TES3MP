@@ -102,6 +102,16 @@ namespace MWWorld
         /// the caller's entire objectState unchanged. Custom/Lua state is omitted.
         void write(ESM::ObjectState& objectState, const Compiler::Locals& declarations) const;
 
+        /// Strict detached restoration of modern owned RefData fields. Validate
+        /// before staging; preserve all activation flags unlike stock save loading.
+        /// An empty script identity requires absent locals. Unsupported Lua/custom
+        /// state, legacy versions, malformed flags/names and nonfinite numbers reject.
+        /// No scene, content-deletion or postponed-physics state is reconstructed.
+        static void validateRestore(
+            const ESM::ObjectState& state, const ESM::RefId& script, const Compiler::Locals& declarations);
+        static RefData restore(
+            const ESM::ObjectState& state, const ESM::RefId& script, const Compiler::Locals& declarations);
+
         RefData& operator=(const RefData& refData);
         RefData& operator=(RefData&& other);
 

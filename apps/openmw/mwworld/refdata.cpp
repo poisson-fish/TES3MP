@@ -1,6 +1,7 @@
 #include "refdata.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <stdexcept>
 
@@ -158,6 +159,42 @@ namespace MWWorld
         ESM::Locals locals;
         const bool hasLocals = mLocals.write(locals, declarations);
         write(objectState, std::move(locals), hasLocals);
+    }
+
+    void RefData::validateRestore(
+        const ESM::ObjectState& state, const ESM::RefId& script, const Compiler::Locals& declarations)
+    {
+        if (state.mVersion != ESM::DefaultFormatVersion || state.mActorIdConverter || state.mHasCustomState
+            || !state.mLuaScripts.mScripts.empty() || state.mEnabled > 1
+            || state.mHasLocals != static_cast<unsigned char>(!script.empty())
+            || (state.mFlags & ~(Flag_SuppressActivate | Flag_OnActivate | Flag_ActivationBuffered)))
+            throw std::invalid_argument("Unsupported detached RefData state");
+        for (int i = 0; i < 3; ++i)
+            if (!std::isfinite(state.mPosition.pos[i]) || !std::isfinite(state.mPosition.rot[i]))
+                throw std::invalid_argument("Nonfinite RefData position");
+        for (const auto& animation : state.mAnimationState.mScriptedAnims)
+            if (animation.mGroup.empty() || animation.mGroup.find('\0') != std::string::npos
+                || !std::isfinite(animation.mTime))
+                throw std::invalid_argument("Invalid RefData animation");
+        if (!script.empty())
+            MWScript::Locals::validateRestore(state.mLocals, declarations);
+        else if (!state.mLocals.mVariables.empty())
+            throw std::invalid_argument("Unexpected detached locals");
+    }
+
+    RefData RefData::restore(
+        const ESM::ObjectState& state, const ESM::RefId& script, const Compiler::Locals& declarations)
+    {
+        validateRestore(state, script, declarations);
+        RefData result;
+        if (!script.empty())
+            result.mLocals = MWScript::Locals::restore(state.mLocals, script, declarations);
+        result.mAnimationState = state.mAnimationState;
+        result.mPosition = state.mPosition;
+        result.mFlags = state.mFlags;
+        result.mEnabled = state.mEnabled != 0;
+        result.mChanged = true;
+        return result;
     }
 
     void RefData::write(ESM::ObjectState& objectState, ESM::Locals&& locals, bool hasLocals) const

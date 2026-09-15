@@ -34,6 +34,7 @@ namespace MWScript
 
         void ensure(const ESM::RefId& scriptName);
         bool setVar(const Compiler::Locals& declarations, std::string_view var, double val);
+        void readValidated(const ESM::Locals& locals, const Compiler::Locals& declarations);
 
     public:
         std::vector<Interpreter::Type_Short> mShorts;
@@ -101,6 +102,14 @@ namespace MWScript
         /// Invalid input throws invalid_argument; any failure preserves both inputs
         /// and existing values/storage. No Environment lookup or script execution.
         void read(const ESM::Locals& locals, const Compiler::Locals& declarations);
+
+        /// Allocation-free validation of the strict modern named representation.
+        static void validateRestore(const ESM::Locals& locals, const Compiler::Locals& declarations);
+
+        /// Fresh owned locals from explicitly supplied identity/declarations. No
+        /// global-script defaults, Environment lookup, coercion or legacy fallback.
+        static Locals restore(
+            const ESM::Locals& locals, const ESM::RefId& script, const Compiler::Locals& declarations);
     };
 }
 

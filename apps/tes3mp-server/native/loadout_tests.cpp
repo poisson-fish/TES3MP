@@ -5694,6 +5694,11 @@ namespace
         auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
         options.mContent.push_back("Inventory.esm");
         TES3MP::Native::Loadout loadout(options);
+        if (filter == "inventory-transfer-restore")
+        {
+            MWWorld::Testing::checkTransferRestore(loadout.store());
+            return;
+        }
         if (filter == "inventory-transfer-locals-restore")
         {
             MWWorld::Testing::checkTransferLocalsRestore(loadout.store());

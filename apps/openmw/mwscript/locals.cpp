@@ -213,6 +213,12 @@ namespace MWScript
             || declarations.get('f').size() != mFloats.size())
             throw std::invalid_argument("Local declaration/value shape mismatch");
 
+        validateRestore(locals, declarations);
+        readValidated(locals, declarations);
+    }
+
+    void Locals::validateRestore(const ESM::Locals& locals, const Compiler::Locals& declarations)
+    {
         // Bound lookup indices and the total without overflowing a count sum.
         size_t remaining = locals.mVariables.size();
         for (char type : { 's', 'l', 'f' })
@@ -255,10 +261,25 @@ namespace MWScript
                     throw std::invalid_argument("Nonfinite float local value");
             }
         }
+    }
 
-        std::vector<Interpreter::Type_Short> shorts(mShorts.size());
-        std::vector<Interpreter::Type_Integer> longs(mLongs.size());
-        std::vector<Interpreter::Type_Float> floats(mFloats.size());
+    Locals Locals::restore(const ESM::Locals& locals, const ESM::RefId& script, const Compiler::Locals& declarations)
+    {
+        if (script.empty())
+            throw std::invalid_argument("Local restoration requires an explicit script identity");
+        validateRestore(locals, declarations);
+        Locals result;
+        result.readValidated(locals, declarations);
+        result.mScriptId = script;
+        result.mInitialised = true;
+        return result;
+    }
+
+    void Locals::readValidated(const ESM::Locals& locals, const Compiler::Locals& declarations)
+    {
+        std::vector<Interpreter::Type_Short> shorts(declarations.get('s').size());
+        std::vector<Interpreter::Type_Integer> longs(declarations.get('l').size());
+        std::vector<Interpreter::Type_Float> floats(declarations.get('f').size());
         for (const auto& [name, value] : locals.mVariables)
         {
             const auto index = declarations.getIndex(name);
