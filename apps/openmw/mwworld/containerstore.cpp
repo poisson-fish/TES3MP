@@ -892,7 +892,7 @@ struct MWWorld::PreparedContainerTransfer::State
     std::array<Ptr, 3> mContexts;
     std::array<ESM::RefNum, 3> mContextIdentities;
     ContextBindings mContextBindings;
-    struct ThirdStore
+    struct ResolvedStore
     {
         ContainerStoreResolution mInput;
         ESM::RefNum mOwnerIdentity, mSelection;
@@ -904,8 +904,8 @@ struct MWWorld::PreparedContainerTransfer::State
         };
         std::vector<NodeValues> mValues;
     };
-    std::optional<ThirdStore> mThirdStore;
-    std::optional<ThirdStoreBindings> mThirdStoreBindings;
+    std::vector<ResolvedStore> mResolvedStores;
+    std::vector<ResolvedStoreBindings> mResolvedStoreBindings;
 };
 
 MWWorld::PreparedContainerTransfer::PreparedContainerTransfer(std::unique_ptr<State> state)
@@ -1083,10 +1083,10 @@ MWWorld::PreparedContainerTransfer::getContextBindings() const
     return state().mContextBindings;
 }
 
-const std::optional<MWWorld::PreparedContainerTransfer::ThirdStoreBindings>&
-MWWorld::PreparedContainerTransfer::getThirdStoreBindings() const
+const std::vector<MWWorld::PreparedContainerTransfer::ResolvedStoreBindings>&
+MWWorld::PreparedContainerTransfer::getResolvedStoreBindings() const
 {
-    return state().mThirdStoreBindings;
+    return state().mResolvedStoreBindings;
 }
 
 MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getSourceSelectionIterator() const
@@ -1202,20 +1202,22 @@ const MWWorld::ContainerStore& MWWorld::ContainerStoreResolution::validate(const
     // establish liveness. Do not inspect the store until its own witness succeeds.
     const auto lifetime = mLifetime.lock();
     if (!lifetime || lifetime->mStore != mStore)
-        throw std::invalid_argument("Container transfer preparation third store lifetime changed");
+        throw std::invalid_argument("Container transfer preparation resolved store lifetime changed");
     validateContextReference(mOwner, worldModel);
     if (mStore->mResolutionLifetime != lifetime || mStore->mStorageIdentity != mStorage)
-        throw std::invalid_argument("Container transfer preparation third store storage changed");
+        throw std::invalid_argument("Container transfer preparation resolved store storage changed");
     mStore->validateExplicitOwner(mOwner, worldModel);
     if (!sameLifetimeBinding(mStore->getPtr(worldModel), mOwner))
-        throw std::invalid_argument("Container transfer preparation third store owner changed");
+        throw std::invalid_argument("Container transfer preparation resolved store owner changed");
     return *mStore;
 }
 
 MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(const ConstPtr& item, int count,
     ContainerStore& destination, const ContainerStoreRemoveContext& sourceContext,
-    const ContainerStoreAddContext& destinationContext, const std::optional<ContainerStoreResolution>& thirdStore) const
+    const ContainerStoreAddContext& destinationContext, std::span<const ContainerStoreResolution> resolvedStores) const
 {
+    if (resolvedStores.size() > MaxTransferResolvedStores)
+        throw std::invalid_argument("Container transfer preparation resolved store collection bound exceeded");
     const auto& worldModel = sourceContext.mWorldModel;
     if (&worldModel != &destinationContext.mWorldModel)
         throw std::invalid_argument("Container transfer preparation world context mismatch");
@@ -1247,6 +1249,32 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     if (&sourceContext.mLocalScripts != destinationContext.mLocalScripts)
         destinationContext.mLocalScripts->validateContextBindings(contextNodes);
 
+    // Validate every supplied lifetime/owner/storage, including duplicate inputs,
+    // before capturing any nodes. Saved pointer equality never establishes validity.
+    std::array<const ContainerStoreResolution*, MaxTransferResolvedStores> uniqueStores{};
+    size_t uniqueCount = 0;
+    for (const auto& input : resolvedStores)
+    {
+        const auto& store = input.validate(worldModel);
+        if (&store == this || &store == &destination || input.mOwner == contexts[0] || input.mOwner == contexts[1])
+            throw std::invalid_argument(
+                "Container transfer preparation resolved store aliases transfer owners or stores");
+        bool duplicate = false;
+        for (size_t i = 0; i < uniqueCount; ++i)
+        {
+            const auto& previous = *uniqueStores[i];
+            if (input.mStore != previous.mStore && input.mOwner != previous.mOwner)
+                continue;
+            if (input.mStore != previous.mStore || !sameLifetimeBinding(input.mOwner, previous.mOwner)
+                || input.mStorage != previous.mStorage || input.mLifetime.lock() != previous.mLifetime.lock())
+                throw std::invalid_argument("Container transfer preparation inconsistent resolved store aliases");
+            duplicate = true;
+            break;
+        }
+        if (!duplicate)
+            uniqueStores[uniqueCount++] = &input;
+    }
+
     auto state = std::make_unique<PreparedContainerTransfer::State>();
     state->mOriginalRegistry = worldModel.snapshotPtrRegistry();
     state->mSourceStorage = mStorageIdentity;
@@ -1259,15 +1287,14 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     state->mPlayerIdentity = contextIdentities[2];
     state->mContexts = contexts;
     state->mContextIdentities = contextIdentities;
-    if (thirdStore)
+    state->mResolvedStores.reserve(uniqueCount);
+    for (size_t i = 0; i < uniqueCount; ++i)
     {
-        const auto& store = thirdStore->validate(worldModel);
-        if (&store == this || &store == &destination || thirdStore->mOwner == contexts[0]
-            || thirdStore->mOwner == contexts[1])
-            throw std::invalid_argument("Container transfer preparation third store aliases transfer owners or stores");
-        state->mThirdStore.emplace(PreparedContainerTransfer::State::ThirdStore{
-            *thirdStore, thirdStore->mOwner.getCellRef().getRefNum(), store.transferSelection(), {}, {} });
-        auto& third = *state->mThirdStore;
+        const auto& input = *uniqueStores[i];
+        const auto& store = input.validate(worldModel);
+        state->mResolvedStores.push_back(PreparedContainerTransfer::State::ResolvedStore{
+            input, input.mOwner.getCellRef().getRefNum(), store.transferSelection(), {}, {} });
+        auto& resolved = state->mResolvedStores.back();
         for (const auto& ref : store.mLists.mMiscItems.mList)
         {
             Ptr current(const_cast<LiveCellRef<ESM::Miscellaneous>*>(&ref));
@@ -1277,13 +1304,14 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
             const auto registered = worldModel.getPtr(ref.mRef.getRefNum());
             if (!ref.mRef.getRefNum().isSet() || ref.mWorldModel != &worldModel || !registered.hasLiveReference()
                 || !sameLifetimeBinding(current, registered) || ref.mData.isDeletedByContentFile())
-                throw std::invalid_argument("Container transfer preparation third store registry binding changed");
+                throw std::invalid_argument("Container transfer preparation resolved store registry binding changed");
             if (destinationContext.mStore.get<ESM::Miscellaneous>().search(ref.mRef.getRefId()) != ref.mBase)
-                throw std::invalid_argument("Container transfer preparation third store content changed");
+                throw std::invalid_argument("Container transfer preparation resolved store content changed");
             if (ref.mRef.getCount(false) == std::numeric_limits<int>::min())
-                throw std::invalid_argument("Container transfer preparation third store count invalid");
-            third.mNodes.push_back(current);
-            third.mValues.push_back({ PreparedContainerAdd::miscState(current), copyContainerTransferItem(current) });
+                throw std::invalid_argument("Container transfer preparation resolved store count invalid");
+            resolved.mNodes.push_back(current);
+            resolved.mValues.push_back(
+                { PreparedContainerAdd::miscState(current), copyContainerTransferItem(current) });
         }
     }
     state->mRemoval
@@ -1394,8 +1422,8 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
         append(owned.mDestinationInventory.mLists.mMiscItems, prepared.getDestinationItem());
     owned.mRelocation = relocateTransfer(prepared);
     // All fallible script preparation and the destination consumer copy have run.
-    // Reacquire the third store's current nodes before any saved Ptr is followed.
-    const auto thirdPointers = validateTransferResolution(prepared);
+    // Reacquire all supplied stores and current nodes before following saved Ptrs.
+    const auto resolvedPointers = validateTransferResolution(prepared);
     std::vector<Ptr> scriptNodes;
     std::vector<std::pair<ESM::RefNum, Ptr>> registryNodes;
     const auto collectNodes = [&](auto& list, const auto& views) {
@@ -1420,7 +1448,7 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
             contextPointers.push_back(contexts[i]);
             registryNodes.emplace_back(contextIdentities[i], contexts[i]);
         }
-    for (const auto& node : thirdPointers)
+    for (const auto& node : resolvedPointers)
     {
         contextPointers.push_back(node);
         registryNodes.emplace_back(node.getCellRef().getRefNum(), node);
@@ -1435,13 +1463,14 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     owned.mContextBindings.mIterators = &owned.mIterators->mBindings;
     for (size_t i = 0; i < contexts.size(); ++i)
         owned.mContextBindings.mReferences[i] = { contextIdentities[i], contexts[i] };
-    if (owned.mThirdStore)
+    owned.mResolvedStoreBindings.reserve(owned.mResolvedStores.size());
+    for (const auto& resolved : owned.mResolvedStores)
     {
-        const auto& third = *owned.mThirdStore;
-        owned.mThirdStoreBindings.emplace(PreparedContainerTransfer::ThirdStoreBindings{
-            &owned.mIterators->mBindings, third.mInput.mStore, { third.mOwnerIdentity, third.mInput.mOwner }, {} });
-        for (size_t i = 0; i < third.mNodes.size(); ++i)
-            owned.mThirdStoreBindings->mNodes.push_back({ third.mValues[i].mIdentity.mIdentity, third.mNodes[i] });
+        auto& binding = owned.mResolvedStoreBindings.emplace_back(
+            PreparedContainerTransfer::ResolvedStoreBindings{ &owned.mIterators->mBindings, resolved.mInput.mStore,
+                { resolved.mOwnerIdentity, resolved.mInput.mOwner }, {} });
+        for (size_t i = 0; i < resolved.mNodes.size(); ++i)
+            binding.mNodes.push_back({ resolved.mValues[i].mIdentity.mIdentity, resolved.mNodes[i] });
     }
     // The last fallible consumer copy follows stock iterator binding as well as
     // inventory/script/registry allocation. Failure destroys iterators before lists.
@@ -1759,7 +1788,7 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
 {
     const auto& state = prepared.state();
     validateTransferContextBindings(prepared);
-    const auto thirdPointers = validateTransferResolution(prepared);
+    const auto resolvedPointers = validateTransferResolution(prepared);
     if (!state.mIterators || state.mIterators->mSourceStorageIdentity != state.mSourceInventory.mStorageIdentity
         || state.mIterators->mDestinationStorageIdentity != state.mDestinationInventory.mStorageIdentity)
         throw std::invalid_argument("Container transfer preparation iterator storage changed");
@@ -1810,7 +1839,7 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
     for (const auto& context : state.mContexts)
         if (!context.isEmpty())
             contextNodes.push_back(context);
-    for (const auto& node : thirdPointers)
+    for (const auto& node : resolvedPointers)
         contextNodes.push_back(node);
     // Relocation has just been independently checked against the protected
     // witnesses/current nodes. Retain its exact immutable registration identities.
@@ -1832,7 +1861,7 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
     for (size_t i = 0; i < state.mContexts.size(); ++i)
         if (!state.mContexts[i].isEmpty())
             registryNodes.emplace_back(state.mContextIdentities[i], state.mContexts[i]);
-    for (const auto& node : thirdPointers)
+    for (const auto& node : resolvedPointers)
         registryNodes.emplace_back(node.getCellRef().getRefNum(), node);
     PtrRegistry::validateStorage(*state.mRegistryStorage, actual.mRegistry, registryNodes);
     validateTransferIterators(prepared);
@@ -1856,65 +1885,66 @@ void MWWorld::ContainerStore::validateTransferContextBindings(const PreparedCont
 std::vector<MWWorld::Ptr> MWWorld::ContainerStore::validateTransferResolution(const PreparedContainerTransfer& prepared)
 {
     const auto& state = prepared.state();
-    if (!state.mThirdStore)
-    {
-        if (state.mThirdStoreBindings)
-            throw std::invalid_argument("Container transfer preparation third store pair changed");
-        return {};
-    }
-    const auto& third = *state.mThirdStore;
+    if (state.mIterators && state.mResolvedStoreBindings.size() != state.mResolvedStores.size())
+        throw std::invalid_argument("Container transfer preparation resolved store collection changed");
     const auto& worldModel = *state.mAddition.mWorldModel;
-    const auto& store = third.mInput.validate(worldModel);
-    if (third.mInput.mOwner.getCellRef().getRefNum() != third.mOwnerIdentity
-        || store.transferSelection() != third.mSelection)
-        throw std::invalid_argument("Container transfer preparation third store owner or selection changed");
-    std::vector<Ptr> nodes;
-    for (const auto& ref : store.mLists.mMiscItems.mList)
+    std::vector<Ptr> result;
+    for (size_t index = 0; index < state.mResolvedStores.size(); ++index)
     {
-        Ptr current(const_cast<LiveCellRef<ESM::Miscellaneous>*>(&ref));
-        current.mContainerStore = const_cast<ContainerStore*>(&store);
-        if (current.getClass().isGold(current))
-            continue;
-        const auto i = nodes.size();
-        if (i >= third.mNodes.size() || !sameLifetimeBinding(current, third.mNodes[i])
-            || !third.mNodes[i].hasLiveReference())
-            throw std::invalid_argument(
-                "Container transfer preparation third store node lifetime or membership changed");
-        const auto& saved = third.mValues[i];
-        const auto registered = worldModel.getPtr(ref.mRef.getRefNum());
-        if (!registered.hasLiveReference() || !sameLifetimeBinding(current, registered)
-            || ref.mWorldModel != &worldModel || ref.mData.isDeletedByContentFile()
-            || PreparedContainerAdd::miscState(current) != saved.mIdentity)
-            throw std::invalid_argument("Container transfer preparation third store registry binding changed");
-        if (!sameTransferValues(ref, *saved.mValues) || ref.mRef.hasChanged() != saved.mValues->mRef.hasChanged())
-            throw std::invalid_argument("Container transfer preparation third store values changed");
-        nodes.push_back(current);
+        const auto& resolved = state.mResolvedStores[index];
+        const auto& store = resolved.mInput.validate(worldModel);
+        if (resolved.mInput.mOwner.getCellRef().getRefNum() != resolved.mOwnerIdentity
+            || store.transferSelection() != resolved.mSelection)
+            throw std::invalid_argument("Container transfer preparation resolved store owner or selection changed");
+        std::vector<Ptr> nodes;
+        for (const auto& ref : store.mLists.mMiscItems.mList)
+        {
+            Ptr current(const_cast<LiveCellRef<ESM::Miscellaneous>*>(&ref));
+            current.mContainerStore = const_cast<ContainerStore*>(&store);
+            if (current.getClass().isGold(current))
+                continue;
+            const auto i = nodes.size();
+            if (i >= resolved.mNodes.size() || !sameLifetimeBinding(current, resolved.mNodes[i])
+                || !resolved.mNodes[i].hasLiveReference())
+                throw std::invalid_argument(
+                    "Container transfer preparation resolved store node lifetime or membership changed");
+            const auto& saved = resolved.mValues[i];
+            const auto registered = worldModel.getPtr(ref.mRef.getRefNum());
+            if (!registered.hasLiveReference() || !sameLifetimeBinding(current, registered)
+                || ref.mWorldModel != &worldModel || ref.mData.isDeletedByContentFile()
+                || PreparedContainerAdd::miscState(current) != saved.mIdentity)
+                throw std::invalid_argument("Container transfer preparation resolved store registry binding changed");
+            if (!sameTransferValues(ref, *saved.mValues) || ref.mRef.hasChanged() != saved.mValues->mRef.hasChanged())
+                throw std::invalid_argument("Container transfer preparation resolved store values changed");
+            nodes.push_back(current);
+        }
+        if (nodes.size() != resolved.mNodes.size())
+            throw std::invalid_argument("Container transfer preparation resolved store membership changed");
+        const std::vector<ConstPtr> currentNodes(nodes.begin(), nodes.end());
+        for (const auto* service : { state.mRemoval.mLocalScripts, state.mDestinationScripts })
+        {
+            service->validateContextBindings({ resolved.mInput.mOwner });
+            service->validateInventoryBindings(currentNodes, resolved.mInput.mOwner.mCell);
+        }
+        // Before iterator preparation this private result is still being built.
+        // Afterwards every public binding must name the exact pair and current nodes.
+        if (state.mIterators)
+        {
+            const auto& binding = state.mResolvedStoreBindings[index];
+            if (binding.mIterators != &state.mIterators->mBindings || binding.mStore != &store
+                || binding.mOwner.mIdentity != resolved.mOwnerIdentity
+                || !sameLifetimeBinding(binding.mOwner.mItem, resolved.mInput.mOwner)
+                || binding.mNodes.size() != nodes.size())
+                throw std::invalid_argument("Container transfer preparation resolved store pair changed");
+            for (size_t i = 0; i < nodes.size(); ++i)
+                if (binding.mNodes[i].mIdentity != resolved.mValues[i].mIdentity.mIdentity
+                    || !sameLifetimeBinding(binding.mNodes[i].mItem, nodes[i]))
+                    throw std::invalid_argument("Container transfer preparation resolved store node binding changed");
+        }
+        result.insert(result.end(), nodes.begin(), nodes.end());
+        result.push_back(resolved.mInput.mOwner);
     }
-    if (nodes.size() != third.mNodes.size())
-        throw std::invalid_argument("Container transfer preparation third store membership changed");
-    const std::vector<ConstPtr> currentNodes(nodes.begin(), nodes.end());
-    for (const auto* service : { state.mRemoval.mLocalScripts, state.mDestinationScripts })
-    {
-        service->validateContextBindings({ third.mInput.mOwner });
-        service->validateInventoryBindings(currentNodes, third.mInput.mOwner.mCell);
-    }
-    // Before iterator preparation this private result is still being built.
-    // Afterwards the public bindings must name the exact pair and current nodes.
-    if (state.mIterators)
-    {
-        if (!state.mThirdStoreBindings || state.mThirdStoreBindings->mIterators != &state.mIterators->mBindings
-            || state.mThirdStoreBindings->mStore != &store
-            || state.mThirdStoreBindings->mOwner.mIdentity != third.mOwnerIdentity
-            || !sameLifetimeBinding(state.mThirdStoreBindings->mOwner.mItem, third.mInput.mOwner)
-            || state.mThirdStoreBindings->mNodes.size() != nodes.size())
-            throw std::invalid_argument("Container transfer preparation third store pair changed");
-        for (size_t i = 0; i < nodes.size(); ++i)
-            if (state.mThirdStoreBindings->mNodes[i].mIdentity != third.mValues[i].mIdentity.mIdentity
-                || !sameLifetimeBinding(state.mThirdStoreBindings->mNodes[i].mItem, nodes[i]))
-                throw std::invalid_argument("Container transfer preparation third store node binding changed");
-    }
-    nodes.push_back(third.mInput.mOwner);
-    return nodes;
+    return result;
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

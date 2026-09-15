@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -242,7 +243,7 @@ namespace MWWorld
         const Relocation& getRelocation() const;
         // Stock LocalScripts nodes and cursor relocation, built from the same
         // owned inventory nodes. Shared services return the same storage object.
-        // Explicit owners/initiator and the supplied third store resolve through
+        // Explicit owners/initiator and supplied stores resolve through
         // captured lifetimes and current ownership/storage/node checks.
         // Other unaffected entries keep empty items. No installation is exposed.
         const LocalScripts::PreparedStorage& getSourceScriptStorage() const;
@@ -281,7 +282,7 @@ namespace MWWorld
         // Views expire on reference destruction; validateTransfer checks current
         // registry/script state before the pair can be accepted again.
         const ContextBindings& getContextBindings() const;
-        struct ThirdStoreBindings
+        struct ResolvedStoreBindings
         {
             const IteratorBindings* mIterators;
             const ContainerStore* mStore;
@@ -290,7 +291,8 @@ namespace MWWorld
             // Separate from the pair's detached source/destination values.
             std::vector<ContextReference> mNodes;
         };
-        const std::optional<ThirdStoreBindings>& getThirdStoreBindings() const;
+        // Coalesced in first-supplied order; bound to this exact protected pair.
+        const std::vector<ResolvedStoreBindings>& getResolvedStoreBindings() const;
         // Check current owned storage before copying any saved iterator. These
         // read-only copies traverse isolated stock stores/lists and their own end
         // sentinels. They expire with the pair's state; script items may also be
@@ -722,16 +724,19 @@ namespace MWWorld
         // inventory results/selections, stacking, script intents and both notification
         // consumers as one unit.
         // Both contexts require LocalScripts, even for plain registration absence.
-        // An optional third-store witness resolves only its owner and non-gold MISC
-        // nodes in these services. Capture it from a current store; later use checks
-        // store lifetime, storage replacement, owner, nodes and unchanged values.
+        // Supplied witnesses resolve only their owners and non-gold MISC nodes.
+        // The input bound includes aliases and is checked before allocation.
+        // Identical aliases coalesce in input order; inconsistent owner/store
+        // aliases and overlap with transfer owners/stores reject. Capture from
+        // current stores; later use checks lifetime, storage, ownership and values.
         // No live removal, installation, effects, persistence or atomic transfer.
+        static constexpr size_t MaxTransferResolvedStores = 16;
         PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,
             const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext,
-            const std::optional<ContainerStoreResolution>& thirdStore = std::nullopt) const;
+            std::span<const ContainerStoreResolution> resolvedStores = {}) const;
 
         // Narrow current-state check; re-acquires inventory nodes before reading.
-        // Transfer stores/content/cells/services must outlive use. Borrowed third-store
+        // Transfer stores/content/cells/services must outlive use. Borrowed store
         // and reference destruction rejects through lifetime witnesses. Consumers
         // are owned snapshots, not re-sourced from the validation contexts; service,
         // player, owner and listener bindings must still match. No script calls.

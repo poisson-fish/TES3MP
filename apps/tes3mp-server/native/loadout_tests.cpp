@@ -1898,14 +1898,14 @@ namespace
                         binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
             const auto& registryStorage = paired.getRegistryStorage();
             const auto isContext = [&](const MWWorld::LiveCellRefBase* reference) {
-                const auto& third = paired.getThirdStoreBindings();
                 return reference
                     && (std::ranges::any_of(paired.getContextBindings().mReferences,
                             [&](const auto& binding) { return binding.mItem.mRef == reference; })
-                        || (third
-                            && (third->mOwner.mItem.mRef == reference
-                                || std::ranges::any_of(third->mNodes,
-                                    [&](const auto& binding) { return binding.mItem.mRef == reference; }))));
+                        || std::ranges::any_of(paired.getResolvedStoreBindings(), [&](const auto& binding) {
+                               return binding.mOwner.mItem.mRef == reference
+                                   || std::ranges::any_of(
+                                       binding.mNodes, [&](const auto& node) { return node.mItem.mRef == reference; });
+                           }));
             };
             require(registryStorage.getBindings() == relocation.mRegistry,
                 "owned registry storage changed relocated membership, revision or counter");
@@ -3954,6 +3954,7 @@ namespace
                     copyValues(expired->getPtr(), *scriptA);
                     registerItem(sourceScripts, expired->getPtr(), nullptr);
                     const auto* expiredKey = &expired->getPtr().getCellRef();
+                    const auto expiredRegistration = sourceScripts.prepareRemove(expiredKey);
                     auto withExpired = source.prepareTransfer(item, 1, destination, removal, destinationAdd);
                     expired.reset();
                     const auto expiredBefore = sourceScripts.snapshot();
@@ -3962,13 +3963,19 @@ namespace
                     {
                         auto afterExpired = source.prepareTransfer(item, 1, destination, removal, destinationAdd);
                         source.validateTransfer(afterExpired, destination, removal, destinationAdd);
-                        for (const auto* storage :
-                            { &withExpired.getSourceScriptStorage(), &afterExpired.getSourceScriptStorage() })
+                        for (const auto* decision : { &withExpired, &afterExpired })
                         {
-                            const auto found = std::find_if(storage->getEntries().begin(), storage->getEntries().end(),
-                                [&](const auto& entry) { return entry.references(expiredKey); });
-                            require(found != storage->getEntries().end() && found->getItem().isEmpty()
-                                    && found->getScript() == scriptId,
+                            // An owned node may reuse the expired address. Locate
+                            // the unchanged registration identity in protected order.
+                            const auto& registrations = decision->getSourceScripts().mEntries;
+                            const auto registration
+                                = std::find(registrations.begin(), registrations.end(), expiredRegistration);
+                            require(registration != registrations.end(), "expired script registration identity lost");
+                            const auto& entries = decision->getSourceScriptStorage().getEntries();
+                            const auto found
+                                = std::next(entries.begin(), std::distance(registrations.begin(), registration));
+                            require(found != entries.end() && found->references(expiredKey)
+                                    && found->getItem().isEmpty() && found->getScript() == scriptId,
                                 "script storage retained an expired live Ptr or lost its registration key");
                         }
                     }
@@ -4295,13 +4302,13 @@ namespace
             }
             require(expiredBeforeData, "reference lifetime survived into RefData destruction");
         }
-        // Explicit contexts and one supplied third store resolve unaffected slots.
+        // Explicit collections resolve only supplied stores, in first-occurrence order.
         // Each fixture owns its contexts independently of both inventory stores.
         for (bool shared : { false, true })
             for (int initiator : { -1, 0, 1, 2 })
             {
-                std::array<std::unique_ptr<MWWorld::ManualRef>, 4> owners;
-                std::array<MWWorld::Ptr, 4> contexts;
+                std::array<std::unique_ptr<MWWorld::ManualRef>, 5> owners;
+                std::array<MWWorld::Ptr, 5> contexts;
                 for (size_t i = 0; i < owners.size(); ++i)
                 {
                     owners[i]
@@ -4311,7 +4318,7 @@ namespace
                     worldModel.registerPtr(contexts[i]);
                 }
                 MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
-                MWWorld::ContainerStore source, destination, third;
+                MWWorld::ContainerStore source, destination, third, fourth;
                 auto sourceAdd = scriptedAddA;
                 auto destinationAdd = scriptedAddB;
                 sourceAdd.mContainer = contexts[0];
@@ -4345,7 +4352,17 @@ namespace
                     }
                 MWWorld::ManualRef gold(store, MWWorld::ContainerStore::sGoldId);
                 const auto thirdGold = *third.add(gold.getPtr(), 1, thirdAdd);
-                const MWWorld::ContainerStoreResolution supplied(third, contexts[2]);
+                bindEmptyStore(fourth, contexts[4], worldModel);
+                observedStores.push_back(&fourth);
+                auto fourthAdd = thirdAdd;
+                fourthAdd.mContainer = contexts[4];
+                const auto fourthNode = *fourth.add(scripted.getPtr(), 5, fourthAdd);
+                destinationScripts.add(scriptId, fourthNode, scripts);
+                fourthNode.getRefData().getLocals().mLongs.at(0) = 97;
+                fourth.setSelectedEnchantItem(fourth.begin());
+                const std::array supplied{ MWWorld::ContainerStoreResolution(fourth, contexts[4]),
+                    MWWorld::ContainerStoreResolution(third, contexts[2]),
+                    MWWorld::ContainerStoreResolution(fourth, contexts[4]) };
                 const auto item = *source.add(scripted.getPtr(), 4, sourceAdd);
                 destination.add(plain.getPtr(), 2, destinationAdd);
                 source.setSelectedEnchantItem(source.begin());
@@ -4374,6 +4391,122 @@ namespace
                     return std::tuple{ snapshot(), sourceScripts.snapshot(), destinationScripts.snapshot(),
                         references };
                 };
+                // Empty, singleton, multiple and reordered duplicate inputs all
+                // compare against disposable stock, including unresolved slots.
+                for (const std::vector<MWWorld::ContainerStoreResolution>& inputs :
+                    { std::vector<MWWorld::ContainerStoreResolution>{}, { supplied[1] }, { supplied[0], supplied[1] },
+                        { supplied[1], supplied[0], supplied[1], supplied[0] } })
+                {
+                    const auto before = unchangedState();
+                    {
+                        auto decision = source.prepareTransfer(item, 1, destination, removal, destinationAdd, inputs);
+                        validate(decision);
+                        compareStock(decision, item, destination, sourceAdd, destinationAdd);
+                        const auto& bindings = decision.getResolvedStoreBindings();
+                        require(bindings.size() == std::min(inputs.size(), size_t(2)),
+                            "resolution collection failed to coalesce aliases");
+                        if (!bindings.empty())
+                            require(bindings.front().mStore == (inputs.size() == 2 ? &fourth : &third),
+                                "resolution collection lost first supplied order");
+                        for (const auto& node : { *thirdScript, fourthNode })
+                        {
+                            const bool resolved = inputs.size() >= 2 || (inputs.size() == 1 && node == *thirdScript);
+                            require(decision.getRegistryStorage().getItem(node.getCellRef().getRefNum()).isEmpty()
+                                    == !resolved,
+                                "resolution collection traversed an unsupplied store");
+                        }
+                    }
+                    require(unchangedState() == before, "collection preparation/discard changed live state");
+                }
+                {
+                    auto decision = make();
+                    auto& bindings
+                        = const_cast<std::vector<Pair::ResolvedStoreBindings>&>(decision.getResolvedStoreBindings());
+                    const auto saved = bindings;
+                    const auto before = unchangedState();
+                    bindings.pop_back();
+                    reject([&] { validate(decision); }, "resolved store collection changed");
+                    rejectIterators(decision, "resolved store collection changed");
+                    bindings = saved;
+                    bindings.push_back(bindings.front());
+                    reject([&] { validate(decision); }, "resolved store collection changed");
+                    bindings = saved;
+                    std::swap(bindings.front(), bindings.back());
+                    reject([&] { validate(decision); }, "resolved store pair changed");
+                    rejectIterators(decision, "resolved store pair changed");
+                    bindings = saved;
+                    validate(decision);
+                    require(unchangedState() == before, "corrupted collection changed live state");
+                }
+                if (initiator == -1)
+                {
+                    constexpr auto bound = MWWorld::ContainerStore::MaxTransferResolvedStores;
+                    std::vector<std::unique_ptr<MWWorld::ManualRef>> boundOwners;
+                    std::vector<std::unique_ptr<MWWorld::ContainerStore>> boundStores;
+                    std::vector<MWWorld::ContainerStoreResolution> inputs;
+                    const auto observedSize = observedStores.size();
+                    for (size_t i = 0; i < bound; ++i)
+                    {
+                        auto& owner = boundOwners.emplace_back(std::make_unique<MWWorld::ManualRef>(
+                            store, ESM::RefId::stringRefId("native_context_owner")));
+                        auto& inventory = boundStores.emplace_back(std::make_unique<MWWorld::ContainerStore>());
+                        bindEmptyStore(*inventory, owner->getPtr(), worldModel);
+                        observedStores.push_back(inventory.get());
+                        inputs.emplace_back(*inventory, owner->getPtr());
+                    }
+                    const auto before = unchangedState();
+                    {
+                        auto maximum = source.prepareTransfer(item, 1, destination, removal, destinationAdd, inputs);
+                        validate(maximum);
+                        compareStock(maximum, item, destination, sourceAdd, destinationAdd);
+                        require(maximum.getResolvedStoreBindings().size() == bound,
+                            "maximum distinct collection lost empty supplied stores");
+                    }
+                    inputs.push_back(inputs.front());
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, inputs); },
+                        "collection bound exceeded");
+                    inputs.assign(bound, supplied[0]);
+                    {
+                        auto aliases = source.prepareTransfer(item, 1, destination, removal, destinationAdd, inputs);
+                        validate(aliases);
+                        compareStock(aliases, item, destination, sourceAdd, destinationAdd);
+                        require(aliases.getResolvedStoreBindings().size() == 1,
+                            "maximum alias collection did not coalesce");
+                    }
+                    // Over-bound input rejects even before an invalid final witness.
+                    inputs.emplace_back(third, contexts[3]);
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, inputs); },
+                        "collection bound exceeded");
+                    require(unchangedState() == before, "collection bound changed state or notifications");
+                    observedStores.resize(observedSize);
+                }
+                {
+                    MWWorld::ContainerStore alias;
+                    bindEmptyStore(alias, contexts[2], worldModel);
+                    const std::array inconsistent{ supplied[0], supplied[1],
+                        MWWorld::ContainerStoreResolution(alias, contexts[2]) };
+                    const auto before = unchangedState();
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, inconsistent); },
+                        "inconsistent resolved store aliases");
+                    // Every repeated input is validated, even after an identical
+                    // store address has already been accepted into the collection.
+                    auto wrong = contexts[2];
+                    wrong.mCell = contexts[1].mCell;
+                    const std::array badHint{ supplied[0], supplied[1],
+                        MWWorld::ContainerStoreResolution(third, wrong) };
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, badHint); },
+                        "context registry binding");
+                    const_cast<MWWorld::ReferenceLifetime::Witness&>(wrong.getReferenceLifetime()) = {};
+                    const std::array badLifetime{ supplied[0], supplied[1],
+                        MWWorld::ContainerStoreResolution(third, wrong) };
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, badLifetime); },
+                        "context lifetime");
+                    alias.setPtr(contexts[0], worldModel);
+                    const std::array ownerOverlap{ supplied[0], MWWorld::ContainerStoreResolution(alias, contexts[0]) };
+                    reject([&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, ownerOverlap); },
+                        "resolved store aliases");
+                    require(unchangedState() == before, "inconsistent collection aliases changed live state");
+                }
                 for (int quantity : { 1, 4 })
                     for (size_t cursor = 0; cursor <= sourceScripts.snapshot().mEntries.size(); ++cursor)
                     {
@@ -4389,26 +4522,26 @@ namespace
                             assigned = std::move(decision);
                             validate(assigned);
                             compareStock(assigned, item, destination, sourceAdd, destinationAdd);
-                            const auto& thirdBindings = *assigned.getThirdStoreBindings();
+                            const auto& thirdBindings = assigned.getResolvedStoreBindings().back();
                             require(thirdBindings.mIterators == &assigned.getIteratorBindings()
                                     && thirdBindings.mStore == &third && thirdBindings.mNodes.size() == 3,
-                                "third store resolution lost raw membership or pair binding on move");
+                                "resolved store resolution lost raw membership or pair binding on move");
                             require(assigned.getRegistryStorage().getItem(thirdGold.getCellRef().getRefNum()).isEmpty(),
-                                "third store resolution included gold");
+                                "resolved store resolution included gold");
                             for (const auto& member : thirdBindings.mNodes)
                             {
                                 const auto resolved = assigned.getRegistryStorage().getItem(member.mIdentity);
                                 require(resolved == member.mItem && resolved.hasLiveReference()
                                         && resolved.mContainerStore == &third,
-                                    "third store registry lost current node or dormant identity");
+                                    "resolved store registry lost current node or dormant identity");
                             }
-                            reject([&] { initial.getThirdStoreBindings(); }, "moved from");
-                            reject([&] { decision.getThirdStoreBindings(); }, "moved from");
+                            reject([&] { initial.getResolvedStoreBindings(); }, "moved from");
+                            reject([&] { decision.getResolvedStoreBindings(); }, "moved from");
                             require(assigned.getContextBindings().mIterators == &assigned.getIteratorBindings(),
                                 "context resolution lost pair storage on move");
                             for (size_t i = 0; i < contexts.size(); ++i)
                             {
-                                const bool resolved = i < 3;
+                                const bool resolved = i != 3;
                                 const auto view
                                     = assigned.getRegistryStorage().getItem(contexts[i].getCellRef().getRefNum());
                                 require(resolved ? view == contexts[i] && view.hasLiveReference() : view.isEmpty(),
@@ -4454,7 +4587,8 @@ namespace
                     auto decision = make();
                     auto other = make(4);
                     const auto before = unchangedState();
-                    auto& binding = const_cast<Pair::ThirdStoreBindings&>(*decision.getThirdStoreBindings());
+                    auto& binding
+                        = const_cast<Pair::ResolvedStoreBindings&>(decision.getResolvedStoreBindings().back());
                     const auto saved = binding;
                     const auto rejectBinding = [&](const char* message) {
                         reject([&] { validate(decision); }, message);
@@ -4462,20 +4596,20 @@ namespace
                         binding = saved;
                     };
                     binding.mIterators = &other.getIteratorBindings();
-                    rejectBinding("third store pair changed");
+                    rejectBinding("resolved store pair changed");
                     binding.mStore = &source;
-                    rejectBinding("third store pair changed");
+                    rejectBinding("resolved store pair changed");
                     binding.mOwner = other.getContextBindings().mReferences[0];
-                    rejectBinding("third store pair changed");
+                    rejectBinding("resolved store pair changed");
                     binding.mNodes.pop_back();
-                    rejectBinding("third store pair changed");
+                    rejectBinding("resolved store pair changed");
                     ++binding.mNodes.front().mIdentity.mIndex;
-                    rejectBinding("third store node binding changed");
+                    rejectBinding("resolved store node binding changed");
                     binding.mNodes.front().mItem = *plainA;
-                    rejectBinding("third store node binding changed");
+                    rejectBinding("resolved store node binding changed");
                     const_cast<MWWorld::ReferenceLifetime::Witness&>(
                         binding.mNodes.front().mItem.getReferenceLifetime()) = contexts[3].getReferenceLifetime();
-                    rejectBinding("third store node binding changed");
+                    rejectBinding("resolved store node binding changed");
                     corruptIterators(decision, other, validate);
                     corruptScriptStorage(decision, other, validate);
                     corruptRegistryStorage(decision, other, validate);
@@ -4483,17 +4617,17 @@ namespace
                     {
                         const auto savedRef = node.getCellRef();
                         node.getCellRef().setCount(9);
-                        reject([&] { validate(decision); }, "third store registry binding changed");
+                        reject([&] { validate(decision); }, "resolved store registry binding changed");
                         node.getCellRef() = savedRef;
                         auto savedData = std::move(node.getRefData());
                         node.getRefData() = savedData.copyForContainerTransfer();
                         setFlags(node.getRefData(), flags(node.getRefData()) ^ 1u);
-                        reject([&] { validate(decision); }, "third store values changed");
+                        reject([&] { validate(decision); }, "resolved store values changed");
                         node.getRefData() = std::move(savedData);
                         if (!node.getRefData().getLocals().mLongs.empty())
                         {
                             ++node.getRefData().getLocals().mLongs[0];
-                            reject([&] { validate(decision); }, "third store values changed");
+                            reject([&] { validate(decision); }, "resolved store values changed");
                             --node.getRefData().getLocals().mLongs[0];
                         }
                         const auto id = node.getCellRef().getRefNum();
@@ -4513,17 +4647,17 @@ namespace
                             if (fault == 3)
                                 ptr.mRef = item.mRef;
                             const auto corrupted = unchangedState();
-                            reject([&] { validate(decision); }, "third store registry binding changed");
-                            reject([&] { make(); }, "third store registry binding changed");
+                            reject([&] { validate(decision); }, "resolved store registry binding changed");
+                            reject([&] { make(); }, "resolved store registry binding changed");
                             require(unchangedState() == corrupted, "third registry rejection changed live state");
                             ptr = savedPtr;
                         }
                     }
                     third.setSelectedEnchantItem(thirdScript);
-                    reject([&] { validate(decision); }, "third store owner or selection changed");
+                    reject([&] { validate(decision); }, "resolved store owner or selection changed");
                     third.setSelectedEnchantItem(thirdDormant);
                     validate(decision);
-                    require(unchangedState() == before, "third store corruption recovery changed live state");
+                    require(unchangedState() == before, "resolved store corruption recovery changed live state");
                 }
                 for (const auto* alias : { &source, &destination })
                 {
@@ -4531,10 +4665,11 @@ namespace
                     reject(
                         [&] {
                             source.prepareTransfer(item, 1, destination, removal, destinationAdd,
-                                MWWorld::ContainerStoreResolution(*alias, alias->getPtr(worldModel)));
+                                std::array{ supplied[0], supplied[1],
+                                    MWWorld::ContainerStoreResolution(*alias, alias->getPtr(worldModel)) });
                         },
-                        "third store aliases");
-                    require(unchangedState() == before, "third store alias rejection changed live state");
+                        "resolved store aliases");
+                    require(unchangedState() == before, "resolved store alias rejection changed live state");
                 }
                 {
                     auto wrongOwner = contexts[2];
@@ -4544,13 +4679,15 @@ namespace
                     reject(
                         [&] {
                             source.prepareTransfer(item, 1, destination, removal, destinationAdd,
-                                MWWorld::ContainerStoreResolution(third, wrongOwner));
+                                std::array{
+                                    supplied[0], supplied[1], MWWorld::ContainerStoreResolution(third, wrongOwner) });
                         },
                         "context lifetime");
                     reject(
                         [&] {
                             source.prepareTransfer(item, 1, destination, removal, destinationAdd,
-                                MWWorld::ContainerStoreResolution(third, contexts[3]));
+                                std::array{
+                                    supplied[0], supplied[1], MWWorld::ContainerStoreResolution(third, contexts[3]) });
                         },
                         "owner mismatch");
                     require(unchangedState() == before, "third owner rejection changed live state");
@@ -4664,6 +4801,29 @@ namespace
                 auto beforeReplace = make();
                 sourceScripts.add(scriptId, contexts[0], scripts);
                 reject([&] { validate(beforeReplace); }, "registration or cursor changed");
+                {
+                    // Initialized locals skip compiler lookup; OnPCAdd performs
+                    // the fallible lookup only when the destination is the player.
+                    const auto player = destinationAdd.mPlayer;
+                    destinationAdd.mPlayer = contexts[1];
+                    const auto before = unchangedState();
+                    scripts.mBeforeLocals = [&] { throw PreparationFailure{}; };
+                    bool failed = false;
+                    try
+                    {
+                        make();
+                    }
+                    catch (const PreparationFailure&)
+                    {
+                        failed = true;
+                    }
+                    scripts.mBeforeLocals = {};
+                    destinationAdd.mPlayer = player;
+                    require(failed, "collection script preparation fault was not reached");
+                    require(unchangedState() == before,
+                        "collection script preparation failure changed live state or notifications");
+                    validate(make());
+                }
                 const auto beforeFailure = unchangedState();
                 int alive = 0, emitted = 0;
                 std::function<void()> onCopy;
@@ -4724,9 +4884,10 @@ namespace
                 observedStores.pop_back();
                 observedStores.pop_back();
                 observedStores.pop_back();
+                observedStores.pop_back();
             }
 
-        // A supplied store can expire independently of its registered owner.
+        // A later supplied store can expire independently of its registered owner.
         // Each destructive case uses disposable live state and compares snapshots
         // after the deliberate fault, so rejection cannot hide extra publication.
         for (bool shared : { false, true })
@@ -4735,6 +4896,8 @@ namespace
                 auto thirdOwner
                     = std::make_unique<MWWorld::ManualRef>(store, ESM::RefId::stringRefId("native_context_owner"));
                 const auto owner = thirdOwner->getPtr();
+                MWWorld::ManualRef earlierOwner(store, ESM::RefId::stringRefId("native_context_owner"));
+                MWWorld::ContainerStore earlier;
                 auto third = std::make_unique<MWWorld::ContainerStore>();
                 MWWorld::ContainerStore source, destination;
                 MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
@@ -4745,11 +4908,16 @@ namespace
                 destinationAdd.mPlayer = destinationAdd.mContainer;
                 bindEmptyStore(source, sourceAdd.mContainer, worldModel);
                 bindEmptyStore(destination, destinationAdd.mContainer, worldModel);
+                bindEmptyStore(earlier, earlierOwner.getPtr(), worldModel);
                 bindEmptyStore(*third, owner, worldModel);
-                observedStores.insert(observedStores.end(), { &source, &destination, third.get() });
+                observedStores.insert(observedStores.end(), { &source, &destination, &earlier, third.get() });
                 auto thirdAdd = sourceAdd;
                 thirdAdd.mContainer = owner;
                 thirdAdd.mPlayer = {};
+                auto earlierAdd = thirdAdd;
+                earlierAdd.mContainer = earlierOwner.getPtr();
+                const auto earlierNode = *earlier.add(scripted.getPtr(), 3, earlierAdd);
+                destinationScripts.add(scriptId, earlierNode, scripts);
                 MWWorld::Ptr node;
                 if (fault != 9)
                 {
@@ -4762,7 +4930,9 @@ namespace
                 destination.add(plain.getPtr(), 1, destinationAdd);
                 MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer, sourceScripts,
                     sourceAdd.mInventoryUpdated };
-                const MWWorld::ContainerStoreResolution supplied(*third, owner);
+                const std::array supplied{ MWWorld::ContainerStoreResolution(earlier, earlierOwner.getPtr()),
+                    MWWorld::ContainerStoreResolution(*third, owner),
+                    MWWorld::ContainerStoreResolution(earlier, earlierOwner.getPtr()) };
                 const auto make
                     = [&] { return source.prepareTransfer(item, 1, destination, removal, destinationAdd, supplied); };
                 const auto validate = [&](const Pair& decision) {
@@ -4772,6 +4942,7 @@ namespace
                     = [&] { return std::tuple{ snapshot(), sourceScripts.snapshot(), destinationScripts.snapshot() }; };
                 auto decision = make();
                 validate(decision);
+                compareStock(decision, item, destination, sourceAdd, destinationAdd);
                 if (fault < 3)
                 {
                     if (fault == 0)
@@ -4790,9 +4961,14 @@ namespace
                         *third = std::move(moved);
                     }
                     const auto before = unchangedState();
-                    reject([&] { validate(decision); }, "third store storage changed");
-                    rejectIterators(decision, "third store storage changed");
-                    reject([&] { make(); }, "third store storage changed");
+                    reject([&] { validate(decision); }, "resolved store storage changed");
+                    rejectIterators(decision, "resolved store storage changed");
+                    reject([&] { make(); }, "resolved store storage changed");
+                    const std::array freshThenStale{ supplied[0], MWWorld::ContainerStoreResolution(*third, owner),
+                        supplied[1] };
+                    reject(
+                        [&] { source.prepareTransfer(item, 1, destination, removal, destinationAdd, freshThenStale); },
+                        "resolved store storage changed");
                     require(unchangedState() == before, "third storage replacement rejection changed state");
                 }
                 else if (fault == 3 || fault == 4 || fault == 9)
@@ -4810,10 +4986,10 @@ namespace
                         third.reset();
                     }
                     const auto before = unchangedState();
-                    reject([&] { validate(decision); }, "third store lifetime changed");
-                    rejectIterators(decision, "third store lifetime changed");
-                    reject([&] { make(); }, "third store lifetime changed");
-                    require(unchangedState() == before, "destroyed third store rejection changed state");
+                    reject([&] { validate(decision); }, "resolved store lifetime changed");
+                    rejectIterators(decision, "resolved store lifetime changed");
+                    reject([&] { make(); }, "resolved store lifetime changed");
+                    require(unchangedState() == before, "destroyed resolved store rejection changed state");
                 }
                 else if (fault == 5)
                 {
@@ -4829,8 +5005,8 @@ namespace
                     fresh.mContainerStore = third.get();
                     worldModel.registerPtr(fresh);
                     const auto before = unchangedState();
-                    reject([&] { validate(decision); }, "third store node lifetime");
-                    rejectIterators(decision, "third store node lifetime");
+                    reject([&] { validate(decision); }, "resolved store node lifetime");
+                    rejectIterators(decision, "resolved store node lifetime");
                     reject([&] { decision.getRegistryStorage().getItem(ref->mRef.getRefNum()); }, "item lifetime");
                     reject([&] { make(); }, "Local script context binding");
                     require(unchangedState() == before, "reconstructed third node rejection changed state");
@@ -4869,17 +5045,18 @@ namespace
                     }
                     catch (const std::invalid_argument& error)
                     {
-                        expiredDuringCopy = std::string_view(error.what()).find("third store lifetime changed")
+                        expiredDuringCopy = std::string_view(error.what()).find("resolved store lifetime changed")
                             != std::string_view::npos;
                     }
                     onCopy = {};
                     consumer = original;
                     require(expiredDuringCopy && afterCallback && unchangedState() == *afterCallback && alive == 0
                             && emitted == 0,
-                        "consumer-copy third store destruction partially published state or effects");
+                        "consumer-copy resolved store destruction partially published state or effects");
                 }
                 if (third)
                     observedStores.pop_back();
+                observedStores.pop_back();
                 observedStores.pop_back();
                 observedStores.pop_back();
             }
