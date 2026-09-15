@@ -1,6 +1,7 @@
 #include "test_allocations.hpp"
 #include "transfer_rehearsal.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <new>
@@ -35,13 +36,20 @@ namespace MWWorld::Testing
             detached.getLocals() = {};
             ESM::ObjectState state;
             detached.write(state);
+            std::vector<std::tuple<std::string, float, bool, uint64_t>> animations;
+            for (const auto& animation : data.getAnimationState().mScriptedAnims)
+                animations.emplace_back(animation.mGroup, animation.mTime, animation.mAbsolute, animation.mLoopCount);
             return std::tuple{ item.mRef, item.getReferenceLifetime(), item.mRef->mWorldModel, ref.getRefNum(),
                 ref.getCount(false), ref.getSoul(), ref.getCharge(), ref.getChargeIntRemainder(),
                 ref.getEnchantmentCharge(), ref.hasChanged(), ref.getPosition(), ref.getOwner(), data.hasChanged(),
                 data.isEnabled(), data.getPosition(), state.mFlags, data.mPhysicsPostponed, data.getBaseNode(),
                 data.getCustomData(), data.getLuaScripts(), locals.getScriptId(), locals.mShorts, locals.mLongs,
                 locals.mFloats, locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
-                data.getAnimationState().mScriptedAnims.data() };
+                locals.mShorts.capacity(), locals.mLongs.capacity(), locals.mFloats.capacity(),
+                data.getAnimationState().mScriptedAnims.data(), data.getAnimationState().mScriptedAnims.capacity(),
+                animations, data.isDeletedByContentFile(), ref.getRefId(), ref.getGlobalVariable(), ref.getFaction(),
+                ref.getFactionRank(), ref.getScale(), ref.getTeleport(), ref.getDoorDest(), ref.getDestCell(),
+                ref.getLockLevel(), ref.getKey(), ref.getTrap() };
         }
 
         auto snapshot(const DisposableTransferRehearsal& fixture)
@@ -113,14 +121,18 @@ namespace MWWorld::Testing
                 {
                     Allocations::Trace trace;
                     void* value;
+                    bool aligned;
+                    size_t outstanding;
                     {
                         Allocations::Observe observe(trace);
                         value = route.mAllocate(size);
+                        aligned = value && reinterpret_cast<std::uintptr_t>(value) % route.mAlignment == 0;
+                        outstanding = trace.mOutstanding;
+                        route.mFree(value, size);
                     }
-                    require(value && reinterpret_cast<std::uintptr_t>(value) % route.mAlignment == 0
-                            && trace.mTotal == 1 && trace.mFailures == 0,
+                    require(aligned && trace.mTotal == 1 && trace.mFailures == 0 && outstanding == 1
+                            && trace.mOutstanding == 0 && trace.mPeakOutstanding == 1 && trace.mTrackingOverflow == 0,
                         "allocation hook missed a route or broke alignment/zero-size allocation");
-                    route.mFree(value, size);
                     bool threw = false;
                     {
                         Allocations::Observe observe(trace, 1);
@@ -134,10 +146,67 @@ namespace MWWorld::Testing
                             threw = true;
                         }
                     }
-                    require(!value && threw == route.mThrows && trace.mTotal == 1 && trace.mFailures == 1,
+                    require(!value && threw == route.mThrows && trace.mTotal == 1 && trace.mFailures == 1
+                            && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
                         "allocation hook missed failure or broke throwing/nothrow semantics");
                 }
+            // Track only this observation's blocks, including non-LIFO frees.
+            auto* prior = ::operator new(17);
+            Allocations::Trace trace;
+            {
+                Allocations::Observe observe(trace);
+                auto* first = ::operator new(17);
+                auto* second = ::operator new[](17);
+                auto* third = ::operator new(17, std::align_val_t{ 64 });
+                ::operator delete(prior);
+                ::operator delete[](second);
+                ::operator delete(first);
+                ::operator delete(third, std::align_val_t{ 64 });
+            }
+            require(trace.mTotal == 3 && trace.mPeakOutstanding == 3 && trace.mOutstanding == 0
+                    && trace.mTrackingOverflow == 0,
+                "allocation tracking lost ownership or non-LIFO deallocation");
         }
+
+        struct ConsumerCopyTrace
+        {
+            Allocations::Trace* mTrace = nullptr;
+            size_t mStarted = 0, mCompleted = 0, mOrdinal = 0;
+        };
+
+        // Only the source consumer is replaced: prepareTransfer copies it after
+        // preparing stock inventory/script/registry storage and iterator guards.
+        // Force both std::function storage and an identifiable fallible copy-body
+        // allocation without adding instrumentation to any production source.
+        struct AllocatingConsumer
+        {
+            ConsumerCopyTrace& mCopies;
+            int& mNotifications;
+            std::array<std::byte, 128> mPadding{};
+            std::unique_ptr<int> mValue;
+
+            AllocatingConsumer(ConsumerCopyTrace& copies, int& notifications)
+                : mCopies(copies)
+                , mNotifications(notifications)
+                , mValue(std::make_unique<int>(7))
+            {
+            }
+            AllocatingConsumer(const AllocatingConsumer& other)
+                : mCopies(other.mCopies)
+                , mNotifications(other.mNotifications)
+            {
+                if (mCopies.mTrace)
+                {
+                    ++mCopies.mStarted;
+                    mCopies.mOrdinal = mCopies.mTrace->mTotal + 1;
+                }
+                Allocations::InPhase phase(Allocations::Phase::ConsumerCopy);
+                mValue = std::make_unique<int>(*other.mValue);
+                if (mCopies.mTrace)
+                    ++mCopies.mCompleted;
+            }
+            void operator()(const Ptr&) const { ++mNotifications; }
+        };
 
         auto ownedNodes(const PreparedContainerTransfer& pair)
         {
@@ -152,6 +221,96 @@ namespace MWWorld::Testing
         {
             for (const auto& node : nodes)
                 require(!node.hasLiveReference(), "consumed pair retained an owned node after discard");
+        }
+
+        template <class Make, class Verify>
+        Allocations::Trace checkPreparationAllocationFailures(
+            DisposableTransferRehearsal& fixture, ConsumerCopyTrace& copies, Make make, Verify verify)
+        {
+            using namespace Allocations;
+            const auto measure = [&](Trace& trace, size_t failAt = 0) {
+                copies = { &trace };
+                bool caught = false, complete = false;
+                {
+                    Observe observe(trace, failAt);
+                    InPhase phase(Phase::Preparation);
+                    try
+                    {
+                        // Observe preparation, partial unwinding and full discard.
+                        // Never allocate snapshots/assertions/observers in here.
+                        auto pair = make();
+                        complete = pair.getResolutionCompleteness().isComplete();
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        caught = true;
+                    }
+                }
+                copies.mTrace = nullptr;
+                require(trace.mTrackingOverflow == 0 && trace.mOutstanding == 0,
+                    "preparation leaked an observed allocation or overflowed cleanup tracking");
+                require(trace.mTotal == trace.allocations(Phase::Preparation) + trace.allocations(Phase::ConsumerCopy),
+                    "preparation reached an unrelated allocation phase");
+                require(failAt ? caught && !complete && trace.mFailures == 1 && trace.mTotal == failAt
+                               : !caught && complete && trace.mFailures == 0,
+                    "preparation allocation failure was missed/swallowed or allocated during cleanup");
+            };
+            const auto fresh = [&] {
+                std::vector<ConstPtr> nodes;
+                {
+                    auto pair = make();
+                    require(pair.getResolutionCompleteness().isComplete(), "fresh preparation incomplete");
+                    const auto* bindings = &pair.getIteratorBindings();
+                    nodes = ownedNodes(pair);
+                    verify();
+                    pair = fixture.rehearse(std::move(pair));
+                    require(&pair.getIteratorBindings() == bindings && ownedNodes(pair) == nodes,
+                        "fresh rehearsal replaced protected bindings or owned nodes");
+                    verify();
+                }
+                requireDiscarded(nodes);
+                verify();
+            };
+            Trace baseline;
+            measure(baseline);
+            const auto consumerOrdinal = copies.mOrdinal;
+            require(copies.mStarted == 1 && copies.mCompleted == 1 && consumerOrdinal > 1
+                    && consumerOrdinal < baseline.mTotal && baseline.allocations(Phase::ConsumerCopy) == 1
+                    && baseline.mPeakOutstanding > 0,
+                "preparation missed the final fallible consumer copy or subsequent validation");
+            verify();
+            fresh();
+            Trace repeated;
+            measure(repeated);
+            require(repeated.mAllocations == baseline.mAllocations && repeated.mVisits == baseline.mVisits
+                    && repeated.mPeakOutstanding == baseline.mPeakOutstanding && copies.mOrdinal == consumerOrdinal
+                    && copies.mStarted == 1 && copies.mCompleted == 1,
+                "fresh preparation changed allocation coverage or final consumer copy order");
+            verify();
+            for (size_t failAt = 1; failAt <= baseline.mTotal; ++failAt)
+            {
+                try
+                {
+                    Trace failure;
+                    measure(failure, failAt);
+                    require(
+                        failure.mFailedPhase == (failAt == consumerOrdinal ? Phase::ConsumerCopy : Phase::Preparation),
+                        "preparation failure moved to a different allocation phase/ordinal");
+                    require(copies.mStarted == (failAt >= consumerOrdinal ? 1 : 0)
+                            && copies.mCompleted == (failAt > consumerOrdinal ? 1 : 0)
+                            && (!copies.mStarted || copies.mOrdinal == consumerOrdinal),
+                        "preparation failed at the wrong final consumer copy boundary");
+                    verify();
+                    fresh();
+                }
+                catch (...)
+                {
+                    std::cerr << "Preparation allocation ordinal=" << failAt << '/' << baseline.mTotal
+                              << " final-consumer=" << consumerOrdinal << '\n';
+                    throw;
+                }
+            }
+            return baseline;
         }
 
         template <class Make, class Verify>
@@ -246,7 +405,14 @@ namespace MWWorld::Testing
         }
     }
 
-    static void checkTransferRehearsalCases(const ESMStore& content, bool allocationFailures)
+    enum class AllocationCheck
+    {
+        None,
+        Rehearsal,
+        Preparation
+    };
+
+    static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
     {
         using Rehearsal = DisposableTransferRehearsal;
         using Stage = Rehearsal::Stage;
@@ -279,6 +445,7 @@ namespace MWWorld::Testing
         ManualRef plain(store, plainId), scripted(store, scriptedId);
         size_t cases = 0;
         Allocations::Trace totals;
+        const bool allocationFailures = allocationCheck != AllocationCheck::None;
         if (allocationFailures)
             checkAllocationHooks();
 
@@ -294,7 +461,10 @@ namespace MWWorld::Testing
                     for (int quantity : { 1, 4 })
                         for (int cursorPosition : { 0, 1, 99 })
                         {
+                            ConsumerCopyTrace copies;
                             Rehearsal fixture(store, readers, scripts, ownerId, shared);
+                            if (allocationCheck == AllocationCheck::Preparation)
+                                fixture.mRemoval.mInventoryUpdated = AllocatingConsumer(copies, fixture.mNotifications);
                             auto& source = fixture.mSource;
                             auto& destination = fixture.mDestination;
                             const auto item
@@ -349,15 +519,29 @@ namespace MWWorld::Testing
                             const auto unrelated = nodeState(*other);
                             const auto verifyOriginal = [&] {
                                 require(snapshot(fixture) == before,
-                                    "rehearsal rollback changed original nodes/state/caches/cursors");
+                                    "transfer changed original nodes/state/caches/cursors");
                                 require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
-                                    "rehearsal emitted notifications/scripts or changed unrelated live state");
+                                    "transfer emitted notifications/scripts or changed unrelated live state");
                             };
                             if (allocationFailures)
                             {
-                                const auto trace = checkAllocationFailures(fixture, make, verifyOriginal);
+                                Allocations::Trace trace;
+                                try
+                                {
+                                    trace = allocationCheck == AllocationCheck::Preparation
+                                        ? checkPreparationAllocationFailures(fixture, copies, make, verifyOriginal)
+                                        : checkAllocationFailures(fixture, make, verifyOriginal);
+                                }
+                                catch (...)
+                                {
+                                    std::cerr << "Allocation fixture: shared=" << shared << " scripted=" << scriptedItem
+                                              << " existing=" << stack << " quantity=" << quantity
+                                              << " cursor=" << cursorPosition << '\n';
+                                    throw;
+                                }
                                 ++cases;
                                 totals.mTotal += trace.mTotal;
+                                totals.mPeakOutstanding = std::max(totals.mPeakOutstanding, trace.mPeakOutstanding);
                                 for (size_t i = 0; i < totals.mAllocations.size(); ++i)
                                     totals.mAllocations[i] += trace.mAllocations[i];
                                 continue;
@@ -554,6 +738,16 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (allocationCheck == AllocationCheck::Preparation)
+            {
+                require(totals.allocations(Allocations::Phase::ConsumerCopy) == cases,
+                    "preparation matrix missed final consumer allocations");
+                std::cout << "Allocation preparation: cases=" << cases << " individually-failed=" << totals.mTotal
+                          << " preparation=" << totals.allocations(Allocations::Phase::Preparation)
+                          << " final-consumer-copy=" << totals.allocations(Allocations::Phase::ConsumerCopy)
+                          << " peak-outstanding=" << totals.mPeakOutstanding << " remaining-after-cleanup=0\n";
+                return;
+            }
             require(totals.allocations(Allocations::Phase::Setup) > 0, "fallible script setup was never exercised");
             std::cout << "Allocation rehearsal: cases=" << cases << " individually-failed=" << totals.mTotal
                       << " validation=" << totals.allocations(Allocations::Phase::Validation)
@@ -566,11 +760,16 @@ namespace MWWorld::Testing
 
     void checkTransferRehearsal(const ESMStore& content)
     {
-        checkTransferRehearsalCases(content, false);
+        checkTransferRehearsalCases(content, AllocationCheck::None);
     }
 
     void checkTransferRehearsalAllocations(const ESMStore& content)
     {
-        checkTransferRehearsalCases(content, true);
+        checkTransferRehearsalCases(content, AllocationCheck::Rehearsal);
+    }
+
+    void checkTransferPreparationAllocations(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::Preparation);
     }
 }

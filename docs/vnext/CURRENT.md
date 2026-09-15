@@ -5,99 +5,100 @@
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). Fully resolved non-gold MISC pairs
-  support an allocation-tested, reversible, effect-free installation rehearsal
-  on disposable stock stores/services. Production installation remains
+  support allocation-tested preparation and reversible, effect-free installation
+  rehearsal on disposable stock stores/services. Production installation remains
   unavailable; no live atomic transfer exists.
-- **Next action:** extend test-only allocation-failure injection to
-  `ContainerStore::prepareTransfer` itself for the same fully resolved non-gold
-  MISC matrix, including its final fallible consumer copy. Fail each observed
-  allocation individually; require exact original state, no effects, safe
-  partial-preparation cleanup and successful fresh preparation/rehearsal after
-  each failure. Keep complete resolution, protected witnesses and test-only
-  ownership; do not enable production installation, durability or effects.
+- **Next action:** introduce explicit-declaration overloads for
+  `MWScript::Locals::write` and `RefData::write`, retaining stock wrappers, then
+  serialize detached plain/initialized-MWScript MISC RefData from fully validated
+  prepared pairs without `Environment`. Verify short/long/float names, types and
+  values, flags, position and animation. Malformed declaration/value shapes and
+  individual allocation failures must leave caller output and original fixtures
+  unchanged. This is an owned serialization seam only; no file durability,
+  production installation or effects.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[DisposableTransferRehearsal](../../apps/tes3mp-server/native/transfer_rehearsal.hpp)
-and [allocation instrumentation](../../apps/tes3mp-server/native/test_allocations.hpp)
-are defined and linked only in `tes3mp_native_loadout_tests`. The rehearsal owns
-both transfer stores, an additional supplied store, WorldModel registry and
-LocalScripts services. External service targets and reentrant rehearsals reject.
-There is no production installation, commit/release or effect API.
+The new `inventory-transfer-preparation-allocations` filter in
+[transfer tests](../../apps/tes3mp-server/native/transfer_rehearsal_tests.cpp)
+measures `ContainerStore::prepareTransfer` itself through successful discard or
+partial-preparation unwinding. A test-only source consumer forces allocating
+`std::function` storage and an identifiable allocation inside its final copy.
+The test checks that copy's entry/completion ordinal and subsequent validation;
+no production instrumentation or installation API was added.
 
-Full `validateTransfer` and complete registry/script resolution precede stock
-storage access. Protected pair/context/collection bindings, separate proposed
-identities, ownership/storage/lifetime witnesses, read-only views and owned-node/
-iterator guards remain intact. Unresolved keys are never followed; no additional
-objects are resolved. Shared scripts exchange once; distinct services exchange
-in source-then-destination order.
+[Allocation instrumentation](../../apps/tes3mp-server/native/test_allocations.hpp)
+remains linked only into `tes3mp_native_loadout_tests`. Thread-local hooks cover
+C++ scalar/array, aligned and nothrow allocation. A fixed 8,192-slot address table
+tracks observed blocks without allocating; overflow fails the check. Hook checks
+cover all eight routes, zero size, alignment, throwing/nothrow semantics,
+non-LIFO frees and deallocation of blocks created before observation.
+Assertions, snapshots and fixture construction remain outside measured calls.
 
-The rehearsal retains original inventory, script and registry nodes through
-temporary exchanges, then restores original selections, registrations, cursors,
-registry revision/generated counter and cache flags/values. Rollback clears
-temporary identities/WorldModel links from detached nodes. Success fully
-revalidates and returns the same pair; exceptions discard it after restoration.
-
-Thread-local instrumentation counts C++ scalar/array, aligned and nothrow
-allocations, injecting one `std::bad_alloc` at a time. Fixed-size phase counters
-separate validation, setup, exchange, rollback and post-rollback revalidation.
-The observer is empty throughout measured calls. Instrumentation remains active
-through unwinding and consumed-pair destruction; assertions and snapshots run
-after it is disabled. Hook self-checks cover all eight allocation routes,
-zero-size requests, alignment and throwing/nothrow semantics.
-
-The 48 synthetic combinations cover plain/scripted MISC, existing/empty
+All 48 synthetic combinations cover plain/scripted MISC, existing/empty
 destinations, full/partial removal, shared/distinct services and begin/middle/end
-script cursors, with dormant nodes and selections. Every failure checks exact
-original nodes, reference lifetimes, identities, values/locals, selections,
-script nodes/registrations/cursors, registry nodes/revision/counter and caches.
-Snapshots also cover supplied-store raw order, recharge-cache storage/capacity,
-resolved flags and listeners. No notifications, script execution or unrelated
-WorldModel changes occur. All consumed owned inventory references expire, and
-a fresh pair successfully rehearses and discards on the same fixture after
-every failure. Repeated successful pairs retain bindings and allocation counts.
+script cursors, with dormant nodes and selections. Every observed allocation is
+failed individually. Each failure propagates `std::bad_alloc`, performs no further
+allocation during cleanup, and releases every tracked preparation block.
+Fresh preparation/rehearsal succeeds on the same fixture after every failure;
+protected bindings and owned nodes survive rehearsal, then owned reference
+lifetimes expire on discard. Repeated preparations retain allocation counts,
+phase visits, peak storage and final consumer-copy order.
+
+Exact snapshots check original inventory nodes, lifetimes, identities, values,
+locals and selections; script nodes, registrations and cursors; registry nodes,
+revision and generated counter; cache flags/values/storage/capacity, resolved
+flags and listeners. Snapshots now also include animation values/capacity, local
+vector capacities and additional CellRef fields. Notifications, script execution,
+the supplied store and an independent WorldModel remain unchanged.
+
+Full `validateTransfer` and complete registry/script resolution still precede
+rehearsal storage access. Protected pair/context/collection bindings, separate
+proposed identities, ownership/storage/lifetime witnesses, read-only views and
+owned-node/iterator guards remain intact. Unresolved keys are never followed and
+no additional objects are resolved. Shared services exchange once; distinct
+services exchange source then destination. Original inventory/script/registry
+nodes and metadata are retained and restored; rollback clears temporary
+identities and WorldModel links from detached nodes. Disposable ownership remains
+test-only, with no commit/release or effect API.
 
 ## Fresh verification
 
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
-`build/vnext-product`, individually:
+`build/vnext-product`, individually, all exit **0**:
 
-- Focused `tes3mp_native_loadout_tests` build: exit 0.
-- `inventory-transfer-rehearsal-allocations`: exit 0; **6,998** allocations
-  failed individually: validation 3,454, setup 90, revalidation 3,454.
-  Exchange and rollback each observed **zero allocations**.
-- `inventory-transfer-rehearsal`: exit 0, including checkpoint exceptions,
-  corruption/staleness rejection, complete-resolution guards and service order.
-- `inventory-transfer-preparation`: exit 0.
+- Focused `tes3mp_native_loadout_tests` build.
+- `inventory-transfer-preparation-allocations`: **13,970** allocations failed
+  individually, including **48** final consumer-copy-body allocations; peak
+  outstanding **237**, remaining after every cleanup **0**.
+- `inventory-transfer-preparation`.
+- `inventory-transfer-rehearsal`.
+- `inventory-transfer-rehearsal-allocations`: **6,998** individual failures;
+  validation **3,454**, setup **90**, revalidation **3,454**. Exchange and rollback
+  each observe **zero allocations**.
 - Documentation budget/links, patch-registry semantic fields, formatting and
-  whitespace: exit 0.
+  whitespace.
 
-The initial allocation check exited 1 because it incorrectly required setup
-allocations in every case; plain fixtures have empty script lists. That assertion
-was corrected to require fallible setup coverage across the matrix, then the
-build and failed check passed before continuing. Logs are in `build/logs/`:
-`native-rehearsal-allocations-build-final.log`,
-`native-rehearsal-allocations-test-final.log`,
-`native-rehearsal-allocations-regression.log` and
-`native-rehearsal-allocations-preparation.log`.
+No check failed. Logs: `build/logs/native-preparation-allocations-` followed by
+`build.log`, `test.log`, `preparation.log`, `rehearsal.log` or
+`rehearsal-allocations.log`; documentation/review logs use the same prefix.
 No complete suites, expensive gates or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Allocation injection covers rehearsal calls on already prepared pairs, not
-pair construction, direct C allocation, other threads or external libraries'
-private allocators. Borrowed content/readers/script-manager/cell services must
-outlive use. Checks assume serialized engine access and current state/lifetime,
-not complete mutation history or live-world concurrency safety.
+Allocation coverage excludes direct C allocation, other threads and external
+libraries' private allocators. Borrowed content/readers/script-manager/cell
+services must outlive use. Checks assume serialized engine access and current
+state/lifetime, not complete mutation history or live-world concurrency safety.
 
 Production installation, durability and notification execution remain unavailable.
 Unresolved stores, equipment, gold/other types, Lua/custom-state transfer,
 persistence and stable multiplayer mapping remain outside this slice.
-Inherited M1 real-Morrowind/enchantment evidence under `build/native-loadout/real`
-and `build/native-loadout/parity` was not rerun; TR remains unverified. Independent
+M1 real-Morrowind/enchantment evidence under `build/native-loadout/real` and
+`build/native-loadout/parity` was not rerun; TR remains unverified. Independent
 networking/standalone targets and the migration base are unchanged. Broad
-openmw-lib rendering dependencies still need extraction before production
-headless packaging. Whole-baseline provenance debt remains; only relevant
-patch-registry test entries changed.
+openmw-lib rendering dependencies still need extraction for production headless
+packaging. Whole-baseline provenance debt remains; only relevant patch-registry
+test entries changed.

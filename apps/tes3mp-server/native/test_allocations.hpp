@@ -11,6 +11,8 @@ namespace MWWorld::Testing::Allocations
     enum class Phase
     {
         Outside,
+        Preparation,
+        ConsumerCopy,
         Validation,
         Setup,
         Exchange,
@@ -22,6 +24,9 @@ namespace MWWorld::Testing::Allocations
     {
         std::array<std::size_t, static_cast<std::size_t>(Phase::Count)> mAllocations{}, mVisits{};
         std::size_t mTotal = 0, mFailures = 0;
+        // Fixed-capacity, non-allocating address tracking covers only blocks
+        // allocated during this observation, including frees during unwinding.
+        std::size_t mOutstanding = 0, mPeakOutstanding = 0, mTrackingOverflow = 0;
         Phase mFailedPhase = Phase::Outside;
         std::size_t allocations(Phase phase) const { return mAllocations[static_cast<std::size_t>(phase)]; }
         std::size_t visits(Phase phase) const { return mVisits[static_cast<std::size_t>(phase)]; }

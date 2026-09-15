@@ -1,5 +1,6 @@
 #include "test_allocations.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <new>
@@ -14,6 +15,30 @@ namespace
     thread_local Trace* sTrace = nullptr;
     thread_local std::size_t sFailAt = 0;
     thread_local Phase sPhase = Phase::Outside;
+    thread_local std::array<void*, 8192> sBlocks{};
+
+    void trackAllocation(void* value) noexcept
+    {
+        if (!sTrace)
+            return;
+        if (sTrace->mOutstanding == sBlocks.size())
+        {
+            ++sTrace->mTrackingOverflow;
+            return;
+        }
+        sBlocks[sTrace->mOutstanding++] = value;
+        sTrace->mPeakOutstanding = std::max(sTrace->mPeakOutstanding, sTrace->mOutstanding);
+    }
+
+    void trackFree(void* value) noexcept
+    {
+        if (!sTrace || !value)
+            return;
+        const auto end = sBlocks.begin() + sTrace->mOutstanding;
+        const auto found = std::find(sBlocks.begin(), end, value);
+        if (found != end)
+            *found = sBlocks[--sTrace->mOutstanding];
+    }
 
     void observeAllocation()
     {
@@ -48,7 +73,10 @@ namespace
 #endif
             }
             if (result)
+            {
+                trackAllocation(result);
                 return result;
+            }
             const auto handler = std::get_new_handler();
             if (!handler)
                 throw std::bad_alloc();
@@ -162,6 +190,7 @@ void* operator new[](std::size_t size, std::align_val_t alignment, const std::no
 }
 void operator delete(void* value) noexcept
 {
+    trackFree(value);
     std::free(value);
 }
 void operator delete[](void* value) noexcept
@@ -186,6 +215,7 @@ void operator delete[](void* value, const std::nothrow_t&) noexcept
 }
 void operator delete(void* value, std::align_val_t) noexcept
 {
+    trackFree(value);
     freeAligned(value);
 }
 void operator delete[](void* value, std::align_val_t alignment) noexcept

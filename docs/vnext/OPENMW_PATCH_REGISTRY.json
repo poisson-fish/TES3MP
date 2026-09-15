@@ -27,7 +27,7 @@
         "apps/openmw/mwworld/refdata.cpp",
         "apps/openmw/mwworld/refdata.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations"],
+      "tests": ["tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations", "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit script service interfaces for locals and registration"
     },
@@ -50,7 +50,7 @@
         "apps/openmw/mwworld/worldmodel.cpp",
         "apps/openmw/mwworld/worldmodel.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations"],
+      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations", "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
     },
