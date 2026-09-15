@@ -5,62 +5,59 @@
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). The protected MISC transfer pair now
-  owns inventory/selection, LocalScripts membership/cursor and WorldModel
-  registry/identity results. Preparation remains isolated, not an atomic transfer.
-- **Next action:** prepare owned stock MISC list storage and selection relocation
-  from the protected pair, preserving dormant nodes and keeping proposed identities
-  separate; bind prepared script/registry associations to those stable owned nodes
-  without live installation or effects.
+  owns stock inventory lists and selection/script/registry relocation to their
+  stable nodes. Preparation remains isolated, not an atomic transfer.
+- **Next action:** prepare owned stock LocalScripts list storage and cursor
+  relocation from the protected pair's stable MISC nodes, preserving unaffected
+  registrations and shared/distinct services; bind it to the same pair and
+  witnesses without live installation or effects.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
 [ContainerStore::prepareTransfer](../../apps/openmw/mwworld/containerstore.cpp)
-returns one move-only `PreparedContainerTransfer`. Its private state binds source
-removal, both inventories/selections, incoming/destination values, complete script
-lists/cursors, registry results and deferred notification consumers to one removal
-quantity. No stock mutation caller or production authority changed.
+returns one move-only `PreparedContainerTransfer`. Its protected decisions bind
+source removal, both inventories/selections, incoming/destination values, complete
+script lists/cursors, registry results and deferred notification consumers to one
+removal quantity. No stock mutation caller or production authority changed.
 
-`getRegistry()` exposes an owned WorldModel mapping result with proposed revision
-and generated-ID counter. Bindings retain compare-only reference keys and cell/
-container associations, including unaffected world/other-owner entries.
-`getDestinationIdentity()` returns the existing or proposed new ID;
-`getRegistryItem(id)` resolves either inventory's ID to its detached owned value,
-including dormant nodes, and returns empty for unrelated entries. It never follows
-an old inventory reference. Existing inventory views retain original IDs; new
-membership still uses an unset ID, with its proposed ID available separately.
+`getSourceStorage()` and `getDestinationStorage()` expose const stock
+`CellRefList<ESM::Miscellaneous>::List` storage. Explicit detached value copies
+are moved into list nodes, preserving source/existing-stack flags and the already
+prepared new-stack activation semantics. Lists preserve raw stock order, signed
+counts, partial/full removal and dormant nodes. Existing destinations are replaced
+in place; new stacks append. Original/proposed value witnesses remain separate
+from storage, including independently owned locals and animation buffers.
 
-Stock removal leaves the source registered even at zero count. Stock addition
-registers its iterator Ptr before script-specific cell hints: it retains an
-existing stack's ID, resets that mapping's cell hint, and increments the registry
-revision even when replacing an identical binding. A new stack proposes one ID
-using stock `CellRef::getOrAssignRefNum` on a scratch CellRef and owned counter.
-No proposed item receives a RefNum or WorldModel link. Negative-content-file
-rollover is preserved. New-ID preparation rejects nonnegative counter files,
-exhaustion and collisions, including with the dormant source; unaffected mappings
-must survive. Existing-stack preparation needs no generated identity. Live stock
-generation, insertion and removal behavior remains unchanged.
+`getRelocation()` exposes raw membership and selected-node views, with empty
+selection for stock end. Original inventory IDs remain separate from values;
+new membership retains an unset ID, while `getDestinationIdentity()` and the
+relocated registry carry the proposed ID. No node receives a RefNum, WorldModel,
+scene, Lua/custom-state or live container link.
 
-Joint validation compares complete original registry membership/bindings,
-revision and counter, then reconstructs the expected result from the protected
-destination choice. Registry corruption and another pair's new binding reject.
-Restoring a mapping through stock registration still changes its revision and
-invalidates an old decision. This witnesses current state, not complete history:
-resetting the counter back without a revision change is not detectable.
+Relocated LocalScripts entries reference owned nodes while preserving script,
+owner/container/cell associations and full membership/cursors. Shared services
+keep one combined remove-then-append result; distinct services remain independent.
+Unaffected registrations retain their immutable identity. Relocated registry
+bindings reference the same owned nodes, including dormant source identities,
+while preserving stock cell hints, revision and generated-counter results.
+Unrelated registry/script entries remain compare-only keys, even after destruction.
+The earlier inventory/script/registry views remain protected relocation witnesses.
 
-Both inventories preserve stock order, signed arithmetic, dormant values and
-selection rules. Applicable RefData, locals and buffers are owned; new-stack
-activation flags follow stock copying semantics. Entire LocalScripts results
-preserve unaffected registrations and cursor behavior; shared services combine
-removal then append. Immutable script identities and registry address keys can be
-copied/compared without dereferencing unrelated destroyed objects.
+Joint validation first checks live storage identity, current values, selections,
+service/owner bindings, script membership/cursors, registry membership/bindings,
+revision/counter and deferred consumers. It then checks owned list membership and
+values and reconstructs relocation from current owned nodes. It never dereferences
+relocation views or saved live inventory nodes/iterators. Replaced storage,
+reordered/equal-valued nodes, corrupted associations and another pair's bindings
+reject. This witnesses current state, not complete mutation history.
 
-Preparation, validation, failure, moves and discard perform no live removal,
-deregistration, registration, installation or notification/effect execution.
+The pair's heap-owned state keeps lists, nodes and relocation stable across moves.
+Moved-from access rejects. The final fallible consumer copy follows storage and
+relocation preparation; failures and discard destroy the whole owned result.
 Content records, stores, owners/cells, WorldModel and script services must outlive
-the pair. Public views last while it owns its state; moved-from access rejects.
-Copies have no scene, Lua/custom-state or shared mutable-buffer links.
+the pair. Public views last while the pair owns its state.
 
 ## Fresh verification
 
@@ -72,29 +69,32 @@ Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
 - Documentation budget/links, patch-registry semantic fields, formatting and
   whitespace checks: exit 0.
 
-Synthetic disposable-stock comparisons now reproduce complete registry mappings,
-owner bindings and identity counters. Coverage includes both directions, signed
-partial/full removal, existing/new stacks, plain/scripted items, dormant nodes,
-unrelated owners and independent script/registry cell hints. Faults cover stale
-membership/bindings/revisions/counters, corrupted proposals, identity boundaries,
-OnPCAdd and late consumer-copy failures, moves and discard. Stock registry tests
-cover first generation, repeated insertion, replacement and mismatched/absent
-removal. Snapshots preserve live inventories, RefData flags/locals, script
-registrations/cursors, selection, mappings/revision/counter and notifications.
+Synthetic disposable-stock comparisons cover both directions, signed partial/full
+removal, existing/new destinations, plain/scripted values, raw dormant nodes,
+selection, independent script/registry cell hints and shared/distinct cursors.
+Faults cover stale live/owned storage, equal-value replacement, node order,
+corrupted relocation, cross-pair bindings, script/registry witnesses, OnPCAdd and
+late consumer-copy failure, moves and discard. Snapshots preserve live inventories,
+RefData flags/locals, script registrations/cursors, selection, WorldModel
+mappings/revision/counter and notifications. Move assignment also proves disposal
+of replaced owned stock nodes.
 
-Logs: `build/logs/native-registry-*`. No complete suites, expensive gates or
-upstream baseline tests ran. No Environment, World, UI or Lua runtime initialized.
+Logs: `build/logs/native-storage-*`. Initial diagnostic compile and rejection-label
+failures were fixed; their individual checks passed on retry. No complete suites,
+expensive gates or upstream baseline tests ran. No Environment, World, UI or Lua
+runtime initialized.
 
 ## Remaining limits and inherited evidence
 
-Installable stock storage, relocation and live installation remain unprepared.
-Unresolved stores, equipment, gold/other types, Lua/custom state, persistence,
-durability and stable multiplayer instance mapping remain outside this slice.
-Allocator faults are not injected; no installation/effect-failure proof exists.
+Stock LocalScripts/registry installation storage, live installation, durability
+and effect execution remain unprepared. No atomic transfer or installation-failure
+proof exists; allocator faults are not injected. Unresolved stores, equipment,
+gold/other types, Lua/custom state, persistence and stable multiplayer instance
+mapping remain outside this slice.
 
 Inherited M1 real-Morrowind/enchantment evidence under `build/native-loadout/real`
 and `build/native-loadout/parity` was not rerun; TR remains unverified. Independent
 networking/standalone targets and the migration base are unchanged. Broad
 openmw-lib rendering dependencies still need extraction before production
-headless packaging. Whole-baseline provenance debt remains; only the touched
-patch-registry entry changed.
+headless packaging. Whole-baseline provenance debt remains; only touched
+patch-registry entries changed.

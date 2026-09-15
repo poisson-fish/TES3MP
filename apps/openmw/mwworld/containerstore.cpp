@@ -844,6 +844,10 @@ struct MWWorld::PreparedContainerTransfer::State
     std::optional<LocalScripts::PreparedList> mDestinationScriptList;
     PtrRegistry::Snapshot mOriginalRegistry, mRegistry;
     ESM::RefNum mDestinationIdentity;
+    // Keep the stock list objects inside the heap-owned State: moving the pair
+    // never moves a list, its nodes or its end sentinel. No live iterator is kept.
+    CellRefList<ESM::Miscellaneous> mSourceList, mDestinationList;
+    Relocation mRelocation;
     const MWBase::ScriptManager* mScriptManager = nullptr;
     Ptr mPlayer;
     ESM::RefNum mPlayerIdentity;
@@ -982,6 +986,21 @@ MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getRegistryItem(ESM::RefNu
 bool MWWorld::PreparedContainerTransfer::hasAdditionNotification() const
 {
     return state().mAddition.mNotifyItemAdded;
+}
+
+const MWWorld::PreparedContainerTransfer::MiscList& MWWorld::PreparedContainerTransfer::getSourceStorage() const
+{
+    return state().mSourceList.mList;
+}
+
+const MWWorld::PreparedContainerTransfer::MiscList& MWWorld::PreparedContainerTransfer::getDestinationStorage() const
+{
+    return state().mDestinationList.mList;
+}
+
+const MWWorld::PreparedContainerTransfer::Relocation& MWWorld::PreparedContainerTransfer::getRelocation() const
+{
+    return state().mRelocation;
 }
 
 namespace
@@ -1156,10 +1175,24 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     // Removal keeps the source's mapping, including a now-dormant source node.
     state->mDestinationIdentity
         = PtrRegistry::prepareInsert(state->mRegistry, identity, PtrRegistry::binding(target, nullptr, &destination));
-    // The last fallible consumer copy occurs after both decisions, values and
-    // script/notification intents exist. Any throw destroys the entire pair.
-    state->mSourceUpdated = sourceContext.mInventoryUpdated;
     PreparedContainerTransfer prepared(std::move(state));
+    const auto append = [](auto& list, const ConstPtr& value) {
+        // Move an explicitly detached copy. LiveCellRef copying would clear
+        // activation flags and could borrow mutable RefData or WorldModel links.
+        auto detached = copyContainerTransferItem(value);
+        list.mList.push_back(std::move(*detached));
+    };
+    auto& owned = *prepared.mState;
+    for (const auto& member : owned.mSourceValues)
+        append(owned.mSourceList, ConstPtr(member.mResult.get()));
+    for (const auto& member : owned.mDestinationValues)
+        append(owned.mDestinationList, ConstPtr(member.mResult.get()));
+    if (!owned.mDestinationItemIndex)
+        append(owned.mDestinationList, prepared.getDestinationItem());
+    owned.mRelocation = relocateTransfer(prepared);
+    // The last fallible consumer copy now also follows list allocation and
+    // relocation. Failure discards every owned node and association together.
+    owned.mSourceUpdated = sourceContext.mInventoryUpdated;
     validateTransfer(prepared, destination, sourceContext, destinationContext);
     return prepared;
 }
@@ -1314,8 +1347,91 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
         = PtrRegistry::prepareInsert(expectedRegistry, identity, PtrRegistry::binding(target, nullptr, &destination));
     if (state.mRegistry != expectedRegistry || state.mDestinationIdentity != expectedIdentity)
         throw std::invalid_argument("Container transfer preparation registry result changed");
+    validateTransferStorage(prepared);
     // The immutable pair binds its derived item and intents; this is neither an
     // installation precondition nor a durability or mutation-history guarantee.
+}
+
+MWWorld::PreparedContainerTransfer::Relocation MWWorld::ContainerStore::relocateTransfer(
+    const PreparedContainerTransfer& prepared)
+{
+    const auto& state = prepared.state();
+    PreparedContainerTransfer::Relocation result;
+    result.mRegistry = state.mRegistry;
+    LocalScripts::Relocations scriptBindings;
+    const auto relocate
+        = [&](const auto& values, const auto& list, auto& views, ESM::RefNum selection, ConstPtr& selected) {
+              size_t i = 0;
+              for (const auto& node : list)
+              {
+                  const bool appended = i == values.size();
+                  const auto id = appended ? ESM::RefNum() : values.at(i).mIdentity.mIdentity;
+                  const ConstPtr ptr(&node);
+                  views.push_back({ id, ptr });
+                  if (id.isSet() && id == selection)
+                      selected = ptr;
+                  const auto registryId = appended ? state.mDestinationIdentity : id;
+                  auto& binding = result.mRegistry.mEntries.at(registryId);
+                  binding = PtrRegistry::binding(&node, binding.getCell(), binding.getContainer());
+                  if (appended)
+                  {
+                      if (state.mAddition.mScript)
+                          scriptBindings.emplace_back(prepared.getDestinationScripts().mEntries.back(), &node.mRef);
+                  }
+                  else
+                      scriptBindings.emplace_back(values.at(i).mScript, &node.mRef);
+                  ++i;
+              }
+          };
+    relocate(
+        state.mSourceValues, state.mSourceList.mList, result.mSource, state.mSourceSelection, result.mSourceSelection);
+    relocate(state.mDestinationValues, state.mDestinationList.mList, result.mDestination, state.mDestinationSelection,
+        result.mDestinationSelection);
+    result.mSourceScripts = LocalScripts::relocateList(prepared.getSourceScripts(), scriptBindings);
+    if (state.mDestinationScriptList)
+        result.mDestinationScripts = LocalScripts::relocateList(prepared.getDestinationScripts(), scriptBindings);
+    return result;
+}
+
+void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTransfer& prepared)
+{
+    const auto& state = prepared.state();
+    const auto validate = [](const auto& list, const auto& values, const ConstPtr& appended) {
+        if (list.size() != values.size() + !appended.isEmpty())
+            throw std::invalid_argument("Container transfer preparation owned storage membership changed");
+        size_t i = 0;
+        for (const auto& node : list)
+        {
+            const auto& witness = i < values.size() ? *values[i].mResult : *appended.get<ESM::Miscellaneous>();
+            if (node.mWorldModel || node.mRef.getRefNum().isSet() || node.mData.getBaseNode()
+                || node.mClass != witness.mClass || !sameTransferValues(node, witness)
+                || node.mRef.hasChanged() != witness.mRef.hasChanged())
+                throw std::invalid_argument("Container transfer preparation owned storage values changed");
+            ++i;
+        }
+    };
+    validate(state.mSourceList.mList, state.mSourceValues, ConstPtr());
+    validate(state.mDestinationList.mList, state.mDestinationValues,
+        state.mDestinationItemIndex ? ConstPtr() : prepared.getDestinationItem());
+    // Recompute bindings from current owned list nodes, never dereference a
+    // relocation view: corrupted views may refer to destroyed or foreign nodes.
+    const auto expected = relocateTransfer(prepared);
+    const auto& actual = state.mRelocation;
+    const auto sameViews = [](const auto& a, const auto& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const auto& x, const auto& y) {
+            return x.mIdentity == y.mIdentity && sameBinding(x.mItem, y.mItem);
+        });
+    };
+    if (!sameViews(actual.mSource, expected.mSource) || !sameViews(actual.mDestination, expected.mDestination)
+        || !sameBinding(actual.mSourceSelection, expected.mSourceSelection)
+        || !sameBinding(actual.mDestinationSelection, expected.mDestinationSelection)
+        || actual.mRegistry != expected.mRegistry
+        || !LocalScripts::sameRelocatedList(actual.mSourceScripts, expected.mSourceScripts, prepared.getSourceScripts())
+        || actual.mDestinationScripts.has_value() != expected.mDestinationScripts.has_value()
+        || (actual.mDestinationScripts
+            && !LocalScripts::sameRelocatedList(
+                *actual.mDestinationScripts, *expected.mDestinationScripts, prepared.getDestinationScripts())))
+        throw std::invalid_argument("Container transfer preparation relocation result changed");
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

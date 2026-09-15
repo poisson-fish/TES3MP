@@ -197,6 +197,25 @@ namespace MWWorld
         // including dormant nodes; empty for unaffected world/other-owner entries.
         // The value itself remains detached and has no assigned RefNum.
         ConstPtr getRegistryItem(ESM::RefNum identity) const;
+        // Actual stock list storage, including dormant nodes. Values remain
+        // detached; even proposed identities are never written into these nodes.
+        using MiscList = CellRefList<ESM::Miscellaneous>::List;
+        const MiscList& getSourceStorage() const;
+        const MiscList& getDestinationStorage() const;
+        struct Relocation
+        {
+            // Raw stock order (including zero counts); original IDs, or unset for
+            // the appended node. Every view points into the owned stock lists.
+            std::vector<InventoryItem> mSource, mDestination;
+            ConstPtr mSourceSelection, mDestinationSelection;
+            LocalScripts::List mSourceScripts;
+            // Absent for a shared service; mSourceScripts is the combined result.
+            std::optional<LocalScripts::List> mDestinationScripts;
+            PtrRegistry::Snapshot mRegistry;
+        };
+        // Rebound associations preserve owner/container/cell hints separately
+        // from detached values. Unrelated entries retain compare-only keys.
+        const Relocation& getRelocation() const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 
@@ -480,6 +499,8 @@ namespace MWWorld
         void validateTransferCount(const ConstPtr& item, int count) const;
         void validateTransferSource(const ConstPtr& item, int count, const WorldModel& worldModel) const;
         ESM::RefNum transferSelection() const;
+        static PreparedContainerTransfer::Relocation relocateTransfer(const PreparedContainerTransfer& prepared);
+        static void validateTransferStorage(const PreparedContainerTransfer& prepared);
         PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
             const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval

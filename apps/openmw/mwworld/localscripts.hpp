@@ -93,6 +93,11 @@ namespace MWWorld
             PreparedList& prepared, const Registration& addition, const CellRef* ref, ContainerStore* container) const;
         void validateList(const PreparedList& prepared, const Removal* removal, const Registration* addition,
             const CellRef* ref, const ContainerStore* container) const;
+        using Relocations = std::vector<std::pair<Removal, const CellRef*>>;
+        // Rebind owned results only. Original registration identities remain in
+        // the protected list as witnesses; no live Ptr or iterator is followed.
+        static List relocateList(const List& original, const Relocations& bindings);
+        static bool sameRelocatedList(const List& left, const List& right, const List& original);
 
     public:
         // Initializes only the supplied RefData. Exceptions propagate to the staging

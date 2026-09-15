@@ -805,7 +805,9 @@ namespace
             {
                 caught = true;
                 require(std::string_view(error.what()).find(reason) != std::string_view::npos,
-                    "unexpected preparation rejection reason");
+                    ("unexpected preparation rejection: expected '" + std::string(reason) + "', got '" + error.what()
+                        + "'")
+                        .c_str());
             }
             require(caught, "preparation accepted a stale or unsupported decision");
             require(snapshot() == before, "preparation rejection changed live state");
@@ -1495,6 +1497,13 @@ namespace
 
         std::cerr << "Checking protected transfer stock comparisons and faults\n";
         using Pair = MWWorld::PreparedContainerTransfer;
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceStorage()), const Pair::MiscList&>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getDestinationStorage()), const Pair::MiscList&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getRelocation()), const Pair::Relocation&>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getRelocation().mSource[0].mItem.getRefData()),
+                const MWWorld::RefData&>);
         static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getRegistry()), const MWWorld::PtrRegistry::Snapshot&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getRegistryItem({}).getRefData()),
@@ -1572,6 +1581,7 @@ namespace
             auto stockSource = source.end();
             std::map<ESM::RefNum, ESM::RefNum> sourceIdentities, destinationIdentities;
             std::vector<MWWorld::Ptr> stockDormant;
+            std::vector<MWWorld::Ptr> sourceNodes, destinationNodes;
             std::map<const MWWorld::CellRef*, MWWorld::Ptr> clonedReferences;
             const auto clone
                 = [&](const MWWorld::ContainerStore& original, MWWorld::ContainerStore& copiedStore,
@@ -1583,6 +1593,7 @@ namespace
                           seed.getPtr().getCellRef().setSoul(
                               ESM::RefId::stringRefId("stock_clone_" + std::to_string(identities.size())));
                           const auto copied = copiedStore.add(seed.getPtr(), 1, add);
+                          (&copiedStore == &source ? sourceNodes : destinationNodes).push_back(*copied);
                           clonedReferences.emplace(&member.getCellRef(), *copied);
                           copyValues(*copied, member);
                           if (member.getRefData().getBaseNode())
@@ -1697,6 +1708,8 @@ namespace
                     "stock new-stack copying/registration did not precede OnPCAdd");
             };
             const auto stockResult = destination.add(incoming.getPtr(), removed, destinationAdd);
+            if (!paired.getStackTarget().isSet())
+                destinationNodes.push_back(*stockResult);
             scripts.mBeforeLocals = {};
             const auto actualRegistry = model.snapshotPtrRegistry();
             const auto& proposedRegistry = paired.getRegistry();
@@ -1772,6 +1785,98 @@ namespace
             };
             compareScripts(paired.getSourceScripts(), stockScripts);
             compareScripts(paired.getDestinationScripts(), *destinationAdd.mLocalScripts);
+            const auto& relocation = paired.getRelocation();
+            auto relocatedReferences = clonedReferences;
+            const auto compareStorage = [&](const auto& storage, const auto& views, const auto& nodes,
+                                            const MWWorld::ConstPtr& selection, const MWWorld::ContainerStore& stock) {
+                require(storage.size() == nodes.size() && views.size() == nodes.size(),
+                    "owned stock storage lost raw membership, including dormant nodes");
+                auto node = storage.begin();
+                for (size_t i = 0; i < nodes.size(); ++i, ++node)
+                {
+                    const auto& actual = nodes[i];
+                    const auto& view = views[i];
+                    const auto id = actual.getCellRef().getRefNum();
+                    const auto witness = paired.getRegistryItem(id);
+                    const auto incoming = actual == *stockResult && !paired.getStackTarget().isSet();
+                    require(view.mItem.mRef == &*node && view.mIdentity == (incoming ? ESM::RefNum() : id)
+                            && view.mItem.mRef != witness.mRef && !node->mWorldModel && !node->mRef.getRefNum().isSet()
+                            && !view.mItem.mCell && !view.mItem.mContainerStore && !node->mData.getBaseNode()
+                            && values(view.mItem) == values(actual)
+                            && node->mRef.getCount(false) == actual.getCellRef().getCount(false)
+                            && node->mData.matchesContainerTransferState(actual.getRefData())
+                            && (node->mData.getLocals().mLongs.empty()
+                                || (node->mData.getLocals().mLongs.data()
+                                        != actual.getRefData().getLocals().mLongs.data()
+                                    && node->mData.getLocals().mLongs.data()
+                                        != witness.getRefData().getLocals().mLongs.data()))
+                            && (node->mData.getAnimationState().mScriptedAnims.empty()
+                                || node->mData.getAnimationState().mScriptedAnims.data()
+                                    != witness.getRefData().getAnimationState().mScriptedAnims.data()),
+                        "owned stock list order, separate identity, values or detached buffers differ");
+                    relocatedReferences.emplace(&node->mRef, actual);
+                    const auto& binding = relocation.mRegistry.mEntries.at(id);
+                    require(binding.references(&*node) && binding.getCell() == model.getPtr(id).mCell
+                            && binding.getContainer() == paired.getRegistry().mEntries.at(id).getContainer(),
+                        "registry relocation lost a stable stock node or owner/cell association");
+                }
+                const auto selected = stock.getSelectedEnchantItem();
+                require(selection.isEmpty() == (selected == stock.end()), "stock selection relocation lost end");
+                if (!selection.isEmpty())
+                    require(!selection.mCell && !selection.mContainerStore
+                            && relocatedReferences.at(&selection.getCellRef()) == *selected,
+                        "stock selection relocation points to the wrong node");
+            };
+            compareStorage(
+                paired.getSourceStorage(), relocation.mSource, sourceNodes, relocation.mSourceSelection, source);
+            compareStorage(paired.getDestinationStorage(), relocation.mDestination, destinationNodes,
+                relocation.mDestinationSelection, destination);
+            require(relocation.mRegistry.mRevision == proposedRegistry.mRevision
+                    && relocation.mRegistry.mLastGenerated == proposedRegistry.mLastGenerated
+                    && relocation.mRegistry.mEntries.size() == proposedRegistry.mEntries.size(),
+                "relocation changed registry revision, counter or membership");
+            for (const auto& [id, binding] : relocation.mRegistry.mEntries)
+                if (paired.getRegistryItem(id).isEmpty())
+                    require(
+                        binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
+            const auto compareRelocatedScripts = [&](const auto& proposed, const MWWorld::LocalScripts& stock) {
+                const auto actual = stock.snapshot();
+                require(proposed.mCursor == actual.mCursor && proposed.mEntries.size() == actual.mEntries.size(),
+                    "script relocation changed stock order/cursor");
+                for (size_t i = 0; i < proposed.mEntries.size(); ++i)
+                {
+                    const auto& entry = proposed.mEntries[i];
+                    const auto copied = std::find_if(relocatedReferences.begin(), relocatedReferences.end(),
+                        [&](const auto& member) { return entry.references(member.first); });
+                    require(copied != relocatedReferences.end()
+                            && actual.mEntries[i].references(&copied->second.getCellRef())
+                            && entry.getScript() == actual.mEntries[i].getScript()
+                            && entry.getCell() == actual.mEntries[i].getCell()
+                            && actual.mEntries[i].getContainer()
+                                == (entry.getContainer() == item.mContainerStore   ? &source
+                                        : entry.getContainer() == &liveDestination ? &destination
+                                                                                   : entry.getContainer()),
+                        "relocated script binding differs from stock node, order or owner/cell");
+                    if (copied->second.mContainerStore == &source || copied->second.mContainerStore == &destination)
+                    {
+                        const auto owns = [&](const auto& views) {
+                            return std::any_of(views.begin(), views.end(), [&](const auto& view) {
+                                return entry.references(&view.mItem.getCellRef())
+                                    && relocation.mRegistry.mEntries.at(copied->second.getCellRef().getRefNum())
+                                           .references(view.mItem.mRef);
+                            });
+                        };
+                        require(owns(relocation.mSource) || owns(relocation.mDestination),
+                            "script relocation retained an old inventory key");
+                    }
+                }
+            };
+            compareRelocatedScripts(relocation.mSourceScripts, stockScripts);
+            require(
+                relocation.mDestinationScripts.has_value() != sharedScripts, "script relocation lost shared service");
+            compareRelocatedScripts(
+                relocation.mDestinationScripts ? *relocation.mDestinationScripts : relocation.mSourceScripts,
+                *destinationAdd.mLocalScripts);
             require((&paired.getSourceScripts() == &paired.getDestinationScripts()) == sharedScripts,
                 "shared/distinct script service result binding lost");
             require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
@@ -1883,6 +1988,88 @@ namespace
                             && paired.getRemoval().getRemainingCount() != 0),
                 "paired deferred script intents differ from disposable stock behavior");
         };
+        const auto corruptStorage = [&](Pair& decision, const Pair& other, const auto& validate) {
+            for (const auto* storage : { &decision.getSourceStorage(), &decision.getDestinationStorage() })
+            {
+                auto& list = const_cast<Pair::MiscList&>(*storage);
+                Pair::MiscList removed;
+                removed.splice(removed.end(), list, list.begin());
+                reject([&] { validate(decision); }, "owned storage membership changed");
+                list.splice(list.begin(), removed);
+                Pair::MiscList replacement;
+                for (const auto& node : list)
+                {
+                    replacement.emplace_back(ESM::makeBlankCellRef(), node.mBase);
+                    replacement.back().mRef = node.mRef;
+                    replacement.back().mData = node.mData.copyForContainerTransfer();
+                }
+                list.swap(replacement);
+                reject([&] { validate(decision); }, "relocation result changed");
+                list.swap(replacement);
+                for (auto& node : list)
+                {
+                    const auto saved = node.mRef;
+                    node.mRef.setCount(node.mRef.getCount(false) + 1);
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mRef = saved;
+                    node.mRef.setRefNum({ 123, -1 });
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mRef = saved;
+                    const auto data = node.mData.copyForContainerTransfer();
+                    setFlags(node.mData, flags(node.mData) ^ 1u);
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mData = data.copyForContainerTransfer();
+                    node.mData.getLocals().mLongs.push_back(27);
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mData = data.copyForContainerTransfer();
+                    node.mData.setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mData = data.copyForContainerTransfer();
+                    node.mWorldModel = &worldModel;
+                    reject([&] { validate(decision); }, "owned storage values changed");
+                    node.mWorldModel = nullptr;
+                }
+                // Move nodes without destroying them: even identical values may
+                // not redirect original identities and bindings to another node.
+                if (list.size() > 1)
+                {
+                    list.splice(list.end(), list, list.begin());
+                    // Equal-valued dormant nodes reject at binding validation;
+                    // distinct values reject earlier at storage validation.
+                    reject([&] { validate(decision); }, "changed");
+                    list.splice(list.begin(), list, std::prev(list.end()));
+                }
+            }
+            auto& result = const_cast<Pair::Relocation&>(decision.getRelocation());
+            const auto saved = result;
+            const auto corrupt = [&](const auto& change) {
+                change();
+                reject([&] { validate(decision); }, "relocation result changed");
+                result = saved;
+            };
+            corrupt([&] { result = other.getRelocation(); });
+            for (bool source : { false, true })
+            {
+                auto& views = source ? result.mSource : result.mDestination;
+                corrupt([&] { views.pop_back(); });
+                corrupt([&] { views.front().mIdentity = { 456, -1 }; });
+                corrupt([&] { views.front().mItem = other.getRelocation().mSource.front().mItem; });
+                corrupt([&] { views.front().mItem.mContainerStore = &a; });
+                auto& selected = source ? result.mSourceSelection : result.mDestinationSelection;
+                corrupt([&] { selected = other.getRelocation().mSource.front().mItem; });
+            }
+            corrupt([&] { ++result.mRegistry.mRevision; });
+            corrupt([&] { ++result.mRegistry.mLastGenerated.mIndex; });
+            corrupt([&] { result.mRegistry.mEntries.erase(decision.getDestinationIdentity()); });
+            corrupt([&] { result.mRegistry = decision.getRegistry(); });
+            corrupt([&] { result.mSourceScripts = other.getRelocation().mSourceScripts; });
+            corrupt([&] { ++result.mSourceScripts.mCursor; });
+            if (result.mDestinationScripts)
+                corrupt([&] { ++result.mDestinationScripts->mCursor; });
+            else
+                corrupt([&] { result.mDestinationScripts = result.mSourceScripts; });
+            validate(decision);
+        };
         for (const auto& item : live)
         {
             const bool fromA = item.mContainerStore == &a;
@@ -1936,7 +2123,14 @@ namespace
                                         {
                                             auto initial = source.prepareTransfer(
                                                 item, quantity, destination, removalContext, context);
+                                            const auto* sourceStorage = &initial.getSourceStorage();
+                                            const auto* destinationStorage = &initial.getDestinationStorage();
+                                            const auto* relocation = &initial.getRelocation();
                                             auto paired = std::move(initial);
+                                            require(&paired.getSourceStorage() == sourceStorage
+                                                    && &paired.getDestinationStorage() == destinationStorage
+                                                    && &paired.getRelocation() == relocation,
+                                                "move construction moved stock list storage or relocation");
                                             const auto& removal = paired.getRemoval();
                                             const auto temporary = paired.getItem();
                                             const auto sourceResult = paired.getSourceItem();
@@ -2187,6 +2381,12 @@ namespace
                                             int replacedSourceAlive = 0;
                                             int replacedRemainingAlive = 0;
                                             int replacedDestinationAlive = 0;
+                                            int replacedStorageAlive = 0;
+                                            for (const auto* storage :
+                                                { &assigned.getSourceStorage(), &assigned.getDestinationStorage() })
+                                                for (auto& node : const_cast<Pair::MiscList&>(*storage))
+                                                    node.mData.setCustomData(
+                                                        std::make_unique<Lifetime>(replacedStorageAlive));
                                             const_cast<MWWorld::RefData&>(assigned.getSourceItem().getRefData())
                                                 .setCustomData(std::make_unique<Lifetime>(replacedSourceAlive));
                                             for (const auto& view : assigned.getSourceInventory())
@@ -2200,7 +2400,10 @@ namespace
                                                         std::make_unique<Lifetime>(replacedDestinationAlive));
                                             assigned = std::move(paired);
                                             require(replacedSourceAlive == 0 && replacedRemainingAlive == 0
-                                                    && replacedDestinationAlive == 0
+                                                    && replacedDestinationAlive == 0 && replacedStorageAlive == 0
+                                                    && &assigned.getSourceStorage() == sourceStorage
+                                                    && &assigned.getDestinationStorage() == destinationStorage
+                                                    && &assigned.getRelocation() == relocation
                                                     && assigned.getSourceItem() == sourceResult
                                                     && assigned.getDestinationItem() == result,
                                                 "move assignment leaked a prior inventory result or lost the new one");
@@ -2211,6 +2414,9 @@ namespace
                                                     [&] { paired.getSourceSelection(); },
                                                     [&] { paired.getDestinationInventory(); },
                                                     [&] { paired.getDestinationSelection(); },
+                                                    [&] { paired.getSourceStorage(); },
+                                                    [&] { paired.getDestinationStorage(); },
+                                                    [&] { paired.getRelocation(); },
                                                     [&] { paired.getDestinationItem(); } })
                                             {
                                                 movedRejected = false;
@@ -3350,6 +3556,11 @@ namespace
                                     = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
                                 compareStock(
                                     decision, item, destination, sourceAdd, destinationAdd, rawDestination, rawSource);
+                                auto other
+                                    = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                corruptStorage(decision, other, [&](const Pair& paired) {
+                                    source.validateTransfer(paired, destination, removal, destinationAdd);
+                                });
                                 const auto views = decision.getSourceInventory();
                                 require(views.size() == static_cast<size_t>((keepRemaining ? 2 : 0) + (quantity != 4))
                                         && std::none_of(views.begin(), views.end(),
@@ -3538,6 +3749,9 @@ namespace
                 MWWorld::ContainerStoreRemoveContext removal{ worldModel, addA.mContainer, localScripts,
                     addA.mInventoryUpdated };
                 auto paired = source.prepareTransfer(item, 2, destination, removal, scriptedAddB);
+                const auto sourceStorageValue = values(paired.getRelocation().mSource.front().mItem);
+                const auto destinationStorageValue = values(paired.getRelocation().mDestination.front().mItem);
+                const auto relocatedRegistry = paired.getRelocation().mRegistry;
                 auto& replaced = replaceSource ? source : destination;
                 std::vector<const MWWorld::CellRef*> oldScriptKeys;
                 for (const auto& ptr : replaced)
@@ -3554,6 +3768,10 @@ namespace
                 bindEmptyStore(empty, replaced.getPtr(worldModel), worldModel);
                 replaced = std::move(empty);
                 reject([&] { source.validateTransfer(paired, destination, removal, scriptedAddB); }, "storage changed");
+                require(values(paired.getRelocation().mSource.front().mItem) == sourceStorageValue
+                        && values(paired.getRelocation().mDestination.front().mItem) == destinationStorageValue
+                        && paired.getRelocation().mRegistry == relocatedRegistry,
+                    "destroying live storage invalidated owned stock nodes or relocation");
                 if (replaceSource)
                     reject([&] { source.prepareTransfer(item, 2, destination, removal, scriptedAddB); },
                         "ownership mismatch");

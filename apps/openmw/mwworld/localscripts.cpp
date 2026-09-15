@@ -307,6 +307,39 @@ void MWWorld::LocalScripts::validateList(const PreparedList& prepared, const Rem
     }
 }
 
+MWWorld::LocalScripts::List MWWorld::LocalScripts::relocateList(const List& original, const Relocations& bindings)
+{
+    auto result = original;
+    for (auto& entry : result.mEntries)
+        for (const auto& [from, to] : bindings)
+            if (from.references(entry.mReference))
+            {
+                entry.mReference = to;
+                entry.mRegistration = std::make_shared<const ScriptRegistration>(
+                    ScriptRegistration{ entry.getScript(), to, entry.getCell(), entry.getContainer() });
+                break;
+            }
+    return result;
+}
+
+bool MWWorld::LocalScripts::sameRelocatedList(const List& left, const List& right, const List& original)
+{
+    if (left.mCursor != right.mCursor || left.mEntries.size() != right.mEntries.size())
+        return false;
+    for (size_t i = 0; i < left.mEntries.size(); ++i)
+    {
+        const auto& a = left.mEntries[i];
+        const auto& b = right.mEntries[i];
+        if (b.references(original.mEntries[i].mReference) && a != b)
+            return false; // Unrelated registrations retain their immutable identity.
+        if (a.mScripts != b.mScripts || a.mReference != b.mReference || !a.mRegistration || !b.mRegistration
+            || a.getScript() != b.getScript() || a.getCell() != b.getCell() || a.getContainer() != b.getContainer()
+            || a.mRegistration->mReference != b.mRegistration->mReference)
+            return false;
+    }
+    return true;
+}
+
 bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& ptr) const
 {
     return std::ranges::any_of(
