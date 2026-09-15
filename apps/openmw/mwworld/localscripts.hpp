@@ -151,6 +151,7 @@ namespace MWWorld
         void validateStorage(const PreparedStorage& storage, const List& relocated, const List& original,
             const std::vector<ConstPtr>& nodes, const std::vector<ConstPtr>& contexts) const;
         void validateContextBindings(const std::vector<ConstPtr>& contexts) const;
+        void validateInventoryBindings(const std::vector<ConstPtr>& nodes, CellStore* ownerCell) const;
 
     public:
         // Initializes only the supplied RefData. Exceptions propagate to the staging

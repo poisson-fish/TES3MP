@@ -74,6 +74,25 @@ namespace MWWorld
         std::function<void(const Ptr&)> mInventoryUpdated;
     };
 
+    // Capture from a current store, then pass by value without following saved
+    // pointers. This witnesses a borrowed store; it never keeps that store alive.
+    class ContainerStoreResolution
+    {
+        friend class ContainerStore;
+        struct Lifetime
+        {
+            const ContainerStore* mStore;
+        };
+        const ContainerStore* mStore;
+        Ptr mOwner;
+        std::weak_ptr<const Lifetime> mLifetime;
+        std::shared_ptr<const void> mStorage;
+        const ContainerStore& validate(const WorldModel& worldModel) const;
+
+    public:
+        ContainerStoreResolution(const ContainerStore& store, const Ptr& owner);
+    };
+
     // Operation-owned destination state/effects. Destruction discards everything;
     // there is deliberately no transfer installation or effect execution API here.
     // The base record, owner and registration cell are borrowed for this operation.
@@ -223,12 +242,13 @@ namespace MWWorld
         const Relocation& getRelocation() const;
         // Stock LocalScripts nodes and cursor relocation, built from the same
         // owned inventory nodes. Shared services return the same storage object.
-        // Explicit owners/initiator resolve through captured reference lifetimes.
+        // Explicit owners/initiator and the supplied third store resolve through
+        // captured lifetimes and current ownership/storage/node checks.
         // Other unaffected entries keep empty items. No installation is exposed.
         const LocalScripts::PreparedStorage& getSourceScriptStorage() const;
         const LocalScripts::PreparedStorage& getDestinationScriptStorage() const;
         // Stock registry map with the relocated revision/counter and bindings.
-        // Item views reference owned stock lists or lifetime-checked contexts;
+        // Item views reference owned stock lists or lifetime-checked borrowed bindings;
         // other unaffected mappings retain empty items. No installation API.
         const PtrRegistry::PreparedStorage& getRegistryStorage() const;
         // Compare-only witnesses for private stock iterator positions. The exact
@@ -261,6 +281,16 @@ namespace MWWorld
         // Views expire on reference destruction; validateTransfer checks current
         // registry/script state before the pair can be accepted again.
         const ContextBindings& getContextBindings() const;
+        struct ThirdStoreBindings
+        {
+            const IteratorBindings* mIterators;
+            const ContainerStore* mStore;
+            ContextReference mOwner;
+            // Current borrowed non-gold MISC nodes, including dormant nodes.
+            // Separate from the pair's detached source/destination values.
+            std::vector<ContextReference> mNodes;
+        };
+        const std::optional<ThirdStoreBindings>& getThirdStoreBindings() const;
         // Check current owned storage before copying any saved iterator. These
         // read-only copies traverse isolated stock stores/lists and their own end
         // sentinels. They expire with the pair's state; script items may also be
@@ -523,6 +553,10 @@ namespace MWWorld
         {
         };
         std::shared_ptr<const StorageIdentity> mStorageIdentity = std::make_shared<const StorageIdentity>();
+        friend class ContainerStoreResolution;
+        // Lazy and distinct from storage identity: decisions retain storage tokens,
+        // so those tokens alone cannot establish that a store is still alive.
+        mutable std::shared_ptr<ContainerStoreResolution::Lifetime> mResolutionLifetime;
 
         mutable float mCachedWeight = 0;
         unsigned int mSeed = 0;
@@ -554,6 +588,7 @@ namespace MWWorld
         static void prepareTransferIterators(PreparedContainerTransfer& prepared);
         static void validateTransferIterators(const PreparedContainerTransfer& prepared);
         static void validateTransferContextBindings(const PreparedContainerTransfer& prepared);
+        static std::vector<Ptr> validateTransferResolution(const PreparedContainerTransfer& prepared);
         PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
             const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval
@@ -593,7 +628,7 @@ namespace MWWorld
         ContainerStore& operator=(const ContainerStore&);
         ContainerStore& operator=(ContainerStore&&);
 
-        virtual ~ContainerStore() = default;
+        virtual ~ContainerStore();
 
         virtual std::unique_ptr<ContainerStore> clone()
         {
@@ -687,12 +722,17 @@ namespace MWWorld
         // inventory results/selections, stacking, script intents and both notification
         // consumers as one unit.
         // Both contexts require LocalScripts, even for plain registration absence.
+        // An optional third-store witness resolves only its owner and non-gold MISC
+        // nodes in these services. Capture it from a current store; later use checks
+        // store lifetime, storage replacement, owner, nodes and unchanged values.
         // No live removal, installation, effects, persistence or atomic transfer.
         PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,
-            const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext) const;
+            const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext,
+            const std::optional<ContainerStoreResolution>& thirdStore = std::nullopt) const;
 
         // Narrow current-state check; re-acquires inventory nodes before reading.
-        // Stores/content/owners/cells/services must outlive the decision. Consumers
+        // Transfer stores/content/cells/services must outlive use. Borrowed third-store
+        // and reference destruction rejects through lifetime witnesses. Consumers
         // are owned snapshots, not re-sourced from the validation contexts; service,
         // player, owner and listener bindings must still match. No script calls.
         void validateTransfer(const PreparedContainerTransfer& prepared, const ContainerStore& destination,

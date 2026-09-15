@@ -443,3 +443,24 @@ bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& p
     return std::ranges::any_of(
         mScripts, [&](const Entry& entry) { return entry.mRegistration->mScript == scriptName && entry.mItem == ptr; });
 }
+
+void MWWorld::LocalScripts::validateInventoryBindings(const std::vector<ConstPtr>& nodes, CellStore* ownerCell) const
+{
+    for (const auto& node : nodes)
+    {
+        if (!node.hasLiveReference())
+            throw std::invalid_argument("Local script inventory lifetime changed");
+        // Registry inventory Ptrs have no cell hint. Stock scripts may use the
+        // owning cell or nullptr (player); verify that hint before reusing the
+        // exact context/lifetime/locals checks. Never follow the entry's saved Ptr.
+        auto context = node;
+        for (const auto& entry : mScripts)
+            if (entry.references(&node.getCellRef()))
+            {
+                if (entry.getCell() && entry.getCell() != ownerCell)
+                    throw std::invalid_argument("Local script inventory cell binding changed");
+                context.mCell = entry.getCell();
+            }
+        validateContextBindings({ context });
+    }
+}

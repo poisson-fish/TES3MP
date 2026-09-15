@@ -1898,9 +1898,14 @@ namespace
                         binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
             const auto& registryStorage = paired.getRegistryStorage();
             const auto isContext = [&](const MWWorld::LiveCellRefBase* reference) {
+                const auto& third = paired.getThirdStoreBindings();
                 return reference
-                    && std::ranges::any_of(paired.getContextBindings().mReferences,
-                        [&](const auto& binding) { return binding.mItem.mRef == reference; });
+                    && (std::ranges::any_of(paired.getContextBindings().mReferences,
+                            [&](const auto& binding) { return binding.mItem.mRef == reference; })
+                        || (third
+                            && (third->mOwner.mItem.mRef == reference
+                                || std::ranges::any_of(third->mNodes,
+                                    [&](const auto& binding) { return binding.mItem.mRef == reference; }))));
             };
             require(registryStorage.getBindings() == relocation.mRegistry,
                 "owned registry storage changed relocated membership, revision or counter");
@@ -4290,7 +4295,7 @@ namespace
             }
             require(expiredBeforeData, "reference lifetime survived into RefData destruction");
         }
-        // Only explicit context references may resolve unaffected map/script slots.
+        // Explicit contexts and one supplied third store resolve unaffected slots.
         // Each fixture owns its contexts independently of both inventory stores.
         for (bool shared : { false, true })
             for (int initiator : { -1, 0, 1, 2 })
@@ -4306,7 +4311,7 @@ namespace
                     worldModel.registerPtr(contexts[i]);
                 }
                 MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
-                MWWorld::ContainerStore source, destination;
+                MWWorld::ContainerStore source, destination, third;
                 auto sourceAdd = scriptedAddA;
                 auto destinationAdd = scriptedAddB;
                 sourceAdd.mContainer = contexts[0];
@@ -4318,6 +4323,29 @@ namespace
                 bindEmptyStore(destination, contexts[1], worldModel);
                 observedStores.push_back(&source);
                 observedStores.push_back(&destination);
+                bindEmptyStore(third, contexts[2], worldModel);
+                observedStores.push_back(&third);
+                auto thirdAdd = sourceAdd;
+                thirdAdd.mContainer = contexts[2];
+                thirdAdd.mPlayer = {}; // Exercise owner-cell script hints.
+                auto thirdScript = third.add(scripted.getPtr(), 3, thirdAdd);
+                const auto thirdPlain = *third.add(plain.getPtr(), 2, thirdAdd);
+                thirdPlain.getCellRef().setCount(-2);
+                auto thirdDormant = third.add(scripted.getPtr(), 1, thirdAdd);
+                thirdDormant->getCellRef() = thirdDormant->getCellRef().copyWithCount(0);
+                observedDormant.push_back(*thirdDormant);
+                third.setSelectedEnchantItem(thirdDormant);
+                for (auto* service : { &sourceScripts, &destinationScripts })
+                    for (auto node : { *thirdScript, *thirdDormant })
+                    {
+                        node.mCell = service == &sourceScripts ? contexts[2].mCell : nullptr;
+                        service->add(scriptId, node, scripts);
+                        node.getRefData().getLocals().mLongs.at(0) = 83;
+                        setFlags(node.getRefData(), 7);
+                    }
+                MWWorld::ManualRef gold(store, MWWorld::ContainerStore::sGoldId);
+                const auto thirdGold = *third.add(gold.getPtr(), 1, thirdAdd);
+                const MWWorld::ContainerStoreResolution supplied(third, contexts[2]);
                 const auto item = *source.add(scripted.getPtr(), 4, sourceAdd);
                 destination.add(plain.getPtr(), 2, destinationAdd);
                 source.setSelectedEnchantItem(source.begin());
@@ -4333,7 +4361,7 @@ namespace
                 MWWorld::ContainerStoreRemoveContext removal{ worldModel, contexts[0], sourceScripts,
                     sourceAdd.mInventoryUpdated };
                 const auto make = [&](int count = 1) {
-                    return source.prepareTransfer(item, count, destination, removal, destinationAdd);
+                    return source.prepareTransfer(item, count, destination, removal, destinationAdd, supplied);
                 };
                 const auto validate = [&](const Pair& decision) {
                     source.validateTransfer(decision, destination, removal, destinationAdd);
@@ -4361,11 +4389,26 @@ namespace
                             assigned = std::move(decision);
                             validate(assigned);
                             compareStock(assigned, item, destination, sourceAdd, destinationAdd);
+                            const auto& thirdBindings = *assigned.getThirdStoreBindings();
+                            require(thirdBindings.mIterators == &assigned.getIteratorBindings()
+                                    && thirdBindings.mStore == &third && thirdBindings.mNodes.size() == 3,
+                                "third store resolution lost raw membership or pair binding on move");
+                            require(assigned.getRegistryStorage().getItem(thirdGold.getCellRef().getRefNum()).isEmpty(),
+                                "third store resolution included gold");
+                            for (const auto& member : thirdBindings.mNodes)
+                            {
+                                const auto resolved = assigned.getRegistryStorage().getItem(member.mIdentity);
+                                require(resolved == member.mItem && resolved.hasLiveReference()
+                                        && resolved.mContainerStore == &third,
+                                    "third store registry lost current node or dormant identity");
+                            }
+                            reject([&] { initial.getThirdStoreBindings(); }, "moved from");
+                            reject([&] { decision.getThirdStoreBindings(); }, "moved from");
                             require(assigned.getContextBindings().mIterators == &assigned.getIteratorBindings(),
                                 "context resolution lost pair storage on move");
                             for (size_t i = 0; i < contexts.size(); ++i)
                             {
-                                const bool resolved = i < 2 || static_cast<int>(i) == initiator;
+                                const bool resolved = i < 3;
                                 const auto view
                                     = assigned.getRegistryStorage().getItem(contexts[i].getCellRef().getRefNum());
                                 require(resolved ? view == contexts[i] && view.hasLiveReference() : view.isEmpty(),
@@ -4405,6 +4448,146 @@ namespace
                         }
                         require(unchangedState() == before, "context resolution/move/discard changed live state");
                     }
+                // The third-store projection is inseparable from the same protected
+                // quantity, inventories, services, cursors and deferred consumers.
+                {
+                    auto decision = make();
+                    auto other = make(4);
+                    const auto before = unchangedState();
+                    auto& binding = const_cast<Pair::ThirdStoreBindings&>(*decision.getThirdStoreBindings());
+                    const auto saved = binding;
+                    const auto rejectBinding = [&](const char* message) {
+                        reject([&] { validate(decision); }, message);
+                        rejectIterators(decision, message);
+                        binding = saved;
+                    };
+                    binding.mIterators = &other.getIteratorBindings();
+                    rejectBinding("third store pair changed");
+                    binding.mStore = &source;
+                    rejectBinding("third store pair changed");
+                    binding.mOwner = other.getContextBindings().mReferences[0];
+                    rejectBinding("third store pair changed");
+                    binding.mNodes.pop_back();
+                    rejectBinding("third store pair changed");
+                    ++binding.mNodes.front().mIdentity.mIndex;
+                    rejectBinding("third store node binding changed");
+                    binding.mNodes.front().mItem = *plainA;
+                    rejectBinding("third store node binding changed");
+                    const_cast<MWWorld::ReferenceLifetime::Witness&>(
+                        binding.mNodes.front().mItem.getReferenceLifetime()) = contexts[3].getReferenceLifetime();
+                    rejectBinding("third store node binding changed");
+                    corruptIterators(decision, other, validate);
+                    corruptScriptStorage(decision, other, validate);
+                    corruptRegistryStorage(decision, other, validate);
+                    for (const auto& node : { *thirdScript, thirdPlain, *thirdDormant })
+                    {
+                        const auto savedRef = node.getCellRef();
+                        node.getCellRef().setCount(9);
+                        reject([&] { validate(decision); }, "third store registry binding changed");
+                        node.getCellRef() = savedRef;
+                        auto savedData = std::move(node.getRefData());
+                        node.getRefData() = savedData.copyForContainerTransfer();
+                        setFlags(node.getRefData(), flags(node.getRefData()) ^ 1u);
+                        reject([&] { validate(decision); }, "third store values changed");
+                        node.getRefData() = std::move(savedData);
+                        if (!node.getRefData().getLocals().mLongs.empty())
+                        {
+                            ++node.getRefData().getLocals().mLongs[0];
+                            reject([&] { validate(decision); }, "third store values changed");
+                            --node.getRefData().getLocals().mLongs[0];
+                        }
+                        const auto id = node.getCellRef().getRefNum();
+                        const auto registry = worldModel.getPtrRegistryView();
+                        const auto it
+                            = std::ranges::find_if(registry, [&](const auto& entry) { return entry.first == id; });
+                        auto& ptr = const_cast<MWWorld::Ptr&>(it->second);
+                        const auto savedPtr = ptr;
+                        for (int fault = 0; fault < 4; ++fault)
+                        {
+                            if (fault == 0)
+                                const_cast<MWWorld::ReferenceLifetime::Witness&>(ptr.getReferenceLifetime()) = {};
+                            if (fault == 1)
+                                ptr.mContainerStore = &source;
+                            if (fault == 2)
+                                ptr.mCell = contexts[2].mCell;
+                            if (fault == 3)
+                                ptr.mRef = item.mRef;
+                            const auto corrupted = unchangedState();
+                            reject([&] { validate(decision); }, "third store registry binding changed");
+                            reject([&] { make(); }, "third store registry binding changed");
+                            require(unchangedState() == corrupted, "third registry rejection changed live state");
+                            ptr = savedPtr;
+                        }
+                    }
+                    third.setSelectedEnchantItem(thirdScript);
+                    reject([&] { validate(decision); }, "third store owner or selection changed");
+                    third.setSelectedEnchantItem(thirdDormant);
+                    validate(decision);
+                    require(unchangedState() == before, "third store corruption recovery changed live state");
+                }
+                for (const auto* alias : { &source, &destination })
+                {
+                    const auto before = unchangedState();
+                    reject(
+                        [&] {
+                            source.prepareTransfer(item, 1, destination, removal, destinationAdd,
+                                MWWorld::ContainerStoreResolution(*alias, alias->getPtr(worldModel)));
+                        },
+                        "third store aliases");
+                    require(unchangedState() == before, "third store alias rejection changed live state");
+                }
+                {
+                    auto wrongOwner = contexts[2];
+                    const_cast<MWWorld::ReferenceLifetime::Witness&>(wrongOwner.getReferenceLifetime())
+                        = contexts[3].getReferenceLifetime();
+                    const auto before = unchangedState();
+                    reject(
+                        [&] {
+                            source.prepareTransfer(item, 1, destination, removal, destinationAdd,
+                                MWWorld::ContainerStoreResolution(third, wrongOwner));
+                        },
+                        "context lifetime");
+                    reject(
+                        [&] {
+                            source.prepareTransfer(item, 1, destination, removal, destinationAdd,
+                                MWWorld::ContainerStoreResolution(third, contexts[3]));
+                        },
+                        "owner mismatch");
+                    require(unchangedState() == before, "third owner rejection changed live state");
+                }
+                // Script identity/cell/container metadata and the saved Ptr lifetime
+                // must agree independently of a correct WorldModel mapping.
+                for (auto* service : { &sourceScripts, destinationAdd.mLocalScripts })
+                {
+                    const auto original = service->prepareRemove(&thirdScript->getCellRef());
+                    for (int fault = 0; fault < 3; ++fault)
+                    {
+                        auto invalid = *thirdScript;
+                        invalid.mCell = original.getCell();
+                        if (fault == 0)
+                            invalid.mCell = contexts[1].mCell;
+                        if (fault == 1)
+                            invalid.mContainerStore = &source;
+                        service->add(scriptId, invalid, scripts);
+                        if (fault == 2)
+                            thirdScript->getRefData().getLocals() = {};
+                        const auto before = unchangedState();
+                        reject([&] { make(); },
+                            fault == 0       ? "inventory cell binding"
+                                : fault == 1 ? "Local script context binding"
+                                             : "matching initialized script locals");
+                        require(unchangedState() == before, "third script rejection changed live state");
+                        auto restored = *thirdScript;
+                        restored.mCell = original.getCell();
+                        service->remove(&restored.getCellRef());
+                        service->add(scriptId, restored, scripts);
+                    }
+                    auto decision = make();
+                    auto replacement = *thirdScript;
+                    replacement.mCell = original.getCell();
+                    service->add(scriptId, replacement, scripts);
+                    reject([&] { validate(decision); }, "registration or cursor changed");
+                }
                 auto decision = make();
                 for (auto* input : { &removal.mContainer, &destinationAdd.mContainer, &destinationAdd.mPlayer })
                 {
@@ -4490,7 +4673,7 @@ namespace
                 bool failed = false;
                 try
                 {
-                    source.prepareTransfer(item, 4, destination, failing, destinationAdd);
+                    source.prepareTransfer(item, 4, destination, failing, destinationAdd, supplied);
                 }
                 catch (const PreparationFailure&)
                 {
@@ -4537,6 +4720,166 @@ namespace
                 reject([&] { make(); }, "context lifetime");
                 reject([&] { expired.getRegistryStorage().getItem(expiredId); }, "item lifetime changed");
                 require(unchangedState() == beforeDestroyed, "destroyed context rejection changed live state");
+                observedDormant.pop_back();
+                observedStores.pop_back();
+                observedStores.pop_back();
+                observedStores.pop_back();
+            }
+
+        // A supplied store can expire independently of its registered owner.
+        // Each destructive case uses disposable live state and compares snapshots
+        // after the deliberate fault, so rejection cannot hide extra publication.
+        for (bool shared : { false, true })
+            for (int fault = 0; fault < 10; ++fault)
+            {
+                auto thirdOwner
+                    = std::make_unique<MWWorld::ManualRef>(store, ESM::RefId::stringRefId("native_context_owner"));
+                const auto owner = thirdOwner->getPtr();
+                auto third = std::make_unique<MWWorld::ContainerStore>();
+                MWWorld::ContainerStore source, destination;
+                MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
+                auto sourceAdd = scriptedAddA;
+                auto destinationAdd = scriptedAddB;
+                sourceAdd.mLocalScripts = &sourceScripts;
+                destinationAdd.mLocalScripts = shared ? &sourceScripts : &destinationScripts;
+                destinationAdd.mPlayer = destinationAdd.mContainer;
+                bindEmptyStore(source, sourceAdd.mContainer, worldModel);
+                bindEmptyStore(destination, destinationAdd.mContainer, worldModel);
+                bindEmptyStore(*third, owner, worldModel);
+                observedStores.insert(observedStores.end(), { &source, &destination, third.get() });
+                auto thirdAdd = sourceAdd;
+                thirdAdd.mContainer = owner;
+                thirdAdd.mPlayer = {};
+                MWWorld::Ptr node;
+                if (fault != 9)
+                {
+                    node = *third->add(scripted.getPtr(), 2, thirdAdd);
+                    destinationScripts.add(scriptId, node, scripts);
+                }
+                for (auto* service : { &sourceScripts, &destinationScripts })
+                    service->add(scriptId, owner, scripts);
+                const auto item = *source.add(scripted.getPtr(), 4, sourceAdd);
+                destination.add(plain.getPtr(), 1, destinationAdd);
+                MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer, sourceScripts,
+                    sourceAdd.mInventoryUpdated };
+                const MWWorld::ContainerStoreResolution supplied(*third, owner);
+                const auto make
+                    = [&] { return source.prepareTransfer(item, 1, destination, removal, destinationAdd, supplied); };
+                const auto validate = [&](const Pair& decision) {
+                    source.validateTransfer(decision, destination, removal, destinationAdd);
+                };
+                const auto unchangedState
+                    = [&] { return std::tuple{ snapshot(), sourceScripts.snapshot(), destinationScripts.snapshot() }; };
+                auto decision = make();
+                validate(decision);
+                if (fault < 3)
+                {
+                    if (fault == 0)
+                    {
+                        MWWorld::ContainerStore copy(*third);
+                        *third = copy;
+                    }
+                    if (fault == 1)
+                    {
+                        MWWorld::ContainerStore copy(*third);
+                        *third = std::move(copy);
+                    }
+                    if (fault == 2)
+                    {
+                        MWWorld::ContainerStore moved(std::move(*third));
+                        *third = std::move(moved);
+                    }
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "third store storage changed");
+                    rejectIterators(decision, "third store storage changed");
+                    reject([&] { make(); }, "third store storage changed");
+                    require(unchangedState() == before, "third storage replacement rejection changed state");
+                }
+                else if (fault == 3 || fault == 4 || fault == 9)
+                {
+                    if (fault == 3)
+                    {
+                        auto* address = third.get();
+                        std::destroy_at(address);
+                        std::construct_at(address);
+                        bindEmptyStore(*third, owner, worldModel);
+                    }
+                    else
+                    {
+                        observedStores.pop_back();
+                        third.reset();
+                    }
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "third store lifetime changed");
+                    rejectIterators(decision, "third store lifetime changed");
+                    reject([&] { make(); }, "third store lifetime changed");
+                    require(unchangedState() == before, "destroyed third store rejection changed state");
+                }
+                else if (fault == 5)
+                {
+                    auto* ref = node.get<ESM::Miscellaneous>();
+                    auto copy = *ref;
+                    copy.mWorldModel = nullptr;
+                    auto data = ref->mData.copyForContainerTransfer();
+                    ref->mWorldModel = nullptr;
+                    std::destroy_at(ref);
+                    std::construct_at(ref, copy);
+                    ref->mData = std::move(data);
+                    auto fresh = MWWorld::Ptr(ref);
+                    fresh.mContainerStore = third.get();
+                    worldModel.registerPtr(fresh);
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "third store node lifetime");
+                    rejectIterators(decision, "third store node lifetime");
+                    reject([&] { decision.getRegistryStorage().getItem(ref->mRef.getRefNum()); }, "item lifetime");
+                    reject([&] { make(); }, "Local script context binding");
+                    require(unchangedState() == before, "reconstructed third node rejection changed state");
+                    for (auto* service : { &sourceScripts, &destinationScripts })
+                    {
+                        service->remove(&ref->mRef);
+                        service->add(scriptId, fresh, scripts);
+                    }
+                    validate(make());
+                }
+                else if (fault == 6)
+                {
+                    thirdOwner.reset();
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "context lifetime");
+                    reject([&] { make(); }, "context lifetime");
+                    require(unchangedState() == before, "destroyed third owner rejection changed state");
+                }
+                else
+                {
+                    int alive = 0, emitted = 0;
+                    std::function<void()> onCopy;
+                    auto& consumer = fault == 7 ? destinationAdd.mInventoryUpdated : removal.mInventoryUpdated;
+                    const auto original = consumer;
+                    consumer = NotificationIntent(alive, onCopy, emitted);
+                    std::optional<decltype(unchangedState())> afterCallback;
+                    onCopy = [&] {
+                        observedStores.pop_back();
+                        third.reset();
+                        afterCallback = unchangedState();
+                    };
+                    bool expiredDuringCopy = false;
+                    try
+                    {
+                        make();
+                    }
+                    catch (const std::invalid_argument& error)
+                    {
+                        expiredDuringCopy = std::string_view(error.what()).find("third store lifetime changed")
+                            != std::string_view::npos;
+                    }
+                    onCopy = {};
+                    consumer = original;
+                    require(expiredDuringCopy && afterCallback && unchangedState() == *afterCallback && alive == 0
+                            && emitted == 0,
+                        "consumer-copy third store destruction partially published state or effects");
+                }
+                if (third)
+                    observedStores.pop_back();
                 observedStores.pop_back();
                 observedStores.pop_back();
             }
