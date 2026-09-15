@@ -88,6 +88,7 @@ namespace MWWorld
 
     private:
         friend class ContainerStore;
+        friend class PreparedContainerTransfer;
         // MISC has no enchantment, item health or timed usage. These are state
         // witnesses, not a second compatibility predicate: selection uses stacks().
         struct MiscState
@@ -154,6 +155,16 @@ namespace MWWorld
         // Owned post-removal source value, including zero for full removal.
         // Retains applicable source RefData; detached with no script cleanup.
         ConstPtr getSourceItem() const;
+        struct SourceInventoryItem
+        {
+            ESM::RefNum mIdentity; // Original identity; the value itself is unregistered.
+            ConstPtr mItem;
+        };
+        // Owned non-gold MISC projection in stock iteration order, excluding
+        // zero-count nodes. Copies only read-only views, never live references.
+        std::vector<SourceInventoryItem> getSourceInventory() const;
+        // Original identity to retain, or unset for no selection. No iterator.
+        ESM::RefNum getSourceSelection() const;
         // Incoming source-derived value, with the removal quantity. New stacks
         // clear stock activation flags before script registration/OnPCAdd.
         ConstPtr getItem() const;
@@ -445,6 +456,7 @@ namespace MWWorld
         ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
         void validateTransferCount(const ConstPtr& item, int count) const;
         void validateTransferSource(const ConstPtr& item, int count, const WorldModel& worldModel) const;
+        ESM::RefNum transferSourceSelection() const;
         struct ItemRemoval
         {
             int mRemoved;

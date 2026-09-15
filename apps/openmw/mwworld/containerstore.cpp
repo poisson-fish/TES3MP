@@ -809,8 +809,18 @@ void MWWorld::ContainerStore::validateTransferStacking(
 struct MWWorld::PreparedContainerTransfer::State
 {
     PreparedContainerRemove mRemoval;
-    // Separate from the original removal witness used to detect stale live state.
-    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mSourceItem;
+    struct SourceState
+    {
+        PreparedContainerAdd::MiscState mIdentity;
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mValues;
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mResult;
+        LocalScripts::Removal mScript;
+    };
+    // Raw nodes include dormant values; public iteration omits zero counts.
+    // The removal witness remains separate from every proposed source value.
+    std::vector<SourceState> mSourceValues;
+    size_t mSourceItemIndex = 0;
+    ESM::RefNum mOriginalSourceSelection, mSourceSelection;
     PreparedContainerAdd mAddition;
     std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mAddedValues;
     // Only an existing stack needs a second result. New stacks retain mAddition's
@@ -829,7 +839,6 @@ struct MWWorld::PreparedContainerTransfer::State
     ESM::RefNum mPlayerIdentity;
     ContainerStoreListener* mSourceListener = nullptr;
     ContainerStoreListener* mDestinationListener = nullptr;
-    bool mClearSelection = false;
     std::function<void(const Ptr&)> mSourceUpdated;
 };
 
@@ -862,7 +871,23 @@ MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getItem() const
 
 MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getSourceItem() const
 {
-    return ConstPtr(state().mSourceItem.get());
+    const auto& owned = state();
+    return ConstPtr(owned.mSourceValues.at(owned.mSourceItemIndex).mResult.get());
+}
+
+std::vector<MWWorld::PreparedContainerTransfer::SourceInventoryItem>
+MWWorld::PreparedContainerTransfer::getSourceInventory() const
+{
+    std::vector<SourceInventoryItem> result;
+    for (const auto& item : state().mSourceValues)
+        if (item.mResult->mRef.getCount(false))
+            result.push_back({ item.mIdentity.mIdentity, ConstPtr(item.mResult.get()) });
+    return result;
+}
+
+ESM::RefNum MWWorld::PreparedContainerTransfer::getSourceSelection() const
+{
+    return state().mSourceSelection;
 }
 
 MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getDestinationItem() const
@@ -921,6 +946,18 @@ namespace
     }
 }
 
+ESM::RefNum MWWorld::ContainerStore::transferSourceSelection() const
+{
+    if (mSelectedEnchantItem == end())
+        return {};
+    // Read only a current member, never dereference the stored selection. A
+    // dormant or foreign selection cannot describe this MISC inventory result.
+    for (auto iter = begin(Type_Miscellaneous); iter != end(); ++iter)
+        if (iter == mSelectedEnchantItem)
+            return iter->getCellRef().getRefNum();
+    throw std::invalid_argument("Container transfer preparation source selection changed or unsupported");
+}
+
 MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(const ConstPtr& item, int count,
     ContainerStore& destination, const ContainerStoreRemoveContext& sourceContext,
     const ContainerStoreAddContext& destinationContext) const
@@ -969,10 +1006,37 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     if (destinationContext.mStore.get<ESM::Miscellaneous>().search(source.mRef.getRefId()) != source.mBase)
         throw std::invalid_argument("Container transfer preparation source content mismatch");
     validateTransferRegistration(*state->mRemoval.mScriptState, item, *this, sourceContext.mContainer.mCell);
-    state->mClearSelection
-        = state->mRemoval.getRemainingCount() == 0 && mSelectedEnchantItem != end() && *mSelectedEnchantItem == item;
-    state->mSourceItem = copyContainerTransferItem(ConstPtr(&source));
-    state->mSourceItem->mRef = source.mRef.copyWithCount(state->mRemoval.getRemainingCount());
+    state->mOriginalSourceSelection = transferSourceSelection();
+    state->mSourceSelection = state->mRemoval.getRemainingCount() == 0
+            && state->mOriginalSourceSelection == state->mRemoval.getItemIdentity()
+        ? ESM::RefNum()
+        : state->mOriginalSourceSelection;
+    for (const auto& ref : mLists.mMiscItems.mList)
+    {
+        const ConstPtr current(&ref);
+        const auto registered = worldModel.getPtr(ref.mRef.getRefNum());
+        if (!ref.mRef.getRefNum().isSet() || ref.mWorldModel != &worldModel || registered.mRef != &ref
+            || registered.mContainerStore != this)
+            throw std::invalid_argument("Container transfer preparation source inventory item must be registered");
+        if (destinationContext.mStore.get<ESM::Miscellaneous>().search(ref.mRef.getRefId()) != ref.mBase)
+            throw std::invalid_argument("Container transfer preparation source content mismatch");
+        if (current.getClass().isGold(current))
+            throw std::logic_error("Container transfer preparation source inventory excludes gold");
+        if (ref.mRef.getCount(false) == std::numeric_limits<int>::min())
+            throw std::invalid_argument("Container transfer preparation source inventory count is invalid");
+        auto identity = PreparedContainerAdd::miscState(current);
+        auto registration = sourceContext.mLocalScripts.prepareRemove(&ref.mRef);
+        validateTransferRegistration(registration, current, *this, sourceContext.mContainer.mCell);
+        auto values = copyContainerTransferItem(current);
+        auto result = copyContainerTransferItem(ConstPtr(values.get()));
+        if (&ref == state->mRemoval.mItemReference)
+        {
+            state->mSourceItemIndex = state->mSourceValues.size();
+            result->mRef = source.mRef.copyWithCount(state->mRemoval.getRemainingCount());
+        }
+        state->mSourceValues.push_back(
+            { std::move(identity), std::move(values), std::move(result), std::move(registration) });
+    }
     for (const auto& ref : destination.mLists.mMiscItems.mList)
     {
         if (destinationContext.mStore.get<ESM::Miscellaneous>().search(ref.mRef.getRefId()) != ref.mBase)
@@ -1034,7 +1098,7 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
         throw std::invalid_argument("Container transfer preparation removal count changed");
     const auto removal = prepareRemoveCount(source.mRef, state.mRemoval.getCount());
     const auto expectedSource = source.mRef.copyWithCount(removal.mRemainingCount);
-    const auto* sourceResult = state.mSourceItem.get();
+    const auto* sourceResult = prepared.getSourceItem().get<ESM::Miscellaneous>();
     if (removal.mRemoved != state.mRemoval.getCount() || removal.mRemainingCount != state.mRemoval.getRemainingCount()
         || !sourceResult || sourceResult->mBase != source.mBase || sourceResult->mWorldModel
         || sourceResult->mRef.getRefNum().isSet() || sourceResult->mData.getBaseNode()
@@ -1046,10 +1110,41 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
     if (!sameTransferValues(item, *state.mAddedValues) || item.mData.getBaseNode() || item.mRef.getRefNum().isSet()
         || item.mWorldModel || item.mRef.getCount(false) != state.mRemoval.getCount())
         throw std::invalid_argument("Container transfer preparation item values changed");
-    const bool clearSelection = state.mRemoval.getRemainingCount() == 0 && mSelectedEnchantItem != end()
-        && mSelectedEnchantItem->mRef == state.mRemoval.mItemReference;
-    if (clearSelection != state.mClearSelection)
+    const auto expectedSelection
+        = removal.mFullRemoval && state.mOriginalSourceSelection == state.mRemoval.getItemIdentity()
+        ? ESM::RefNum()
+        : state.mOriginalSourceSelection;
+    if (transferSourceSelection() != state.mOriginalSourceSelection || state.mSourceSelection != expectedSelection)
         throw std::invalid_argument("Container transfer preparation source selection changed");
+    size_t sourceIndex = 0;
+    for (const auto& ref : mLists.mMiscItems.mList)
+    {
+        if (sourceIndex == state.mSourceValues.size())
+            throw std::invalid_argument("Container transfer preparation source inventory membership changed");
+        const auto& savedSource = state.mSourceValues[sourceIndex];
+        const auto registered = worldModel.getPtr(ref.mRef.getRefNum());
+        if (ref.mWorldModel != &worldModel || registered.mRef != &ref || registered.mContainerStore != this
+            || savedSource.mIdentity != PreparedContainerAdd::miscState(ConstPtr(&ref)))
+            throw std::invalid_argument("Container transfer preparation source inventory membership changed");
+        if (!sameTransferValues(ref, *savedSource.mValues)
+            || ref.mRef.hasChanged() != savedSource.mValues->mRef.hasChanged())
+            throw std::invalid_argument("Container transfer preparation source inventory values changed");
+        sourceContext.mLocalScripts.validateRemoval(savedSource.mScript, &ref.mRef);
+        const bool removed = sourceIndex == state.mSourceItemIndex;
+        if (removed != (savedSource.mIdentity.mIdentity == state.mRemoval.getItemIdentity()))
+            throw std::invalid_argument("Container transfer preparation source inventory result changed");
+        const auto& witness = removed ? source : *savedSource.mValues;
+        const auto expected = removed ? expectedSource : witness.mRef;
+        const auto* result = savedSource.mResult.get();
+        if (!result || result->mBase != witness.mBase || result->mWorldModel || result->mRef.getRefNum().isSet()
+            || result->mData.getBaseNode() || miscTransferValues(result->mRef) != miscTransferValues(expected)
+            || result->mRef.hasChanged() != expected.hasChanged()
+            || !result->mData.matchesContainerTransferState(witness.mData))
+            throw std::invalid_argument("Container transfer preparation source inventory result changed");
+        ++sourceIndex;
+    }
+    if (sourceIndex != state.mSourceValues.size())
+        throw std::invalid_argument("Container transfer preparation source inventory membership changed");
     auto saved = state.mDestinationValues.begin();
     bool foundStack = false;
     for (const auto& ref : destination.mLists.mMiscItems.mList)
