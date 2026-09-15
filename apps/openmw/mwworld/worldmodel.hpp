@@ -73,6 +73,8 @@ namespace MWWorld
 
         PtrRegistryView getPtrRegistryView() const { return PtrRegistryView(mPtrRegistry); }
 
+        PtrRegistry::Snapshot snapshotPtrRegistry() const { return mPtrRegistry.snapshot(); }
+
         ESM::RefNum getLastGeneratedRefNum() const { return mPtrRegistry.getLastGenerated(); }
 
         void setLastGeneratedRefNum(ESM::RefNum v) { mPtrRegistry.setLastGenerated(v); }

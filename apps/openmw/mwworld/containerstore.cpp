@@ -842,6 +842,8 @@ struct MWWorld::PreparedContainerTransfer::State
     LocalScripts::PreparedList mSourceScriptList;
     // Absent for a shared service: both views then use the combined source list.
     std::optional<LocalScripts::PreparedList> mDestinationScriptList;
+    PtrRegistry::Snapshot mOriginalRegistry, mRegistry;
+    ESM::RefNum mDestinationIdentity;
     const MWBase::ScriptManager* mScriptManager = nullptr;
     Ptr mPlayer;
     ESM::RefNum mPlayerIdentity;
@@ -955,6 +957,28 @@ bool MWWorld::PreparedContainerTransfer::hasRemovalNotification() const
     return state().mSourceListener != nullptr;
 }
 
+const MWWorld::PtrRegistry::Snapshot& MWWorld::PreparedContainerTransfer::getRegistry() const
+{
+    return state().mRegistry;
+}
+
+ESM::RefNum MWWorld::PreparedContainerTransfer::getDestinationIdentity() const
+{
+    return state().mDestinationIdentity;
+}
+
+MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getRegistryItem(ESM::RefNum identity) const
+{
+    const auto& owned = state();
+    if (identity == owned.mDestinationIdentity)
+        return getDestinationItem();
+    for (const auto* inventory : { &owned.mSourceValues, &owned.mDestinationValues })
+        for (const auto& member : *inventory)
+            if (member.mIdentity.mIdentity == identity)
+                return ConstPtr(member.mResult.get());
+    return {};
+}
+
 bool MWWorld::PreparedContainerTransfer::hasAdditionNotification() const
 {
     return state().mAddition.mNotifyItemAdded;
@@ -1020,6 +1044,7 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     destination.validateTransferCount(item, count);
 
     auto state = std::make_unique<PreparedContainerTransfer::State>();
+    state->mOriginalRegistry = worldModel.snapshotPtrRegistry();
     state->mSourceStorage = mStorageIdentity;
     state->mDestinationStorage = destination.mStorageIdentity;
     state->mDestinationScripts = destinationContext.mLocalScripts;
@@ -1121,6 +1146,16 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
         if (!state->mDestinationItemIndex)
             throw std::logic_error("Container transfer preparation stack witness missing");
     }
+    state->mRegistry = state->mOriginalRegistry;
+    auto identity = state->mAddition.mItem->mRef;
+    identity.setRefNum(state->mAddition.getStackTarget());
+    const auto* target = state->mDestinationItemIndex
+        ? state->mDestinationValues[*state->mDestinationItemIndex].mIdentity.mReference
+        : state->mAddition.mItem.get();
+    // addWithContext registers the iterator Ptr before script-specific cell hints.
+    // Removal keeps the source's mapping, including a now-dormant source node.
+    state->mDestinationIdentity
+        = PtrRegistry::prepareInsert(state->mRegistry, identity, PtrRegistry::binding(target, nullptr, &destination));
     // The last fallible consumer copy occurs after both decisions, values and
     // script/notification intents exist. Any throw destroys the entire pair.
     state->mSourceUpdated = sourceContext.mInventoryUpdated;
@@ -1263,6 +1298,22 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
     if (!sharedScripts)
         destinationContext.mLocalScripts->validateList(
             *state.mDestinationScriptList, nullptr, addition, addedRef, &destination);
+    const auto currentRegistry = worldModel.snapshotPtrRegistry();
+    if (currentRegistry != state.mOriginalRegistry)
+        throw std::invalid_argument(
+            "Container transfer preparation registry membership, binding, revision or counter changed (revision "
+            + std::to_string(state.mOriginalRegistry.mRevision) + " -> " + std::to_string(currentRegistry.mRevision)
+            + ", size " + std::to_string(state.mOriginalRegistry.mEntries.size()) + " -> "
+            + std::to_string(currentRegistry.mEntries.size()) + ")");
+    auto expectedRegistry = state.mOriginalRegistry;
+    auto identity = item.mRef;
+    identity.setRefNum(state.mAddition.getStackTarget());
+    const auto* target
+        = foundStack ? state.mDestinationValues[*state.mDestinationItemIndex].mIdentity.mReference : &item;
+    const auto expectedIdentity
+        = PtrRegistry::prepareInsert(expectedRegistry, identity, PtrRegistry::binding(target, nullptr, &destination));
+    if (state.mRegistry != expectedRegistry || state.mDestinationIdentity != expectedIdentity)
+        throw std::invalid_argument("Container transfer preparation registry result changed");
     // The immutable pair binds its derived item and intents; this is neither an
     // installation precondition nor a durability or mutation-history guarantee.
 }

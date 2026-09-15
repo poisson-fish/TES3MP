@@ -1493,7 +1493,12 @@ namespace
         require(customAlive == 1, "rejection cloned or destroyed live custom state");
         plainA->getRefData().setCustomData(nullptr);
 
+        std::cerr << "Checking protected transfer stock comparisons and faults\n";
         using Pair = MWWorld::PreparedContainerTransfer;
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getRegistry()), const MWWorld::PtrRegistry::Snapshot&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getRegistryItem({}).getRefData()),
+            const MWWorld::RefData&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceScripts()),
             const MWWorld::LocalScripts::List&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationScripts()),
@@ -1636,6 +1641,43 @@ namespace
             cloneScripts(*sourceContext.mLocalScripts, stockScripts);
             if (!sharedScripts)
                 cloneScripts(*destinationContext.mLocalScripts, stockDestinationScripts);
+            // Reproduce the complete WorldModel membership with the original IDs.
+            // This fixture owns every reference it reads; production snapshots use
+            // only address keys and must also tolerate unrelated stale entries.
+            clonedReferences.emplace(&sourceContext.mContainer.getCellRef(), sourcePtr);
+            clonedReferences.emplace(&destinationContext.mContainer.getCellRef(), destinationPtr);
+            for (const auto& [original, copied] : clonedReferences)
+                model.deregisterLiveCellRef(*copied.mRef);
+            for (const auto& [id, original] : worldModel.getPtrRegistryView())
+            {
+                auto found = clonedReferences.find(&original.getCellRef());
+                if (found == clonedReferences.end())
+                {
+                    auto extra = std::make_unique<MWWorld::ManualRef>(store, original.getCellRef().getRefId());
+                    copyValues(extra->getPtr(), original);
+                    found = clonedReferences.emplace(&original.getCellRef(), extra->getPtr()).first;
+                    otherReferences.push_back(std::move(extra));
+                }
+                auto copied = found->second;
+                copied.getCellRef().setRefNum(id);
+                copied.mCell = original.mCell;
+                copied.mContainerStore = original.mContainerStore == item.mContainerStore ? &source
+                    : original.mContainerStore == &liveDestination                        ? &destination
+                                                                                          : original.mContainerStore;
+                model.registerPtr(copied);
+            }
+            const auto restoreIdentities = [](auto& identities) {
+                std::map<ESM::RefNum, ESM::RefNum> result;
+                for (const auto& [copied, original] : identities)
+                    result.emplace(original, original);
+                identities = std::move(result);
+            };
+            restoreIdentities(sourceIdentities);
+            restoreIdentities(destinationIdentities);
+            source.setPtr(sourcePtr, model);
+            destination.setPtr(destinationPtr, model);
+            model.setLastGeneratedRefNum(worldModel.getLastGeneratedRefNum());
+            const auto registryBefore = model.snapshotPtrRegistry();
             require(stockSource != source.end(), "disposable source clone lost transfer item");
             MWWorld::ManualRef incoming(store, item.getCellRef().getRefId());
             copyValues(incoming.getPtr(), item);
@@ -1656,6 +1698,40 @@ namespace
             };
             const auto stockResult = destination.add(incoming.getPtr(), removed, destinationAdd);
             scripts.mBeforeLocals = {};
+            const auto actualRegistry = model.snapshotPtrRegistry();
+            const auto& proposedRegistry = paired.getRegistry();
+            require(actualRegistry.mEntries.size() == proposedRegistry.mEntries.size()
+                    && actualRegistry.mLastGenerated == proposedRegistry.mLastGenerated
+                    && actualRegistry.mRevision - registryBefore.mRevision == 1
+                    && proposedRegistry.mRevision - worldModel.getPtrRegistryRevision() == 1
+                    && paired.getDestinationIdentity() == stockResult->getCellRef().getRefNum(),
+                "prepared registry membership, revision or generated identity differs from stock");
+            for (const auto& [id, entry] : proposedRegistry.mEntries)
+            {
+                const auto actual = model.getPtr(id);
+                const auto original = worldModel.getPtr(id);
+                const auto* expected
+                    = original.isEmpty() ? stockResult->mRef : clonedReferences.at(&original.getCellRef()).mRef;
+                require(actual.mRef == expected
+                        && entry.references(original.isEmpty() ? paired.getItem().mRef : original.mRef)
+                        && entry.getCell() == actual.mCell
+                        && actual.mContainerStore
+                            == (entry.getContainer() == item.mContainerStore   ? &source
+                                    : entry.getContainer() == &liveDestination ? &destination
+                                                                               : entry.getContainer()),
+                    "prepared registry reference, cell or container binding differs from stock");
+                const auto owned = paired.getRegistryItem(id);
+                if (!owned.isEmpty())
+                    require(!owned.getCellRef().getRefNum().isSet() && !owned.mRef->mWorldModel
+                            && owned.mCell == nullptr && owned.mContainerStore == nullptr
+                            && values(owned) == values(actual)
+                            && owned.getCellRef().getCount(false) == actual.getCellRef().getCount(false)
+                            && owned.getRefData().matchesContainerTransferState(actual.getRefData()),
+                        "registry identity lost its detached inventory value, including dormant source");
+                else
+                    require(actual.mContainerStore != &source && actual.mContainerStore != &destination,
+                        "registry lost an owned inventory value binding");
+            }
             const auto compareScripts = [&](const MWWorld::LocalScripts::List& proposed, MWWorld::LocalScripts& stock) {
                 const auto actual = stock.snapshot();
                 require(proposed.mCursor == actual.mCursor && proposed.mEntries.size() == actual.mEntries.size(),
@@ -2279,7 +2355,8 @@ namespace
                     worldModel.registerPtr(replacementPtr);
                     reject([&] { validatePair(decision); }, "source state changed");
                     worldModel.registerPtr(item);
-                    validatePair(decision);
+                    reject([&] { validatePair(decision); }, "revision or counter changed");
+                    validatePair(source.prepareTransfer(item, quantity, destination, removalContext, context));
                 }
             item.getCellRef().setCount(originalCount);
             const auto remainingItem = fromA ? (hasScript ? *plainA : *scriptA) : (hasScript ? *plainB : *scriptB);
@@ -2495,6 +2572,9 @@ namespace
                 reject([&] { validatePair(paired); }, "changed");
                 container->setContListener(listener);
             }
+            // Restoring a stock binding still increments the witnessed revision.
+            reject([&] { validatePair(paired); }, "revision or counter changed");
+            paired = makePair();
             // Deliberate internal-corruption fault injection; the public view is
             // const. Full prepared values, not just stack inputs, must be checked.
             auto* temporary
@@ -2570,6 +2650,8 @@ namespace
                 target.getCellRef().setCount(std::numeric_limits<int>::max());
                 reject([&] { makePair(); }, "overflow");
                 target.getCellRef() = targetRef;
+                reject([&] { validatePair(paired); }, "revision or counter changed");
+                paired = makePair();
                 validatePair(paired);
             }
             auto full = source.prepareTransfer(item, std::abs(originalCount), destination, removalContext, context);
@@ -2702,6 +2784,249 @@ namespace
                             "paired notification intents survived their contexts");
                     }
             target.getCellRef().setSoul(originalSoul);
+        }
+
+        std::cerr << "Checking registry witnesses and identity boundaries\n";
+        // Registry preparation binds every mapping and the revision/counter, even
+        // outside these inventories. Exercise raw binding drift independently of
+        // revision changes, and stock changes that restore identical membership.
+        for (bool fromA : { false, true })
+            for (bool hasScript : { false, true })
+            {
+                auto& source = fromA ? a : b;
+                auto& destination = fromA ? b : a;
+                const auto item = fromA ? (hasScript ? *scriptA : *plainA) : (hasScript ? *scriptB : *plainB);
+                const auto& sourceAdd = fromA ? scriptedAddA : scriptedAddB;
+                const auto& destinationAdd = fromA ? scriptedAddB : scriptedAddA;
+                const auto plainTarget = fromA ? *plainB : *plainA;
+                const auto targetRef = plainTarget.getCellRef();
+                if (!hasScript)
+                    plainTarget.getCellRef().setSoul(item.getCellRef().getSoul());
+                const auto sourceBinding = worldModel.getPtr(item.getCellRef().getRefNum());
+                auto sourceCellBinding = sourceBinding;
+                sourceCellBinding.mCell = sourceAdd.mContainer.mCell;
+                worldModel.registerPtr(sourceCellBinding);
+                const auto targetBinding = worldModel.getPtr(plainTarget.getCellRef().getRefNum());
+                auto targetCellBinding = targetBinding;
+                targetCellBinding.mCell = destinationAdd.mContainer.mCell;
+                worldModel.registerPtr(targetCellBinding);
+                MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer, localScripts,
+                    sourceAdd.mInventoryUpdated };
+                startScripts();
+                const auto make = [&](int quantity = 1) {
+                    return source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                };
+                const auto validate = [&](const Pair& decision) {
+                    const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
+                    try
+                    {
+                        source.validateTransfer(decision, destination, removal, destinationAdd);
+                    }
+                    catch (...)
+                    {
+                        require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                            "failed registry validation changed live state");
+                        throw;
+                    }
+                    require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                        "registry validation changed live state");
+                };
+                MWWorld::ManualRef external(store, plain.getPtr().getCellRef().getRefId());
+                MWWorld::ContainerStore externalStore;
+                auto externalPtr = external.getPtr();
+                externalPtr.mCell = sourceAdd.mContainer.mCell;
+                externalPtr.mContainerStore = &externalStore;
+                worldModel.registerPtr(externalPtr);
+                const auto externalId = externalPtr.getCellRef().getRefNum();
+                for (int change : { 0, 1, 2 })
+                {
+                    auto decision = make();
+                    const auto view = worldModel.getPtrRegistryView();
+                    const auto found = std::find_if(
+                        view.begin(), view.end(), [&](const auto& entry) { return entry.first == externalId; });
+                    auto& binding = const_cast<MWWorld::Ptr&>(found->second);
+                    const auto saved = binding;
+                    if (change == 0)
+                        binding.mCell = nullptr;
+                    else if (change == 1)
+                        binding.mContainerStore = &b;
+                    else
+                        binding.mRef = item.mRef;
+                    reject([&] { validate(decision); }, "registry membership, binding");
+                    binding = saved;
+                    validate(decision);
+                }
+                {
+                    auto decision = make();
+                    worldModel.registerPtr(externalPtr); // Same mapping, new revision.
+                    reject([&] { validate(decision); }, "revision or counter changed");
+                    auto present = make();
+                    worldModel.deregisterLiveCellRef(*externalPtr.mRef);
+                    reject([&] { validate(present); }, "registry membership, binding");
+                    auto absent = make();
+                    worldModel.registerPtr(externalPtr);
+                    reject([&] { validate(absent); }, "registry membership, binding");
+                    reject([&] { validate(present); }, "revision or counter changed");
+                }
+                const auto originalCounter = worldModel.getLastGeneratedRefNum();
+                {
+                    auto decision = make();
+                    worldModel.setLastGeneratedRefNum({ 987654, -7 }); // No revision change.
+                    reject([&] { validate(decision); }, "revision or counter changed");
+                    worldModel.setLastGeneratedRefNum(originalCounter);
+                    validate(decision);
+                }
+                for (int quantity : { 1, item.getCellRef().getCount() })
+                {
+                    const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
+                    {
+                        auto initial = make(quantity);
+                        const auto savedRegistry = initial.getRegistry();
+                        const auto savedIdentity = initial.getDestinationIdentity();
+                        const auto savedValue = initial.getRegistryItem(savedIdentity);
+                        auto moved = std::move(initial);
+                        reject([&] { initial.getRegistry(); }, "moved from");
+                        reject([&] { initial.getDestinationIdentity(); }, "moved from");
+                        reject([&] { initial.getRegistryItem(savedIdentity); }, "moved from");
+                        auto decision = make(quantity);
+                        decision = std::move(moved);
+                        require(decision.getRegistry() == savedRegistry
+                                && decision.getDestinationIdentity() == savedIdentity
+                                && decision.getRegistryItem(savedIdentity) == savedValue
+                                && decision.getRegistryItem(externalId).isEmpty(),
+                            "move lost registry ownership or detached value binding");
+                        auto& result = const_cast<MWWorld::PtrRegistry::Snapshot&>(decision.getRegistry());
+                        for (int change : { 0, 1, 2, 3, 4 })
+                        {
+                            if (change == 0)
+                                ++result.mRevision;
+                            else if (change == 1)
+                                ++result.mLastGenerated.mIndex;
+                            else if (change == 2)
+                                result.mEntries.erase(externalId);
+                            else if (change == 3)
+                                result.mEntries[savedIdentity] = result.mEntries.at(externalId);
+                            else
+                                result.mEntries.emplace(ESM::RefNum{ 123456, -12 }, result.mEntries.at(externalId));
+                            reject([&] { validate(decision); }, "registry result changed");
+                            result = savedRegistry;
+                        }
+                        if (!decision.getStackTarget().isSet())
+                        {
+                            auto other = make(quantity == 1 ? item.getCellRef().getCount() : 1);
+                            result.mEntries[savedIdentity]
+                                = other.getRegistry().mEntries.at(other.getDestinationIdentity());
+                            reject([&] { validate(decision); }, "registry result changed");
+                            result = savedRegistry;
+                        }
+                        validate(decision);
+                    }
+                    require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                        "registry preparation, corruption, moves or discard changed live state");
+                }
+                // Valid rollover and final representable generated identity use
+                // exactly stock CellRef arithmetic, with no live counter advance.
+                for (const auto counter :
+                    { ESM::RefNum{ 123, -7 }, ESM::RefNum{ std::numeric_limits<uint32_t>::max(), -7 },
+                        ESM::RefNum{ 0, std::numeric_limits<int32_t>::min() },
+                        ESM::RefNum{ std::numeric_limits<uint32_t>::max() - 1, std::numeric_limits<int32_t>::min() } })
+                {
+                    worldModel.setLastGeneratedRefNum(counter);
+                    const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
+                    {
+                        auto decision = make();
+                        validate(decision);
+                        compareStock(decision, item, destination, sourceAdd, destinationAdd);
+                    }
+                    require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                        "identity boundary preparation changed live state");
+                }
+                for (const auto counter : { ESM::RefNum{ 0, 0 }, ESM::RefNum{ 1, 2 },
+                         ESM::RefNum{ std::numeric_limits<uint32_t>::max(), std::numeric_limits<int32_t>::min() },
+                         ESM::RefNum{ externalId.mIndex - 1, externalId.mContentFile } })
+                {
+                    worldModel.setLastGeneratedRefNum(counter);
+                    if (hasScript)
+                        reject([&] { make(); },
+                            counter.mContentFile < 0 && counter.mContentFile != std::numeric_limits<int32_t>::min()
+                                ? "identity collision"
+                                : "counter invalid or exhausted");
+                    else
+                    {
+                        // Existing-stack insertion needs no generated identity.
+                        const auto before = snapshot();
+                        auto decision = make();
+                        require(decision.getStackTarget().isSet() && decision.getRegistry().mLastGenerated == counter,
+                            "existing stack unnecessarily generated an identity");
+                        validate(decision);
+                        require(snapshot() == before, "existing-stack preparation changed invalid counter");
+                    }
+                }
+                if (hasScript)
+                {
+                    const auto sourceId = item.getCellRef().getRefNum();
+                    worldModel.setLastGeneratedRefNum({ sourceId.mIndex - 1, sourceId.mContentFile });
+                    reject([&] { make(item.getCellRef().getCount()); }, "identity collision");
+                }
+                worldModel.setLastGeneratedRefNum(originalCounter);
+                plainTarget.getCellRef() = targetRef;
+                worldModel.registerPtr(sourceBinding);
+                worldModel.registerPtr(targetBinding);
+            }
+
+        {
+            // A stale unrelated WorldModel mapping must be copied/compared without
+            // touching the destroyed object. Replace its key safely for teardown.
+            ESM::RefNum staleId;
+            const MWWorld::LiveCellRefBase* staleKey;
+            {
+                MWWorld::ManualRef expired(store, plain.getPtr().getCellRef().getRefId());
+                auto ptr = expired.getPtr();
+                worldModel.registerPtr(ptr);
+                staleId = ptr.getCellRef().getRefNum();
+                staleKey = ptr.mRef;
+                ptr.mRef->mWorldModel = nullptr; // Deliberately retain a stale registry entry.
+            }
+            startScripts();
+            MWWorld::ContainerStoreRemoveContext removal{ worldModel, addA.mContainer, localScripts,
+                addA.mInventoryUpdated };
+            const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
+            {
+                auto decision = a.prepareTransfer(*scriptA, 1, b, removal, scriptedAddB);
+                a.validateTransfer(decision, b, removal, scriptedAddB);
+                require(decision.getRegistry().mEntries.at(staleId).references(staleKey)
+                        && decision.getRegistryItem(staleId).isEmpty(),
+                    "registry preparation lost unrelated stale mapping");
+            }
+            require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                "stale registry preparation changed live state");
+            MWWorld::ManualRef replacement(store, plain.getPtr().getCellRef().getRefId());
+            replacement.getPtr().getCellRef().setRefNum(staleId);
+            worldModel.registerPtr(replacement.getPtr());
+        }
+        {
+            // Direct stock evidence: first generation, repeated insert, replacement
+            // and mismatched/absent remove. No WorldModel is attached by this registry.
+            MWWorld::PtrRegistry registry;
+            MWWorld::ManualRef first(store, plain.getPtr().getCellRef().getRefId());
+            MWWorld::ManualRef second(store, plain.getPtr().getCellRef().getRefId());
+            registry.insert(first.getPtr());
+            require(first.getPtr().getCellRef().getRefNum() == ESM::RefNum{ 1, -1 }
+                    && registry.getLastGenerated() == ESM::RefNum{ 1, -1 } && registry.getRevision() == 1,
+                "stock first generated identity or revision differs");
+            registry.insert(first.getPtr());
+            second.getPtr().getCellRef().setRefNum(first.getPtr().getCellRef().getRefNum());
+            registry.remove(*second.getPtr().mRef);
+            require(registry.getRevision() == 2, "mismatched remove changed registry revision");
+            registry.insert(second.getPtr());
+            registry.remove(*first.getPtr().mRef);
+            require(registry.getRevision() == 3 && registry.getOrEmpty({ 1, -1 }) == second.getPtr(),
+                "stock replacement or old-reference removal changed mapping");
+            registry.remove(*second.getPtr().mRef);
+            registry.remove(*second.getPtr().mRef);
+            require(registry.getRevision() == 4 && registry.getOrEmpty({ 1, -1 }).isEmpty()
+                    && registry.getLastGenerated() == ESM::RefNum{ 1, -1 },
+                "stock removal revision or identity retention differs");
         }
 
         // Entire service membership/cursor, including unrelated owners, must be

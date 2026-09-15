@@ -27,6 +27,7 @@
 #include "cellreflist.hpp"
 #include "localscripts.hpp"
 #include "ptr.hpp"
+#include "ptrregistry.hpp"
 
 namespace ESM
 {
@@ -187,6 +188,15 @@ namespace MWWorld
         // all other entries preserve immutable registration identities/bindings.
         const LocalScripts::List& getSourceScripts() const;
         const LocalScripts::List& getDestinationScripts() const;
+        // Entire WorldModel result. Existing references are compare-only keys;
+        // the new destination binding references the owned detached incoming item.
+        // Source identities remain registered even after full removal.
+        const PtrRegistry::Snapshot& getRegistry() const;
+        ESM::RefNum getDestinationIdentity() const;
+        // Owned value associated with a proposed identity in either inventory,
+        // including dormant nodes; empty for unaffected world/other-owner entries.
+        // The value itself remains detached and has no assigned RefNum.
+        ConstPtr getRegistryItem(ESM::RefNum identity) const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 
