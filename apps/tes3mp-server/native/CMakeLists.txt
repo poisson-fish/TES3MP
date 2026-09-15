@@ -18,7 +18,8 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
-    transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp)
+    transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
+    test_allocations.cpp test_allocations.hpp)
 target_link_libraries(tes3mp_native_loadout_tests PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_tests ALLOWED tes3mp_native_loadout)
 set_target_properties(tes3mp_native_loadout tes3mp_native_loadout_probe tes3mp_native_loadout_tests

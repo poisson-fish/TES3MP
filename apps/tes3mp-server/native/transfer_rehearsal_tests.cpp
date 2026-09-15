@@ -1,4 +1,9 @@
+#include "test_allocations.hpp"
 #include "transfer_rehearsal.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <new>
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwscript/compilercontext.hpp>
@@ -48,12 +53,14 @@ namespace MWWorld::Testing
                 nodes.push_back(nodeState(ptr));
                 registryNodes.push_back(fixture.registryNode(id));
             }
-            std::vector<const void*> source, destination;
+            std::vector<const void*> source, destination, other;
             for (const auto& node : fixture.sourceStorage())
                 source.push_back(&node);
             for (const auto& node : fixture.destinationStorage())
                 destination.push_back(&node);
-            return std::tuple{ nodes, registryNodes, source, destination, fixture.mModel.snapshotPtrRegistry(),
+            for (const auto& node : fixture.otherStorage())
+                other.push_back(&node);
+            return std::tuple{ nodes, registryNodes, source, destination, other, fixture.mModel.snapshotPtrRegistry(),
                 fixture.mSourceScripts.snapshot(), fixture.mDestinationScripts.snapshot(),
                 fixture.scriptNodes(fixture.mSourceScripts), fixture.scriptNodes(fixture.mDestinationScripts),
                 fixture.scriptCursor(fixture.mSourceScripts), fixture.scriptCursor(fixture.mDestinationScripts),
@@ -71,9 +78,175 @@ namespace MWWorld::Testing
             void itemAdded(const ConstPtr&, int) override { ++mCalls; }
             void itemRemoved(const ConstPtr&, int) override { ++mCalls; }
         };
+
+        void checkAllocationHooks()
+        {
+            // Direct calls cannot be elided like new-expressions. Exercise all
+            // eight allocation overloads, zero size and matching delete families.
+            struct Route
+            {
+                void* (*mAllocate)(size_t);
+                void (*mFree)(void*, size_t);
+                bool mThrows;
+                size_t mAlignment;
+            };
+            const std::array routes{
+                Route{ [](size_t n) { return ::operator new(n); }, [](void* p, size_t) { ::operator delete(p); }, true,
+                    alignof(std::max_align_t) },
+                Route{ [](size_t n) { return ::operator new[](n); },
+                    [](void* p, size_t n) { ::operator delete[](p, n); }, true, alignof(std::max_align_t) },
+                Route{ [](size_t n) { return ::operator new(n, std::nothrow); },
+                    [](void* p, size_t) { ::operator delete(p, std::nothrow); }, false, alignof(std::max_align_t) },
+                Route{ [](size_t n) { return ::operator new[](n, std::nothrow); },
+                    [](void* p, size_t) { ::operator delete[](p, std::nothrow); }, false, alignof(std::max_align_t) },
+                Route{ [](size_t n) { return ::operator new(n, std::align_val_t{ 64 }); },
+                    [](void* p, size_t) { ::operator delete(p, std::align_val_t{ 64 }); }, true, 64 },
+                Route{ [](size_t n) { return ::operator new[](n, std::align_val_t{ 64 }); },
+                    [](void* p, size_t n) { ::operator delete[](p, n, std::align_val_t{ 64 }); }, true, 64 },
+                Route{ [](size_t n) { return ::operator new(n, std::align_val_t{ 64 }, std::nothrow); },
+                    [](void* p, size_t) { ::operator delete(p, std::align_val_t{ 64 }, std::nothrow); }, false, 64 },
+                Route{ [](size_t n) { return ::operator new[](n, std::align_val_t{ 64 }, std::nothrow); },
+                    [](void* p, size_t) { ::operator delete[](p, std::align_val_t{ 64 }, std::nothrow); }, false, 64 }
+            };
+            for (const auto& route : routes)
+                for (size_t size : { size_t{ 0 }, size_t{ 17 } })
+                {
+                    Allocations::Trace trace;
+                    void* value;
+                    {
+                        Allocations::Observe observe(trace);
+                        value = route.mAllocate(size);
+                    }
+                    require(value && reinterpret_cast<std::uintptr_t>(value) % route.mAlignment == 0
+                            && trace.mTotal == 1 && trace.mFailures == 0,
+                        "allocation hook missed a route or broke alignment/zero-size allocation");
+                    route.mFree(value, size);
+                    bool threw = false;
+                    {
+                        Allocations::Observe observe(trace, 1);
+                        value = nullptr;
+                        try
+                        {
+                            value = route.mAllocate(size);
+                        }
+                        catch (const std::bad_alloc&)
+                        {
+                            threw = true;
+                        }
+                    }
+                    require(!value && threw == route.mThrows && trace.mTotal == 1 && trace.mFailures == 1,
+                        "allocation hook missed failure or broke throwing/nothrow semantics");
+                }
+        }
+
+        auto ownedNodes(const PreparedContainerTransfer& pair)
+        {
+            std::vector<ConstPtr> result;
+            for (const auto* storage : { &pair.getSourceStorage(), &pair.getDestinationStorage() })
+                for (const auto& node : *storage)
+                    result.emplace_back(&node);
+            return result;
+        }
+
+        void requireDiscarded(const std::vector<ConstPtr>& nodes)
+        {
+            for (const auto& node : nodes)
+                require(!node.hasLiveReference(), "consumed pair retained an owned node after discard");
+        }
+
+        template <class Make, class Verify>
+        Allocations::Trace checkAllocationFailures(DisposableTransferRehearsal& fixture, Make make, Verify verify)
+        {
+            using namespace Allocations;
+            // Preparation and allocating assertions are deliberately outside the
+            // measured call. Every measured rehearsal has an empty observer.
+            auto pair = make();
+            const auto* bindings = &pair.getIteratorBindings();
+            const auto nodes = ownedNodes(pair);
+            Trace baseline;
+            {
+                Observe observe(baseline);
+                pair = fixture.rehearse(std::move(pair));
+            }
+            if (baseline.allocations(Phase::Validation) == 0 || baseline.allocations(Phase::Revalidation) == 0
+                || baseline.allocations(Phase::Exchange) != 0 || baseline.allocations(Phase::Rollback) != 0
+                || baseline.allocations(Phase::Outside) != 0)
+                std::cerr << "Allocation phases: validation=" << baseline.allocations(Phase::Validation)
+                          << " setup=" << baseline.allocations(Phase::Setup)
+                          << " exchange=" << baseline.allocations(Phase::Exchange)
+                          << " rollback=" << baseline.allocations(Phase::Rollback)
+                          << " revalidation=" << baseline.allocations(Phase::Revalidation)
+                          << " outside=" << baseline.allocations(Phase::Outside) << '\n';
+            require(baseline.mFailures == 0 && baseline.allocations(Phase::Validation) > 0
+                    && baseline.allocations(Phase::Revalidation) > 0 && baseline.allocations(Phase::Exchange) == 0
+                    && baseline.allocations(Phase::Rollback) == 0 && baseline.allocations(Phase::Outside) == 0,
+                "rehearsal missed fallible phases or allocated during exchange/rollback");
+            for (auto phase :
+                { Phase::Validation, Phase::Setup, Phase::Exchange, Phase::Rollback, Phase::Revalidation })
+                require(baseline.visits(phase) == 1, "rehearsal skipped or repeated a measured phase");
+            require(&pair.getIteratorBindings() == bindings && ownedNodes(pair) == nodes,
+                "measured rehearsal replaced pair bindings or owned nodes");
+            verify();
+            Trace repeated;
+            {
+                Observe observe(repeated);
+                // Include successful returned-pair discard in the observation.
+                fixture.rehearse(std::move(pair));
+            }
+            require(repeated.mAllocations == baseline.mAllocations && repeated.mVisits == baseline.mVisits,
+                "repeat/discard allocated differently from first rehearsal");
+            requireDiscarded(nodes);
+            verify();
+
+            for (size_t failAt = 1; failAt <= baseline.mTotal; ++failAt)
+            {
+                auto failedPair = make();
+                const auto failedNodes = ownedNodes(failedPair);
+                Trace failure;
+                bool caught = false;
+                {
+                    Observe observe(failure, failAt);
+                    try
+                    {
+                        fixture.rehearse(std::move(failedPair));
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && failure.mFailures == 1 && failure.mTotal == failAt,
+                    "allocation failure was swallowed, missed, or allocated during unwind/discard");
+                size_t offset = failAt;
+                auto expectedPhase = Phase::Validation;
+                for (auto phase : { Phase::Validation, Phase::Setup, Phase::Revalidation })
+                {
+                    if (offset <= baseline.allocations(phase))
+                    {
+                        expectedPhase = phase;
+                        break;
+                    }
+                    offset -= baseline.allocations(phase);
+                }
+                require(failure.mFailedPhase == expectedPhase && failure.allocations(expectedPhase) == offset,
+                    "allocation failure moved to a different phase/ordinal");
+                const size_t exchanged = expectedPhase == Phase::Revalidation ? 1 : 0;
+                require(failure.visits(Phase::Exchange) == exchanged && failure.visits(Phase::Rollback) == exchanged
+                        && failure.visits(Phase::Revalidation) == exchanged && failure.allocations(Phase::Exchange) == 0
+                        && failure.allocations(Phase::Rollback) == 0 && failure.allocations(Phase::Outside) == 0,
+                    "allocation failure bypassed rollback or allocated in exchange/rollback/discard");
+                requireDiscarded(failedNodes);
+                verify();
+                // A fresh pair must work on the very same stores/services after
+                // every failure, including revalidation after completed rollback.
+                fixture.rehearse(make());
+                verify();
+            }
+            return baseline;
+        }
     }
 
-    void checkTransferRehearsal(const ESMStore& content)
+    static void checkTransferRehearsalCases(const ESMStore& content, bool allocationFailures)
     {
         using Rehearsal = DisposableTransferRehearsal;
         using Stage = Rehearsal::Stage;
@@ -104,6 +277,10 @@ namespace MWWorld::Testing
             }
         } scripts(store, compilerContext, 1);
         ManualRef plain(store, plainId), scripted(store, scriptedId);
+        size_t cases = 0;
+        Allocations::Trace totals;
+        if (allocationFailures)
+            checkAllocationHooks();
 
         // Unrelated registered state in an independent WorldModel must stay exact,
         // even while another fixture has partially exchanged its stock storage.
@@ -176,6 +353,15 @@ namespace MWWorld::Testing
                                 require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
                                     "rehearsal emitted notifications/scripts or changed unrelated live state");
                             };
+                            if (allocationFailures)
+                            {
+                                const auto trace = checkAllocationFailures(fixture, make, verifyOriginal);
+                                ++cases;
+                                totals.mTotal += trace.mTotal;
+                                for (size_t i = 0; i < totals.mAllocations.size(); ++i)
+                                    totals.mAllocations[i] += trace.mAllocations[i];
+                                continue;
+                            }
                             auto decision = make();
                             require(decision.getResolutionCompleteness().isComplete(), "rehearsal fixture incomplete");
                             const auto* bindings = &decision.getIteratorBindings();
@@ -365,5 +551,26 @@ namespace MWWorld::Testing
                             require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
                                 "rejections affected effects or unrelated live state");
                         }
+        if (allocationFailures)
+        {
+            require(cases == 48, "allocation failure matrix lost a fixture combination");
+            require(totals.allocations(Allocations::Phase::Setup) > 0, "fallible script setup was never exercised");
+            std::cout << "Allocation rehearsal: cases=" << cases << " individually-failed=" << totals.mTotal
+                      << " validation=" << totals.allocations(Allocations::Phase::Validation)
+                      << " setup=" << totals.allocations(Allocations::Phase::Setup)
+                      << " revalidation=" << totals.allocations(Allocations::Phase::Revalidation)
+                      << " exchange=" << totals.allocations(Allocations::Phase::Exchange)
+                      << " rollback=" << totals.allocations(Allocations::Phase::Rollback) << '\n';
+        }
+    }
+
+    void checkTransferRehearsal(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, false);
+    }
+
+    void checkTransferRehearsalAllocations(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, true);
     }
 }

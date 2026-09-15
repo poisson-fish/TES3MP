@@ -5699,6 +5699,11 @@ namespace
             MWWorld::Testing::checkTransferRehearsal(loadout.store());
             return;
         }
+        if (filter == "inventory-transfer-rehearsal-allocations")
+        {
+            MWWorld::Testing::checkTransferRehearsalAllocations(loadout.store());
+            return;
+        }
         if (filter == "inventory-two-owners" || filter == "inventory-transfer-preparation")
         {
             checkInventoryOwners(loadout, filter == "inventory-transfer-preparation");

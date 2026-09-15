@@ -48,17 +48,20 @@ namespace MWWorld::Testing
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
         const PreparedContainerTransfer::MiscList& destinationStorage() const;
+        const PreparedContainerTransfer::MiscList& otherStorage() const;
         std::vector<const void*> scriptNodes(const LocalScripts& service) const;
         const void* scriptCursor(const LocalScripts& service) const;
         const void* registryNode(ESM::RefNum identity) const;
         auto cacheState(const ContainerStore& store) const
         {
             return std::tuple{ store.mCachedWeight, store.mWeightUpToDate, store.mRechargingItemsUpToDate,
-                store.mModified, store.mStorageIdentity.get(), store.mSeed };
+                store.mModified, store.mStorageIdentity.get(), store.mSeed, store.mRechargingItems,
+                store.mRechargingItems.data(), store.mRechargingItems.capacity(), store.mResolved, store.mListener };
         }
     };
 
     void checkTransferRehearsal(const ESMStore& content);
+    void checkTransferRehearsalAllocations(const ESMStore& content);
 }
 
 #endif

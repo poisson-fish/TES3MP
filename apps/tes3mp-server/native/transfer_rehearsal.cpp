@@ -1,4 +1,5 @@
 #include "transfer_rehearsal.hpp"
+#include "test_allocations.hpp"
 
 #include <components/esm3/loadcont.hpp>
 
@@ -34,6 +35,7 @@ namespace MWWorld::Testing
     PreparedContainerTransfer DisposableTransferRehearsal::rehearse(
         PreparedContainerTransfer pair, const std::function<void(Stage)>& observer)
     {
+        Allocations::InPhase phase(Allocations::Phase::Validation);
         if (mActive)
             throw std::invalid_argument("Disposable rehearsal already active");
         // Even modified fixture contexts cannot redirect an exchange to a live
@@ -46,6 +48,7 @@ namespace MWWorld::Testing
         if (!mSource.validateTransfer(pair, mDestination, mRemoval, mDestinationAdd).isComplete())
             throw std::invalid_argument("Disposable rehearsal requires complete resolution");
 
+        phase.set(Allocations::Phase::Setup);
         // Validation precedes every cast/access to the protected stock storage.
         // Originals are retained by swapping nodes, never copying/rebuilding them.
         auto& source = const_cast<PreparedContainerTransfer::MiscList&>(pair.getSourceStorage());
@@ -104,6 +107,7 @@ namespace MWWorld::Testing
             std::swap(liveRegistry.mLastGenerated, counter);
         };
         const auto rollback = [&]() noexcept {
+            Allocations::InPhase rollbackPhase(Allocations::Phase::Rollback);
             if (registryInstalled)
                 exchangeRegistry();
             if (destinationScriptsInstalled)
@@ -139,6 +143,7 @@ namespace MWWorld::Testing
             mActive = false;
         };
         {
+            phase.set(Allocations::Phase::Exchange);
             struct Rollback
             {
                 const decltype(rollback)& mRun;
@@ -192,6 +197,7 @@ namespace MWWorld::Testing
             registryInstalled = true;
             checkpoint(Stage::Registry);
         }
+        phase.set(Allocations::Phase::Revalidation);
         mSource.validateTransfer(pair, mDestination, mRemoval, mDestinationAdd);
         return pair;
     }
@@ -203,6 +209,10 @@ namespace MWWorld::Testing
     const PreparedContainerTransfer::MiscList& DisposableTransferRehearsal::destinationStorage() const
     {
         return mDestination.mLists.mMiscItems.mList;
+    }
+    const PreparedContainerTransfer::MiscList& DisposableTransferRehearsal::otherStorage() const
+    {
+        return mOther.mLists.mMiscItems.mList;
     }
     std::vector<const void*> DisposableTransferRehearsal::scriptNodes(const LocalScripts& service) const
     {
