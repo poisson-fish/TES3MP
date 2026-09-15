@@ -155,16 +155,23 @@ namespace MWWorld
         // Owned post-removal source value, including zero for full removal.
         // Retains applicable source RefData; detached with no script cleanup.
         ConstPtr getSourceItem() const;
-        struct SourceInventoryItem
+        struct InventoryItem
         {
-            ESM::RefNum mIdentity; // Original identity; the value itself is unregistered.
+            ESM::RefNum mIdentity; // Original identity, or unset for the new destination node.
             ConstPtr mItem;
         };
         // Owned non-gold MISC projection in stock iteration order, excluding
         // zero-count nodes. Copies only read-only views, never live references.
-        std::vector<SourceInventoryItem> getSourceInventory() const;
+        std::vector<InventoryItem> getSourceInventory() const;
+        // Existing stack replaced in place, or incoming value appended. Remaining
+        // values preserve their state/identity associations; dormant nodes stay
+        // owned but are excluded from this non-gold MISC membership view.
+        // All values are detached; new membership does not allocate a live identity.
+        std::vector<InventoryItem> getDestinationInventory() const;
         // Original identity to retain, or unset for no selection. No iterator.
         ESM::RefNum getSourceSelection() const;
+        // Stock addition retains the original selection, even on a replaced stack.
+        ESM::RefNum getDestinationSelection() const;
         // Incoming source-derived value, with the removal quantity. New stacks
         // clear stock activation flags before script registration/OnPCAdd.
         ConstPtr getItem() const;
@@ -456,7 +463,7 @@ namespace MWWorld
         ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
         void validateTransferCount(const ConstPtr& item, int count) const;
         void validateTransferSource(const ConstPtr& item, int count, const WorldModel& worldModel) const;
-        ESM::RefNum transferSourceSelection() const;
+        ESM::RefNum transferSelection() const;
         struct ItemRemoval
         {
             int mRemoved;
@@ -585,7 +592,8 @@ namespace MWWorld
             const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
 
         // Paired preparation only. Captures removal, detached source/incoming/destination
-        // results, stacking, script intents and both notification consumers as one unit.
+        // inventory results/selections, stacking, script intents and both notification
+        // consumers as one unit.
         // Both contexts require LocalScripts, even for plain registration absence.
         // No live removal, installation, effects, persistence or atomic transfer.
         PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,

@@ -509,8 +509,9 @@ namespace
             const auto& data = item.getRefData();
             const auto& locals = data.getLocals();
             return std::tuple{ values(item), item.mRef, item.mCell, item.mContainerStore, item.mRef->mWorldModel,
-                item.get<ESM::Miscellaneous>()->mBase, item.getCellRef().getRefNum(), item.getCellRef().getCount(false),
-                data.getBaseNode(), data.getBaseNode() ? data.getBaseNode()->referenceCount() : 0, data.getLuaScripts(),
+                item.getType() == ESM::Miscellaneous::sRecordId ? item.get<ESM::Miscellaneous>()->mBase : nullptr,
+                item.getCellRef().getRefNum(), item.getCellRef().getCount(false), data.getBaseNode(),
+                data.getBaseNode() ? data.getBaseNode()->referenceCount() : 0, data.getLuaScripts(),
                 data.getCustomData(),
                 data.getLuaScripts() || data.getCustomData() ? std::optional<unsigned int>() : flags(data),
                 locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
@@ -1498,6 +1499,12 @@ namespace
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceInventory()[0].mItem.getCellRef()),
             const MWWorld::CellRef&>);
         static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getDestinationInventory()[0].mItem.getRefData()),
+                const MWWorld::RefData&>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getDestinationInventory()[0].mItem.getCellRef()),
+                const MWWorld::CellRef&>);
+        static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getItem().getRefData()), const MWWorld::RefData&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationItem().getRefData()),
             const MWWorld::RefData&>);
@@ -1511,9 +1518,12 @@ namespace
             to.getCellRef().setRefNum(identity);
             to.getRefData() = from.getRefData().copyForContainerTransfer();
         };
-        const auto compareStock = [&](const Pair& paired, const MWWorld::Ptr& item, const MWWorld::Ptr& target,
+        const auto compareStock = [&](const Pair& paired, const MWWorld::Ptr& item,
+                                      const MWWorld::ContainerStore& liveDestination,
                                       const MWWorld::ContainerStoreAddContext& sourceContext,
-                                      const MWWorld::ContainerStoreAddContext& destinationContext) {
+                                      const MWWorld::ContainerStoreAddContext& destinationContext,
+                                      const std::vector<MWWorld::Ptr>& rawDestination = {},
+                                      const std::vector<MWWorld::Ptr>& rawSource = {}) {
             // Separate stores, owners, registry and script list: real stock mutation
             // must not disturb the live preparation snapshots, even their ID counter.
             MWWorld::ESMStore registryStore;
@@ -1542,28 +1552,50 @@ namespace
                 destinationPtr, &stockScripts, &scripts, sourceAdd.mInventoryUpdated };
             const bool scriptedItem = !item.getClass().getScript(item).empty();
             auto stockSource = source.end();
-            std::map<ESM::RefNum, ESM::RefNum> sourceIdentities;
-            const auto* liveSource = item.mContainerStore;
-            for (const auto& member : *liveSource)
-            {
-                // Distinct seed souls preserve even separate compatible nodes.
-                MWWorld::ManualRef seed(store, member.getCellRef().getRefId());
-                seed.getPtr().getCellRef().setSoul(
-                    ESM::RefId::stringRefId("stock_clone_" + std::to_string(sourceIdentities.size())));
-                const auto copied = source.add(seed.getPtr(), member.getCellRef().getCount(), sourceAdd);
-                copyValues(*copied, member);
-                sourceIdentities.emplace(copied->getCellRef().getRefNum(), member.getCellRef().getRefNum());
-                if (member == item)
-                    stockSource = copied;
-                if (liveSource->getSelectedEnchantItem() != liveSource->end()
-                    && *liveSource->getSelectedEnchantItem() == member)
-                    source.setSelectedEnchantItem(copied);
-            }
+            std::map<ESM::RefNum, ESM::RefNum> sourceIdentities, destinationIdentities;
+            std::vector<MWWorld::Ptr> stockDormant;
+            const auto clone
+                = [&](const MWWorld::ContainerStore& original, MWWorld::ContainerStore& copiedStore,
+                      const MWWorld::ContainerStoreAddContext& add, std::map<ESM::RefNum, ESM::RefNum>& identities,
+                      const std::vector<MWWorld::Ptr>& raw) {
+                      const auto append = [&](const MWWorld::ConstPtr& member) {
+                          // Distinct seed souls preserve separate compatible and dormant nodes.
+                          MWWorld::ManualRef seed(store, member.getCellRef().getRefId());
+                          seed.getPtr().getCellRef().setSoul(
+                              ESM::RefId::stringRefId("stock_clone_" + std::to_string(identities.size())));
+                          const auto copied = copiedStore.add(seed.getPtr(), 1, add);
+                          copyValues(*copied, member);
+                          if (member.getRefData().getBaseNode())
+                              copied->getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                          identities.emplace(copied->getCellRef().getRefNum(), member.getCellRef().getRefNum());
+                          if (member == item)
+                              stockSource = copied;
+                          if (original.getSelectedEnchantItem() != original.end()
+                              && *original.getSelectedEnchantItem() == member)
+                              copiedStore.setSelectedEnchantItem(copied);
+                          if (!member.getCellRef().getCount(false))
+                              stockDormant.push_back(*copied);
+                          // Clone the actual registration presence/cell, independent of
+                          // the context chosen for this next addition's player semantics.
+                          const auto registration = localScripts.prepareRemove(&member.getCellRef());
+                          stockScripts.remove(*copied);
+                          if (registration.hasRegistration())
+                          {
+                              auto ptr = *copied;
+                              ptr.mCell = registration.getCell();
+                              stockScripts.add(registration.getScript(), ptr, scripts);
+                          }
+                      };
+                      if (raw.empty())
+                          for (const auto& member : original)
+                              append(member);
+                      else
+                          for (const auto& member : raw)
+                              append(member);
+                  };
+            clone(*item.mContainerStore, source, sourceAdd, sourceIdentities, rawSource);
+            clone(liveDestination, destination, destinationAdd, destinationIdentities, rawDestination);
             require(stockSource != source.end(), "disposable source clone lost transfer item");
-            auto stockTarget = destination.add(plain.getPtr(), target.getCellRef().getCount(), destinationAdd);
-            copyValues(*stockTarget, target);
-            stockTarget->getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
-            destination.setSelectedEnchantItem(stockTarget);
             MWWorld::ManualRef incoming(store, item.getCellRef().getRefId());
             copyValues(incoming.getPtr(), item);
             MWWorld::ContainerStoreRemoveContext removal{ model, sourcePtr, stockScripts, sourceAdd.mInventoryUpdated };
@@ -1574,7 +1606,7 @@ namespace
                 // search() resolves through global World even for a resolved
                 // store. Observe current members of this disposable store only.
                 const auto added = std::find_if(destination.begin(), destination.end(), [&](const auto& candidate) {
-                    return candidate.getCellRef().getRefId() == item.getCellRef().getRefId();
+                    return !destinationIdentities.contains(candidate.getCellRef().getRefNum());
                 });
                 require(added != destination.end() && stockScripts.isRunning(scriptId, *added)
                         && flags(added->getRefData()) == (flags(item.getRefData()) & ~7u)
@@ -1592,12 +1624,15 @@ namespace
                     && stockSource->getCellRef().getCount(false) == sourceResult.getCellRef().getCount(false)
                     && values(*stockSource) == values(sourceResult)
                     && stockSource->getRefData().matchesContainerTransferState(sourceResult.getRefData())
-                    && (stockResult == stockTarget) == paired.getStackTarget().isSet()
-                    && destination.getSelectedEnchantItem() == stockTarget && values(*stockResult) == values(result)
+                    && (destinationIdentities.contains(stockResult->getCellRef().getRefNum())
+                               ? destinationIdentities.at(stockResult->getCellRef().getRefNum())
+                               : ESM::RefNum())
+                        == paired.getStackTarget()
+                    && values(*stockResult) == values(result)
                     && stockResult->getRefData().matchesContainerTransferState(result.getRefData())
                     && stockResult->getCellRef().getCount(false) == result.getCellRef().getCount(false)
                     && !stockResult->getRefData().getBaseNode()
-                    && notifications == static_cast<int>(sourceIdentities.size()) + 3,
+                    && notifications == static_cast<int>(sourceIdentities.size() + destinationIdentities.size()) + 2,
                 "paired source/destination values differ from stock add/remove in disposable stores");
             const auto inventory = paired.getSourceInventory();
             size_t index = 0;
@@ -1626,6 +1661,55 @@ namespace
                         == (selected == source.end() ? ESM::RefNum()
                                                      : sourceIdentities.at(selected->getCellRef().getRefNum())),
                 "prepared source membership or selection differs from stock removal");
+            const auto destinationInventory = paired.getDestinationInventory();
+            index = 0;
+            for (const auto& member : destination)
+            {
+                require(index < destinationInventory.size(), "prepared destination omitted a stock member");
+                const auto& view = destinationInventory[index++];
+                const auto identity = destinationIdentities.find(member.getCellRef().getRefNum());
+                require(view.mIdentity == (identity == destinationIdentities.end() ? ESM::RefNum() : identity->second)
+                        && values(view.mItem) == values(member)
+                        && view.mItem.getCellRef().getCount(false) == member.getCellRef().getCount(false)
+                        && view.mItem.getRefData().matchesContainerTransferState(member.getRefData())
+                        && (view.mItem == result) == (member == *stockResult),
+                    "prepared destination order, identity, values or result association differs from stock add");
+                if (member != *stockResult)
+                {
+                    const auto original = worldModel.getPtr(view.mIdentity);
+                    const auto registration = localScripts.prepareRemove(&original.getCellRef());
+                    const auto stockRegistration = stockScripts.prepareRemove(&member.getCellRef());
+                    require(stockRegistration.hasRegistration() == registration.hasRegistration()
+                            && bool(member.getRefData().getBaseNode()) == bool(original.getRefData().getBaseNode())
+                            && (!registration.hasRegistration()
+                                || (stockRegistration.getScript() == registration.getScript()
+                                    && stockRegistration.getCell() == registration.getCell()
+                                    && stockRegistration.getContainer() == &destination)),
+                        "stock addition changed a remaining destination registration");
+                }
+            }
+            const auto destinationSelected = destination.getSelectedEnchantItem();
+            require(index == destinationInventory.size()
+                    && paired.getDestinationSelection()
+                        == (destinationSelected == destination.end()
+                                ? ESM::RefNum()
+                                : destinationIdentities.at(destinationSelected->getCellRef().getRefNum())),
+                "prepared destination membership or selection differs from stock addition");
+            for (const auto& member : stockDormant)
+            {
+                const auto& identities = member.mContainerStore == &source ? sourceIdentities : destinationIdentities;
+                const auto original = worldModel.getPtr(identities.at(member.getCellRef().getRefNum()));
+                const auto registration = localScripts.prepareRemove(&original.getCellRef());
+                const auto stockRegistration = stockScripts.prepareRemove(&member.getCellRef());
+                require(!member.getCellRef().getCount(false) && values(member) == values(original)
+                        && member.getRefData().matchesContainerTransferState(original.getRefData())
+                        && registration.hasRegistration() == stockRegistration.hasRegistration()
+                        && (!registration.hasRegistration()
+                            || (registration.getScript() == stockRegistration.getScript()
+                                && registration.getCell() == stockRegistration.getCell()
+                                && stockRegistration.getContainer() == member.mContainerStore)),
+                    "stock transfer changed a dormant node or registration");
+            }
             require(stockScripts.isRunning(scriptId, *stockResult) == paired.getScriptAddition().has_value()
                     && (!paired.getScriptAddition()
                         || stockScripts.prepareRemove(&stockResult->getCellRef()).getCell()
@@ -1648,6 +1732,7 @@ namespace
             const auto originalSoul = target.getCellRef().getSoul();
             const auto originalCount = item.getCellRef().getCount(false);
             const auto originalSelection = source.getSelectedEnchantItem();
+            const auto originalDestinationSelection = destination.getSelectedEnchantItem();
             const auto originalTargetCount = target.getCellRef().getCount(false);
             const auto originalData = item.getRefData().copyForContainerTransfer();
             const auto originalTargetData = target.getRefData().copyForContainerTransfer();
@@ -1668,6 +1753,10 @@ namespace
                                                 ? source.end()
                                                 : std::find(source.begin(), source.end(),
                                                       selectionMode == 1 ? item : selectionOther));
+                                        destination.setSelectedEnchantItem(selectionMode == 0
+                                                ? destination.end()
+                                                : std::find(destination.begin(), destination.end(),
+                                                      selectionMode == 1 ? target : (fromA ? *scriptB : *scriptA)));
                                         item.getCellRef().setCount(signedCount);
                                         target.getCellRef().setCount(destinationCount);
                                         target.getCellRef().setSoul(
@@ -1805,6 +1894,48 @@ namespace
                                                 "paired value differs from shared detached/stock normalization rules");
                                             const auto result = paired.getDestinationItem();
                                             const bool stacked = compatible && !hasScript;
+                                            auto destinationInventory = paired.getDestinationInventory();
+                                            require(destinationInventory.size() == (stacked ? 2u : 3u)
+                                                    && paired.getDestinationSelection()
+                                                        == (selectionMode == 0
+                                                                ? ESM::RefNum()
+                                                                : (selectionMode == 1 ? target
+                                                                                      : (fromA ? *scriptB : *scriptA))
+                                                                      .getCellRef()
+                                                                      .getRefNum()),
+                                                "destination result lost existing/new membership or original "
+                                                "selection");
+                                            for (const auto& view : destinationInventory)
+                                            {
+                                                const auto original
+                                                    = view.mIdentity.isSet() ? worldModel.getPtr(view.mIdentity) : item;
+                                                const auto& data = view.mItem.getRefData();
+                                                const auto& liveData = original.getRefData();
+                                                require(view.mItem.mRef != original.mRef
+                                                        && !view.mItem.mRef->mWorldModel
+                                                        && !view.mItem.getCellRef().getRefNum().isSet()
+                                                        && !view.mItem.mCell && !view.mItem.mContainerStore
+                                                        && !data.getBaseNode() && !data.getLuaScripts()
+                                                        && !data.getCustomData()
+                                                        && !localScripts.prepareRemove(&view.mItem.getCellRef())
+                                                            .hasRegistration()
+                                                        && data.getAnimationState().mScriptedAnims.data()
+                                                            != liveData.getAnimationState().mScriptedAnims.data()
+                                                        && (data.getLocals().mShorts.empty()
+                                                            || (data.getLocals().mShorts.data()
+                                                                    != liveData.getLocals().mShorts.data()
+                                                                && data.getLocals().mLongs.data()
+                                                                    != liveData.getLocals().mLongs.data()
+                                                                && data.getLocals().mFloats.data()
+                                                                    != liveData.getLocals().mFloats.data())),
+                                                    "destination inventory retained live identity, registration, scene "
+                                                    "or buffers");
+                                                if (!view.mIdentity.isSet()
+                                                    || view.mIdentity == paired.getStackTarget())
+                                                    require(view.mItem == result,
+                                                        "destination membership duplicated the added value");
+                                            }
+                                            destinationInventory.clear();
                                             require(flags(sourceResult.getRefData()) == sourceFlags
                                                     && flags(temporary.getRefData())
                                                         == (stacked ? sourceFlags : sourceFlags & ~7u)
@@ -1836,7 +1967,7 @@ namespace
                                                     "compatible stack lost distinct destination RefData or aliases "
                                                     "owned "
                                                     "buffers");
-                                            compareStock(paired, item, target, sourceAdd, context);
+                                            compareStock(paired, item, destination, sourceAdd, context);
                                             auto registration = paired.getScriptAddition();
                                             require(registration.has_value() == hasScript
                                                     && (!registration
@@ -1890,6 +2021,7 @@ namespace
                                                 item, quantity, destination, removalContext, context);
                                             int replacedSourceAlive = 0;
                                             int replacedRemainingAlive = 0;
+                                            int replacedDestinationAlive = 0;
                                             const_cast<MWWorld::RefData&>(assigned.getSourceItem().getRefData())
                                                 .setCustomData(std::make_unique<Lifetime>(replacedSourceAlive));
                                             for (const auto& view : assigned.getSourceInventory())
@@ -1897,15 +2029,24 @@ namespace
                                                     const_cast<MWWorld::RefData&>(view.mItem.getRefData())
                                                         .setCustomData(
                                                             std::make_unique<Lifetime>(replacedRemainingAlive));
+                                            for (const auto& view : assigned.getDestinationInventory())
+                                                const_cast<MWWorld::RefData&>(view.mItem.getRefData())
+                                                    .setCustomData(
+                                                        std::make_unique<Lifetime>(replacedDestinationAlive));
                                             assigned = std::move(paired);
                                             require(replacedSourceAlive == 0 && replacedRemainingAlive == 0
-                                                    && assigned.getSourceItem() == sourceResult,
-                                                "move assignment leaked the prior source result or lost the new one");
+                                                    && replacedDestinationAlive == 0
+                                                    && assigned.getSourceItem() == sourceResult
+                                                    && assigned.getDestinationItem() == result,
+                                                "move assignment leaked a prior inventory result or lost the new one");
                                             source.validateTransfer(assigned, destination, removalContext, context);
                                             for (const auto& access :
                                                 std::vector<std::function<void()>>{ [&] { paired.getSourceItem(); },
                                                     [&] { paired.getSourceInventory(); },
-                                                    [&] { paired.getSourceSelection(); } })
+                                                    [&] { paired.getSourceSelection(); },
+                                                    [&] { paired.getDestinationInventory(); },
+                                                    [&] { paired.getDestinationSelection(); },
+                                                    [&] { paired.getDestinationItem(); } })
                                             {
                                                 movedRejected = false;
                                                 try
@@ -1916,7 +2057,7 @@ namespace
                                                 {
                                                     movedRejected = true;
                                                 }
-                                                require(movedRejected, "moved-from pair exposed a source result");
+                                                require(movedRejected, "moved-from pair exposed an inventory result");
                                             }
                                         }
                                         // Failure after all values and add intents exist must
@@ -1951,6 +2092,7 @@ namespace
                                         unchangedScripts();
                                     }
             source.setSelectedEnchantItem(originalSelection);
+            destination.setSelectedEnchantItem(originalDestinationSelection);
             item.getRefData() = originalData.copyForContainerTransfer();
             item.getRefData().setBaseNode(originalNode);
             target.getRefData() = originalTargetData.copyForContainerTransfer();
@@ -2111,6 +2253,74 @@ namespace
                 reject([&] { validatePair(decision); }, "source inventory result changed");
                 result->mWorldModel = nullptr;
                 validatePair(decision);
+            }
+            for (const auto& selected : { destination.end(), std::find(destination.begin(), destination.end(), target),
+                     std::find(destination.begin(), destination.end(), fromA ? *scriptB : *scriptA) })
+            {
+                destination.setSelectedEnchantItem(selected);
+                auto decision = makePair();
+                for (const auto& changed :
+                    { destination.end(), std::find(destination.begin(), destination.end(), target),
+                        std::find(destination.begin(), destination.end(), fromA ? *scriptB : *scriptA) })
+                    if (changed != selected)
+                    {
+                        destination.setSelectedEnchantItem(changed);
+                        reject([&] { validatePair(decision); }, "selection changed");
+                        destination.setSelectedEnchantItem(selected);
+                        validatePair(decision);
+                    }
+            }
+            destination.setSelectedEnchantItem(originalDestinationSelection);
+            for (int quantity : { 1, std::abs(originalCount) })
+            {
+                auto decision = source.prepareTransfer(item, quantity, destination, removalContext, context);
+                for (auto view : decision.getDestinationInventory())
+                {
+                    if (view.mItem == decision.getDestinationItem())
+                        continue; // Addition result corruption is covered separately.
+                    auto* result
+                        = const_cast<MWWorld::LiveCellRef<ESM::Miscellaneous>*>(view.mItem.get<ESM::Miscellaneous>());
+                    const auto original = worldModel.getPtr(view.mIdentity);
+                    view.mIdentity = {};
+                    view.mItem = {}; // Returned membership/associations cannot edit the decision.
+                    validatePair(decision);
+                    const auto ref = result->mRef;
+                    const auto data = result->mData.copyForContainerTransfer();
+                    for (const auto& change : std::vector<std::function<void(MWWorld::CellRef&)>>{
+                             [](auto& value) { value = value.copyWithCount(0); },
+                             [](auto& value) { value.setCount(-value.getCount(false)); },
+                             [](auto& value) { value.setCharge(999); }, [](auto& value) { value.setOwner({}); },
+                             [](auto& value) { value.setPosition({}); },
+                             [&](auto& value) { value.setRefNum(original.getCellRef().getRefNum()); } })
+                    {
+                        change(result->mRef);
+                        reject([&] { validatePair(decision); }, "destination inventory result changed");
+                        result->mRef = ref;
+                    }
+                    for (const auto& change : std::vector<std::function<void(MWWorld::RefData&)>>{
+                             [](auto& value) { value.getAnimationState().mScriptedAnims[0].mTime += 1; },
+                             [](auto& value) { value.getLocals().mLongs.push_back(42); },
+                             [](auto& value) { value.enable(); }, [](auto& value) { value.setPosition({}); },
+                             [&](auto& value) {
+                                 const auto bits = flags(value);
+                                 setFlags(value, bits & 7u ? bits & ~7u : bits | 1u);
+                             },
+                             [](auto& value) { value.setBaseNode(new SceneUtil::PositionAttitudeTransform); } })
+                    {
+                        change(result->mData);
+                        reject([&] { validatePair(decision); }, "destination inventory result changed");
+                        result->mData = data.copyForContainerTransfer();
+                    }
+                    result->mWorldModel = &worldModel;
+                    reject([&] { validatePair(decision); }, "destination inventory result changed");
+                    result->mWorldModel = nullptr;
+                    int alive = 0;
+                    result->mData.setCustomData(std::make_unique<Lifetime>(alive));
+                    reject([&] { validatePair(decision); }, "destination inventory result changed");
+                    result->mData.setCustomData(nullptr);
+                    require(alive == 0, "remaining destination corruption marker leaked");
+                    validatePair(decision);
+                }
             }
             for (const auto& changedItem : { item, remainingItem, target, fromA ? *scriptB : *scriptA })
             {
@@ -2311,9 +2521,11 @@ namespace
                     {
                         target.getCellRef().setSoul(compatible ? item.getCellRef().getSoul() : originalSoul);
                         int sourceAlive = 0, destinationAlive = 0, emitted = 0, copies = 0, itemAlive = 0,
-                            resultAlive = 0, sourceResultAlive = 0, remainingResultAlive = 0;
+                            resultAlive = 0, sourceResultAlive = 0, remainingResultAlive = 0,
+                            destinationRemainingAlive = 0;
                         osg::observer_ptr<SceneUtil::PositionAttitudeTransform> node, resultNode, sourceNode,
                             remainingNode;
+                        std::vector<osg::observer_ptr<SceneUtil::PositionAttitudeTransform>> destinationNodes;
                         std::function<void()> sourceCopy, destinationCopy;
                         {
                             auto addition = context;
@@ -2354,6 +2566,16 @@ namespace
                                     }
                                 require(remainingResultAlive == 1 && remainingNode.valid(),
                                     "paired discard did not own the remaining source values");
+                                for (const auto& view : decision.getDestinationInventory())
+                                    if (view.mItem != decision.getDestinationItem())
+                                    {
+                                        auto& remaining = const_cast<MWWorld::RefData&>(view.mItem.getRefData());
+                                        remaining.setCustomData(std::make_unique<Lifetime>(destinationRemainingAlive));
+                                        remaining.setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                                        destinationNodes.emplace_back(remaining.getBaseNode());
+                                    }
+                                require(destinationRemainingAlive == (decision.getStackTarget().isSet() ? 1 : 2),
+                                    "paired discard did not own all remaining destination values");
                                 // Observe destruction of the privately owned item after
                                 // successful preparation; never install these test markers live.
                                 auto& data = const_cast<MWWorld::RefData&>(decision.getItem().getRefData());
@@ -2379,7 +2601,11 @@ namespace
                             require(caught == fail && copies == 1 && sourceAlive == 1 && destinationAlive == 1
                                     && emitted == 0 && itemAlive == 0 && resultAlive == 0 && !node.valid()
                                     && sourceResultAlive == 0 && !sourceNode.valid() && !resultNode.valid()
-                                    && remainingResultAlive == 0 && !remainingNode.valid() && snapshot() == before,
+                                    && remainingResultAlive == 0 && !remainingNode.valid()
+                                    && destinationRemainingAlive == 0
+                                    && std::none_of(destinationNodes.begin(), destinationNodes.end(),
+                                        [](const auto& observed) { return observed.valid(); })
+                                    && snapshot() == before,
                                 "paired late failure/discard leaked owned state or changed live state/notifications");
                             unchangedScripts();
                         }
@@ -2396,7 +2622,9 @@ namespace
             for (bool hasScript : { false, true })
                 for (int signedCount : { 4, -4 })
                     for (int quantity : { 1, 4 })
-                        for (bool keepRemaining : { false, true })
+                        // Destination modes: empty membership, new stack, existing stack.
+                        for (const auto& [keepRemaining, destinationMode] : std::vector<std::pair<bool, int>>{
+                                 { false, 0 }, { false, 1 }, { false, 2 }, { true, 0 }, { true, 1 }, { true, 2 } })
                         {
                             auto sourceAdd = fromA ? scriptedAddA : scriptedAddB;
                             auto destinationAdd = fromA ? scriptedAddB : scriptedAddA;
@@ -2426,7 +2654,41 @@ namespace
                                 append(fromA ? *plainA : *plainB, -3);
                                 append(fromA ? *scriptA : *scriptB, -2);
                             }
-                            const auto target = *destination.add(plain.getPtr(), 7, destinationAdd);
+                            std::vector<MWWorld::Ptr> rawDestination;
+                            const auto appendDestination = [&](const MWWorld::Ptr& original, int count) {
+                                MWWorld::ManualRef seed(store, original.getCellRef().getRefId());
+                                seed.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId(
+                                    "destination_clone_" + std::to_string(rawDestination.size())));
+                                auto added = *destination.add(seed.getPtr(), 1, destinationAdd);
+                                copyValues(added, original);
+                                added.getCellRef() = added.getCellRef().copyWithCount(count);
+                                rawDestination.push_back(added);
+                                return added;
+                            };
+                            const auto destinationPlain = fromA ? *plainB : *plainA;
+                            const auto destinationScript = fromA ? *scriptB : *scriptA;
+                            // Dormant compatible nodes must neither stack nor enter membership.
+                            const auto dormantTarget = appendDestination(destinationPlain, 0);
+                            dormantTarget.getCellRef().setSoul(item.getCellRef().getSoul());
+                            const auto dormantScript = appendDestination(destinationScript, 0);
+                            observedDormant.push_back(dormantTarget);
+                            observedDormant.push_back(dormantScript);
+                            auto selectedTarget = destination.end();
+                            if (destinationMode)
+                            {
+                                const auto first = appendDestination(destinationPlain, signedCount > 0 ? 7 : -7);
+                                if (destinationMode == 2)
+                                    first.getCellRef().setSoul(item.getCellRef().getSoul());
+                                // A second compatible stack must survive with its original values.
+                                const auto second = appendDestination(destinationPlain, -3);
+                                second.getCellRef().setSoul(first.getCellRef().getSoul());
+                                const auto other = appendDestination(destinationScript, -2);
+                                selectedTarget = std::find(destination.begin(), destination.end(), first);
+                                if (keepRemaining)
+                                    destination.setSelectedEnchantItem(quantity == 1
+                                            ? selectedTarget
+                                            : std::find(destination.begin(), destination.end(), other));
+                            }
                             source.setSelectedEnchantItem(std::find(source.begin(), source.end(), item));
                             MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer,
                                 localScripts, sourceAdd.mInventoryUpdated };
@@ -2435,7 +2697,8 @@ namespace
                             {
                                 auto decision
                                     = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
-                                compareStock(decision, item, target, sourceAdd, destinationAdd);
+                                compareStock(
+                                    decision, item, destination, sourceAdd, destinationAdd, rawDestination, rawSource);
                                 const auto views = decision.getSourceInventory();
                                 require(views.size() == static_cast<size_t>((keepRemaining ? 2 : 0) + (quantity != 4))
                                         && std::none_of(views.begin(), views.end(),
@@ -2444,6 +2707,17 @@ namespace
                                             }),
                                     "dormant or fully removed node remained in source membership");
                                 source.validateTransfer(decision, destination, removal, destinationAdd);
+                                const auto destinationViews = decision.getDestinationInventory();
+                                const bool stacked = destinationMode == 2 && !hasScript;
+                                require(destinationViews.size() == (destinationMode ? (stacked ? 3u : 4u) : 1u)
+                                        && std::none_of(destinationViews.begin(), destinationViews.end(),
+                                            [&](const auto& view) {
+                                                return view.mIdentity == dormantTarget.getCellRef().getRefNum()
+                                                    || view.mIdentity == dormantScript.getCellRef().getRefNum();
+                                            })
+                                        && decision.getStackTarget()
+                                            == (stacked ? selectedTarget->getCellRef().getRefNum() : ESM::RefNum()),
+                                    "destination preparation revived a dormant node or missed first-stack membership");
                                 require(
                                     snapshot() == before, "owned source inventory preparation changed raw/live values");
                                 unchangedScripts();
@@ -2469,16 +2743,129 @@ namespace
                                     "source inventory values changed");
                                 dormant.getRefData().getLocals().mLongs[0] -= 1;
                                 source.validateTransfer(decision, destination, removal, destinationAdd);
+                                for (const auto& dormantDestination : { dormantTarget, dormantScript })
+                                {
+                                    const auto ref = dormantDestination.getCellRef();
+                                    for (int count : { 1, -1 })
+                                    {
+                                        dormantDestination.getCellRef().setCount(count);
+                                        reject(
+                                            [&] {
+                                                source.validateTransfer(decision, destination, removal, destinationAdd);
+                                            },
+                                            "destination state changed");
+                                        // Capture a current iterator before restoring dormancy.
+                                        const auto invalidSelection
+                                            = std::find(destination.begin(), destination.end(), dormantDestination);
+                                        dormantDestination.getCellRef() = ref;
+                                        const auto selection = destination.getSelectedEnchantItem();
+                                        destination.setSelectedEnchantItem(invalidSelection);
+                                        reject(
+                                            [&] {
+                                                source.validateTransfer(decision, destination, removal, destinationAdd);
+                                            },
+                                            "selection changed or unsupported");
+                                        reject(
+                                            [&] {
+                                                source.prepareTransfer(
+                                                    item, quantity, destination, removal, destinationAdd);
+                                            },
+                                            "selection changed or unsupported");
+                                        destination.setSelectedEnchantItem(selection);
+                                    }
+                                    const auto data = dormantDestination.getRefData().copyForContainerTransfer();
+                                    dormantDestination.getRefData().getAnimationState().mScriptedAnims[0].mTime += 1;
+                                    reject(
+                                        [&] {
+                                            source.validateTransfer(decision, destination, removal, destinationAdd);
+                                        },
+                                        "destination values changed");
+                                    dormantDestination.getRefData().getAnimationState().mScriptedAnims[0].mTime -= 1;
+                                    const auto bits = flags(data);
+                                    setFlags(dormantDestination.getRefData(), bits & 7u ? bits & ~7u : bits | 1u);
+                                    reject(
+                                        [&] {
+                                            source.validateTransfer(decision, destination, removal, destinationAdd);
+                                        },
+                                        "destination values changed");
+                                    setFlags(dormantDestination.getRefData(), bits);
+                                    int alive = 0;
+                                    dormantDestination.getRefData().setCustomData(std::make_unique<Lifetime>(alive));
+                                    reject(
+                                        [&] {
+                                            source.prepareTransfer(
+                                                item, quantity, destination, removal, destinationAdd);
+                                        },
+                                        "Lua or custom state");
+                                    require(alive == 1, "preparation touched dormant destination custom state");
+                                    dormantDestination.getRefData().setCustomData(nullptr);
+                                }
+                                dormantScript.getRefData().getLocals().mLongs[0] += 1;
+                                reject([&] { source.validateTransfer(decision, destination, removal, destinationAdd); },
+                                    "destination values changed");
+                                dormantScript.getRefData().getLocals().mLongs[0] -= 1;
+                                const auto destinationSelection = destination.getSelectedEnchantItem();
+                                destination.setSelectedEnchantItem(source.begin());
+                                reject(
+                                    [&] {
+                                        source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                    },
+                                    "selection changed or unsupported");
+                                reject([&] { source.validateTransfer(decision, destination, removal, destinationAdd); },
+                                    "selection changed or unsupported");
+                                destination.setSelectedEnchantItem(destinationSelection);
+                                // An unrelated destination count still has to be representable.
+                                const auto dormantRefData = dormantScript.getCellRef();
+                                dormantScript.getCellRef().setCount(std::numeric_limits<int>::min());
+                                reject(
+                                    [&] {
+                                        source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                    },
+                                    "count");
+                                dormantScript.getCellRef() = dormantRefData;
+                                source.validateTransfer(decision, destination, removal, destinationAdd);
+                                appendDestination(destinationScript, 1);
+                                reject([&] { source.validateTransfer(decision, destination, removal, destinationAdd); },
+                                    "destination state changed");
+                                auto withAppendedDestination
+                                    = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
                                 // Appending a member rejects even when it cannot stack
                                 // with the incoming item and the removal value is unchanged.
                                 append(fromA ? *scriptA : *scriptB, 1);
-                                reject([&] { source.validateTransfer(decision, destination, removal, destinationAdd); },
+                                reject(
+                                    [&] {
+                                        source.validateTransfer(
+                                            withAppendedDestination, destination, removal, destinationAdd);
+                                    },
                                     "source inventory membership changed");
+                                // A non-MISC selection cannot be represented by this projection.
+                                MWWorld::ManualRef book(store, ESM::RefId::stringRefId("native_book"));
+                                const auto bookMember = destination.add(book.getPtr(), 1, destinationAdd);
+                                auto withBook
+                                    = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                destination.setSelectedEnchantItem(bookMember);
+                                reject(
+                                    [&] {
+                                        source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                    },
+                                    "selection changed or unsupported");
+                                reject([&] { source.validateTransfer(withBook, destination, removal, destinationAdd); },
+                                    "selection changed or unsupported");
+                                destination.setSelectedEnchantItem(destinationSelection);
+                                MWWorld::ManualRef gold(store, MWWorld::ContainerStore::sGoldId);
+                                appendDestination(gold.getPtr(), 1);
+                                reject(
+                                    [&] {
+                                        source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                    },
+                                    "destination inventory excludes gold");
                             }
                             for (const auto& member : rawSource)
                                 localScripts.remove(member);
-                            for (const auto& member : destination)
+                            for (const auto& member : rawDestination)
                                 localScripts.remove(member);
+                            observedDormant.pop_back();
+                            observedDormant.pop_back();
                             observedDormant.pop_back();
                             observedStores.pop_back();
                             observedStores.pop_back();
@@ -2576,6 +2963,8 @@ namespace
             auto alternate = record<ESM::Script>("alternate_script");
             alternate.mScriptText = "begin alternate_script\nend alternate_script\n";
             store.insertStatic(alternate);
+            store.insertStatic(record<ESM::Book>("native_book"));
+            store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(MWWorld::ContainerStore::sGoldId));
         }
         store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(scriptedId));
         ESM::ReadersCache readers;
