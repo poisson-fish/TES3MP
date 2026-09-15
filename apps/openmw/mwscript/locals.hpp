@@ -87,6 +87,11 @@ namespace MWScript
         /// \return Locals written?
         bool write(ESM::Locals& locals, const ESM::RefId& script) const;
 
+        /// Explicit declarations; no Environment lookup or script execution.
+        /// Appends stock named values atomically. Initialized value/declaration
+        /// shapes must match exactly; failure leaves locals unchanged.
+        bool write(ESM::Locals& locals, const Compiler::Locals& declarations) const;
+
         /// \note Locals will be automatically configured first, if necessary
         void read(const ESM::Locals& locals, const ESM::RefId& script);
     };

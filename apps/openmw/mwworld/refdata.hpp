@@ -72,6 +72,8 @@ namespace MWWorld
         // Shared by stock copy construction and detached new-stack preparation.
         void clearActivationFlags();
 
+        void write(ESM::ObjectState& objectState, ESM::Locals&& locals, bool hasLocals) const;
+
     public:
         RefData();
 
@@ -94,6 +96,11 @@ namespace MWWorld
         void write(ESM::ObjectState& objectState, const ESM::RefId& scriptId = ESM::RefId()) const;
         ///< Ignores custom data (not enough context available here to
         /// perform this operations).
+
+        /// Explicit MWScript declarations; no Environment lookup. Stages locals
+        /// and animation before publishing any RefData fields. Failure leaves
+        /// the caller's entire objectState unchanged. Custom/Lua state is omitted.
+        void write(ESM::ObjectState& objectState, const Compiler::Locals& declarations) const;
 
         RefData& operator=(const RefData& refData);
         RefData& operator=(RefData&& other);

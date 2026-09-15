@@ -1,6 +1,8 @@
 #include "locals.hpp"
 #include "globalscripts.hpp"
 
+#include <stdexcept>
+
 #include <components/compiler/locals.hpp>
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loadscpt.hpp>
@@ -147,51 +149,55 @@ namespace MWScript
         if (!mInitialised)
             return false;
 
-        const Compiler::Locals& declarations = MWBase::Environment::get().getScriptManager()->getLocals(script);
+        return write(locals, MWBase::Environment::get().getScriptManager()->getLocals(script));
+    }
 
-        for (int i = 0; i < 3; ++i)
+    bool Locals::write(ESM::Locals& locals, const Compiler::Locals& declarations) const
+    {
+        if (!mInitialised)
+            return false;
+
+        // Check the entire shape before allocating or publishing any values.
+        // Extra values must not be silently lost; missing ones must not leave a
+        // partially appended save. Names must identify one unambiguous variable.
+        if (declarations.get('s').size() != mShorts.size() || declarations.get('l').size() != mLongs.size()
+            || declarations.get('f').size() != mFloats.size())
+            throw std::invalid_argument("Local declaration/value shape mismatch");
+        for (char type : { 's', 'l', 'f' })
         {
-            char type = 0;
-
-            switch (i)
-            {
-                case 0:
-                    type = 's';
-                    break;
-                case 1:
-                    type = 'l';
-                    break;
-                case 2:
-                    type = 'f';
-                    break;
-            }
-
-            const std::vector<std::string>& names = declarations.get(type);
-
-            for (int i2 = 0; i2 < static_cast<int>(names.size()); ++i2)
-            {
-                ESM::Variant value;
-
-                switch (i)
-                {
-                    case 0:
-                        value.setType(ESM::VT_Int);
-                        value.setInteger(mShorts.at(i2));
-                        break;
-                    case 1:
-                        value.setType(ESM::VT_Int);
-                        value.setInteger(mLongs.at(i2));
-                        break;
-                    case 2:
-                        value.setType(ESM::VT_Float);
-                        value.setFloat(mFloats.at(i2));
-                        break;
-                }
-
-                locals.mVariables.emplace_back(names[i2], value);
-            }
+            const auto& names = declarations.get(type);
+            for (size_t i = 0; i < names.size(); ++i)
+                if (names[i].empty() || declarations.getType(names[i]) != type
+                    || declarations.getIndex(names[i]) != static_cast<int>(i))
+                    throw std::invalid_argument("Invalid local declaration name");
         }
 
+        auto variables = locals.mVariables;
+        for (char type : { 's', 'l', 'f' })
+        {
+            const auto& names = declarations.get(type);
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                ESM::Variant value;
+                switch (type)
+                {
+                    case 's':
+                        value.setType(ESM::VT_Int);
+                        value.setInteger(mShorts[i]);
+                        break;
+                    case 'l':
+                        value.setType(ESM::VT_Int);
+                        value.setInteger(mLongs[i]);
+                        break;
+                    case 'f':
+                        value.setType(ESM::VT_Float);
+                        value.setFloat(mFloats[i]);
+                        break;
+                }
+                variables.emplace_back(names[i], value);
+            }
+        }
+        locals.mVariables.swap(variables);
         return true;
     }
 

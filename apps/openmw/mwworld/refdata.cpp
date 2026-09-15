@@ -1,6 +1,7 @@
 #include "refdata.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <stdexcept>
 
 #include <components/esm3/objectstate.hpp>
@@ -147,13 +148,40 @@ namespace MWWorld
 
     void RefData::write(ESM::ObjectState& objectState, const ESM::RefId& scriptId) const
     {
-        objectState.mHasLocals = mLocals.write(objectState.mLocals, scriptId);
+        ESM::Locals locals;
+        const bool hasLocals = mLocals.write(locals, scriptId);
+        write(objectState, std::move(locals), hasLocals);
+    }
+
+    void RefData::write(ESM::ObjectState& objectState, const Compiler::Locals& declarations) const
+    {
+        ESM::Locals locals;
+        const bool hasLocals = mLocals.write(locals, declarations);
+        write(objectState, std::move(locals), hasLocals);
+    }
+
+    void RefData::write(ESM::ObjectState& objectState, ESM::Locals&& locals, bool hasLocals) const
+    {
+        // Preserve stock append semantics and unrelated/derived ObjectState
+        // fields. No caller field changes until all allocating work succeeds.
+        if (hasLocals && !objectState.mLocals.mVariables.empty())
+        {
+            auto variables = objectState.mLocals.mVariables;
+            variables.insert(variables.end(), std::make_move_iterator(locals.mVariables.begin()),
+                std::make_move_iterator(locals.mVariables.end()));
+            locals.mVariables.swap(variables);
+        }
+        auto animation = mAnimationState;
+        static_assert(noexcept(objectState.mLocals.mVariables.swap(locals.mVariables)));
+        static_assert(noexcept(objectState.mAnimationState.mScriptedAnims.swap(animation.mScriptedAnims)));
+        if (hasLocals)
+            objectState.mLocals.mVariables.swap(locals.mVariables);
+        objectState.mAnimationState.mScriptedAnims.swap(animation.mScriptedAnims);
+        objectState.mHasLocals = hasLocals;
 
         objectState.mEnabled = mEnabled;
         objectState.mPosition = mPosition;
         objectState.mFlags = mFlags;
-
-        objectState.mAnimationState = mAnimationState;
     }
 
     RefData& RefData::operator=(const RefData& refData)

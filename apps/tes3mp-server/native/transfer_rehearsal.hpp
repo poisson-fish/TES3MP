@@ -63,6 +63,7 @@ namespace MWWorld::Testing
     void checkTransferRehearsal(const ESMStore& content);
     void checkTransferRehearsalAllocations(const ESMStore& content);
     void checkTransferPreparationAllocations(const ESMStore& content);
+    void checkTransferSerialization(const ESMStore& content);
 }
 
 #endif
