@@ -202,6 +202,144 @@ namespace MWWorld::Testing
         return pair;
     }
 
+    bool DisposableTransferRehearsal::commit(
+        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestSink& sink)
+    {
+        Allocations::InPhase phase(Allocations::Phase::Validation);
+        if (mActive)
+            throw std::invalid_argument("Disposable rehearsal already active");
+        if (!sink || &mRemoval.mWorldModel != &mModel || &mDestinationAdd.mWorldModel != &mModel
+            || &mRemoval.mLocalScripts != &mSourceScripts
+            || (mDestinationAdd.mLocalScripts != &mSourceScripts
+                && mDestinationAdd.mLocalScripts != &mDestinationScripts))
+            throw std::invalid_argument("Disposable commit sink or service mismatch");
+        mActive = true;
+        struct Active
+        {
+            bool& mValue;
+            ~Active() { mValue = false; }
+        } active{ mActive };
+        // Destroy the consumed state before leaving the measured phase/active
+        // guard, including its private iterators, services and old inventory nodes.
+        auto pair = std::move(input);
+        SerializedPair saved;
+        serializePair(*this, pair, declarations, saved); // Full validation before storage reads.
+
+        phase.set(Allocations::Phase::Setup);
+        auto& source = const_cast<PreparedContainerTransfer::MiscList&>(pair.getSourceStorage());
+        auto& destination = const_cast<PreparedContainerTransfer::MiscList&>(pair.getDestinationStorage());
+        auto& sourceScripts = const_cast<LocalScripts::PreparedStorage&>(pair.getSourceScriptStorage());
+        auto& destinationScripts = const_cast<LocalScripts::PreparedStorage&>(pair.getDestinationScriptStorage());
+        auto& registry = const_cast<PtrRegistry::PreparedStorage&>(pair.getRegistryStorage());
+        auto& liveRegistry = mModel.mPtrRegistry;
+        auto& destinationService = *mDestinationAdd.mLocalScripts;
+        const bool shared = &sourceScripts == &destinationScripts;
+        const auto selection = [](ContainerStore& store, auto& list, const ConstPtr& selected) {
+            for (auto it = list.begin(); it != list.end(); ++it)
+                if (&*it == selected.mRef)
+                    return ContainerStoreIterator(&store, it);
+            return store.end();
+        };
+        const auto sourceSelection = selection(mSource, source, pair.getRelocation().mSourceSelection);
+        const auto destinationSelection
+            = selection(mDestination, destination, pair.getRelocation().mDestinationSelection);
+        const auto cursor = [](auto& list, size_t position) {
+            using Iterator = decltype(list.begin());
+            return position == list.size() ? std::optional<Iterator>()
+                                           : std::optional<Iterator>(std::next(list.begin(), position));
+        };
+        const auto sourceCursor = cursor(sourceScripts.mEntries, pair.getSourceScripts().mCursor);
+        const auto destinationCursor = cursor(destinationScripts.mEntries, pair.getDestinationScripts().mCursor);
+        const auto revision = registry.mBindings.mRevision;
+        const auto counter = registry.mBindings.mLastGenerated;
+
+        phase.set(Allocations::Phase::Revalidation);
+        if (!mSource.validateTransfer(pair, mDestination, mRemoval, mDestinationAdd).isComplete())
+            throw std::invalid_argument("Disposable commit requires complete resolution");
+        // No pair readers/validators are called after this point. Assign IDs only
+        // to owned nodes while still detached, so even a throwing CellRef setter
+        // or rejecting sink cannot mutate/deregister anything in the fixture.
+        const auto identities = [](auto& nodes, const auto& ids) {
+            size_t i = 0;
+            for (auto& node : nodes)
+                node.mRef.setRefNum(ids[i++]);
+        };
+        identities(source, saved.mSource.mProposedIdentities);
+        identities(destination, saved.mDestination.mProposedIdentities);
+
+        phase.set(Allocations::Phase::Persistence);
+        if (!sink(saved))
+            return false;
+
+        // Synchronous acceptance is the last fallible call. No callbacks,
+        // validation, Ptr construction, identity generation or effect dispatch.
+        const auto install = [&]() noexcept {
+            phase.set(Allocations::Phase::Installation);
+            for (auto* list : { &source, &destination })
+                for (auto& node : *list)
+                    node.mWorldModel = &mModel;
+            static_assert(noexcept(source.swap(mSource.mLists.mMiscItems.mList)));
+            mSource.mLists.mMiscItems.mList.swap(source);
+            mDestination.mLists.mMiscItems.mList.swap(destination);
+            // Stock iterator assignment only copies fields, weak witnesses and
+            // list iterators; selected nodes and receiving end owners are staged.
+            mSource.mSelectedEnchantItem = sourceSelection;
+            mDestination.mSelectedEnchantItem = destinationSelection;
+            for (auto* store : { &mSource, &mDestination })
+            {
+                store->mRechargingItems.clear();
+                store->mWeightUpToDate = store->mRechargingItemsUpToDate = false;
+                store->mModified = true;
+            }
+            static_assert(noexcept(mSourceScripts.mScripts.swap(sourceScripts.mEntries)));
+            mSourceScripts.mScripts.swap(sourceScripts.mEntries);
+            // list::swap need not preserve end iterators. End is a staged logical
+            // position, materialized from the receiving list after its swap.
+            static_assert(noexcept(mSourceScripts.mScripts.end()));
+            mSourceScripts.mIter = sourceCursor ? *sourceCursor : mSourceScripts.mScripts.end();
+            if (!shared)
+            {
+                destinationService.mScripts.swap(destinationScripts.mEntries);
+                destinationService.mIter = destinationCursor ? *destinationCursor : destinationService.mScripts.end();
+            }
+            static_assert(noexcept(liveRegistry.mIndex.swap(registry.mIndex)));
+            liveRegistry.mIndex.swap(registry.mIndex);
+            liveRegistry.mRevision = revision;
+            liveRegistry.mLastGenerated = counter;
+
+            phase.set(Allocations::Phase::Retirement);
+            // Old nodes now belong to the consumed pair. Detach them before its
+            // ordered teardown so destructors never touch the installed registry.
+            for (auto* list : { &source, &destination })
+                for (auto& node : *list)
+                    node.mWorldModel = nullptr;
+        };
+        install();
+        return true;
+    }
+
+    void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
+        const Compiler::Locals& declarations, SerializedPair& output)
+    {
+        if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
+                .isComplete())
+            throw std::invalid_argument("ObjectState serialization requires complete resolution");
+        SerializedPair staged;
+        const auto serialize = [&](const auto& storage, const auto& views, SerializedInventory& inventory) {
+            serializeInventory(
+                storage,
+                [&](size_t i) {
+                    const auto id = views.at(i).mIdentity;
+                    return id.isSet() ? id : pair.getDestinationIdentity();
+                },
+                declarations, inventory);
+        };
+        serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
+        serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
+        output.mSource.swap(staged.mSource);
+        output.mDestination.swap(staged.mDestination);
+    }
+
     const PreparedContainerTransfer::MiscList& DisposableTransferRehearsal::sourceStorage() const
     {
         return mSource.mLists.mMiscItems.mList;

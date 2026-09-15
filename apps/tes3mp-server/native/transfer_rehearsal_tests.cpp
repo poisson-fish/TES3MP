@@ -346,68 +346,6 @@ namespace MWWorld::Testing
             return std::tuple{ output.data(), output.capacity(), states };
         }
 
-        // Owned test output only: these associations never become node RefNums.
-        // No borrowed Ptr, registry key to follow, or production persistence API.
-        struct SerializedInventory
-        {
-            std::vector<ESM::ObjectState> mObjects;
-            std::vector<ESM::RefNum> mProposedIdentities;
-
-            void swap(SerializedInventory& other) noexcept
-            {
-                static_assert(noexcept(mObjects.swap(other.mObjects)));
-                static_assert(noexcept(mProposedIdentities.swap(other.mProposedIdentities)));
-                mObjects.swap(other.mObjects);
-                mProposedIdentities.swap(other.mProposedIdentities);
-            }
-        };
-
-        struct SerializedPair
-        {
-            SerializedInventory mSource, mDestination;
-        };
-
-        template <class Identity>
-        void serializeInventory(const PreparedContainerTransfer::MiscList& storage, Identity identity,
-            const Compiler::Locals& declarations, SerializedInventory& inventory)
-        {
-            inventory.mObjects.reserve(storage.size());
-            inventory.mProposedIdentities.reserve(storage.size());
-            size_t i = 0;
-            for (const auto& node : storage)
-            {
-                inventory.mProposedIdentities.push_back(identity(i++));
-                inventory.mObjects.emplace_back();
-                auto& object = inventory.mObjects.back();
-                object.blank();
-                node.mRef.writeState(object);
-                node.mData.write(object, declarations);
-                object.mHasCustomState = false;
-            }
-        }
-
-        void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
-            const Compiler::Locals& declarations, SerializedPair& output)
-        {
-            if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
-                    .isComplete())
-                throw std::invalid_argument("ObjectState serialization requires complete resolution");
-            SerializedPair staged;
-            const auto serialize = [&](const auto& storage, const auto& views, SerializedInventory& inventory) {
-                serializeInventory(
-                    storage,
-                    [&](size_t i) {
-                        const auto id = views.at(i).mIdentity;
-                        return id.isSet() ? id : pair.getDestinationIdentity();
-                    },
-                    declarations, inventory);
-            };
-            serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
-            serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
-            output.mSource.swap(staged.mSource);
-            output.mDestination.swap(staged.mDestination);
-        }
-
         // Disposable test-only composition, with exactly the stock MISC list type.
         // Published nodes are read-only and have no WorldModel or assigned identity.
         // Supplied records outlive this storage. No registry/script-service rebuild,
@@ -1007,7 +945,7 @@ namespace MWWorld::Testing
             return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination) };
         }
 
-        RestoredPair expectedRestoration(const PreparedContainerTransfer& pair)
+        RestoredPair expectedRestoration(const PreparedContainerTransfer& pair, bool serialized = true)
         {
             RestoredPair result;
             const auto copy = [&](const auto& storage, const auto& views, RestoredInventory& inventory) {
@@ -1018,7 +956,8 @@ namespace MWWorld::Testing
                     expected.mRef = node.mRef;
                     expected.mData = node.mData.copyForContainerTransfer();
                     // This transient engine flag is deliberately absent from ObjectState.
-                    expected.mData.mPhysicsPostponed = false;
+                    if (serialized)
+                        expected.mData.mPhysicsPostponed = false;
                     const auto id = views[i++].mIdentity;
                     inventory.mProposedIdentities.push_back(id.isSet() ? id : pair.getDestinationIdentity());
                 }
@@ -1678,6 +1617,336 @@ namespace MWWorld::Testing
             return allocations;
         }
 
+        template <class Make, class Incomplete, class Verify, class Unrelated>
+        size_t checkCommitCase(std::unique_ptr<DisposableTransferRehearsal>& owner, Make make, Incomplete incomplete,
+            Verify verifyOriginal, Unrelated verifyUnrelated, const RestoreContent& content, size_t failAt,
+            size_t allocationCount)
+        {
+            using namespace Allocations;
+            using Pair = PreparedContainerTransfer;
+            using Fixture = DisposableTransferRehearsal;
+            auto& fixture = *owner;
+            auto persisted = std::make_unique<SerializedPair>(pairOutputSentinel<true>());
+            const auto priorOutput = pairOutputState(*persisted);
+            int calls = 0, accepted = 0;
+            // Stage a full independent sink copy. A failed copy, false return or
+            // throw never publishes an acceptance, just like a synchronous sink.
+            bool accept = failAt != 0;
+            const Fixture::TestSink sink = [&](const SerializedPair& saved) {
+                ++calls;
+                auto staged = std::make_unique<SerializedPair>(saved);
+                if (!accept)
+                    return false;
+                persisted.swap(staged);
+                ++accepted;
+                return true;
+            };
+            Trace measured;
+            bool caught = false, committed = false;
+            {
+                Observe observe(measured, failAt);
+                InPhase phase(Phase::Preparation);
+                try
+                {
+                    committed = fixture.commit(make(), content.mDeclarations, sink);
+                }
+                catch (const std::bad_alloc&)
+                {
+                    caught = true;
+                }
+                if (committed)
+                {
+                    // The ordinal immediately beyond all pre-acceptance work
+                    // must never fire, even during complete successful cleanup.
+                    persisted.reset();
+                    owner.reset();
+                }
+            }
+            require(measured.mOutstanding == 0 && measured.mTrackingOverflow == 0,
+                "commit leaked an observed allocation or overflowed cleanup tracking");
+            require(measured.allocations(Phase::Installation) == 0 && measured.allocations(Phase::Retirement) == 0,
+                "accepted commit allocated during installation/retirement");
+            if (failAt > allocationCount && allocationCount)
+            {
+                require(committed && !caught && calls == 1 && accepted == 1 && measured.mFailures == 0
+                        && measured.mTotal == allocationCount && measured.visits(Phase::Installation) == 1
+                        && measured.visits(Phase::Retirement) == 1,
+                    "post-acceptance allocation boundary or fixture cleanup failed");
+                verifyUnrelated();
+                return measured.mTotal;
+            }
+            require(!committed && accepted == 0 && pairOutputState(*persisted) == priorOutput,
+                "failed commit accepted or changed prior sink output");
+            require(failAt ? caught && measured.mFailures == 1 && measured.mTotal == failAt
+                           : !caught && calls == 1 && measured.mFailures == 0,
+                "commit missed an allocation failure or allocated during unwinding");
+            require(measured.visits(Phase::Installation) == 0 && measured.visits(Phase::Retirement) == 0,
+                "rejected commit reached installation");
+            verifyOriginal();
+            if (failAt)
+            {
+                // Retry on these exact preserved stores/services, accept, then
+                // destroy all newly installed state inside allocation tracking.
+                calls = accepted = 0;
+                Trace retry;
+                {
+                    Observe observe(retry, allocationCount + 1);
+                    InPhase phase(Phase::Preparation);
+                    committed = fixture.commit(make(), content.mDeclarations, sink);
+                    persisted.reset();
+                    owner.reset();
+                }
+                require(committed && calls == 1 && accepted == 1 && retry.mTotal == allocationCount
+                        && retry.mFailures == 0 && retry.mOutstanding == 0 && retry.mTrackingOverflow == 0
+                        && retry.allocations(Phase::Installation) == 0 && retry.allocations(Phase::Retirement) == 0
+                        && retry.visits(Phase::Installation) == 1 && retry.visits(Phase::Retirement) == 1,
+                    "successful commit retry or complete cleanup failed");
+                verifyUnrelated();
+                return measured.mTotal;
+            }
+            require(measured.allocations(Phase::Preparation) > 0 && measured.allocations(Phase::Validation) > 0
+                    && measured.allocations(Phase::Revalidation) > 0 && measured.allocations(Phase::Persistence) > 0,
+                "commit allocation coverage missed preparation/validation/save/sink");
+
+            const auto reject = [&](Pair pair) {
+                const auto before = snapshot(fixture);
+                const auto nodes = ownedNodes(pair);
+                bool rejected = false, called = false;
+                try
+                {
+                    fixture.commit(std::move(pair), content.mDeclarations, [&](const SerializedPair&) {
+                        called = true;
+                        return true;
+                    });
+                }
+                catch (const std::invalid_argument&)
+                {
+                    rejected = true;
+                }
+                require(rejected && !called && snapshot(fixture) == before,
+                    "invalid commit reached sink or changed fixture");
+                requireDiscarded(nodes);
+            };
+            reject(incomplete());
+            auto invalid = make();
+            ++const_cast<Pair::ResolutionCompleteness&>(invalid.getResolutionCompleteness()).mRegistryEntries;
+            reject(std::move(invalid));
+            invalid = make();
+            ++const_cast<Pair::IteratorBindings&>(invalid.getIteratorBindings()).mCount;
+            reject(std::move(invalid));
+            invalid = make();
+            ++const_cast<PtrRegistry::Snapshot&>(invalid.getRegistryStorage().getBindings()).mRevision;
+            reject(std::move(invalid));
+            invalid = make();
+            const_cast<CellRef&>(invalid.getSourceStorage().front().mRef).setCount(99);
+            reject(std::move(invalid));
+            const auto reconstruct = [](auto& node) {
+                auto replacement = std::move(node);
+                std::destroy_at(&node);
+                std::construct_at(&node, std::move(replacement));
+            };
+            invalid = make();
+            reconstruct(const_cast<Pair::MiscList&>(invalid.getSourceStorage()).back());
+            reject(std::move(invalid));
+            invalid = make();
+            if (!invalid.getSourceScriptStorage().getEntries().empty())
+            {
+                reconstruct(
+                    const_cast<LocalScripts::PreparedStorage::Entries&>(invalid.getSourceScriptStorage().getEntries())
+                        .front());
+                reject(std::move(invalid));
+            }
+            // Mutate current witnesses, not saved raw addresses/iterators.
+            invalid = make();
+            auto& original = const_cast<CellRef&>(fixture.sourceStorage().front().mRef);
+            const auto originalRef = original;
+            original.setCount(3);
+            reject(std::move(invalid));
+            original = originalRef;
+            invalid = make();
+            const auto counter = fixture.mModel.getLastGeneratedRefNum();
+            auto changedCounter = counter;
+            ++changedCounter.mIndex;
+            fixture.mModel.setLastGeneratedRefNum(changedCounter);
+            reject(std::move(invalid));
+            fixture.mModel.setLastGeneratedRefNum(counter);
+            verifyOriginal();
+
+            for (int mode : { 0, 1, 2 })
+            {
+                auto pair = make();
+                const auto nodes = ownedNodes(pair);
+                const auto* bindings = &pair.getIteratorBindings();
+                const auto* contexts = &pair.getContextBindings();
+                const auto* collection = &pair.getResolvedStoreBindings();
+                const auto* completeness = &pair.getResolutionCompleteness();
+                bool reached = false, thrown = false;
+                try
+                {
+                    require(
+                        !fixture.commit(std::move(pair), content.mDeclarations,
+                            [&](const SerializedPair& saved) {
+                                reached = true;
+                                verifyOriginal(); // Every current fixture byte/storage is still unchanged at the sink.
+                                require(completeness->mIterators == bindings && completeness->mContexts == contexts
+                                        && completeness->mResolvedStores == collection,
+                                    "commit replaced protected bindings before sink");
+                                std::unique_ptr<const RestoredPair> restored;
+                                restorePair(saved, content, restored);
+                                if (mode == 1)
+                                    throw Failure{};
+                                if (mode == 2)
+                                    throw std::bad_alloc();
+                                return false;
+                            }),
+                        "declining sink committed");
+                }
+                catch (const Failure&)
+                {
+                    thrown = mode == 1;
+                }
+                catch (const std::bad_alloc&)
+                {
+                    thrown = mode == 2;
+                }
+                require(reached && (mode == 0 || thrown), "commit swallowed sink exception");
+                requireDiscarded(nodes);
+                verifyOriginal();
+                // The ordinary rehearsal remains usable after each sink failure.
+                fixture.rehearse(make());
+                verifyOriginal();
+            }
+
+            auto pair = make();
+            auto stale = make(); // Retains original lifetime/storage witnesses through retirement.
+            const auto expected = expectedRestoration(pair, false);
+            const auto restoreExpected = expectedRestoration(pair);
+            SerializedPair expectedSave;
+            serializePair(fixture, pair, content.mDeclarations, expectedSave);
+            const auto expectedRegistry = pair.getRelocation().mRegistry;
+            const auto expectedScripts = pair.getRelocation().mSourceScripts;
+            const auto expectedDestinationScripts = pair.getRelocation().mDestinationScripts.value_or(expectedScripts);
+            const auto sourceSelection = pair.getRelocation().mSourceSelection;
+            const auto destinationSelection = pair.getRelocation().mDestinationSelection;
+            const auto sourceCursor = pair.getSourceScriptStorage().getCursor();
+            const auto destinationCursor = pair.getDestinationScriptStorage().getCursor();
+            const auto nodes = ownedNodes(pair);
+            std::vector<ConstPtr> oldNodes;
+            for (const auto* list : { &fixture.sourceStorage(), &fixture.destinationStorage() })
+                for (const auto& node : *list)
+                    oldNodes.emplace_back(&node);
+            const auto otherBefore = fixture.cacheState(fixture.mOther);
+            const auto sourceCache = fixture.cacheState(fixture.mSource),
+                       destinationCache = fixture.cacheState(fixture.mDestination);
+            const auto otherState = nodeState(ConstPtr(&fixture.otherStorage().front()));
+            const int notifications = fixture.mNotifications;
+            calls = accepted = 0;
+            accept = true;
+            require(fixture.commit(std::move(pair), content.mDeclarations,
+                        [&](const SerializedPair& saved) {
+                            verifyOriginal();
+                            checkSavedValues(saved, expectedSave);
+                            return sink(saved);
+                        }),
+                "accepting sink did not commit");
+            require(calls == 1 && accepted == 1, "sink acceptance repeated");
+            requireDiscarded(oldNodes);
+            require(fixture.mModel.snapshotPtrRegistry() == expectedRegistry
+                    && fixture.mSourceScripts.snapshot() == expectedScripts
+                    && fixture.mDestinationAdd.mLocalScripts->snapshot() == expectedDestinationScripts
+                    && fixture.scriptCursor(fixture.mSourceScripts) == sourceCursor
+                    && fixture.scriptCursor(*fixture.mDestinationAdd.mLocalScripts) == destinationCursor,
+                "committed registry/scripts/cursors differ from intended engine result");
+            const auto checkInventory = [&](const auto& storage, const auto& wanted, const ContainerStore& target) {
+                require(storage.size() == wanted.mNodes.size(), "commit changed raw membership");
+                auto next = wanted.mNodes.begin();
+                size_t i = 0;
+                for (const auto& node : storage)
+                {
+                    const auto& value = *next++;
+                    const auto id = wanted.mProposedIdentities[i++];
+                    require(node.mBase == value.mBase && node.mRef.getRefNum() == id
+                            && node.mWorldModel == &fixture.mModel && fixture.mModel.getPtr(id).mRef == &node
+                            && fixture.mModel.getPtr(id).mContainerStore == &target
+                            && node.mData.matchesContainerTransferState(value.mData)
+                            && localValues(node.mData.getLocals()) == localValues(value.mData.getLocals()),
+                        "commit lost owned engine values or registry ownership");
+                }
+            };
+            checkInventory(fixture.sourceStorage(), expected.mSource, fixture.mSource);
+            checkInventory(fixture.destinationStorage(), expected.mDestination, fixture.mDestination);
+            const auto selected = [](const ContainerStore& store) {
+                const auto it = store.getSelectedEnchantItem();
+                return it == store.end() ? ConstPtr() : *it;
+            };
+            require(
+                selected(fixture.mSource) == sourceSelection && selected(fixture.mDestination) == destinationSelection,
+                "commit lost selection/end/dormant position");
+            const auto checkCache = [&](const ContainerStore& store, const auto& before) {
+                const auto after = fixture.cacheState(store);
+                require(!std::get<1>(after) && !std::get<2>(after) && std::get<3>(after)
+                        && std::get<4>(after) == std::get<4>(before) && std::get<5>(after) == std::get<5>(before)
+                        && std::get<6>(after).empty() && std::get<9>(after) == std::get<9>(before)
+                        && std::get<10>(after) == std::get<10>(before),
+                    "commit lost storage/seed/listener/resolution or retained stale caches");
+            };
+            checkCache(fixture.mSource, sourceCache);
+            checkCache(fixture.mDestination, destinationCache);
+            require(fixture.cacheState(fixture.mOther) == otherBefore
+                    && nodeState(ConstPtr(&fixture.otherStorage().front())) == otherState
+                    && fixture.mNotifications == notifications,
+                "commit changed supplied store or emitted notification");
+            verifyUnrelated();
+            // Save the actual installed engine state in the same detached format.
+            SerializedPair installed;
+            const auto saveInstalled = [&](const auto& storage, SerializedInventory& output) {
+                std::vector<ESM::RefNum> ids;
+                for (const auto& node : storage)
+                    ids.push_back(node.mRef.getRefNum());
+                serializeInventory(storage, [&](size_t i) { return ids.at(i); }, content.mDeclarations, output);
+                for (auto& object : output.mObjects)
+                    object.mRef.mRefNum = {};
+            };
+            saveInstalled(fixture.sourceStorage(), installed.mSource);
+            saveInstalled(fixture.destinationStorage(), installed.mDestination);
+            checkSavedValues(installed, *persisted);
+            std::unique_ptr<const RestoredPair> restored;
+            restorePair(*persisted, content, restored);
+            checkRestored(*restored, restoreExpected);
+            SerializedPair resaved;
+            serializePair(*restored, content.mDeclarations, resaved);
+            checkSavedValues(resaved, installed);
+            // A moved-from pair cannot even be read to collect owned witnesses.
+            bool reused = false;
+            const auto committedBefore = snapshot(fixture);
+            try
+            {
+                fixture.commit(std::move(pair), content.mDeclarations, sink);
+            }
+            catch (const std::invalid_argument&)
+            {
+                reused = true;
+            }
+            require(reused && calls == 1 && snapshot(fixture) == committedBefore,
+                "consumed pair reuse reached sink or changed committed state");
+            // No saved reference/iterator may be followed after old-node destruction.
+            bool staleRejected = false;
+            try
+            {
+                fixture.commit(std::move(stale), content.mDeclarations, sink);
+            }
+            catch (const std::invalid_argument&)
+            {
+                staleRejected = true;
+            }
+            require(staleRejected && calls == 1 && snapshot(fixture) == committedBefore,
+                "retired witness accepted or changed committed state");
+            owner.reset();
+            requireDiscarded(nodes);
+            verifyUnrelated();
+            return measured.mTotal;
+        }
+
         template <class Make, class Verify>
         Allocations::Trace checkPreparationAllocationFailures(
             DisposableTransferRehearsal& fixture, ConsumerCopyTrace& copies, Make make, Verify verify)
@@ -1868,7 +2137,8 @@ namespace MWWorld::Testing
         Serialization,
         ObjectState,
         LocalsRestore,
-        Restore
+        Restore,
+        Commit
     };
 
     static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
@@ -1877,7 +2147,8 @@ namespace MWWorld::Testing
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
         const bool localsRestore = allocationCheck == AllocationCheck::LocalsRestore;
-        const bool inventoryRestore = allocationCheck == AllocationCheck::Restore;
+        const bool commit = allocationCheck == AllocationCheck::Commit;
+        const bool inventoryRestore = allocationCheck == AllocationCheck::Restore || commit;
         const bool serialization = allocationCheck == AllocationCheck::Serialization
             || allocationCheck == AllocationCheck::ObjectState || localsRestore || inventoryRestore;
         MWClass::registerClasses();
@@ -1932,449 +2203,521 @@ namespace MWWorld::Testing
                     for (int quantity : { 1, 4 })
                         for (int cursorPosition : { 0, 1, 99 })
                         {
-                            ConsumerCopyTrace copies;
-                            Rehearsal fixture(store, readers, scripts, ownerId, shared);
-                            if (allocationCheck == AllocationCheck::Preparation)
-                                fixture.mRemoval.mInventoryUpdated = AllocatingConsumer(copies, fixture.mNotifications);
-                            auto& source = fixture.mSource;
-                            auto& destination = fixture.mDestination;
-                            const auto item
-                                = *source.add(scriptedItem ? scripted.getPtr() : plain.getPtr(), 4, fixture.mSourceAdd);
-                            if (stack)
-                                destination.add(
-                                    scriptedItem ? scripted.getPtr() : plain.getPtr(), 7, fixture.mDestinationAdd);
-                            ManualRef dormantItem(store, plainId);
-                            dormantItem.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId("dormant_soul"));
-                            const auto dormantIterator = source.add(dormantItem.getPtr(), 2, fixture.mSourceAdd);
-                            const auto dormant = *dormantIterator;
-                            require(dormant != item, "dormant fixture merged with transfer item");
-                            dormant.getCellRef() = dormant.getCellRef().copyWithCount(0);
-                            item.getRefData().onActivate();
-                            item.getRefData().activate();
-                            if (scriptedItem)
-                                item.getRefData().getLocals().mLongs.at(0) = 27;
-                            source.setSelectedEnchantItem(cursorPosition == 1 ? dormantIterator : source.begin());
-                            destination.setSelectedEnchantItem(destination.begin());
-                            Ptr destinationDormant;
-                            if (cursorPosition == 1)
-                            {
-                                const auto selected = destination.add(dormantItem.getPtr(), 2, fixture.mDestinationAdd);
-                                selected->getCellRef() = selected->getCellRef().copyWithCount(0);
-                                destination.setSelectedEnchantItem(selected);
-                                destinationDormant = *selected;
-                            }
-                            // Non-mutated supplied store resolves unrelated registry
-                            // and script entries, including dormant selection.
-                            const auto other = fixture.mOther.add(
-                                scriptedItem ? scripted.getPtr() : plain.getPtr(), 3, fixture.mOtherAdd);
-                            fixture.mOther.setSelectedEnchantItem(other);
-                            other->getCellRef() = other->getCellRef().copyWithCount(0);
-                            if (serialization)
-                            {
-                                const auto decorate = [&](const Ptr& ptr) {
-                                    if (allocationCheck == AllocationCheck::ObjectState || localsRestore
-                                        || inventoryRestore)
-                                        ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
-                                    auto& data = ptr.getRefData();
-                                    data.disable();
-                                    data.mPhysicsPostponed = true;
-                                    data.setPosition({ { 11.5f, -2.25f, 300.f }, { 0.125f, -0.5f, 1.75f } });
-                                    data.onActivate();
-                                    data.activate();
-                                    auto& locals = data.getLocals();
-                                    if (!locals.getScriptId().empty())
-                                    {
-                                        locals.mShorts = { 1, -19 };
-                                        locals.mLongs = { 27, -123456 };
-                                        locals.mFloats = { -1.25f, 6.5f };
-                                    }
-                                    auto& animations = data.getAnimationState().mScriptedAnims;
-                                    animations.resize(2);
-                                    animations[0].mGroup = "serialization_animation_with_allocating_name";
-                                    animations[0].mTime = 3.75f;
-                                    animations[0].mAbsolute = true;
-                                    animations[0].mLoopCount = 0x100000001ull;
-                                    animations[1].mGroup = "idle";
-                                    animations[1].mTime = -0.5f;
-                                    animations[1].mLoopCount = 3;
-                                    if (inventoryRestore && cursorPosition != 0)
-                                    {
-                                        data.setPosition({ { -0.f, std::numeric_limits<float>::denorm_min(), 300.f },
-                                            { 0.f, -0.f, std::numeric_limits<float>::lowest() } });
-                                        if (cursorPosition == 99)
-                                        {
-                                            data.enable();
-                                            data.activateByScript();
-                                            ptr.getCellRef()
-                                                = ptr.getCellRef().copyWithCount(-ptr.getCellRef().getCount(false));
-                                        }
-                                        else
-                                            data.onActivate();
+                            const auto run = [&](size_t commitFailAt, size_t commitAllocations) -> size_t {
+                                ConsumerCopyTrace copies;
+                                auto fixtureOwner
+                                    = std::make_unique<Rehearsal>(store, readers, scripts, ownerId, shared);
+                                auto& fixture = *fixtureOwner;
+                                if (allocationCheck == AllocationCheck::Preparation)
+                                    fixture.mRemoval.mInventoryUpdated
+                                        = AllocatingConsumer(copies, fixture.mNotifications);
+                                auto& source = fixture.mSource;
+                                auto& destination = fixture.mDestination;
+                                const auto item = *source.add(
+                                    scriptedItem ? scripted.getPtr() : plain.getPtr(), 4, fixture.mSourceAdd);
+                                if (stack)
+                                    destination.add(
+                                        scriptedItem ? scripted.getPtr() : plain.getPtr(), 7, fixture.mDestinationAdd);
+                                ManualRef dormantItem(store, plainId);
+                                dormantItem.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId("dormant_soul"));
+                                const auto dormantIterator = source.add(dormantItem.getPtr(), 2, fixture.mSourceAdd);
+                                const auto dormant = *dormantIterator;
+                                require(dormant != item, "dormant fixture merged with transfer item");
+                                dormant.getCellRef() = dormant.getCellRef().copyWithCount(0);
+                                item.getRefData().onActivate();
+                                item.getRefData().activate();
+                                if (scriptedItem)
+                                    item.getRefData().getLocals().mLongs.at(0) = 27;
+                                source.setSelectedEnchantItem(cursorPosition == 1 ? dormantIterator : source.begin());
+                                destination.setSelectedEnchantItem(destination.begin());
+                                Ptr destinationDormant;
+                                if (cursorPosition == 1)
+                                {
+                                    const auto selected
+                                        = destination.add(dormantItem.getPtr(), 2, fixture.mDestinationAdd);
+                                    selected->getCellRef() = selected->getCellRef().copyWithCount(0);
+                                    destination.setSelectedEnchantItem(selected);
+                                    destinationDormant = *selected;
+                                }
+                                // Non-mutated supplied store resolves unrelated registry
+                                // and script entries, including dormant selection.
+                                const auto other = fixture.mOther.add(
+                                    scriptedItem ? scripted.getPtr() : plain.getPtr(), 3, fixture.mOtherAdd);
+                                fixture.mOther.setSelectedEnchantItem(other);
+                                other->getCellRef() = other->getCellRef().copyWithCount(0);
+                                if (serialization)
+                                {
+                                    const auto decorate = [&](const Ptr& ptr) {
+                                        if (allocationCheck == AllocationCheck::ObjectState || localsRestore
+                                            || inventoryRestore)
+                                            ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
+                                        auto& data = ptr.getRefData();
+                                        data.disable();
+                                        data.mPhysicsPostponed = true;
+                                        data.setPosition({ { 11.5f, -2.25f, 300.f }, { 0.125f, -0.5f, 1.75f } });
+                                        data.onActivate();
+                                        data.activate();
+                                        auto& locals = data.getLocals();
                                         if (!locals.getScriptId().empty())
                                         {
-                                            locals.mShorts = { -32768, 32767 };
-                                            locals.mLongs = { std::numeric_limits<int32_t>::min(),
-                                                std::numeric_limits<int32_t>::max() };
-                                            locals.mFloats = cursorPosition == 99
-                                                ? std::vector<float>{ std::numeric_limits<float>::lowest(),
-                                                      std::numeric_limits<float>::max() }
-                                                : std::vector<float>{ -0.f, std::numeric_limits<float>::denorm_min() };
+                                            locals.mShorts = { 1, -19 };
+                                            locals.mLongs = { 27, -123456 };
+                                            locals.mFloats = { -1.25f, 6.5f };
                                         }
-                                    }
-                                };
-                                decorate(item);
-                                decorate(dormant);
-                                for (auto it = destination.begin(); it != destination.end(); ++it)
-                                    decorate(*it);
-                                if (!destinationDormant.isEmpty())
-                                    decorate(destinationDormant);
-                            }
-                            for (auto* service : { &fixture.mSourceScripts, &fixture.mDestinationScripts })
-                            {
-                                service->startIteration();
-                                std::pair<ESM::RefId, Ptr> entry;
-                                for (int i = 0; i < cursorPosition && service->getNext(entry); ++i)
-                                {
+                                        auto& animations = data.getAnimationState().mScriptedAnims;
+                                        animations.resize(2);
+                                        animations[0].mGroup = "serialization_animation_with_allocating_name";
+                                        animations[0].mTime = 3.75f;
+                                        animations[0].mAbsolute = true;
+                                        animations[0].mLoopCount = 0x100000001ull;
+                                        animations[1].mGroup = "idle";
+                                        animations[1].mTime = -0.5f;
+                                        animations[1].mLoopCount = 3;
+                                        if (inventoryRestore && cursorPosition != 0)
+                                        {
+                                            data.setPosition(
+                                                { { -0.f, std::numeric_limits<float>::denorm_min(), 300.f },
+                                                    { 0.f, -0.f, std::numeric_limits<float>::lowest() } });
+                                            if (cursorPosition == 99)
+                                            {
+                                                data.enable();
+                                                data.activateByScript();
+                                                ptr.getCellRef()
+                                                    = ptr.getCellRef().copyWithCount(-ptr.getCellRef().getCount(false));
+                                            }
+                                            else
+                                                data.onActivate();
+                                            if (!locals.getScriptId().empty())
+                                            {
+                                                locals.mShorts = { -32768, 32767 };
+                                                locals.mLongs = { std::numeric_limits<int32_t>::min(),
+                                                    std::numeric_limits<int32_t>::max() };
+                                                locals.mFloats = cursorPosition == 99
+                                                    ? std::vector<float>{ std::numeric_limits<float>::lowest(),
+                                                          std::numeric_limits<float>::max() }
+                                                    : std::vector<float>{ -0.f,
+                                                          std::numeric_limits<float>::denorm_min() };
+                                            }
+                                        }
+                                    };
+                                    decorate(item);
+                                    decorate(dormant);
+                                    for (auto it = destination.begin(); it != destination.end(); ++it)
+                                        decorate(*it);
+                                    if (!destinationDormant.isEmpty())
+                                        decorate(destinationDormant);
                                 }
-                            }
-                            Listener listener;
-                            source.setContListener(&listener);
-                            destination.setContListener(&listener);
-                            source.getWeight();
-                            destination.getWeight();
-                            const std::array supplied{ ContainerStoreResolution(
-                                fixture.mOther, fixture.mOtherOwner.getPtr()) };
-                            const auto make = [&] {
-                                return source.prepareTransfer(
-                                    item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd, supplied);
-                            };
-                            const auto before = snapshot(fixture);
-                            const auto unrelated = nodeState(*other);
-                            const auto verifyOriginal = [&] {
-                                require(snapshot(fixture) == before,
-                                    "transfer changed original nodes/state/caches/cursors");
-                                require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
-                                    "transfer emitted notifications/scripts or changed unrelated live state");
-                            };
-                            if (serialization)
-                            {
-                                const auto run = [&]<bool ObjectStates>() {
-                                    const auto& declarations = scripts.getLocals(scriptId);
-                                    std::vector<ConstPtr> nodes;
-                                    std::optional<RestoredPair> expected;
-                                    auto output = pairOutputSentinel<ObjectStates>();
-                                    std::optional<decltype(pairOutputState(output))> retained;
+                                for (auto* service : { &fixture.mSourceScripts, &fixture.mDestinationScripts })
+                                {
+                                    service->startIteration();
+                                    std::pair<ESM::RefId, Ptr> entry;
+                                    for (int i = 0; i < cursorPosition && service->getNext(entry); ++i)
                                     {
-                                        auto pair = make();
-                                        nodes = ownedNodes(pair);
-                                        const int sign = inventoryRestore && cursorPosition == 99 ? -1 : 1;
+                                    }
+                                }
+                                Listener listener;
+                                source.setContListener(&listener);
+                                destination.setContListener(&listener);
+                                source.getWeight();
+                                destination.getWeight();
+                                const std::array supplied{ ContainerStoreResolution(
+                                    fixture.mOther, fixture.mOtherOwner.getPtr()) };
+                                const auto make = [&] {
+                                    return source.prepareTransfer(item, quantity, destination, fixture.mRemoval,
+                                        fixture.mDestinationAdd, supplied);
+                                };
+                                const auto before = snapshot(fixture);
+                                const auto unrelated = nodeState(*other);
+                                const auto verifyOriginal = [&] {
+                                    require(snapshot(fixture) == before,
+                                        "transfer changed original nodes/state/caches/cursors");
+                                    require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
+                                        "transfer emitted notifications/scripts or changed unrelated live state");
+                                };
+                                if (commit)
+                                {
+                                    const auto verifyUnrelated = [&] {
+                                        require(
+                                            snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
+                                            "commit affected independent world/listener/scripts");
+                                    };
+                                    const auto incomplete = [&] {
+                                        return source.prepareTransfer(
+                                            item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
+                                    };
+                                    // Check the actual gameplay quantity independently of the serializer.
+                                    {
+                                        const auto pair = make();
+                                        const int sign = cursorPosition == 99 ? -1 : 1;
                                         require(
                                             pair.getSourceItem().getCellRef().getCount(false) == sign * (4 - quantity)
                                                 && pair.getDestinationItem().getCellRef().getCount(false)
                                                     == (!scriptedItem && stack ? sign * (7 + quantity) : quantity),
-                                            "serialization fixture lost full/partial removal or destination count");
-                                        const bool malformed
-                                            = !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0;
-                                        if (!localsRestore && !inventoryRestore)
-                                            totals.mTotal += checkPairSerialization<ObjectStates>(
-                                                fixture, pair, declarations, verifyOriginal, malformed);
-                                        // Rehearsal must retain the same read-only owned values
-                                        // and protected bindings for another serialization.
-                                        pair = fixture.rehearse(std::move(pair));
-                                        serializePair(fixture, pair, declarations, output);
-                                        checkPairOutput(pair, output);
-                                        if (inventoryRestore)
-                                            expected.emplace(expectedRestoration(pair));
+                                            "commit prepared wrong full/partial removal or stack result");
+                                    }
+                                    const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
+                                        store.get<ESM::Miscellaneous>().find(scriptedId) };
+                                    return checkCommitCase(fixtureOwner, make, incomplete, verifyOriginal,
+                                        verifyUnrelated, { bases, script, scripts.getLocals(scriptId) }, commitFailAt,
+                                        commitAllocations);
+                                }
+                                if (serialization)
+                                {
+                                    const auto run = [&]<bool ObjectStates>() {
+                                        const auto& declarations = scripts.getLocals(scriptId);
+                                        std::vector<ConstPtr> nodes;
+                                        std::optional<RestoredPair> expected;
+                                        auto output = pairOutputSentinel<ObjectStates>();
+                                        std::optional<decltype(pairOutputState(output))> retained;
+                                        {
+                                            auto pair = make();
+                                            nodes = ownedNodes(pair);
+                                            const int sign = inventoryRestore && cursorPosition == 99 ? -1 : 1;
+                                            require(pair.getSourceItem().getCellRef().getCount(false)
+                                                        == sign * (4 - quantity)
+                                                    && pair.getDestinationItem().getCellRef().getCount(false)
+                                                        == (!scriptedItem && stack ? sign * (7 + quantity) : quantity),
+                                                "serialization fixture lost full/partial removal or destination count");
+                                            const bool malformed = !shared && scriptedItem && !stack && quantity == 1
+                                                && cursorPosition == 0;
+                                            if (!localsRestore && !inventoryRestore)
+                                                totals.mTotal += checkPairSerialization<ObjectStates>(
+                                                    fixture, pair, declarations, verifyOriginal, malformed);
+                                            // Rehearsal must retain the same read-only owned values
+                                            // and protected bindings for another serialization.
+                                            pair = fixture.rehearse(std::move(pair));
+                                            serializePair(fixture, pair, declarations, output);
+                                            checkPairOutput(pair, output);
+                                            if (inventoryRestore)
+                                                expected.emplace(expectedRestoration(pair));
+                                            require(ownedNodes(pair) == nodes,
+                                                "serialization/rehearsal replaced owned nodes");
+                                            retained = pairOutputState(output);
+                                        }
+                                        requireDiscarded(nodes);
+                                        // Owned values and proposed identities outlive the pair.
                                         require(
-                                            ownedNodes(pair) == nodes, "serialization/rehearsal replaced owned nodes");
-                                        retained = pairOutputState(output);
-                                    }
-                                    requireDiscarded(nodes);
-                                    // Owned values and proposed identities outlive the pair.
-                                    require(pairOutputState(output) == *retained, "discard invalidated owned output");
-                                    verifyOriginal();
-                                    if constexpr (ObjectStates)
-                                    {
-                                        if (inventoryRestore)
+                                            pairOutputState(output) == *retained, "discard invalidated owned output");
+                                        verifyOriginal();
+                                        if constexpr (ObjectStates)
                                         {
-                                            const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
-                                                store.get<ESM::Miscellaneous>().find(scriptedId) };
-                                            totals.mTotal += checkInventoryRestore(output,
-                                                { bases, script, declarations }, *expected, verifyOriginal,
-                                                !shared && scriptedItem && !stack && quantity == 1
-                                                    && cursorPosition == 0,
-                                                localRejections);
-                                            requireDiscarded(nodes);
+                                            if (inventoryRestore)
+                                            {
+                                                const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
+                                                    store.get<ESM::Miscellaneous>().find(scriptedId) };
+                                                totals.mTotal += checkInventoryRestore(output,
+                                                    { bases, script, declarations }, *expected, verifyOriginal,
+                                                    !shared && scriptedItem && !stack && quantity == 1
+                                                        && cursorPosition == 0,
+                                                    localRejections);
+                                                requireDiscarded(nodes);
+                                            }
+                                            if (localsRestore)
+                                            {
+                                                const auto verifyOwned = [&] {
+                                                    require(pairOutputState(output) == *retained,
+                                                        "locals restoration changed caller-owned serialized pair");
+                                                    verifyOriginal();
+                                                };
+                                                // Read only retained owned serialized values, after
+                                                // pair destruction; never follow a key or resolve objects.
+                                                for (const auto* inventory : { &output.mSource, &output.mDestination })
+                                                    for (const auto& object : inventory->mObjects)
+                                                    {
+                                                        if (!object.mHasLocals)
+                                                            continue;
+                                                        MWScript::Locals configured;
+                                                        require(configured.configure(script, scripts),
+                                                            "locals restore fixture did not configure");
+                                                        totals.mTotal += checkLocalRestore(configured, object.mLocals,
+                                                            declarations, verifyOwned, localRejections == 0,
+                                                            localRejections);
+                                                        ++restoredLocals;
+                                                    }
+                                            }
                                         }
-                                        if (localsRestore)
+                                        auto incomplete = source.prepareTransfer(
+                                            item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
+                                        require(!incomplete.getResolutionCompleteness().isComplete(),
+                                            "serialization incomplete fixture resolved extra objects");
+                                        const auto saved = pairOutputState(output);
+                                        bool caught = false;
+                                        try
                                         {
-                                            const auto verifyOwned = [&] {
-                                                require(pairOutputState(output) == *retained,
-                                                    "locals restoration changed caller-owned serialized pair");
-                                                verifyOriginal();
-                                            };
-                                            // Read only retained owned serialized values, after
-                                            // pair destruction; never follow a key or resolve objects.
-                                            for (const auto* inventory : { &output.mSource, &output.mDestination })
-                                                for (const auto& object : inventory->mObjects)
-                                                {
-                                                    if (!object.mHasLocals)
-                                                        continue;
-                                                    MWScript::Locals configured;
-                                                    require(configured.configure(script, scripts),
-                                                        "locals restore fixture did not configure");
-                                                    totals.mTotal
-                                                        += checkLocalRestore(configured, object.mLocals, declarations,
-                                                            verifyOwned, localRejections == 0, localRejections);
-                                                    ++restoredLocals;
-                                                }
+                                            serializePair(fixture, incomplete, declarations, output);
                                         }
-                                    }
-                                    auto incomplete = source.prepareTransfer(
-                                        item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
-                                    require(!incomplete.getResolutionCompleteness().isComplete(),
-                                        "serialization incomplete fixture resolved extra objects");
-                                    const auto saved = pairOutputState(output);
-                                    bool caught = false;
+                                        catch (const std::invalid_argument&)
+                                        {
+                                            caught = true;
+                                        }
+                                        require(caught && pairOutputState(output) == saved,
+                                            "incomplete serialization accepted or changed caller output");
+                                        verifyOriginal();
+                                        auto fresh = make();
+                                        serializePair(fixture, fresh, declarations, output);
+                                        checkPairOutput(fresh, output);
+                                        verifyOriginal();
+                                    };
+                                    if (allocationCheck == AllocationCheck::ObjectState || localsRestore
+                                        || inventoryRestore)
+                                        run.template operator()<true>();
+                                    else
+                                        run.template operator()<false>();
+                                    ++cases;
+                                    return 0;
+                                }
+                                if (allocationFailures)
+                                {
+                                    Allocations::Trace trace;
                                     try
                                     {
-                                        serializePair(fixture, incomplete, declarations, output);
+                                        trace = allocationCheck == AllocationCheck::Preparation
+                                            ? checkPreparationAllocationFailures(fixture, copies, make, verifyOriginal)
+                                            : checkAllocationFailures(fixture, make, verifyOriginal);
                                     }
-                                    catch (const std::invalid_argument&)
+                                    catch (...)
                                     {
-                                        caught = true;
+                                        std::cerr << "Allocation fixture: shared=" << shared
+                                                  << " scripted=" << scriptedItem << " existing=" << stack
+                                                  << " quantity=" << quantity << " cursor=" << cursorPosition << '\n';
+                                        throw;
                                     }
-                                    require(caught && pairOutputState(output) == saved,
-                                        "incomplete serialization accepted or changed caller output");
-                                    verifyOriginal();
-                                    auto fresh = make();
-                                    serializePair(fixture, fresh, declarations, output);
-                                    checkPairOutput(fresh, output);
-                                    verifyOriginal();
-                                };
-                                if (allocationCheck == AllocationCheck::ObjectState || localsRestore
-                                    || inventoryRestore)
-                                    run.template operator()<true>();
-                                else
-                                    run.template operator()<false>();
-                                ++cases;
-                                continue;
-                            }
-                            if (allocationFailures)
-                            {
-                                Allocations::Trace trace;
-                                try
-                                {
-                                    trace = allocationCheck == AllocationCheck::Preparation
-                                        ? checkPreparationAllocationFailures(fixture, copies, make, verifyOriginal)
-                                        : checkAllocationFailures(fixture, make, verifyOriginal);
+                                    ++cases;
+                                    totals.mTotal += trace.mTotal;
+                                    totals.mPeakOutstanding = std::max(totals.mPeakOutstanding, trace.mPeakOutstanding);
+                                    for (size_t i = 0; i < totals.mAllocations.size(); ++i)
+                                        totals.mAllocations[i] += trace.mAllocations[i];
+                                    return 0;
                                 }
-                                catch (...)
-                                {
-                                    std::cerr << "Allocation fixture: shared=" << shared << " scripted=" << scriptedItem
-                                              << " existing=" << stack << " quantity=" << quantity
-                                              << " cursor=" << cursorPosition << '\n';
-                                    throw;
-                                }
-                                ++cases;
-                                totals.mTotal += trace.mTotal;
-                                totals.mPeakOutstanding = std::max(totals.mPeakOutstanding, trace.mPeakOutstanding);
-                                for (size_t i = 0; i < totals.mAllocations.size(); ++i)
-                                    totals.mAllocations[i] += trace.mAllocations[i];
-                                continue;
-                            }
-                            auto decision = make();
-                            require(decision.getResolutionCompleteness().isComplete(), "rehearsal fixture incomplete");
-                            const auto* bindings = &decision.getIteratorBindings();
-                            const auto expectedRegistry = decision.getRelocation().mRegistry;
-                            const auto expectedSourceScripts = decision.getRelocation().mSourceScripts;
-                            const auto expectedDestinationScripts
-                                = shared ? expectedSourceScripts : *decision.getRelocation().mDestinationScripts;
-                            const auto expectedSource = decision.getRelocation().mSource;
-                            const auto expectedDestination = decision.getRelocation().mDestination;
-                            const auto expectedSourceSelection = decision.getRelocation().mSourceSelection;
-                            const auto expectedDestinationSelection = decision.getRelocation().mDestinationSelection;
-                            const auto destinationId = decision.getDestinationIdentity();
-                            std::vector<Stage> stages;
-                            auto restored = fixture.rehearse(std::move(decision), [&](Stage stage) {
-                                stages.push_back(stage);
-                                require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
-                                    "partial rehearsal leaked effects or changed live state");
-                                require(nodeState(*other) == unrelated, "rehearsal changed supplied store node");
-                                if (stage != Stage::Registry)
-                                    return;
-                                require(fixture.mModel.snapshotPtrRegistry() == expectedRegistry,
-                                    "installed registry/revision/counter differ from protected relocation");
-                                require(fixture.mSourceScripts.snapshot() == expectedSourceScripts
-                                        && fixture.mDestinationAdd.mLocalScripts->snapshot()
-                                            == expectedDestinationScripts,
-                                    "installed shared/distinct scripts or cursors differ");
-                                const auto checkInventory = [&](const auto& storage, const auto& expected,
-                                                                ContainerStore& target) {
-                                    require(storage.size() == expected.size(), "installed raw membership differs");
-                                    size_t i = 0;
-                                    for (const auto& node : storage)
-                                    {
-                                        const auto& view = expected[i++];
-                                        const auto id = view.mIdentity.isSet() ? view.mIdentity : destinationId;
-                                        require(&node == view.mItem.mRef && node.mRef.getRefNum() == id
-                                                && node.mWorldModel == &fixture.mModel
-                                                && fixture.mModel.getPtr(id).mRef == &node
-                                                && fixture.mModel.getPtr(id).mContainerStore == &target,
-                                            "installation lost node identity, owner or registry association");
-                                    }
-                                };
-                                checkInventory(fixture.sourceStorage(), expectedSource, source);
-                                checkInventory(fixture.destinationStorage(), expectedDestination, destination);
-                                require(source.count(item.getCellRef().getRefId()) == 4 - quantity
-                                        && destination.count(item.getCellRef().getRefId())
-                                            == (stack ? 7 : 0) + quantity,
-                                    "rehearsal installed wrong transfer quantity");
-                                const auto selected = [](const ContainerStore& container) {
-                                    const auto it = container.getSelectedEnchantItem();
-                                    return it == container.end() ? ConstPtr() : *it;
-                                };
-                                require(selected(source).mRef == expectedSourceSelection.mRef
-                                        && selected(destination).mRef == expectedDestinationSelection.mRef,
-                                    "rehearsal installed wrong selection/end");
-                                source.getWeight();
-                                destination.getWeight();
-                            });
-                            require(&restored.getIteratorBindings() == bindings,
-                                "rehearsal replaced protected pair bindings");
-                            verifyOriginal();
-                            const std::vector<Stage> expectedStages = shared
-                                ? std::vector{ Stage::Validated, Stage::Identities, Stage::SourceInventory,
-                                      Stage::DestinationInventory, Stage::SourceScripts, Stage::Registry }
-                                : std::vector{ Stage::Validated, Stage::Identities, Stage::SourceInventory,
-                                      Stage::DestinationInventory, Stage::SourceScripts, Stage::DestinationScripts,
-                                      Stage::Registry };
-                            require(stages == expectedStages,
-                                "rehearsal duplicated shared service or reordered distinct services");
-                            // Rollback returns the exact reusable pair; every saved
-                            // node/iterator guard must still pass on the second run.
-                            restored = fixture.rehearse(std::move(restored));
-                            verifyOriginal();
-                            for (auto stop : expectedStages)
-                            {
-                                auto failedPair = make();
-                                const auto owned = ConstPtr(&failedPair.getDestinationStorage().back());
-                                bool failed = false;
-                                try
-                                {
-                                    fixture.rehearse(std::move(failedPair), [&](Stage stage) {
-                                        if (stage == stop)
-                                            throw Failure{};
-                                    });
-                                }
-                                catch (const Failure&)
-                                {
-                                    failed = true;
-                                }
-                                require(failed && !owned.hasLiveReference(), "failed rehearsal retained consumed pair");
+                                auto decision = make();
+                                require(
+                                    decision.getResolutionCompleteness().isComplete(), "rehearsal fixture incomplete");
+                                const auto* bindings = &decision.getIteratorBindings();
+                                const auto expectedRegistry = decision.getRelocation().mRegistry;
+                                const auto expectedSourceScripts = decision.getRelocation().mSourceScripts;
+                                const auto expectedDestinationScripts
+                                    = shared ? expectedSourceScripts : *decision.getRelocation().mDestinationScripts;
+                                const auto expectedSource = decision.getRelocation().mSource;
+                                const auto expectedDestination = decision.getRelocation().mDestination;
+                                const auto expectedSourceSelection = decision.getRelocation().mSourceSelection;
+                                const auto expectedDestinationSelection
+                                    = decision.getRelocation().mDestinationSelection;
+                                const auto destinationId = decision.getDestinationIdentity();
+                                std::vector<Stage> stages;
+                                auto restored = fixture.rehearse(std::move(decision), [&](Stage stage) {
+                                    stages.push_back(stage);
+                                    require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
+                                        "partial rehearsal leaked effects or changed live state");
+                                    require(nodeState(*other) == unrelated, "rehearsal changed supplied store node");
+                                    if (stage != Stage::Registry)
+                                        return;
+                                    require(fixture.mModel.snapshotPtrRegistry() == expectedRegistry,
+                                        "installed registry/revision/counter differ from protected relocation");
+                                    require(fixture.mSourceScripts.snapshot() == expectedSourceScripts
+                                            && fixture.mDestinationAdd.mLocalScripts->snapshot()
+                                                == expectedDestinationScripts,
+                                        "installed shared/distinct scripts or cursors differ");
+                                    const auto checkInventory = [&](const auto& storage, const auto& expected,
+                                                                    ContainerStore& target) {
+                                        require(storage.size() == expected.size(), "installed raw membership differs");
+                                        size_t i = 0;
+                                        for (const auto& node : storage)
+                                        {
+                                            const auto& view = expected[i++];
+                                            const auto id = view.mIdentity.isSet() ? view.mIdentity : destinationId;
+                                            require(&node == view.mItem.mRef && node.mRef.getRefNum() == id
+                                                    && node.mWorldModel == &fixture.mModel
+                                                    && fixture.mModel.getPtr(id).mRef == &node
+                                                    && fixture.mModel.getPtr(id).mContainerStore == &target,
+                                                "installation lost node identity, owner or registry association");
+                                        }
+                                    };
+                                    checkInventory(fixture.sourceStorage(), expectedSource, source);
+                                    checkInventory(fixture.destinationStorage(), expectedDestination, destination);
+                                    require(source.count(item.getCellRef().getRefId()) == 4 - quantity
+                                            && destination.count(item.getCellRef().getRefId())
+                                                == (stack ? 7 : 0) + quantity,
+                                        "rehearsal installed wrong transfer quantity");
+                                    const auto selected = [](const ContainerStore& container) {
+                                        const auto it = container.getSelectedEnchantItem();
+                                        return it == container.end() ? ConstPtr() : *it;
+                                    };
+                                    require(selected(source).mRef == expectedSourceSelection.mRef
+                                            && selected(destination).mRef == expectedDestinationSelection.mRef,
+                                        "rehearsal installed wrong selection/end");
+                                    source.getWeight();
+                                    destination.getWeight();
+                                });
+                                require(&restored.getIteratorBindings() == bindings,
+                                    "rehearsal replaced protected pair bindings");
                                 verifyOriginal();
-                            }
-                            {
-                                auto discarded = fixture.rehearse(make());
-                            }
-                            verifyOriginal();
+                                const std::vector<Stage> expectedStages = shared
+                                    ? std::vector{ Stage::Validated, Stage::Identities, Stage::SourceInventory,
+                                          Stage::DestinationInventory, Stage::SourceScripts, Stage::Registry }
+                                    : std::vector{ Stage::Validated, Stage::Identities, Stage::SourceInventory,
+                                          Stage::DestinationInventory, Stage::SourceScripts, Stage::DestinationScripts,
+                                          Stage::Registry };
+                                require(stages == expectedStages,
+                                    "rehearsal duplicated shared service or reordered distinct services");
+                                // Rollback returns the exact reusable pair; every saved
+                                // node/iterator guard must still pass on the second run.
+                                restored = fixture.rehearse(std::move(restored));
+                                verifyOriginal();
+                                for (auto stop : expectedStages)
+                                {
+                                    auto failedPair = make();
+                                    const auto owned = ConstPtr(&failedPair.getDestinationStorage().back());
+                                    bool failed = false;
+                                    try
+                                    {
+                                        fixture.rehearse(std::move(failedPair), [&](Stage stage) {
+                                            if (stage == stop)
+                                                throw Failure{};
+                                        });
+                                    }
+                                    catch (const Failure&)
+                                    {
+                                        failed = true;
+                                    }
+                                    require(
+                                        failed && !owned.hasLiveReference(), "failed rehearsal retained consumed pair");
+                                    verifyOriginal();
+                                }
+                                {
+                                    auto discarded = fixture.rehearse(make());
+                                }
+                                verifyOriginal();
 
-                            const auto reject = [&](Pair pair, std::string_view reason) {
-                                bool rejected = false;
-                                const auto unchanged = snapshot(fixture);
-                                try
-                                {
-                                    fixture.rehearse(std::move(pair), [&](Stage) {
-                                        throw std::runtime_error("invalid pair reached exchange observer");
-                                    });
-                                }
-                                catch (const std::invalid_argument& error)
-                                {
-                                    rejected = std::string_view(error.what()).find(reason) != std::string_view::npos;
-                                }
-                                require(rejected && snapshot(fixture) == unchanged,
-                                    "invalid rehearsal mutated state or wrong rejection");
-                            };
-                            auto stale = make();
-                            const auto original = item.getCellRef();
-                            item.getCellRef().setCount(3);
-                            reject(std::move(stale), "changed");
-                            item.getCellRef() = original;
-                            auto corrupted = make();
-                            ++const_cast<Pair::ResolutionCompleteness&>(corrupted.getResolutionCompleteness())
-                                  .mRegistryEntries;
-                            reject(std::move(corrupted), "completeness changed");
-                            corrupted = make();
-                            const_cast<CellRef&>(corrupted.getSourceStorage().front().mRef).setCount(99);
-                            reject(std::move(corrupted), "changed");
-                            corrupted = make();
-                            const_cast<Pair::IteratorBindings&>(corrupted.getIteratorBindings()).mCount++;
-                            reject(std::move(corrupted), "changed");
-                            corrupted = make();
-                            ++const_cast<PtrRegistry::Snapshot&>(corrupted.getRegistryStorage().getBindings())
-                                  .mRevision;
-                            reject(std::move(corrupted), "changed");
-                            if (shared && scriptedItem && stack && quantity == 4 && cursorPosition == 0)
-                            {
-                                // Same-address reconstruction with identical values
-                                // cannot authorize the saved private iterators.
-                                const auto reconstruct = [](auto& node) {
-                                    auto replacement = std::move(node);
-                                    std::destroy_at(&node);
-                                    std::construct_at(&node, std::move(replacement));
+                                const auto reject = [&](Pair pair, std::string_view reason) {
+                                    bool rejected = false;
+                                    const auto unchanged = snapshot(fixture);
+                                    try
+                                    {
+                                        fixture.rehearse(std::move(pair), [&](Stage) {
+                                            throw std::runtime_error("invalid pair reached exchange observer");
+                                        });
+                                    }
+                                    catch (const std::invalid_argument& error)
+                                    {
+                                        rejected
+                                            = std::string_view(error.what()).find(reason) != std::string_view::npos;
+                                    }
+                                    require(rejected && snapshot(fixture) == unchanged,
+                                        "invalid rehearsal mutated state or wrong rejection");
                                 };
-                                corrupted = make();
-                                auto& nodes = const_cast<Pair::MiscList&>(corrupted.getSourceStorage());
-                                reconstruct(nodes.back());
-                                reject(std::move(corrupted), "iterator node lifetimes changed");
-                                corrupted = make();
-                                auto& entries = const_cast<LocalScripts::PreparedStorage::Entries&>(
-                                    corrupted.getSourceScriptStorage().getEntries());
-                                reconstruct(entries.front());
-                                reject(std::move(corrupted), "iterator node lifetimes changed");
-                                stale = make();
-                                const auto counter = fixture.mModel.getLastGeneratedRefNum();
-                                auto changedCounter = counter;
-                                ++changedCounter.mIndex;
-                                fixture.mModel.setLastGeneratedRefNum(changedCounter);
+                                auto stale = make();
+                                const auto original = item.getCellRef();
+                                item.getCellRef().setCount(3);
                                 reject(std::move(stale), "changed");
-                                fixture.mModel.setLastGeneratedRefNum(counter);
-                                stale = make();
-                                std::pair<ESM::RefId, Ptr> entry;
-                                require(fixture.mSourceScripts.getNext(entry), "stale cursor fixture empty");
-                                reject(std::move(stale), "changed");
-                                fixture.mSourceScripts.startIteration();
-                                const std::array liveSupplied{ ContainerStoreResolution(
-                                    live.mOther, live.mOtherOwner.getPtr()) };
-                                auto foreign = live.mSource.prepareTransfer(*live.mSource.begin(), 1, live.mDestination,
-                                    live.mRemoval, live.mDestinationAdd, liveSupplied);
-                                reject(std::move(foreign), "context changed");
-                                auto serviceMismatch = make();
-                                fixture.mDestinationAdd.mLocalScripts = &live.mSourceScripts;
-                                reject(std::move(serviceMismatch), "service mismatch");
-                                fixture.mDestinationAdd.mLocalScripts = &fixture.mSourceScripts;
-                                auto originalPair = make();
-                                auto moved = std::move(originalPair);
-                                reject(std::move(originalPair), "moved from");
-                                moved = fixture.rehearse(std::move(moved));
-                                verifyOriginal();
+                                item.getCellRef() = original;
+                                auto corrupted = make();
+                                ++const_cast<Pair::ResolutionCompleteness&>(corrupted.getResolutionCompleteness())
+                                      .mRegistryEntries;
+                                reject(std::move(corrupted), "completeness changed");
+                                corrupted = make();
+                                const_cast<CellRef&>(corrupted.getSourceStorage().front().mRef).setCount(99);
+                                reject(std::move(corrupted), "changed");
+                                corrupted = make();
+                                const_cast<Pair::IteratorBindings&>(corrupted.getIteratorBindings()).mCount++;
+                                reject(std::move(corrupted), "changed");
+                                corrupted = make();
+                                ++const_cast<PtrRegistry::Snapshot&>(corrupted.getRegistryStorage().getBindings())
+                                      .mRevision;
+                                reject(std::move(corrupted), "changed");
+                                if (shared && scriptedItem && stack && quantity == 4 && cursorPosition == 0)
+                                {
+                                    // Same-address reconstruction with identical values
+                                    // cannot authorize the saved private iterators.
+                                    const auto reconstruct = [](auto& node) {
+                                        auto replacement = std::move(node);
+                                        std::destroy_at(&node);
+                                        std::construct_at(&node, std::move(replacement));
+                                    };
+                                    corrupted = make();
+                                    auto& nodes = const_cast<Pair::MiscList&>(corrupted.getSourceStorage());
+                                    reconstruct(nodes.back());
+                                    reject(std::move(corrupted), "iterator node lifetimes changed");
+                                    corrupted = make();
+                                    auto& entries = const_cast<LocalScripts::PreparedStorage::Entries&>(
+                                        corrupted.getSourceScriptStorage().getEntries());
+                                    reconstruct(entries.front());
+                                    reject(std::move(corrupted), "iterator node lifetimes changed");
+                                    stale = make();
+                                    const auto counter = fixture.mModel.getLastGeneratedRefNum();
+                                    auto changedCounter = counter;
+                                    ++changedCounter.mIndex;
+                                    fixture.mModel.setLastGeneratedRefNum(changedCounter);
+                                    reject(std::move(stale), "changed");
+                                    fixture.mModel.setLastGeneratedRefNum(counter);
+                                    stale = make();
+                                    std::pair<ESM::RefId, Ptr> entry;
+                                    require(fixture.mSourceScripts.getNext(entry), "stale cursor fixture empty");
+                                    reject(std::move(stale), "changed");
+                                    fixture.mSourceScripts.startIteration();
+                                    const std::array liveSupplied{ ContainerStoreResolution(
+                                        live.mOther, live.mOtherOwner.getPtr()) };
+                                    auto foreign = live.mSource.prepareTransfer(*live.mSource.begin(), 1,
+                                        live.mDestination, live.mRemoval, live.mDestinationAdd, liveSupplied);
+                                    reject(std::move(foreign), "context changed");
+                                    auto serviceMismatch = make();
+                                    fixture.mDestinationAdd.mLocalScripts = &live.mSourceScripts;
+                                    reject(std::move(serviceMismatch), "service mismatch");
+                                    fixture.mDestinationAdd.mLocalScripts = &fixture.mSourceScripts;
+                                    auto originalPair = make();
+                                    auto moved = std::move(originalPair);
+                                    reject(std::move(originalPair), "moved from");
+                                    moved = fixture.rehearse(std::move(moved));
+                                    verifyOriginal();
+                                }
+                                // Independent registry-only and script-only unresolved
+                                // entries must never be followed or partially installed.
+                                ManualRef unresolved(store, plainId);
+                                fixture.mModel.registerPtr(unresolved.getPtr());
+                                reject(make(), "complete resolution");
+                                fixture.mModel.deregisterLiveCellRef(*unresolved.getPtr().mRef);
+                                ManualRef unresolvedScript(store, scriptedId);
+                                fixture.mSourceScripts.add(scriptId, unresolvedScript.getPtr(), scripts);
+                                reject(make(), "complete resolution");
+                                fixture.mSourceScripts.remove(unresolvedScript.getPtr());
+                                require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
+                                    "rejections affected effects or unrelated live state");
+                                return 0;
+                            };
+                            if (commit)
+                            {
+                                const size_t allocations = run(0, 0);
+                                ++cases;
+                                totals.mTotal += allocations;
+                                for (size_t failAt = 1; failAt <= allocations + 1; ++failAt)
+                                {
+                                    try
+                                    {
+                                        run(failAt, allocations);
+                                    }
+                                    catch (...)
+                                    {
+                                        std::cerr << "Commit fixture: shared=" << shared << " scripted=" << scriptedItem
+                                                  << " existing=" << stack << " quantity=" << quantity
+                                                  << " cursor=" << cursorPosition << " ordinal=" << failAt << '/'
+                                                  << allocations << '\n';
+                                        throw;
+                                    }
+                                }
                             }
-                            // Independent registry-only and script-only unresolved
-                            // entries must never be followed or partially installed.
-                            ManualRef unresolved(store, plainId);
-                            fixture.mModel.registerPtr(unresolved.getPtr());
-                            reject(make(), "complete resolution");
-                            fixture.mModel.deregisterLiveCellRef(*unresolved.getPtr().mRef);
-                            ManualRef unresolvedScript(store, scriptedId);
-                            fixture.mSourceScripts.add(scriptId, unresolvedScript.getPtr(), scripts);
-                            reject(make(), "complete resolution");
-                            fixture.mSourceScripts.remove(unresolvedScript.getPtr());
-                            require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
-                                "rejections affected effects or unrelated live state");
+                            else
+                                run(0, 0);
                         }
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (commit)
+            {
+                std::cout << "Persistence-gated fixture commit: cases=" << cases
+                          << " individually-failed=" << totals.mTotal
+                          << " installation=0 retirement=0 remaining-after-cleanup=0"
+                             " sink-decline/throw/bad-alloc=144 consumed/stale/incomplete-rejections=144\n";
+                return;
+            }
             if (inventoryRestore)
             {
                 require(localRejections > 0, "inventory restoration rejection coverage missing");
@@ -2447,6 +2790,11 @@ namespace MWWorld::Testing
     void checkTransferLocalsRestore(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::LocalsRestore);
+    }
+
+    void checkTransferCommit(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::Commit);
     }
 
     void checkTransferRestore(const ESMStore& content)

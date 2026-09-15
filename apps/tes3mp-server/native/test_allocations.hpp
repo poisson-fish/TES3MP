@@ -18,6 +18,9 @@ namespace MWWorld::Testing::Allocations
         Exchange,
         Rollback,
         Revalidation,
+        Persistence,
+        Installation,
+        Retirement,
         Count
     };
     struct Trace

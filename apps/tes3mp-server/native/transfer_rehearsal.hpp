@@ -4,11 +4,53 @@
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
+#include <components/esm3/objectstate.hpp>
 
 namespace MWWorld::Testing
 {
+    // Owned test save: identity associations remain separate from ObjectState.
+    // This is not a production persistence format or a durable file adapter.
+    struct SerializedInventory
+    {
+        std::vector<ESM::ObjectState> mObjects;
+        std::vector<ESM::RefNum> mProposedIdentities;
+
+        void swap(SerializedInventory& other) noexcept
+        {
+            static_assert(noexcept(mObjects.swap(other.mObjects)));
+            static_assert(noexcept(mProposedIdentities.swap(other.mProposedIdentities)));
+            mObjects.swap(other.mObjects);
+            mProposedIdentities.swap(other.mProposedIdentities);
+        }
+    };
+
+    struct SerializedPair
+    {
+        SerializedInventory mSource, mDestination;
+    };
+
+    template <class Identity>
+    void serializeInventory(const PreparedContainerTransfer::MiscList& storage, Identity identity,
+        const Compiler::Locals& declarations, SerializedInventory& inventory)
+    {
+        inventory.mObjects.reserve(storage.size());
+        inventory.mProposedIdentities.reserve(storage.size());
+        size_t i = 0;
+        for (const auto& node : storage)
+        {
+            inventory.mProposedIdentities.push_back(identity(i++));
+            inventory.mObjects.emplace_back();
+            auto& object = inventory.mObjects.back();
+            object.blank();
+            node.mRef.writeState(object);
+            node.mData.write(object, declarations);
+            object.mHasCustomState = false;
+        }
+    }
+
     // Test-target-only composition. Own every exchanged store/service, accept no
-    // external mutation target, and always roll back. There is no commit/release.
+    // external mutation target. Rehearsal rolls back; commit gates installation
+    // in this disposable fixture on an explicit synchronous test sink.
     // Content/readers and the declarations-only script manager outlive this fixture.
     class DisposableTransferRehearsal
     {
@@ -45,6 +87,14 @@ namespace MWWorld::Testing
         PreparedContainerTransfer rehearse(
             PreparedContainerTransfer pair, const std::function<void(Stage)>& observer = {});
 
+        // The sink must not mutate/reenter/destroy the fixture, pair or borrowed
+        // dependencies. It may copy the owned save but must not retain its address.
+        // False/exception means no acceptance and preserves the entire fixture.
+        // True accepts synchronously: only noexcept installation/retirement follows.
+        // Pair consumption applies to success and failure. No effects are emitted.
+        using TestSink = std::function<bool(const SerializedPair&)>;
+        bool commit(PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestSink& sink);
+
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
         const PreparedContainerTransfer::MiscList& destinationStorage() const;
@@ -60,6 +110,9 @@ namespace MWWorld::Testing
         }
     };
 
+    void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
+        const Compiler::Locals& declarations, SerializedPair& output);
+
     void checkTransferRehearsal(const ESMStore& content);
     void checkTransferRehearsalAllocations(const ESMStore& content);
     void checkTransferPreparationAllocations(const ESMStore& content);
@@ -67,6 +120,7 @@ namespace MWWorld::Testing
     void checkTransferObjectState(const ESMStore& content);
     void checkTransferLocalsRestore(const ESMStore& content);
     void checkTransferRestore(const ESMStore& content);
+    void checkTransferCommit(const ESMStore& content);
 }
 
 #endif
