@@ -86,7 +86,8 @@ namespace MWWorld::Testing
         static_assert(std::is_trivially_copyable_v<InventoryNotificationBatch>);
         auto staged = std::make_unique<const InventoryTransferSuccess>(InventoryTransferSuccess{ command,
             destinationItem, pair.getSourceItem().getCellRef().getCount(false),
-            pair.getDestinationItem().getCellRef().getCount(false), revision, notifications });
+            pair.getDestinationItem().getCellRef().getCount(false), revision, notifications,
+            ownedId(pair.getSourceSelection()), ownedId(pair.getDestinationSelection()) });
         phase.set(Allocations::Phase::Setup);
         const bool installed = fixture.commitDurably(
             std::move(pair), bindings.mContent.mDeclarations, [&](const SerializedPair& saved) {

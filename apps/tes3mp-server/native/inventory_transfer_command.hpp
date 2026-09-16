@@ -59,6 +59,8 @@ namespace MWWorld::Testing
         std::int32_t mSourceCount = 0, mDestinationCount = 0;
         std::uint64_t mRevision = 0;
         InventoryNotificationBatch mNotifications;
+        // Prepared stock selections, including unset and dormant identities.
+        InventoryInstanceId mSourceSelection, mDestinationSelection;
         bool operator==(const InventoryTransferSuccess&) const = default;
     };
 

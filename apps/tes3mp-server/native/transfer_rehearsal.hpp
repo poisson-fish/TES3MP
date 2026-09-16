@@ -128,6 +128,7 @@ namespace MWWorld::Testing
     struct RestoreContent;
     struct SaveEnvelope;
     struct SaveBindings;
+    struct InventoryViewSnapshot;
     void restorePair(
         const SerializedPair& input, const RestoreContent& content, std::unique_ptr<const RestoredPair>& output);
 
@@ -206,6 +207,12 @@ namespace MWWorld::Testing
         bool commitDurably(
             PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink);
         bool failedClosed() const noexcept { return mFailedClosed; }
+
+        // Serialized, read-only projection of current owned fixture storage.
+        // Validate all bounds/owner/registry/selection bindings before allocating;
+        // prepare both views completely, then publish by noexcept swap. Failure
+        // retains output values/storage. No borrowed pointers or iterators escape.
+        void snapshotInventoryViews(InventoryViewSnapshot& output) const;
 
         // Explicit fresh fixture bindings, including dormant other-store nodes.
         // Store addresses are compare-only until owner lifetimes validate.
@@ -328,7 +335,8 @@ namespace MWWorld::Testing
     void checkTransferScriptMetadata(const ESMStore& content);
     void checkTransferRestartScripts(const ESMStore& content);
     void checkTransferRestartInstallation(const ESMStore& content);
-    void checkTransferSelections(const ESMStore& content, const std::filesystem::path& scratch);
+    void checkTransferSelections(
+        const ESMStore& content, const std::filesystem::path& scratch, bool snapshotsOnly = false);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart = false);

@@ -1,4 +1,5 @@
 #include "inventory_transfer_command.hpp"
+#include "inventory_view.hpp"
 #include "test_allocations.hpp"
 #include "transfer_file_sink.hpp"
 #include "transfer_rehearsal.hpp"
@@ -2114,11 +2115,145 @@ namespace MWWorld::Testing
             }
         }
 
+        InventoryViewSnapshot savedViews(const SerializedPair& saved, const SaveEnvelope& envelope)
+        {
+            const auto owned = [](ESM::RefNum id) { return InventoryInstanceId{ id.mIndex, id.mContentFile }; };
+            InventoryViewSnapshot result;
+            for (size_t side = 0; side < 2; ++side)
+            {
+                const auto& inventory = side == 0 ? saved.mSource : saved.mDestination;
+                auto& view = result.mOwners[side];
+                view.mOwner = owned(side == 0 ? envelope.mSourceOwner : envelope.mDestinationOwner);
+                view.mSelection = owned(inventory.mSelection);
+                view.mRevision = saved.mRestart.mRevision;
+                for (size_t i = 0; i < inventory.mObjects.size(); ++i)
+                    view.mItems.push_back({ owned(inventory.mProposedIdentities[i]), inventory.mObjects[i].mRef.mCount });
+            }
+            return result;
+        }
+
+        auto viewStorage(const InventoryViewSnapshot& views)
+        {
+            return std::tuple{ views.mOwners[0].mItems.data(), views.mOwners[0].mItems.capacity(),
+                views.mOwners[1].mItems.data(), views.mOwners[1].mItems.capacity() };
+        }
+
+        size_t checkInventorySnapshot(DisposableTransferRehearsal& fixture, const RestoreContent& content)
+        {
+            using namespace Allocations;
+            SerializedPair saved;
+            saveFixture(fixture, content.mDeclarations, saved);
+            SaveEnvelope envelope;
+            envelope.mSourceOwner = fixture.mSourceOwner.getPtr().getCellRef().getRefNum();
+            envelope.mDestinationOwner = fixture.mDestinationOwner.getPtr().getCellRef().getRefNum();
+            const auto expected = savedViews(saved, envelope);
+            const auto before = snapshot(fixture);
+            auto sentinel = expected;
+            sentinel.mOwners[0].mRevision = 1234567;
+            auto output = sentinel;
+            size_t allocations = 0;
+            for (size_t failAt = 0; failAt <= allocations + 1; ++failAt)
+            {
+                output = sentinel;
+                const auto storage = viewStorage(output);
+                Trace trace;
+                bool caught = false, correct = false;
+                {
+                    Observe observe(trace, failAt);
+                    try
+                    {
+                        fixture.snapshotInventoryViews(output);
+                        correct = output == expected;
+                        InventoryViewSnapshot discarded;
+                        output.swap(discarded); // Include complete output cleanup in tracking.
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        caught = true;
+                    }
+                }
+                if (!failAt)
+                    allocations = trace.mTotal;
+                require(trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                        && trace.allocations(Phase::Validation) == 0 && trace.allocations(Phase::Publication) == 0
+                        && snapshot(fixture) == before,
+                    "snapshot allocated during validation/publication, leaked or mutated fixture");
+                if (failAt && failAt <= allocations)
+                    require(caught && trace.mFailures == 1 && output == sentinel && viewStorage(output) == storage,
+                        "snapshot allocation failure published partial owner views");
+                else
+                    require(!caught && correct && trace.mFailures == 0,
+                        "snapshot lost signed counts, dormant membership, selection or exact revision");
+            }
+            output = sentinel;
+            const auto storage = viewStorage(output);
+            const auto reject = [&] {
+                Trace trace;
+                bool caught = false;
+                {
+                    Observe observe(trace);
+                    try
+                    {
+                        fixture.snapshotInventoryViews(output);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && output == sentinel && viewStorage(output) == storage
+                        && trace.allocations(Phase::Preparation) == 0 && trace.visits(Phase::Publication) == 0
+                        && trace.mOutstanding == 0,
+                    "invalid installed snapshot changed output or staged before validation");
+            };
+            auto& nodes = const_cast<PreparedContainerTransfer::MiscList&>(fixture.sourceStorage());
+            if (!nodes.empty())
+            {
+                auto& node = nodes.front();
+                const auto id = node.mRef.getRefNum();
+                node.mRef.setRefNum({});
+                reject();
+                node.mRef.setRefNum(id);
+                node.mWorldModel = nullptr;
+                reject();
+                node.mWorldModel = &fixture.mModel;
+                const auto size = nodes.size();
+                while (nodes.size() <= MaxTransferInventoryItems)
+                {
+                    nodes.push_back(node);
+                    nodes.back().mWorldModel = nullptr;
+                }
+                reject();
+                while (nodes.size() > size)
+                    nodes.pop_back();
+            }
+            const auto selection = fixture.mSource.getSelectedEnchantItem();
+            fixture.mSource.setSelectedEnchantItem(fixture.mDestination.end());
+            reject();
+            fixture.mSource.setSelectedEnchantItem(selection);
+            fixture.mSource.setPtr(fixture.mDestinationOwner.getPtr(), fixture.mModel);
+            reject();
+            fixture.mSource.setPtr(fixture.mSourceOwner.getPtr(), fixture.mModel);
+            require(snapshot(fixture) == before, "snapshot rejection checks did not restore fixture");
+            // The same raw owner address/lifetime with foreign location metadata
+            // is not an exact registry binding. Re-registration advances revision.
+            auto foreignOwner = fixture.mSourceOwner.getPtr();
+            foreignOwner.mContainerStore = &fixture.mDestination;
+            fixture.mModel.registerPtr(foreignOwner);
+            reject();
+            fixture.mModel.registerPtr(fixture.mSourceOwner.getPtr());
+            fixture.snapshotInventoryViews(output);
+            require(output.mOwners[0].mRevision == fixture.mModel.getPtrRegistryRevision(),
+                "snapshot reconstructed revision after owner re-registration");
+            return allocations;
+        }
+
         struct CommandEvidence
         {
             size_t mRejected = 0, mUncertain = 0, mAllocations = 0, mResultFailures = 0, mRepeated = 0;
             size_t mRecovered = 0;
             size_t mDelivered = 0, mDeliveryFailed = 0;
+            size_t mViewResyncs = 0, mViewAllocationFailures = 0;
             unsigned mDeliveryModes = 0, mBatchShapes = 0;
         };
 
@@ -2185,14 +2320,18 @@ namespace MWWorld::Testing
         }
 
         // Modes: healthy, then failure at each of four intents before receipt,
-        // after receipt, and in a receiver allocation. All use actual committed
-        // outputs; only the disposable fixture is recreated between commands.
+        // after receipt, and in a receiver allocation; finally fail each of the
+        // two owner-view allocations. All use actual committed outputs; only the
+        // disposable fixture is recreated between commands.
         template <class Committed>
         void checkNotificationConsumption(std::unique_ptr<const InventoryTransferSuccess>& output,
-            const InventoryTransferSuccess& expected, Committed committed, unsigned mode, CommandEvidence& evidence)
+            const InventoryTransferSuccess& expected, Committed committed, unsigned mode, CommandEvidence& evidence,
+            InventoryViewSnapshot* views = nullptr, const InventoryViewSnapshot* acceptedViews = nullptr)
         {
             using Status = InventoryNotificationDeliveryStatus;
             require(output && *output == expected, "delivery did not receive the prepared owned success");
+            const auto beforeViews = views ? *views : InventoryViewSnapshot{};
+            const auto beforeStorage = views ? viewStorage(*views) : viewStorage(beforeViews);
             struct Receiver final : InventoryNotificationConsumer
             {
                 std::unique_ptr<const InventoryTransferSuccess>& mPending;
@@ -2204,11 +2343,15 @@ namespace MWWorld::Testing
                 InventoryNotificationBatch mOrder;
                 std::array<InventoryNotificationBatch, 2> mMailboxes;
                 std::array<size_t, 2> mCounts{};
+                std::optional<InventoryViewConsumer> mViews;
 
                 Receiver(std::unique_ptr<const InventoryTransferSuccess>& pending,
-                    const InventoryTransferSuccess& expected, Committed& committed, unsigned mode)
+                    const InventoryTransferSuccess& expected, Committed& committed, unsigned mode,
+                    InventoryViewSnapshot* views)
                     : mPending(pending), mExpected(expected), mCommitted(committed), mMode(mode)
                 {
+                    if (views)
+                        mViews.emplace(*views, expected);
                 }
 
                 void receive(InventoryNotificationIntent intent) override
@@ -2217,7 +2360,7 @@ namespace MWWorld::Testing
                     mValid &= !mPending && mCommitted();
                     // The same slot cannot redeliver even during a callback.
                     mValid &= consumeInventoryNotifications(mPending, *this).mStatus == Status::NoPendingSuccess;
-                    const bool fail = mMode && mAttempts == (mMode - 1) % 4 + 1;
+                    const bool fail = mMode && mMode <= 12 && mAttempts == (mMode - 1) % 4 + 1;
                     if (fail && mMode <= 4)
                         throw Failure{};
                     if (fail && mMode >= 9)
@@ -2236,29 +2379,58 @@ namespace MWWorld::Testing
                         mValid = false;
                         return;
                     }
+                    if (mViews)
+                        mViews->receive(intent);
                     mMailboxes[owner][mCounts[owner]++] = intent;
                     mOrder[mReceived++] = intent;
                     if (fail)
                         throw Failure{};
                 }
-            } receiver(output, expected, committed, mode);
+            } receiver(output, expected, committed, mode, views);
             Allocations::Trace trace;
             InventoryNotificationDelivery result;
+            const size_t failurePrefix = mode >= 13 ? (mode == 13 ? 1 : 3) : (mode ? (mode - 1) % 4 : 0);
+            const size_t priorUpdates = views && mode >= 9 && mode <= 12 && failurePrefix >= 2 ? 1 : 0;
             {
-                Allocations::Observe observe(trace, 1);
+                Allocations::Observe observe(trace, mode >= 13 ? mode - 12 : (mode >= 9 ? priorUpdates + 1 : 0));
                 result = consumeInventoryNotifications(output, receiver);
             }
             const size_t total = std::count_if(expected.mNotifications.begin(), expected.mNotifications.end(),
                 [](const auto& intent) { return intent.has_value(); });
-            const size_t prefix = mode ? (mode - 1) % 4 : total;
+            const size_t prefix = mode ? failurePrefix : total;
             const size_t received = prefix + (mode >= 5 && mode <= 8 ? 1 : 0);
+            size_t updates = 0, index = 0;
+            std::array<bool, 2> updated{};
+            for (const auto& intent : expected.mNotifications)
+                if (intent && index++ < received && intent->mKind == InventoryNotificationKind::InventoryUpdated)
+                {
+                    ++updates;
+                    updated[intent->mOwner == expected.mCommand.mSourceOwner ? 0 : 1] = true;
+                }
+            const size_t retained = views ? updates : 0;
             require(receiver.mValid && committed() && !output && result.mRevision == expected.mRevision
                     && result.mStatus == (mode ? Status::FailedAfterCommit : Status::Delivered)
                     && result.mConfirmed == prefix && receiver.mReceived == received
                     && receiver.mAttempts == (mode ? prefix + 1 : total)
-                    && trace.mTotal == (mode >= 9 ? 1u : 0u) && trace.mFailures == (mode >= 9 ? 1u : 0u)
-                    && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                    && trace.mTotal == retained + (mode >= 9 ? 1u : 0u) && trace.mFailures == (mode >= 9 ? 1u : 0u)
+                    && trace.mOutstanding == retained && trace.mTrackingOverflow == 0
+                    && trace.allocations(Allocations::Phase::Publication) == 0,
                 "notification routing/consumption lost committed state or confused delivery failure with rejection");
+            if (views)
+            {
+                require(acceptedViews, "missing independent accepted-save view oracle");
+                for (size_t side = 0; side < 2; ++side)
+                    require(views->mOwners[side]
+                            == (updated[side] ? acceptedViews->mOwners[side] : beforeViews.mOwners[side]),
+                        "independent owner view lost signed count, selection, revision or untouched owner state");
+                if (!updated[0])
+                    require(std::get<0>(viewStorage(*views)) == std::get<0>(beforeStorage),
+                        "undelivered source view storage changed");
+                if (!updated[1])
+                    require(std::get<2>(viewStorage(*views)) == std::get<2>(beforeStorage),
+                        "undelivered destination view storage changed");
+                evidence.mViewAllocationFailures += mode >= 13;
+            }
             size_t position = 0;
             std::array<size_t, 2> counts{};
             for (const auto& intent : expected.mNotifications)
@@ -2278,6 +2450,41 @@ namespace MWWorld::Testing
             evidence.mDeliveryModes |= 1u << mode;
             const unsigned shape = (expected.mNotifications[0] ? 1u : 0u) | (expected.mNotifications[2] ? 2u : 0u);
             evidence.mBatchShapes |= 1u << shape;
+        }
+
+        void checkViewResynchronization(DisposableTransferRehearsal& fixture, InventoryViewSnapshot& views,
+            const InventoryViewSnapshot& accepted, CommandEvidence& evidence)
+        {
+            const auto engineBefore = snapshot(fixture);
+            const auto oldViews = views;
+            const auto storage = viewStorage(views);
+            // Both owner buffers must prepare before either view is published.
+            // Failed recovery itself can be retried: only a read-only snapshot,
+            // never a command or the already consumed notification batch.
+            for (size_t ordinal : { 1u, 2u })
+            {
+                Allocations::Trace trace;
+                bool caught = false;
+                {
+                    Allocations::Observe observe(trace, ordinal);
+                    try
+                    {
+                        fixture.snapshotInventoryViews(views);
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && trace.mFailures == 1 && trace.mOutstanding == 0
+                        && trace.visits(Allocations::Phase::Publication) == 0
+                        && views == oldViews && viewStorage(views) == storage,
+                    "failed resynchronization partially published owner views or leaked");
+            }
+            fixture.snapshotInventoryViews(views);
+            require(views == accepted && snapshot(fixture) == engineBefore,
+                "snapshot resynchronization did not converge or replayed gameplay");
+            ++evidence.mViewResyncs;
         }
 
         template <class Make, class Verify, class Unrelated>
@@ -2320,6 +2527,8 @@ namespace MWWorld::Testing
                     pair.getSourceItem().getCellRef().getCount(false),
                     pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
                 expectedResult.mNotifications = expectedNotifications(expectedResult);
+                expectedResult.mSourceSelection = ownedId(pair.getSourceSelection());
+                expectedResult.mDestinationSelection = ownedId(pair.getDestinationSelection());
             }
             TransferSaveBytes priorBytes, expectedBytes;
             encodeTransferSave(prior, bindings, priorBytes);
@@ -2460,6 +2669,8 @@ namespace MWWorld::Testing
                         pair.getSourceItem().getCellRef().getCount(false),
                         pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
                     expectedResult.mNotifications = expectedNotifications(expectedResult);
+                    expectedResult.mSourceSelection = ownedId(pair.getSourceSelection());
+                    expectedResult.mDestinationSelection = ownedId(pair.getDestinationSelection());
                     serializePair(fixture, pair, content.mDeclarations, expectedSave);
                     encodeTransferSave(expectedSave, bindings, expectedBytes);
                 }
@@ -2490,6 +2701,8 @@ namespace MWWorld::Testing
             }
 
             faults = { fault, 17 };
+            InventoryViewSnapshot views;
+            fixture.snapshotInventoryViews(views);
             Trace measured;
             bool committed = false, allocationFailed = false, uncertain = false;
             {
@@ -2628,6 +2841,7 @@ namespace MWWorld::Testing
                     ++evidence.mRepeated;
                 }
                 require(fileBytes(path) == expectedBytes, "delivery preceded exact accepted persistence");
+                const auto acceptedViews = savedViews(expectedSave, envelope);
                 checkNotificationConsumption(output, expectedResult,
                     [&] {
                         return fixture.mModel.getPtrRegistryRevision() == expectedResult.mRevision
@@ -2635,7 +2849,8 @@ namespace MWWorld::Testing
                             && destination.getCellRef().getCount(false) == expectedResult.mDestinationCount
                             && !fixture.failedClosed() && !file.failedClosed();
                     },
-                    static_cast<unsigned>((evidence.mRepeated / 2 - 1) % 13), evidence);
+                    static_cast<unsigned>((evidence.mRepeated / 2 - 1) % 15), evidence, &views, &acceptedViews);
+                checkViewResynchronization(fixture, views, acceptedViews, evidence);
                 require(snapshot(fixture) == installedBefore && fileBytes(path) == expectedBytes,
                     "notification delivery failure replayed gameplay or changed accepted save");
                 owner.reset();
@@ -4749,7 +4964,7 @@ namespace MWWorld::Testing
         template <class Fresh>
         size_t checkRestartCommand(Fresh makeFresh, const SerializedPair& saved, const SaveBindings& bindings,
             const TransferSaveBytes& accepted, ESM::RefNum sourceId, int quantity, const std::filesystem::path& scratch,
-            bool exhaustive, CommandEvidence& evidence)
+            bool exhaustive, CommandEvidence& evidence, const InventoryViewSnapshot& retainedViews)
         {
             using namespace Allocations;
             using Fixture = DisposableTransferRehearsal;
@@ -4768,7 +4983,7 @@ namespace MWWorld::Testing
                         && std::tuple{ accepted, accepted.data(), accepted.capacity() } == acceptedBefore,
                     "restart command changed borrowed content/save/bindings");
             };
-            const auto installed = [&](const TransferSaveBytes& bytes) {
+            const auto installed = [&](const TransferSaveBytes& bytes, InventoryViewSnapshot* receiving = nullptr) {
                 auto fixture = makeFresh();
                 fixture->mDestinationAdd.mPlayer = fixture->mModel.getPtr(bindings.mEnvelope.mInitiator);
                 fixture->mSource.setContListener(&restartListener);
@@ -4803,6 +5018,12 @@ namespace MWWorld::Testing
                 require(again == bytes && actual.mRestart == decoded.mRestart,
                     "continuation fresh install rebuilt counters or changed accepted engine bytes");
                 checkSelections(*fixture, decoded);
+                InventoryViewSnapshot bootstrap;
+                fixture->snapshotInventoryViews(bootstrap);
+                require(bootstrap == savedViews(decoded, bindings.mEnvelope),
+                    "fresh restart snapshot differs from accepted version-4 owner views");
+                if (receiving)
+                    bootstrap.swap(*receiving);
                 return fixture;
             };
             const auto commandFor = [&](const SerializedPair& prior) {
@@ -4821,7 +5042,8 @@ namespace MWWorld::Testing
                 FileFaults faults;
                 require(file.write(priorBytes, faults) == TestPersistenceResult::Accepted,
                     "continuation seed save not accepted");
-                auto fixture = installed(fileBytes(path));
+                auto views = retainedViews; // Outlived the original fixture and its delivered success.
+                auto fixture = installed(fileBytes(path), &views);
                 const auto command = commandFor(prior);
                 const auto commandBefore = command;
                 const auto item = fixture->mModel.getPtr(sourceId);
@@ -4906,6 +5128,8 @@ namespace MWWorld::Testing
                         pair.getDestinationItem().getCellRef().getCount(false), expected.mRestart.mRevision };
                     expectedResult.mNotifications
                         = expectedNotifications(expectedResult, listenerMask & 1, listenerMask & 2);
+                    expectedResult.mSourceSelection = owned(pair.getSourceSelection());
+                    expectedResult.mDestinationSelection = owned(pair.getDestinationSelection());
                     const auto oldTarget = fixture->mModel.getPtr(pair.getDestinationIdentity());
                     const auto oldCount = oldTarget.isEmpty() ? 0 : oldTarget.getCellRef().getCount(false);
                     const auto sign = [](int count) { return count < 0 ? -1 : 1; };
@@ -5068,6 +5292,7 @@ namespace MWWorld::Testing
                         // request deduplication or permission to retry the old fixture.
                         auto next = command;
                         next.mExpectedRevision = recovered->mModel.getPtrRegistryRevision();
+                        recovered->snapshotInventoryViews(views);
                         faults = {};
                         require(executeInventoryTransfer(*recovered, next, bindings, freshSink, faults, output)
                                 && output->mCommand == next && output->mRevision == next.mExpectedRevision + 1,
@@ -5079,11 +5304,12 @@ namespace MWWorld::Testing
                         require(wire == fileBytes(path), "uncertainty recovery installed before exact persistence");
                         const auto recoveredResult = *output;
                         const auto recoveredState = snapshot(*recovered);
+                        const auto acceptedViews = savedViews(actual, bindings.mEnvelope);
                         require(recoveredResult.mNotifications == expectedNotifications(recoveredResult),
                             "fresh uncertainty recovery lost prepared notifications");
                         checkNotificationConsumption(output, recoveredResult,
                             [&] { return recovered->mModel.getPtrRegistryRevision() == recoveredResult.mRevision; },
-                            0, evidence);
+                            0, evidence, &views, &acceptedViews);
                         require(snapshot(*recovered) == recoveredState && fileBytes(path) == wire,
                             "uncertainty recovery delivery changed committed state");
                         recovered.reset();
@@ -5156,6 +5382,7 @@ namespace MWWorld::Testing
                                 && *output == expectedResult && faults.mReached == FileFault::None,
                             "repeated post-restart intent mutated, persisted or published");
                         ++evidence.mRepeated;
+                        const auto acceptedViews = savedViews(expected, bindings.mEnvelope);
                         checkNotificationConsumption(output, expectedResult,
                             [&] {
                                 return fixture->mModel.getPtrRegistryRevision() == expectedResult.mRevision
@@ -5165,11 +5392,16 @@ namespace MWWorld::Testing
                                             .getCellRef().getCount(false) == expectedResult.mDestinationCount
                                     && !fixture->failedClosed() && !file.failedClosed();
                             },
-                            listenerMask == 3 ? static_cast<unsigned>((evidence.mRepeated - 1) % 13) : 0, evidence);
+                            listenerMask == 3 ? static_cast<unsigned>((evidence.mRepeated - 1) % 15) : 0, evidence,
+                            &views, &acceptedViews);
+                        checkViewResynchronization(*fixture, views, acceptedViews, evidence);
                         require(snapshot(*fixture) == committed && fileBytes(path) == expectedBytes,
                             "post-restart delivery replayed mutation or changed committed persistence");
                         fixture.reset();
-                        auto second = installed(fileBytes(path));
+                        const auto beforeRestartViews = views;
+                        auto second = installed(fileBytes(path), &views);
+                        require(views == beforeRestartViews,
+                            "fresh restart changed retained owned views at the same accepted revision");
                         require(
                             second->mModel.getPtr(sourceId).getCellRef().getCount(false) == expectedResult.mSourceCount
                                 && second->mModel.getPtr(engine(expectedResult.mDestinationItem))
@@ -5196,13 +5428,20 @@ namespace MWWorld::Testing
                                 "subsequent command reused old revision, mutation or notification batch");
                             const auto nextState = snapshot(*second);
                             const auto nextBytes = fileBytes(path);
+                            SerializedPair nextSaved;
+                            decodeTransferSave(nextBytes, bindings, nextSaved);
+                            const auto nextViews = savedViews(nextSaved, bindings.mEnvelope);
                             checkNotificationConsumption(output, nextResult,
                                 [&] { return second->mModel.getPtrRegistryRevision() == nextResult.mRevision; },
-                                0, evidence);
+                                14, evidence, &views, &nextViews);
                             require(snapshot(*second) == nextState && fileBytes(path) == nextBytes,
                                 "subsequent notification consumption changed installed state/save");
                             second.reset();
-                            auto third = installed(nextBytes);
+                            // Delivery failed after commitment. Destroy that
+                            // fixture, then recover the partially updated views
+                            // from accepted bytes in a fresh installation.
+                            auto third = installed(nextBytes, &views);
+                            require(views == nextViews, "fresh restart did not recover partially delivered views");
                         }
                     }
                 }
@@ -5263,6 +5502,7 @@ namespace MWWorld::Testing
             const auto otherBase = oldBindings.mOther.at(0).second.getCellRef().getRefId();
             InventoryTransferSuccess initialResult;
             std::unique_ptr<const InventoryTransferSuccess> initialOutput;
+            InventoryViewSnapshot initialViews;
             {
                 const auto prepared = make();
                 MWWorld::Testing::serializePair(*original, prepared, content.mDeclarations, saved);
@@ -5276,6 +5516,8 @@ namespace MWWorld::Testing
                         prepared.getDestinationItem().getCellRef().getCount(false), saved.mRestart.mRevision };
                     initialResult.mNotifications = expectedNotifications(
                         initialResult, prepared.hasRemovalNotification(), prepared.hasAdditionNotification());
+                    initialResult.mSourceSelection = owned(prepared.getSourceSelection());
+                    initialResult.mDestinationSelection = owned(prepared.getDestinationSelection());
                 }
             }
             TransferSaveBytes bytes;
@@ -5285,6 +5527,7 @@ namespace MWWorld::Testing
             {
                 TransferFileSink file(scratch / "inventory.bin");
                 FileFaults faults;
+                original->snapshotInventoryViews(initialViews);
                 require(executeInventoryTransfer(*original, initialResult.mCommand, bindings, file, faults, initialOutput)
                         && *initialOutput == initialResult,
                     "initial transfer file save was not accepted");
@@ -5306,7 +5549,9 @@ namespace MWWorld::Testing
             if (continuation)
             {
                 require(*initialOutput == initialResult, "notification batch borrowed the destroyed original fixture");
-                checkNotificationConsumption(initialOutput, initialResult, [] { return true; }, 0, *continuation);
+                const auto acceptedViews = savedViews(saved, envelope);
+                checkNotificationConsumption(initialOutput, initialResult, [] { return true; }, 0, *continuation,
+                    &initialViews, &acceptedViews);
             }
             SerializedPair decoded;
             decodeTransferSave(bytes, bindings, decoded);
@@ -5329,7 +5574,8 @@ namespace MWWorld::Testing
                 return checkRestartInstallation(makeFresh, decoded, bindings, bytes, rejections);
             if (continuation)
                 return checkRestartCommand(
-                    makeFresh, decoded, bindings, bytes, sourceId, quantity, scratch, exhaustive, *continuation);
+                    makeFresh, decoded, bindings, bytes, sourceId, quantity, scratch, exhaustive, *continuation,
+                    initialViews);
             auto fixture = makeFresh();
             const auto other = fixture->mModel.getPtr(otherId);
             ManualRef otherTemplate(store, otherBase);
@@ -6367,7 +6613,8 @@ namespace MWWorld::Testing
                 require(commandEvidence.mResultFailures == 2, "command result allocation failure coverage missing");
                 require(!restartCommand || commandEvidence.mRecovered == 192,
                     "post-restart uncertainty recovery coverage missing");
-                require(commandEvidence.mDeliveryModes == 0x1fff,
+                require(commandEvidence.mDeliveryModes == 0x7fff && commandEvidence.mViewAllocationFailures > 0
+                        && commandEvidence.mViewResyncs > 0,
                     "notification consumer missed a failure boundary");
                 require(!restartCommand || commandEvidence.mBatchShapes == 15,
                     "notification consumer missed a listener-presence combination");
@@ -6380,6 +6627,8 @@ namespace MWWorld::Testing
                           << " fresh-composition-recoveries=" << commandEvidence.mRecovered
                           << " notification-delivered=" << commandEvidence.mDelivered
                           << " delivery-failed-after-commit=" << commandEvidence.mDeliveryFailed
+                          << " view-resynchronizations=" << commandEvidence.mViewResyncs
+                          << " view-receiver-allocation-failures=" << commandEvidence.mViewAllocationFailures
                           << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";
                 return;
             }
@@ -6559,7 +6808,7 @@ namespace MWWorld::Testing
             "command test left staging files");
     }
 
-    void checkTransferSelections(const ESMStore& content, const std::filesystem::path& scratch)
+    void checkTransferSelections(const ESMStore& content, const std::filesystem::path& scratch, bool snapshotsOnly)
     {
         require(std::filesystem::create_directory(scratch), "selection scratch directory already exists");
         struct Cleanup
@@ -6601,7 +6850,7 @@ namespace MWWorld::Testing
             store.get<ESM::Miscellaneous>().find(scriptedId) };
         const RestoreContent suppliedContent{ bases, script, scripts.getLocals(scriptId) };
         CommandEvidence evidence;
-        size_t cases = 0, rejected = 0;
+        size_t cases = 0, rejected = 0, snapshotAllocations = 0;
         for (bool shared : { false, true })
             for (bool scripted : { false, true })
                 for (int quantity : { 1, 3 })
@@ -6609,6 +6858,8 @@ namespace MWWorld::Testing
                     {
                         auto fixture = std::make_unique<DisposableTransferRehearsal>(
                             store, readers, scripts, ownerId, shared);
+                        if (snapshotsOnly)
+                            snapshotAllocations += checkInventorySnapshot(*fixture, suppliedContent);
                         ManualRef itemTemplate(store, scripted ? scriptedId : plainId);
                         ManualRef unrelated(store, plainId);
                         unrelated.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId("dormant_soul"));
@@ -6629,6 +6880,20 @@ namespace MWWorld::Testing
                         other->getCellRef() = other->getCellRef().copyWithCount(0);
                         if (shared)
                             fixture->mDestinationAdd.mPlayer = fixture->mSourceOwner.getPtr();
+                        if (snapshotsOnly)
+                        {
+                            if (quantity == 3)
+                                item->getCellRef() = item->getCellRef().copyWithCount(-4);
+                            snapshotAllocations += checkInventorySnapshot(*fixture, suppliedContent);
+                            InventoryViewSnapshot surviving;
+                            fixture->snapshotInventoryViews(surviving);
+                            const auto expected = surviving;
+                            fixture.reset();
+                            require(surviving == expected && scripts.mRuns == 0,
+                                "snapshot retained a borrowed engine value or executed script instructions");
+                            ++cases;
+                            continue;
+                        }
                         const auto sourceId = item->getCellRef().getRefNum();
                         const auto sourceSelection = fixture->selectionIdentity(fixture->mSource);
                         const auto destinationSelection = fixture->selectionIdentity(fixture->mDestination);
@@ -6655,6 +6920,13 @@ namespace MWWorld::Testing
                         require(scripts.mRuns == 0, "selection continuation ran scripts");
                         ++cases;
                     }
+        if (snapshotsOnly)
+        {
+            require(cases == 32 && snapshotAllocations == 64, "snapshot matrix allocation coverage missing");
+            std::cout << "Inventory view snapshots: cases=" << cases << " empty=32 allocation-failures="
+                      << snapshotAllocations << " validation=0 publication=0 remaining-after-cleanup=0\n";
+            return;
+        }
         require(cases == 32 && evidence.mResultFailures == 2 && evidence.mRecovered == 128,
             "focused selection failure/recovery coverage incomplete");
         require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
