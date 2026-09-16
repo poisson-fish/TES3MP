@@ -34,7 +34,7 @@ namespace MWWorld::Testing
 
         void validateRestart(const TransferRestartMetadata& restart)
         {
-            // Version 2 retains the codec's bounded generated-ID domain (-1).
+            // Retain the codec's bounded generated-ID domain (-1).
             // Exhausted but representable values are preserved, not reset; a
             // future resumption path must reject revision/counter overflow.
             if (restart.mRevision == 0 || restart.mRevision > std::numeric_limits<size_t>::max()
@@ -59,9 +59,8 @@ namespace MWWorld::Testing
         throw std::invalid_argument("Missing supplied inventory base record");
     }
 
-    void validateRestore(const SerializedPair& input, const RestoreContent& content)
+    static void validateContent(const RestoreContent& content)
     {
-        validateRestart(input.mRestart);
         constexpr size_t maxObjects = 1024;
         if (content.mBases.empty() || content.mBases.size() > maxObjects)
             throw std::invalid_argument("Invalid supplied base count");
@@ -93,7 +92,78 @@ namespace MWWorld::Testing
                 if (content.mBases[j]->mId == base->mId)
                     throw std::invalid_argument("Ambiguous supplied base record");
         }
+    }
+
+    namespace
+    {
+        struct ScriptView
+        {
+            bool mShared;
+            std::span<const TransferScriptItem> mOther;
+            std::array<std::span<const TransferScriptRegistration>, 2> mEntries;
+            std::array<size_t, 2> mCursors;
+        };
+
+        void validateScripts(const TransferRestartMetadata& restart,
+            const std::array<std::span<const TransferScriptItem>, 2>& inventories,
+            const ScriptView& scripts, const RestoreContent& content)
+        {
+            const auto valid = [](bool condition) {
+                if (!condition)
+                    throw std::invalid_argument("Invalid restart script metadata binding or cursor");
+            };
+            valid(scripts.mOther.size() <= MaxTransferInventoryItems);
+            valid(scripts.mEntries[0].size() <= MaxTransferScriptEntries
+                && scripts.mEntries[1].size() <= MaxTransferScriptEntries - scripts.mEntries[0].size());
+            valid(!scripts.mShared || (scripts.mEntries[1].empty() && scripts.mCursors[1] == 0));
+            const std::array items{ inventories[0], inventories[1], scripts.mOther };
+            for (const auto& item : scripts.mOther)
+            {
+                valid(item.mIdentity.isSet() && item.mIdentity.mContentFile >= -1);
+                validateRestartIdentity(restart, item.mIdentity);
+                validateId(item.mBase, false);
+                const auto& base = suppliedBase(item.mBase, content);
+                valid(!item.mConfigured || !base.mScript.empty());
+                size_t matches = 0;
+                for (const auto collection : items)
+                    matches += std::count_if(collection.begin(), collection.end(),
+                        [&](const auto& value) { return value.mIdentity == item.mIdentity; });
+                valid(matches == 1);
+            }
+            for (size_t service = 0; service < 2; ++service)
+            {
+                valid(scripts.mCursors[service] <= scripts.mEntries[service].size());
+                for (const auto& entry : scripts.mEntries[service])
+                {
+                    validateId(entry.mScript, false);
+                    valid(entry.mScript == content.mScript.mId);
+                    size_t matches = 0;
+                    for (size_t side = 0; side < items.size(); ++side)
+                        for (const auto& item : items[side])
+                            if (item.mIdentity == entry.mIdentity)
+                            {
+                                valid(service == (side == 1 && !scripts.mShared ? 1 : 0)
+                                    && item.mConfigured && suppliedBase(item.mBase, content).mScript == entry.mScript);
+                                ++matches;
+                            }
+                    valid(matches == 1);
+                    size_t registrations = 0;
+                    for (const auto entries : scripts.mEntries)
+                        registrations += std::count_if(entries.begin(), entries.end(),
+                            [&](const auto& value) { return value.mIdentity == entry.mIdentity; });
+                    valid(registrations == 1);
+                }
+            }
+        }
+    }
+
+    void validateRestore(const SerializedPair& input, const RestoreContent& content)
+    {
+        validateRestart(input.mRestart);
+        validateContent(content);
+        constexpr size_t maxObjects = MaxTransferInventoryItems;
         const std::array inventories{ &input.mSource, &input.mDestination };
+        std::array<std::array<TransferScriptItem, maxObjects>, 2> scriptItems;
         // Validate every shape before scanning identity associations or staging.
         for (const auto* inventory : inventories)
             if (inventory->mObjects.size() > maxObjects
@@ -136,14 +206,21 @@ namespace MWWorld::Testing
                 for (const auto& animation : state.mAnimationState.mScriptedAnims)
                     validateText(animation.mGroup, false);
                 RefData::validateRestore(state, base.mScript, content.mDeclarations);
+                scriptItems[inventory == inventories[0] ? 0 : 1][i] = { id, base.mId, state.mHasLocals != 0 };
             }
+        const auto& scripts = input.mScripts;
+        validateScripts(input.mRestart,
+            { std::span(scriptItems[0]).first(input.mSource.mObjects.size()),
+                std::span(scriptItems[1]).first(input.mDestination.mObjects.size()) },
+            { scripts.mShared, scripts.mOther, { scripts.mServices[0].mEntries, scripts.mServices[1].mEntries },
+                { scripts.mServices[0].mCursor, scripts.mServices[1].mCursor } }, content);
     }
 
     namespace
     {
         static_assert(std::endian::native == std::endian::little);
         constexpr size_t MaxObjects = 1024;
-        constexpr uint32_t CodecVersion = 2;
+        constexpr uint32_t CodecVersion = 3;
 
         [[noreturn]] void invalid()
         {
@@ -240,7 +317,36 @@ namespace MWWorld::Testing
         {
             std::array<uint32_t, 2> mCounts;
             TransferRestartMetadata mRestart;
+            bool mShared = true;
+            uint32_t mOtherCount = 0;
+            std::array<TransferScriptItem, MaxTransferInventoryItems> mOther;
+            std::array<TransferScriptRegistration, MaxTransferScriptEntries> mEntries;
+            std::array<uint32_t, 2> mEntryCounts{}, mCursors{};
         };
+
+        ESM::RefId scriptReference(Cursor field, const SaveBindings& bindings, bool base)
+        {
+            const auto bytes = field.mBytes;
+            valid(!bytes.empty() && bytes.front() == static_cast<char>(ESM::RefIdType::UnsizedString));
+            const std::string_view name(bytes.data() + 1, bytes.size() - 1);
+            validateText(name, false);
+            if (base)
+            {
+                for (const auto* record : bindings.mContent.mBases)
+                    if (record->mId.getRefIdString() == name)
+                        return record->mId;
+            }
+            else if (bindings.mContent.mScript.mId.getRefIdString() == name)
+                return bindings.mContent.mScript.mId;
+            invalid();
+        }
+
+        void validateScriptOwners(const TransferScriptMetadata& scripts, const SaveEnvelope& envelope)
+        {
+            for (const auto& item : scripts.mOther)
+                valid(item.mIdentity != envelope.mSourceOwner && item.mIdentity != envelope.mDestinationOwner
+                    && item.mIdentity != envelope.mInitiator);
+        }
 
         void validateRestartOwners(const TransferRestartMetadata& restart, const SaveEnvelope& envelope)
         {
@@ -252,6 +358,8 @@ namespace MWWorld::Testing
         {
             valid(bytes.size() <= MaxTransferSaveBytes);
             validateBindings(bindings);
+            validateContent(bindings.mContent);
+            SavePreflight result;
             Cursor file{ bytes };
             auto header = file.record(ESM::fourCC("TES3"));
             auto form = header.sub(ESM::fourCC("FORM"));
@@ -288,8 +396,9 @@ namespace MWWorld::Testing
             auto sizes = pair.sub(ESM::fourCC("SIZE"));
             const std::array counts{ sizes.number(), sizes.number() };
             valid(sizes.empty() && pair.empty() && counts[0] <= MaxObjects && counts[1] <= MaxObjects);
-            valid(records == 1 + counts[0] + counts[1]);
+            valid(records == 2 + counts[0] + counts[1]);
             std::array<ESM::RefNum, MaxObjects * 2> identities;
+            std::array<std::array<TransferScriptItem, MaxObjects>, 2> scriptItems;
             size_t used = 0;
             for (size_t side = 0; side < counts.size(); ++side)
                 for (size_t i = 0; i < counts[side]; ++i)
@@ -303,6 +412,8 @@ namespace MWWorld::Testing
                     validateRestartIdentity(restart, value);
                     valid(std::find(identities.begin(), identities.begin() + used, value) == identities.begin() + used);
                     identities[used++] = value;
+                    auto& scriptItem = scriptItems[side][i];
+                    scriptItem.mIdentity = value;
                     size_t fields = 0, locals = 0, animations = 0, times = 0;
                     while (!object.empty())
                     {
@@ -313,6 +424,13 @@ namespace MWWorld::Testing
                         switch (tag)
                         {
                             case ESM::fourCC("NAME"):
+                                reference(field.mBytes, bindings);
+                                for (const auto* base : bindings.mContent.mBases)
+                                    if (field.mBytes.size() > 1 && base->mId.getRefIdString()
+                                            == std::string_view(field.mBytes.data() + 1, size - 1))
+                                        scriptItem.mBase = base->mId;
+                                valid(!scriptItem.mBase.empty());
+                                break;
                             case ESM::fourCC("ANAM"):
                             case ESM::fourCC("XSOL"):
                             case ESM::fourCC("CNAM"):
@@ -357,9 +475,12 @@ namespace MWWorld::Testing
                                 break;
                             case ESM::fourCC("HCUS"):
                             case ESM::fourCC("ABST"):
-                            case ESM::fourCC("HLOC"):
                             case ESM::fourCC("ENAB"):
                                 valid(size == 1 && static_cast<unsigned char>(field.mBytes[0]) <= 1);
+                                break;
+                            case ESM::fourCC("HLOC"):
+                                valid(size == 1 && static_cast<unsigned char>(field.mBytes[0]) <= 1);
+                                scriptItem.mConfigured = field.mBytes[0] != 0;
                                 break;
                             case ESM::fourCC("UNAM"):
                                 valid(size == 1);
@@ -386,8 +507,53 @@ namespace MWWorld::Testing
                     }
                     valid(times == animations);
                 }
+            auto scripts = file.record(ESM::fourCC("SCRP"));
+            auto map = scripts.sub(ESM::fourCC("SMAP"));
+            const auto destination = map.number();
+            valid(destination <= 1 && map.empty()); // Source is always 0.
+            result.mShared = destination == 0;
+            auto otherCount = scripts.sub(ESM::fourCC("OCNT"));
+            result.mOtherCount = otherCount.number();
+            valid(result.mOtherCount <= MaxTransferInventoryItems && otherCount.empty());
+            for (size_t i = 0; i < result.mOtherCount; ++i)
+            {
+                auto binding = scripts.sub(ESM::fourCC("BIND"));
+                auto& item = result.mOther[i];
+                item.mIdentity = binding.identity();
+                const auto configured = binding.number();
+                valid(configured <= 1 && binding.empty());
+                item.mConfigured = configured != 0;
+                item.mBase = scriptReference(scripts.sub(ESM::fourCC("BASE")), bindings, true);
+                valid(item.mIdentity != e.mSourceOwner && item.mIdentity != e.mDestinationOwner
+                    && item.mIdentity != e.mInitiator);
+            }
+            size_t entries = 0;
+            for (size_t service = 0; service < (result.mShared ? 1u : 2u); ++service)
+            {
+                auto serviceHeader = scripts.sub(ESM::fourCC("SERV"));
+                const auto count = result.mEntryCounts[service] = serviceHeader.number();
+                result.mCursors[service] = serviceHeader.number();
+                valid(serviceHeader.empty() && count <= MaxTransferScriptEntries - entries);
+                for (size_t i = 0; i < count; ++i)
+                {
+                    auto id = scripts.sub(ESM::fourCC("SREF"));
+                    auto& entry = result.mEntries[entries++];
+                    entry.mIdentity = id.identity();
+                    valid(id.empty());
+                    entry.mScript = scriptReference(scripts.sub(ESM::fourCC("SCPT")), bindings, false);
+                }
+            }
+            valid(scripts.empty());
+            validateScripts(restart,
+                { std::span(scriptItems[0]).first(counts[0]), std::span(scriptItems[1]).first(counts[1]) },
+                { result.mShared, std::span(result.mOther).first(result.mOtherCount),
+                    { std::span(result.mEntries).first(result.mEntryCounts[0]),
+                        std::span(result.mEntries).subspan(result.mEntryCounts[0], result.mEntryCounts[1]) },
+                    { result.mCursors[0], result.mCursors[1] } }, bindings.mContent);
             valid(file.empty());
-            return { counts, restart };
+            result.mCounts = counts;
+            result.mRestart = restart;
+            return result;
         }
 
         // Bounded output with seeking for ESMWriter's length backpatches. Every
@@ -461,6 +627,7 @@ namespace MWWorld::Testing
         validateBindings(bindings);
         validateRestore(input, bindings.mContent);
         validateRestartOwners(input.mRestart, bindings.mEnvelope);
+        validateScriptOwners(input.mScripts, bindings.mEnvelope);
         ByteBuffer buffer;
         std::ostream stream(&buffer);
         stream.exceptions(std::ios::badbit | std::ios::failbit);
@@ -468,7 +635,7 @@ namespace MWWorld::Testing
         writer.setVersion(ESM::VER_130);
         writer.setType(0);
         writer.setFormatVersion(ESM::CurrentSaveGameFormatVersion);
-        writer.setRecordCount(static_cast<int>(1 + input.mSource.mObjects.size() + input.mDestination.mObjects.size()));
+        writer.setRecordCount(static_cast<int>(2 + input.mSource.mObjects.size() + input.mDestination.mObjects.size()));
         writer.save(stream);
         writer.startRecord("PAIR");
         const auto& e = bindings.mEnvelope;
@@ -497,6 +664,34 @@ namespace MWWorld::Testing
                 writer.endRecord(tag);
                 valid(buffer.mBytes.size() - start - 16 <= MaxTransferObjectBytes);
             }
+        buffer.mLimit = MaxTransferSaveBytes;
+        writer.startRecord("SCRP");
+        const auto& scripts = input.mScripts;
+        writer.writeHNT("SMAP", static_cast<uint32_t>(scripts.mShared ? 0 : 1));
+        writer.writeHNT("OCNT", static_cast<uint32_t>(scripts.mOther.size()));
+        for (const auto& item : scripts.mOther)
+        {
+            writer.startSubRecord("BIND");
+            writer.writeT(item.mIdentity.mIndex);
+            writer.writeT(item.mIdentity.mContentFile);
+            writer.writeT(static_cast<uint32_t>(item.mConfigured));
+            writer.endRecord("BIND");
+            writer.writeHNRefId("BASE", item.mBase);
+        }
+        for (size_t service = 0; service < (scripts.mShared ? 1u : 2u); ++service)
+        {
+            const auto& value = scripts.mServices[service];
+            writer.startSubRecord("SERV");
+            writer.writeT(static_cast<uint32_t>(value.mEntries.size()));
+            writer.writeT(static_cast<uint32_t>(value.mCursor));
+            writer.endRecord("SERV");
+            for (const auto& entry : value.mEntries)
+            {
+                writer.writeFormId(entry.mIdentity, true, "SREF");
+                writer.writeHNRefId("SCPT", entry.mScript);
+            }
+        }
+        writer.endRecord("SCRP");
         writer.close();
         preflight(buffer.mBytes, bindings);
         output.swap(buffer.mBytes);
@@ -504,7 +699,8 @@ namespace MWWorld::Testing
 
     void decodeTransferSave(std::span<const char> bytes, const SaveBindings& bindings, SerializedPair& output)
     {
-        const auto [counts, restart] = preflight(bytes, bindings);
+        const auto checked = preflight(bytes, bindings);
+        const auto& counts = checked.mCounts;
         // All nested lengths, counts, RefIds and context identities have already
         // been checked. The bounded copy also gives ESMReader an owning stream.
         auto stream = std::make_unique<std::istringstream>(std::string(bytes.data(), bytes.size()), std::ios::binary);
@@ -515,7 +711,18 @@ namespace MWWorld::Testing
         reader.getRecHeader();
         reader.skipRecord(); // Exactly matched by allocation-free preflight.
         SerializedPair staged;
-        staged.mRestart = restart;
+        staged.mRestart = checked.mRestart;
+        staged.mScripts.mShared = checked.mShared;
+        staged.mScripts.mOther.assign(checked.mOther.begin(), checked.mOther.begin() + checked.mOtherCount);
+        size_t offset = 0;
+        for (size_t service = 0; service < 2; ++service)
+        {
+            auto& value = staged.mScripts.mServices[service];
+            value.mCursor = checked.mCursors[service];
+            value.mEntries.assign(checked.mEntries.begin() + offset,
+                checked.mEntries.begin() + offset + checked.mEntryCounts[service]);
+            offset += checked.mEntryCounts[service];
+        }
         size_t side = 0;
         for (auto* inventory : { &staged.mSource, &staged.mDestination })
         {
@@ -548,6 +755,9 @@ namespace MWWorld::Testing
             }
             ++side;
         }
+        valid(reader.getRecName() == ESM::fourCC("SCRP"));
+        reader.getRecHeader();
+        reader.skipRecord(); // All semantic script metadata was checked without allocation.
         valid(!reader.hasMoreRecs());
         validateRestore(staged, bindings.mContent);
         // Reject duplicate/out-of-order/default redundant fields and inconsistent

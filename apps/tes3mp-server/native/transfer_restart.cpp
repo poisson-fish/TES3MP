@@ -12,6 +12,7 @@ namespace MWWorld::Testing
         validateRestore(input, content);
         auto staged = std::make_unique<RestoredPair>();
         staged->mRestart = input.mRestart;
+        staged->mScripts = input.mScripts;
         const auto restore = [&](const SerializedInventory& saved, RestoredInventory& inventory) {
             inventory.mProposedIdentities = saved.mProposedIdentities;
             inventory.mViews.reserve(saved.mObjects.size());

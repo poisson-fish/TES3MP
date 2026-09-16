@@ -344,6 +344,22 @@ namespace MWWorld::Testing
         if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
                 .isComplete())
             throw std::invalid_argument("ObjectState serialization requires complete resolution");
+        const auto& sourceScripts = pair.getSourceScriptStorage();
+        const auto& destinationScripts = pair.getDestinationScriptStorage();
+        const bool shared = &sourceScripts == &destinationScripts;
+        size_t otherCount = 0;
+        for (const auto& store : pair.getResolvedStoreBindings())
+        {
+            if (store.mStore != &fixture.mOther || store.mNodes.size() > MaxTransferInventoryItems - otherCount)
+                throw std::invalid_argument("Unsupported or oversized script metadata store");
+            otherCount += store.mNodes.size();
+        }
+        if (pair.getSourceStorage().size() > MaxTransferInventoryItems
+            || pair.getDestinationStorage().size() > MaxTransferInventoryItems
+            || sourceScripts.getEntries().size() > MaxTransferScriptEntries
+            || (!shared && destinationScripts.getEntries().size()
+                    > MaxTransferScriptEntries - sourceScripts.getEntries().size()))
+            throw std::invalid_argument("Oversized script metadata membership");
         SerializedPair staged;
         const auto& registry = pair.getRegistryStorage().getBindings();
         staged.mRestart = { registry.mRevision, registry.mLastGenerated };
@@ -358,6 +374,35 @@ namespace MWWorld::Testing
         };
         serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
         serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
+        auto& metadata = staged.mScripts;
+        metadata.mShared = shared;
+        metadata.mOther.reserve(otherCount);
+        for (const auto& store : pair.getResolvedStoreBindings())
+            for (const auto& node : store.mNodes)
+                metadata.mOther.push_back({ node.mIdentity, node.mItem.getCellRef().getRefId(),
+                    !node.mItem.getRefData().getLocals().getScriptId().empty() });
+        const auto scripts = [&](const auto& storage, size_t cursor, TransferScriptService& service) {
+            service.mCursor = cursor;
+            service.mEntries.reserve(storage.getEntries().size());
+            for (const auto& entry : storage.getEntries())
+            {
+                const auto item = entry.getItem();
+                ESM::RefNum identity;
+                size_t matches = 0;
+                for (const auto& [id, binding] : registry.mEntries)
+                    if (binding.references(item.mRef))
+                    {
+                        identity = id;
+                        ++matches;
+                    }
+                if (matches != 1)
+                    throw std::invalid_argument("Missing or ambiguous prepared script identity");
+                service.mEntries.push_back({ identity, entry.getScript() });
+            }
+        };
+        scripts(sourceScripts, pair.getSourceScripts().mCursor, metadata.mServices[0]);
+        if (!shared)
+            scripts(destinationScripts, pair.getDestinationScripts().mCursor, metadata.mServices[1]);
         output.swap(staged);
     }
 

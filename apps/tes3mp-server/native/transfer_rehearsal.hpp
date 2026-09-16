@@ -51,10 +51,47 @@ namespace MWWorld::Testing
         bool operator==(const TransferRestartMetadata&) const = default;
     };
 
+    inline constexpr size_t MaxTransferInventoryItems = 1024;
+    inline constexpr size_t MaxTransferScriptEntries = 3 * MaxTransferInventoryItems;
+
+    struct TransferScriptItem
+    {
+        ESM::RefNum mIdentity;
+        ESM::RefId mBase;
+        bool mConfigured = false;
+        bool operator==(const TransferScriptItem&) const = default;
+    };
+
+    struct TransferScriptRegistration
+    {
+        ESM::RefNum mIdentity;
+        ESM::RefId mScript;
+        bool operator==(const TransferScriptRegistration&) const = default;
+    };
+
+    struct TransferScriptService
+    {
+        std::vector<TransferScriptRegistration> mEntries;
+        size_t mCursor = 0; // size means end, including an empty service.
+        bool operator==(const TransferScriptService&) const = default;
+    };
+
+    // Owned semantic metadata only. Source is service 0; destination is 0 when
+    // shared, otherwise 1. Other-store bindings belong to service 0. They do not
+    // reconstruct that store's values. A configured item need not be registered.
+    struct TransferScriptMetadata
+    {
+        bool mShared = true;
+        std::array<TransferScriptService, 2> mServices;
+        std::vector<TransferScriptItem> mOther;
+        bool operator==(const TransferScriptMetadata&) const = default;
+    };
+
     struct SerializedPair
     {
         SerializedInventory mSource, mDestination;
         TransferRestartMetadata mRestart;
+        TransferScriptMetadata mScripts;
 
         void swap(SerializedPair& other) noexcept
         {
@@ -62,6 +99,8 @@ namespace MWWorld::Testing
             mDestination.swap(other.mDestination);
             static_assert(std::is_nothrow_swappable_v<TransferRestartMetadata>);
             std::swap(mRestart, other.mRestart);
+            static_assert(std::is_nothrow_swappable_v<TransferScriptMetadata>);
+            std::swap(mScripts, other.mScripts);
         }
     };
 
@@ -78,6 +117,7 @@ namespace MWWorld::Testing
     {
         RestoredInventory mSource, mDestination;
         TransferRestartMetadata mRestart;
+        TransferScriptMetadata mScripts; // Carried as values; no service is rebuilt.
     };
 
     struct RestoreContent;
@@ -220,6 +260,7 @@ namespace MWWorld::Testing
     void checkTransferLocalsRestore(const ESMStore& content);
     void checkTransferRestore(const ESMStore& content);
     void checkTransferRestartRegistry(const ESMStore& content);
+    void checkTransferScriptMetadata(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);

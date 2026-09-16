@@ -354,6 +354,7 @@ namespace MWWorld::Testing
         {
             SerializedPair staged;
             staged.mRestart = pair.mRestart;
+            staged.mScripts = pair.mScripts;
             serializeInventory(
                 pair.mSource.mNodes, [&](size_t i) { return pair.mSource.mProposedIdentities.at(i); }, declarations,
                 staged.mSource);
@@ -363,13 +364,21 @@ namespace MWWorld::Testing
             output.swap(staged);
         }
 
+        auto scriptOutputState(const TransferScriptMetadata& value)
+        {
+            return std::tuple{ value, value.mOther.data(), value.mOther.capacity(),
+                value.mServices[0].mEntries.data(), value.mServices[0].mEntries.capacity(),
+                value.mServices[1].mEntries.data(), value.mServices[1].mEntries.capacity() };
+        }
+
         auto pairOutputState(const SerializedPair& output)
         {
             const auto inventory = [](const SerializedInventory& value) {
                 return std::tuple{ pairOutputState(value.mObjects), value.mProposedIdentities,
                     value.mProposedIdentities.data(), value.mProposedIdentities.capacity() };
             };
-            return std::tuple{ inventory(output.mSource), inventory(output.mDestination), output.mRestart };
+            return std::tuple{ inventory(output.mSource), inventory(output.mDestination), output.mRestart,
+                scriptOutputState(output.mScripts) };
         }
 
         template <bool ObjectStates>
@@ -379,6 +388,10 @@ namespace MWWorld::Testing
             {
                 SerializedPair result;
                 result.mRestart = { 0x123456789ull, { 999, -1 } };
+                result.mScripts.mShared = false;
+                result.mScripts.mServices[1].mEntries.push_back({ { 999, -1 }, ESM::RefId{} });
+                result.mScripts.mServices[1].mCursor = 1;
+                result.mScripts.mOther.push_back({ { 888, -1 }, ESM::RefId{}, true });
                 result.mSource.mObjects.push_back(outputSentinel());
                 result.mDestination.mObjects = { outputSentinel(), outputSentinel() };
                 result.mSource.mProposedIdentities.push_back({ 701, -1 });
@@ -803,7 +816,8 @@ namespace MWWorld::Testing
                 return std::tuple{ nodes, bases, strings, value.mProposedIdentities, value.mProposedIdentities.data(),
                     value.mProposedIdentities.capacity(), views, value.mViews.data(), value.mViews.capacity() };
             };
-            return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination), pair->mRestart };
+            return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination), pair->mRestart,
+                scriptOutputState(pair->mScripts) };
         }
 
         RestoredPair expectedRestoration(const PreparedContainerTransfer& pair, bool serialized = true)
@@ -919,6 +933,7 @@ namespace MWWorld::Testing
         void checkSavedValues(const SerializedPair& actual, const SerializedPair& expected)
         {
             require(actual.mRestart == expected.mRestart, "save/restore/save changed restart metadata");
+            require(actual.mScripts == expected.mScripts, "save/restore/save changed script metadata");
             const auto check = [](const SerializedInventory& a, const SerializedInventory& b) {
                 require(a.mProposedIdentities == b.mProposedIdentities && a.mObjects.size() == b.mObjects.size(),
                     "save/restore/save lost membership or identities");
@@ -1716,6 +1731,7 @@ namespace MWWorld::Testing
             for (auto tag : { "FORM", "FVER", "SOWN", "DOWN", "INIT" })
                 change(tag, 999999, true);
             change("FVER", 1, true); // No version-1 migration or inferred metadata.
+            change("FVER", 2, true); // Version 2 did not persist script service state.
             bad = bytes;
             bad.erase(bad.begin() + find("RREV").mHeader, bad.begin() + find("LGEN").mHeader + 16);
             put(bad, find("RREV").mRecord + 4, number(bytes, find("RREV").mRecord + 4) - 32);
@@ -2024,6 +2040,24 @@ namespace MWWorld::Testing
             };
             save(fixture.sourceStorage(), output.mSource);
             save(fixture.destinationStorage(), output.mDestination);
+            output.mScripts = {};
+            output.mScripts.mShared = fixture.mDestinationAdd.mLocalScripts == &fixture.mSourceScripts;
+            for (const auto& node : fixture.otherStorage())
+                output.mScripts.mOther.push_back({ node.mRef.getRefNum(), node.mRef.getRefId(),
+                    !node.mData.getLocals().getScriptId().empty() });
+            for (size_t side = 0; side < (output.mScripts.mShared ? 1u : 2u); ++side)
+            {
+                const auto list = (side == 0 ? fixture.mSourceScripts : fixture.mDestinationScripts).snapshot();
+                auto& service = output.mScripts.mServices[side];
+                service.mCursor = list.mCursor;
+                for (const auto& entry : list.mEntries)
+                    for (const auto* storage : { &fixture.sourceStorage(), &fixture.destinationStorage(),
+                             &fixture.otherStorage() })
+                        for (const auto& node : *storage)
+                            if (entry.references(&node.mRef))
+                                service.mEntries.push_back({ node.mRef.getRefNum(), entry.getScript() });
+                require(service.mEntries.size() == list.mEntries.size(), "fixture save omitted script bindings");
+            }
         }
 
         struct CommandEvidence
@@ -3405,6 +3439,276 @@ namespace MWWorld::Testing
 
     namespace
     {
+        // Independent wire construction for malformed script metadata. Keep the
+        // accepted inventory prefix intact; bypass the encoder's semantic checks.
+        TransferSaveBytes replaceScriptRecord(const TransferSaveBytes& bytes, const TransferScriptMetadata& scripts)
+        {
+            const auto number = [&](size_t offset) {
+                uint32_t result = 0;
+                for (size_t i = 0; i < 4; ++i)
+                    result |= static_cast<uint32_t>(static_cast<unsigned char>(bytes.at(offset + i))) << (8 * i);
+                return result;
+            };
+            size_t record = 0;
+            while (std::string_view(bytes.data() + record, 4) != "SCRP")
+                record += 16 + number(record + 4);
+            TransferSaveBytes result(bytes.begin(), bytes.begin() + record);
+            const auto put = [&](uint32_t value) {
+                for (size_t i = 0; i < 4; ++i)
+                    result.push_back(static_cast<char>(value >> (8 * i)));
+            };
+            const auto tag = [&](std::string_view value) { result.insert(result.end(), value.begin(), value.end()); };
+            const auto field = [&](std::string_view name, std::initializer_list<uint32_t> values) {
+                tag(name);
+                put(static_cast<uint32_t>(values.size() * 4));
+                for (const auto value : values)
+                    put(value);
+            };
+            const auto id = [&](std::string_view name, ESM::RefId value) {
+                tag(name);
+                const auto text = value.empty() ? std::string_view{} : value.getRefIdString();
+                put(static_cast<uint32_t>(1 + text.size()));
+                result.push_back(
+                    static_cast<char>(value.empty() ? ESM::RefIdType::Empty : ESM::RefIdType::UnsizedString));
+                tag(text);
+            };
+            tag("SCRP");
+            put(0);
+            put(0);
+            put(0);
+            field("SMAP", { scripts.mShared ? 0u : 1u });
+            field("OCNT", { static_cast<uint32_t>(scripts.mOther.size()) });
+            for (const auto& item : scripts.mOther)
+            {
+                field("BIND", { item.mIdentity.mIndex, std::bit_cast<uint32_t>(item.mIdentity.mContentFile),
+                                  static_cast<uint32_t>(item.mConfigured) });
+                id("BASE", item.mBase);
+            }
+            // Also emit an illegally populated shared second service for rejection.
+            const bool second = !scripts.mShared || !scripts.mServices[1].mEntries.empty()
+                || scripts.mServices[1].mCursor != 0;
+            for (size_t side = 0; side < (second ? 2u : 1u); ++side)
+            {
+                const auto& service = scripts.mServices[side];
+                field("SERV",
+                    { static_cast<uint32_t>(service.mEntries.size()), static_cast<uint32_t>(service.mCursor) });
+                for (const auto& entry : service.mEntries)
+                {
+                    field("SREF", { entry.mIdentity.mIndex, std::bit_cast<uint32_t>(entry.mIdentity.mContentFile) });
+                    id("SCPT", entry.mScript);
+                }
+            }
+            const auto size = static_cast<uint32_t>(result.size() - record - 16);
+            for (size_t i = 0; i < 4; ++i)
+                result[record + 4 + i] = static_cast<char>(size >> (8 * i));
+            return result;
+        }
+
+        template <class Make, class Verify>
+        size_t checkScriptMetadataCase(std::unique_ptr<DisposableTransferRehearsal>& fixture, Make make,
+            Verify verifyOriginal, const RestoreContent& content, size_t& rejections)
+        {
+            SaveEnvelope envelope{ "OpenMW-0.51.0-test-inventory-runtime-1", { 1, 7, 19 },
+                fixture->mSourceOwner.getPtr().getCellRef().getRefNum(),
+                fixture->mDestinationOwner.getPtr().getCellRef().getRefNum(),
+                fixture->mDestinationOwner.getPtr().getCellRef().getRefNum() };
+            const std::array referenceIds{ content.mBases[0]->mId, content.mBases[1]->mId,
+                ESM::RefId::stringRefId("serialization_owner"), ESM::RefId::stringRefId("serialization_soul"),
+                ESM::RefId::stringRefId("serialization_faction"), ESM::RefId::stringRefId("serialization_key"),
+                ESM::RefId::stringRefId("serialization_trap"), ESM::RefId::stringRefId("dormant_soul") };
+            const SaveBindings bindings{ envelope, content, referenceIds };
+            SerializedPair saved;
+            size_t allocations = 0;
+            {
+                const auto prepared = make();
+                const auto check = [&](const SerializedPair& value) {
+                    checkPairOutput(prepared, value);
+                    require(value.mScripts.mShared
+                            == (fixture->mDestinationAdd.mLocalScripts == &fixture->mSourceScripts),
+                        "lost shared/distinct script association");
+                    for (size_t side = 0; side < (value.mScripts.mShared ? 1u : 2u); ++side)
+                    {
+                        const auto& storage
+                            = side == 0 ? prepared.getSourceScriptStorage() : prepared.getDestinationScriptStorage();
+                        const auto& service = value.mScripts.mServices[side];
+                        require(service.mEntries.size() == storage.getEntries().size(),
+                            "lost complete script membership");
+                        auto node = storage.getEntries().begin();
+                        for (const auto& entry : service.mEntries)
+                        {
+                            require(node->getScript() == entry.mScript
+                                    && prepared.getRegistryStorage().getItem(entry.mIdentity) == node->getItem(),
+                                "lost ordered registration identity/script");
+                            ++node;
+                        }
+                        node = storage.getEntries().begin();
+                        std::advance(node, service.mCursor);
+                        require((node == storage.getEntries().end() ? nullptr : &*node) == storage.getCursor(),
+                            "lost prepared script cursor");
+                    }
+                    size_t unregistered = 0, dormant = 0;
+                    for (const auto* inventory : { &value.mSource, &value.mDestination })
+                        for (size_t i = 0; i < inventory->mObjects.size(); ++i)
+                        {
+                            const auto& state = inventory->mObjects[i];
+                            bool registered = false;
+                            for (const auto& service : value.mScripts.mServices)
+                                for (const auto& entry : service.mEntries)
+                                    registered |= entry.mIdentity == inventory->mProposedIdentities[i];
+                            unregistered += state.mHasLocals && !registered;
+                            dormant += state.mRef.mCount == 0 && registered;
+                        }
+                    require(unregistered >= 2 && dormant >= 1, "configured/unregistered or dormant coverage missing");
+                    require(value.mScripts.mOther.size() == fixture->otherStorage().size(),
+                        "lost other-store bindings");
+                };
+                MWWorld::Testing::serializePair(*fixture, prepared, content.mDeclarations, saved);
+                check(saved);
+                allocations += checkSerializationAllocations([] { return pairOutputSentinel<true>(); },
+                    [&](auto& output) {
+                        MWWorld::Testing::serializePair(*fixture, prepared, content.mDeclarations, output);
+                    },
+                    [](const auto& output) { return pairOutputState(output); }, check, verifyOriginal);
+            }
+            TransferSaveBytes bytes;
+            encodeTransferSave(saved, bindings, bytes);
+            require(replaceScriptRecord(bytes, saved.mScripts) == bytes, "independent script wire layout differs");
+            const auto retained = pairOutputState(saved);
+            const auto retainedBytes = byteState(bytes);
+            const auto verify = [&] {
+                require(pairOutputState(saved) == retained && byteState(bytes) == retainedBytes,
+                    "script codec changed caller input/storage");
+                if (fixture)
+                    verifyOriginal();
+            };
+            const auto checkDecoded = [&](const SerializedPair& output) {
+                checkSavedValues(output, saved);
+                std::unique_ptr<const RestoredPair> restored;
+                restorePair(output, content, restored);
+                require(restored->mScripts == saved.mScripts, "detached restore lost script metadata");
+                SerializedPair again;
+                serializePair(*restored, content.mDeclarations, again);
+                checkSavedValues(again, saved);
+            };
+            allocations += checkSerializationAllocations([] { return TransferSaveBytes(71, 'x'); },
+                [&](auto& output) { encodeTransferSave(saved, bindings, output); }, byteState,
+                [&](const auto& output) { require(output == bytes, "script encoding changed"); }, verify);
+
+            const auto reject = [&](const SerializedPair& bad, const TransferSaveBytes* raw = nullptr) {
+                const auto badBefore = pairOutputState(bad);
+                const auto wire = raw ? *raw : replaceScriptRecord(bytes, bad.mScripts);
+                // Each rejection must happen before engine/staging allocation;
+                // only the diagnostic itself may allocate. Fail it as well.
+                for (bool decode : { false, true })
+                {
+                    if (raw && !decode)
+                        continue;
+                    auto output = pairOutputSentinel<true>();
+                    auto encoded = TransferSaveBytes(71, 'x');
+                    const auto outputBefore = pairOutputState(output);
+                    const auto encodedBefore = byteState(encoded);
+                    for (size_t failAt : { size_t{ 0 }, size_t{ 1 } })
+                    {
+                        bool caught = false;
+                        Allocations::Trace trace;
+                        {
+                            Allocations::Observe observe(trace, failAt);
+                            try
+                            {
+                                if (decode)
+                                    decodeTransferSave(wire, bindings, output);
+                                else
+                                    encodeTransferSave(bad, bindings, encoded);
+                            }
+                            catch (const std::exception&)
+                            {
+                                caught = true;
+                            }
+                        }
+                        require(caught && trace.mTotal <= 1 && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                                && pairOutputState(output) == outputBefore && byteState(encoded) == encodedBefore
+                                && pairOutputState(bad) == badBefore,
+                            "malformed script metadata allocated, leaked or changed output/input");
+                        verify();
+                        ++rejections;
+                        allocations += trace.mFailures;
+                    }
+                    decodeTransferSave(bytes, bindings, output);
+                    checkDecoded(output);
+                    encodeTransferSave(saved, bindings, encoded);
+                    require(encoded == bytes, "script rejection prevented healthy retry");
+                }
+            };
+            const auto mutate = [&](auto edit) { auto bad = saved; edit(bad.mScripts); reject(bad); };
+            mutate([](auto& s) { s.mServices[0].mCursor = s.mServices[0].mEntries.size() + 1; });
+            mutate([](auto& s) { s.mServices[1].mCursor = SIZE_MAX; });
+            mutate([](auto& s) { s.mServices[0].mEntries.push_back(s.mServices[0].mEntries.front()); });
+            mutate([](auto& s) { s.mServices[1].mEntries.push_back(s.mServices[0].mEntries.front()); });
+            mutate([](auto& s) { s.mServices[0].mEntries.resize(MaxTransferScriptEntries + 1); });
+            for (const auto id : { ESM::RefNum{}, ESM::RefNum{ 1, -2 },
+                     ESM::RefNum{ saved.mRestart.mLastGenerated.mIndex + 1, -1 }, envelope.mSourceOwner })
+                mutate([&](auto& s) { s.mServices[0].mEntries.front().mIdentity = id; });
+            for (const auto id : { ESM::RefId{}, content.mBases[0]->mId, ESM::RefId::stringRefId("missing_script") })
+                mutate([&](auto& s) { s.mServices[0].mEntries.front().mScript = id; });
+            mutate([](auto& s) { s.mOther.push_back(s.mOther.front()); });
+            mutate([](auto& s) { s.mOther.resize(MaxTransferInventoryItems + 1); });
+            mutate([&](auto& s) { s.mOther.front().mIdentity = saved.mSource.mProposedIdentities.front(); });
+            mutate([&](auto& s) { s.mOther.front().mIdentity = envelope.mSourceOwner; });
+            mutate([](auto& s) { s.mOther.front().mIdentity = {}; });
+            mutate([&](auto& s) { s.mOther.front().mIdentity = { saved.mRestart.mLastGenerated.mIndex + 1, -1 }; });
+            mutate([](auto& s) { s.mOther.front().mBase = {}; });
+            mutate([](auto& s) { s.mOther.front().mBase = ESM::RefId::stringRefId("missing_base"); });
+            if (saved.mScripts.mOther.front().mConfigured)
+            {
+                mutate([](auto& s) { s.mOther.clear(); });
+                mutate([](auto& s) { s.mOther.front().mConfigured = false; });
+                mutate([&](auto& s) { s.mOther.front().mBase = content.mBases[0]->mId; });
+            }
+            if (!saved.mScripts.mShared)
+                mutate([](auto& s) {
+                    s.mServices[1].mEntries.push_back(s.mServices[0].mEntries.front());
+                    s.mServices[0].mEntries.erase(s.mServices[0].mEntries.begin());
+                    s.mServices[0].mCursor = 0;
+                });
+
+            // Exercise raw scalar domains that owned bools/bounded vectors cannot
+            // express, as well as hostile count/cursor values before allocation.
+            const auto number = [&](size_t offset) {
+                uint32_t value = 0;
+                for (size_t i = 0; i < 4; ++i)
+                    value |= static_cast<uint32_t>(static_cast<unsigned char>(bytes.at(offset + i))) << (8 * i);
+                return value;
+            };
+            size_t record = 0;
+            while (std::string_view(bytes.data() + record, 4) != "SCRP")
+                record += 16 + number(record + 4);
+            for (const auto& [tag, offset, value] : {
+                     std::tuple{ "SMAP", 0, 2u }, { "OCNT", 0, 1025u }, { "BIND", 8, 2u },
+                     { "SERV", 0, static_cast<uint32_t>(MaxTransferScriptEntries + 1) }, { "SERV", 4, UINT32_MAX } })
+            {
+                size_t field = record + 16;
+                while (std::string_view(bytes.data() + field, 4) != tag)
+                    field += 8 + number(field + 4);
+                auto malformed = bytes;
+                for (size_t i = 0; i < 4; ++i)
+                    malformed.at(field + 8 + offset + i) = static_cast<char>(value >> (8 * i));
+                reject(saved, &malformed);
+            }
+
+            verifyOriginal();
+            const auto old = fixture->restartBindings();
+            fixture.reset();
+            for (const auto& owner : old.mOwners)
+                require(!owner.hasLiveReference(), "script test retained original fixture lifetime");
+            allocations += checkSerializationAllocations([] { return pairOutputSentinel<true>(); },
+                [&](auto& output) { decodeTransferSave(bytes, bindings, output); },
+                [](const auto& output) { return pairOutputState(output); }, checkDecoded, verify);
+            SerializedPair decoded;
+            decodeTransferSave(bytes, bindings, decoded);
+            checkDecoded(decoded);
+            return allocations;
+        }
+
         template <class Make, class Verify>
         size_t checkRestartRegistryCase(std::unique_ptr<DisposableTransferRehearsal>& original, Make make,
             Verify verifyOriginal, ESMStore& store, ESM::ReadersCache& readers, MWBase::ScriptManager& scripts,
@@ -3708,6 +4012,20 @@ namespace MWWorld::Testing
                     input.mSource = {};
                 if (empty & 2)
                     input.mDestination = {};
+                for (auto& service : input.mScripts.mServices)
+                {
+                    std::erase_if(service.mEntries, [&](const auto& entry) {
+                        for (size_t side = 0; side < 2; ++side)
+                        {
+                            const auto& ids = (side == 0 ? decoded.mSource : decoded.mDestination).mProposedIdentities;
+                            if ((empty & (1 << side))
+                                && std::find(ids.begin(), ids.end(), entry.mIdentity) != ids.end())
+                                return true;
+                        }
+                        return false;
+                    });
+                    service.mCursor = service.mEntries.size();
+                }
                 TransferSaveBytes encoded;
                 encodeTransferSave(input, bindings, encoded);
                 decodeTransferSave(encoded, bindings, input);
@@ -3758,6 +4076,7 @@ namespace MWWorld::Testing
         LocalsRestore,
         Restore,
         RestartRegistry,
+        ScriptMetadata,
         Codec,
         FileSink,
         Command,
@@ -3776,7 +4095,9 @@ namespace MWWorld::Testing
         const bool codec = allocationCheck == AllocationCheck::Codec || fileSink || command;
         const bool commit = allocationCheck == AllocationCheck::Commit || codec;
         const bool restartRegistry = allocationCheck == AllocationCheck::RestartRegistry;
-        const bool inventoryRestore = allocationCheck == AllocationCheck::Restore || restartRegistry || commit;
+        const bool scriptMetadata = allocationCheck == AllocationCheck::ScriptMetadata;
+        const bool inventoryRestore
+            = allocationCheck == AllocationCheck::Restore || restartRegistry || scriptMetadata || commit;
         const bool serialization = allocationCheck == AllocationCheck::Serialization
             || allocationCheck == AllocationCheck::ObjectState || localsRestore || inventoryRestore;
         MWClass::registerClasses();
@@ -3878,6 +4199,16 @@ namespace MWWorld::Testing
                                     scriptedItem ? scripted.getPtr() : plain.getPtr(), 3, fixture.mOtherAdd);
                                 fixture.mOther.setSelectedEnchantItem(other);
                                 other->getCellRef() = other->getCellRef().copyWithCount(0);
+                                if (scriptMetadata)
+                                {
+                                    const auto registered = *source.add(scripted.getPtr(), 1, fixture.mSourceAdd);
+                                    registered.getCellRef() = registered.getCellRef().copyWithCount(0);
+                                    const auto unregistered = *source.add(scripted.getPtr(), 1, fixture.mSourceAdd);
+                                    fixture.mSourceScripts.remove(unregistered);
+                                    const auto destinationUnregistered
+                                        = *destination.add(scripted.getPtr(), 1, fixture.mDestinationAdd);
+                                    fixture.mDestinationAdd.mLocalScripts->remove(destinationUnregistered);
+                                }
                                 if (serialization)
                                 {
                                     const auto decorate = [&](const Ptr& ptr) {
@@ -3949,6 +4280,10 @@ namespace MWWorld::Testing
                                     };
                                     decorate(item);
                                     decorate(dormant);
+                                    if (scriptMetadata)
+                                        for (const auto& node : fixture.sourceStorage())
+                                            if (&node != item.mRef && &node != dormant.mRef)
+                                                decorate(fixture.mModel.getPtr(node.mRef.getRefNum()));
                                     for (auto it = destination.begin(); it != destination.end(); ++it)
                                         decorate(*it);
                                     if (!destinationDormant.isEmpty())
@@ -3998,6 +4333,17 @@ namespace MWWorld::Testing
                                     require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
                                         "transfer emitted notifications/scripts or changed unrelated live state");
                                 };
+                                if (scriptMetadata)
+                                {
+                                    const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
+                                        store.get<ESM::Miscellaneous>().find(scriptedId) };
+                                    totals.mTotal += checkScriptMetadataCase(fixtureOwner, make, verifyOriginal,
+                                        { bases, script, scripts.getLocals(scriptId) }, localRejections);
+                                    require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
+                                        "script metadata affected independent fixture/listener/scripts");
+                                    ++cases;
+                                    return 0;
+                                }
                                 if (restartRegistry)
                                 {
                                     const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
@@ -4461,6 +4807,14 @@ namespace MWWorld::Testing
                              " sink-decline/throw/bad-alloc=144 consumed/stale/incomplete-rejections=144\n";
                 return;
             }
+            if (scriptMetadata)
+            {
+                require(localRejections > 0 && totals.mTotal > 0, "script metadata coverage missing");
+                std::cout << "Restart script metadata: cases=" << cases << " individually-failed=" << totals.mTotal
+                          << " malformed-rejections=" << localRejections
+                          << " remaining-after-cleanup=0 fresh-decode-after-fixture-destruction=48\n";
+                return;
+            }
             if (restartRegistry)
             {
                 require(localRejections > 0 && totals.mTotal > 0, "restart registry coverage missing");
@@ -4597,5 +4951,10 @@ namespace MWWorld::Testing
     void checkTransferRestartRegistry(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::RestartRegistry);
+    }
+
+    void checkTransferScriptMetadata(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::ScriptMetadata);
     }
 }

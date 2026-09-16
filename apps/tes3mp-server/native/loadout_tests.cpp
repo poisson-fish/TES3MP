@@ -5719,6 +5719,11 @@ namespace
             MWWorld::Testing::checkTransferRestartRegistry(loadout.store());
             return;
         }
+        if (filter == "inventory-transfer-script-metadata")
+        {
+            MWWorld::Testing::checkTransferScriptMetadata(loadout.store());
+            return;
+        }
         if (filter == "inventory-transfer-restore")
         {
             MWWorld::Testing::checkTransferRestore(loadout.store());
