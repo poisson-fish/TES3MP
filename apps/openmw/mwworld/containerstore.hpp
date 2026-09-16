@@ -52,6 +52,7 @@ namespace MWWorld
     }
     class ContainerStore;
     class PreparedPlainEquipment;
+    class RestoredPlainEquipment;
     class ESMStore;
     class LocalScripts;
     class WorldModel;
@@ -544,6 +545,7 @@ namespace MWWorld
         friend class Testing::DisposableTransferRehearsal;
         friend class Testing::PlainEquipmentFixture;
         friend class PreparedPlainEquipment;
+        friend class RestoredPlainEquipment;
     };
 
     class ContainerStore
@@ -911,6 +913,7 @@ namespace MWWorld
         friend class Testing::DisposableTransferRehearsal;
         friend class Testing::PlainEquipmentFixture;
         friend class PreparedPlainEquipment;
+        friend class RestoredPlainEquipment;
     };
 
     template <class T, class U>

@@ -15,6 +15,7 @@
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/plainequipment.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
+#include <components/compiler/locals.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadnpc.hpp>
@@ -193,6 +194,9 @@ namespace MWWorld::Testing
                 result.mMetadata[i] = { store.mCachedWeight, store.mSeed, store.mWeightUpToDate, store.mModified,
                     store.mResolved, store.mRechargingItemsUpToDate, store.mUpdatesEnabled, store.mFirstAutoEquip };
                 result.mSelections.push_back(store.mSelectedEnchantItem);
+                // RefData's stock copy constructor clears activation flags.
+                // Keep snapshot nodes stable instead of copying on vector growth.
+                result.mNodes[i].reserve(store.mLists.mClothes.mList.size());
                 for (const auto& node : store.mLists.mClothes.mList)
                     result.mNodes[i].push_back({ &node, cellBytes(node.mRef), node.mData.copyForContainerTransfer(),
                         node.mData.getBaseNode() });
@@ -225,6 +229,528 @@ namespace MWWorld::Testing
                         "equipment rejection/preparation changed node lifetime, values or scene binding");
                 }
             }
+        }
+
+        static auto cellValues(const ESM::CellRef& ref)
+        {
+            return std::tie(ref.mRefNum, ref.mRefID, ref.mScale, ref.mOwner, ref.mGlobalVariable, ref.mSoul,
+                ref.mFaction, ref.mFactionRank, ref.mChargeInt, ref.mChargeIntRemainder, ref.mEnchantmentCharge,
+                ref.mCount, ref.mTeleport, ref.mDoorDest, ref.mDestCell, ref.mLockLevel, ref.mIsLocked, ref.mKey,
+                ref.mTrap, ref.mReferenceBlocked, ref.mPos);
+        }
+
+        static bool sameObject(const ESM::ObjectState& a, const ESM::ObjectState& b)
+        {
+            return cellValues(a.mRef) == cellValues(b.mRef) && a.mPosition == b.mPosition && a.mFlags == b.mFlags
+                && a.mEnabled == b.mEnabled && a.mHasLocals == b.mHasLocals && a.mVersion == b.mVersion
+                && a.mActorIdConverter == b.mActorIdConverter && a.mHasCustomState == b.mHasCustomState
+                && a.mLocals.mVariables.empty() && b.mLocals.mVariables.empty() && a.mLuaScripts.mScripts.empty()
+                && b.mLuaScripts.mScripts.empty()
+                && std::equal(a.mAnimationState.mScriptedAnims.begin(), a.mAnimationState.mScriptedAnims.end(),
+                    b.mAnimationState.mScriptedAnims.begin(), b.mAnimationState.mScriptedAnims.end(),
+                    [](const auto& x, const auto& y) {
+                        return std::tie(x.mGroup, x.mTime, x.mAbsolute, x.mLoopCount)
+                            == std::tie(y.mGroup, y.mTime, y.mAbsolute, y.mLoopCount);
+                    });
+        }
+
+        static bool sameValues(const PlainEquipmentValues& a, const PlainEquipmentValues& b)
+        {
+            return std::tie(a.mActor, a.mShirt, a.mSelected, a.mLastGenerated)
+                == std::tie(b.mActor, b.mShirt, b.mSelected, b.mLastGenerated)
+                && std::equal(a.mObjects.begin(), a.mObjects.end(), b.mObjects.begin(), b.mObjects.end(), sameObject);
+        }
+
+        ESM::ObjectState seedValues(size_t actor)
+        {
+            ESM::ObjectState object;
+            object.blank();
+            mItems[actor].getCellRef().writeState(object);
+            auto& ref = object.mRef;
+            ref.mScale = 1.25f;
+            ref.mOwner = ESM::RefId::stringRefId("shirt_owner");
+            ref.mGlobalVariable = "long_equipment_global_value_for_allocation";
+            ref.mSoul = ESM::RefId::stringRefId("shirt_soul");
+            ref.mFaction = ESM::RefId::stringRefId("shirt_faction");
+            ref.mFactionRank = 4;
+            ref.mChargeInt = 17;
+            ref.mChargeIntRemainder = 0.375f;
+            ref.mEnchantmentCharge = 9.5f;
+            ref.mTeleport = true;
+            ref.mDestCell = "long_equipment_destination_for_allocation";
+            ref.mLockLevel = 31;
+            ref.mIsLocked = true;
+            ref.mKey = ESM::RefId::stringRefId("shirt_key");
+            ref.mTrap = ESM::RefId::stringRefId("shirt_trap");
+            ref.mReferenceBlocked = 1;
+            ref.mPos = { { 1, 2, 3 }, { 4, 5, 6 } };
+            ref.mDoorDest = { { 7, 8, 9 }, { 10, 11, 12 } };
+            object.mPosition = { { 13, 14, 15 }, { 16, 17, 18 } };
+            object.mFlags = 7;
+            object.mEnabled = actor == 0;
+            object.mHasCustomState = false;
+            auto& animation = object.mAnimationState.mScriptedAnims.emplace_back();
+            animation.mGroup = "long_equipment_animation_for_allocation";
+            animation.mTime = 2.75f;
+            animation.mAbsolute = true;
+            animation.mLoopCount = 0x100000002ull;
+            mItems[actor].getCellRef() = CellRef(ref);
+            mItems[actor].getRefData() = RefData::restore(object, {}, Compiler::Locals{});
+            mItems[actor].getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+            return object;
+        }
+
+        static void checkExport()
+        {
+            PlainEquipmentValues retained;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool single : { false, true })
+                    for (bool equip : { true, false })
+                    {
+                        PlainEquipmentFixture f;
+                        if (single)
+                            f.mItems[actor].getCellRef().setCount(actor == 0 ? 1 : -1);
+                        auto expected = f.seedValues(actor);
+                        auto& inventory = f.mInventories[actor];
+                        inventory.setSelectedEnchantItem(inventory.begin());
+                        if (!equip)
+                            inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                        f.mEvents.clear();
+                        const auto before = f.snapshot();
+                        auto prepared = f.prepare(actor, equip);
+                        const auto result = prepared.result();
+                        prepared.exportValues(f.preparationContext(actor), retained);
+                        require(retained.mActor == result.mActor && retained.mShirt == result.mShirt
+                                && retained.mSelected == result.mSelected
+                                && retained.mLastGenerated == result.mLastGenerated
+                                && retained.mObjects.size() == result.mItems.size(),
+                            "equipment export lost metadata or dormant membership");
+                        for (size_t i = 0; i < retained.mObjects.size(); ++i)
+                        {
+                            auto node = expected;
+                            node.mRef.mRefNum = result.mItems[i].mIdentity;
+                            node.mRef.mCount = result.mItems[i].mCount;
+                            if (i != 0)
+                                node.mFlags = 0; // Stock split clears activation flags only on the new stack.
+                            require(sameObject(retained.mObjects[i], node), "equipment export lost full owned values");
+                        }
+                        require(prepared.result() == result, "equipment export changed captured effect intents");
+                        f.unchanged(before);
+                    }
+            require(!retained.mObjects.empty() && retained.mObjects[0].mRef.mOwner == "shirt_owner"
+                    && retained.mObjects[0].mAnimationState.mScriptedAnims[0].mLoopCount == 0x100000002ull,
+                "equipment exported values did not survive preparation/content destruction");
+            std::cout << "equipment full-value exports=8\n";
+        }
+
+        static void checkRestore()
+        {
+            size_t roundTrips = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int variant = 0; variant < 8; ++variant)
+                {
+                    PlainEquipmentFixture f;
+                    f.seedValues(actor);
+                    auto& inventory = f.mInventories[actor];
+                    const bool equip = variant < 3 || variant >= 6;
+                    if (variant == 0 || variant == 3 || variant == 7)
+                        f.mItems[actor].getCellRef().setCount(actor == 0 ? 1 : -1);
+                    if (!equip)
+                        inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                    if (variant == 5)
+                        std::next(inventory.begin())->getCellRef().setSoul(ESM::RefId::stringRefId("different_soul"));
+                    if (variant == 2 || variant == 6)
+                    {
+                        const size_t nodes = variant == 6 ? PreparedPlainEquipment::MaxItems - 1 : 1;
+                        for (size_t i = 0; i < nodes; ++i)
+                        {
+                            auto dormant = inventory.addNewStack(f.mItems[actor], 1);
+                            dormant->getCellRef().unsetRefNum();
+                            f.mWorld.registerPtr(*dormant);
+                            dormant->getCellRef() = dormant->getCellRef().copyWithCount(0);
+                            inventory.mSelectedEnchantItem = dormant;
+                        }
+                    }
+                    else
+                        inventory.setSelectedEnchantItem(inventory.begin());
+                    // Deliberately above every surviving identity; never infer it.
+                    f.mWorld.setLastGeneratedRefNum({ 900, -2 });
+                    if (variant == 6)
+                        f.mWorld.setLastGeneratedRefNum({ std::numeric_limits<uint32_t>::max(), -1 });
+                    if (variant == 7)
+                        f.mWorld.setLastGeneratedRefNum(
+                            { std::numeric_limits<uint32_t>::max(), std::numeric_limits<int32_t>::min() });
+                    f.mEvents.clear();
+                    const auto before = f.snapshot();
+                    PlainEquipmentValues saved;
+                    {
+                        auto prepared = f.prepare(actor, equip);
+                        const auto effects = prepared.result();
+                        prepared.exportValues(f.preparationContext(actor), saved);
+                        require(prepared.result() == effects, "equipment round trip altered prepared effects");
+                    }
+                    auto restored = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
+                    PlainEquipmentValues again;
+                    auto moved = std::move(restored);
+                    moved.exportValues(again);
+                    require(sameValues(saved, again),
+                        "equipment export/restore/export lost values, slot, selection or exact counter");
+                    if (variant == 6)
+                        require(again.mObjects.size() == PlainEquipmentValues::MaxItems
+                                && again.mLastGenerated == ESM::RefNum{ 0, -2 },
+                            "equipment maximum split membership/counter rollover changed");
+                    if (variant == 2)
+                        require(again.mObjects[1].mRef.mCount == 0 && again.mSelected == again.mObjects[1].mRef.mRefNum,
+                            "equipment restore lost dormant selection");
+                    // The restored stock nodes own all mutable values independently.
+                    saved.mObjects[0].mRef.mGlobalVariable = "changed input";
+                    saved.mObjects[0].mAnimationState.mScriptedAnims.clear();
+                    PlainEquipmentValues independent;
+                    moved.exportValues(independent);
+                    require(sameValues(again, independent), "restored equipment aliased mutable input values");
+                    f.unchanged(before);
+                    ++roundTrips;
+                }
+            std::cout << "equipment detached round trips=" << roundTrips << '\n';
+        }
+
+        static void checkValueGuards()
+        {
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture f;
+                f.seedValues(actor);
+                auto prepared = f.prepare(actor, true);
+                PlainEquipmentValues good, output;
+                prepared.exportValues(f.preparationContext(actor), good);
+                f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), output);
+                auto restored = RestoredPlainEquipment::restore(output, f.mStore, output.mActor);
+                const auto* restoredStorage = restored.mState.get();
+                const auto* outputStorage = output.mObjects.data();
+                const auto outputValue = output;
+                const auto result = prepared.result();
+                const auto* effects = prepared.result().mEffects.data();
+                const auto before = f.snapshot();
+                for (int test = 0; test < 40; ++test)
+                {
+                    auto bad = good;
+                    auto& object = bad.mObjects[0];
+                    auto& ref = object.mRef;
+                    const auto nan = std::numeric_limits<float>::quiet_NaN();
+                    switch (test)
+                    {
+                        case 0:
+                            bad.mActor = output.mActor;
+                            break;
+                        case 1:
+                            bad.mActor = {};
+                            break;
+                        case 2:
+                            bad.mObjects.resize(PlainEquipmentValues::MaxItems + 1);
+                            break;
+                        case 3:
+                            bad.mLastGenerated.mContentFile = 0;
+                            break;
+                        case 4:
+                            bad.mLastGenerated = {};
+                            break;
+                        case 5:
+                            --bad.mLastGenerated.mIndex;
+                            break;
+                        case 6:
+                            ref.mRefNum = {};
+                            break;
+                        case 7:
+                            ref.mRefNum = bad.mActor;
+                            break;
+                        case 8:
+                            ref.mRefNum = bad.mObjects[1].mRef.mRefNum;
+                            break;
+                        case 9:
+                            ref.mRefID = {};
+                            break;
+                        case 10:
+                            ref.mRefID = ESM::RefId::stringRefId("missing_shirt");
+                            break;
+                        case 11:
+                            ref.mRefID = ESM::RefId::stringRefId("equipment_actor");
+                            break;
+                        case 12:
+                            ref.mGlobalVariable.assign(PlainEquipmentValues::MaxText + 1, 'x');
+                            break;
+                        case 13:
+                            ref.mDestCell = std::string("bad\0cell", 8);
+                            break;
+                        case 14:
+                            ref.mScale = nan;
+                            break;
+                        case 15:
+                            ref.mScale = 0;
+                            break;
+                        case 16:
+                            ref.mChargeInt = -2;
+                            break;
+                        case 17:
+                            ref.mChargeIntRemainder = nan;
+                            break;
+                        case 18:
+                            ref.mEnchantmentCharge = -2;
+                            break;
+                        case 19:
+                            ref.mPos.rot[2] = nan;
+                            break;
+                        case 20:
+                            ref.mDoorDest.pos[1] = nan;
+                            break;
+                        case 21:
+                            ref.mCount = std::numeric_limits<int>::min();
+                            break;
+                        case 22:
+                            ref.mCount = std::numeric_limits<int>::max();
+                            break;
+                        case 23:
+                            ref.mCount = 0;
+                            break;
+                        case 24:
+                            ref.mCount = -2;
+                            break;
+                        case 25:
+                            bad.mShirt = output.mObjects[0].mRef.mRefNum;
+                            break;
+                        case 26:
+                            bad.mSelected = output.mObjects[0].mRef.mRefNum;
+                            break;
+                        case 27:
+                            object.mVersion = ESM::DefaultFormatVersion + 1;
+                            break;
+                        case 28:
+                            object.mActorIdConverter = reinterpret_cast<ESM::ActorIdConverter*>(&f);
+                            break;
+                        case 29:
+                            object.mHasCustomState = true;
+                            break;
+                        case 30:
+                            object.mHasLocals = 1;
+                            break;
+                        case 31:
+                            object.mLocals.mVariables.emplace_back();
+                            break;
+                        case 32:
+                            object.mLuaScripts.mScripts.emplace_back();
+                            break;
+                        case 33:
+                            object.mEnabled = 2;
+                            break;
+                        case 34:
+                            object.mFlags = 8;
+                            break;
+                        case 35:
+                            object.mPosition.rot[0] = nan;
+                            break;
+                        case 36:
+                            object.mAnimationState.mScriptedAnims.resize(PlainEquipmentValues::MaxAnimations + 1);
+                            break;
+                        case 37:
+                            object.mAnimationState.mScriptedAnims[0].mGroup.clear();
+                            break;
+                        case 38:
+                            object.mAnimationState.mScriptedAnims[0].mGroup.assign(
+                                PlainEquipmentValues::MaxText + 1, 'x');
+                            break;
+                        case 39:
+                            object.mAnimationState.mScriptedAnims[0].mTime = nan;
+                            break;
+                    }
+                    bool failed = false;
+                    try
+                    {
+                        restored = RestoredPlainEquipment::restore(bad, f.mStore, good.mActor);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        failed = true;
+                    }
+                    if (!failed)
+                        std::cerr << "accepted malformed equipment case=" << test << '\n';
+                    require(failed && restored.mState.get() == restoredStorage,
+                        "malformed equipment restore changed prior storage");
+                    PlainEquipmentValues retained;
+                    restored.exportValues(retained);
+                    require(sameValues(retained, outputValue) && output.mObjects.data() == outputStorage
+                            && sameValues(output, outputValue) && prepared.result() == result
+                            && prepared.result().mEffects.data() == effects,
+                        "malformed equipment restore changed prior values or captured effects");
+                    f.unchanged(before);
+                    ++rejected;
+                }
+                // Content constraints are checked at restore, not trusted from IDs.
+                auto* base = const_cast<ESM::Clothing*>(f.mItems[actor].get<ESM::Clothing>()->mBase);
+                for (int test = 0; test < 3; ++test)
+                {
+                    if (test == 0)
+                        base->mScript = ESM::RefId::stringRefId("unsupported_script");
+                    if (test == 1)
+                        base->mEnchant = ESM::RefId::stringRefId("unsupported_enchantment");
+                    if (test == 2)
+                        base->mData.mType = ESM::Clothing::Robe;
+                    f.reject([&] { restored = RestoredPlainEquipment::restore(good, f.mStore, good.mActor); },
+                        "plain shirt content");
+                    require(restored.mState.get() == restoredStorage, "bad equipment content replaced output");
+                    base->mScript = {};
+                    base->mEnchant = {};
+                    base->mData.mType = ESM::Clothing::Shirt;
+                    ++rejected;
+                }
+                f.reject([&] { prepared.exportValues(f.preparationContext(1 - actor), output); }, "context/service");
+                require(sameValues(output, outputValue) && output.mObjects.data() == outputStorage,
+                    "foreign equipment export context replaced output");
+                ++rejected;
+
+                // Invalid-input diagnostics may themselves fail to allocate.
+                auto bad = good;
+                bad.mSelected = output.mActor;
+                Allocations::Trace trace;
+                bool failed = false;
+                {
+                    Allocations::Observe observe(trace, 1);
+                    try
+                    {
+                        restored = RestoredPlainEquipment::restore(bad, f.mStore, good.mActor);
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        failed = true;
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        failed = true;
+                    }
+                }
+                require(failed && trace.mOutstanding == 0 && restored.mState.get() == restoredStorage,
+                    "equipment restore diagnostic allocation changed output or leaked");
+                PlainEquipmentValues retained;
+                restored.exportValues(retained);
+                require(sameValues(retained, outputValue) && prepared.result() == result,
+                    "equipment restore rejection changed output or effects");
+                f.unchanged(before);
+                ++rejected;
+
+                // Preparation can retain runtime-only state, but export must
+                // explicitly reject it when stock semantic serializers omit it.
+                f.mItems[actor].getRefData().mPhysicsPostponed = true;
+                auto postponed = f.prepare(actor, true);
+                const auto postponedResult = postponed.result();
+                f.reject([&] { postponed.exportValues(f.preparationContext(actor), output); }, "runtime state");
+                require(output.mObjects.data() == outputStorage && sameValues(output, outputValue)
+                        && postponed.result() == postponedResult,
+                    "unsupported equipment export changed output or captured effects");
+                ++rejected;
+
+                auto moved = std::move(prepared);
+                f.reject([&] { prepared.exportValues(f.preparationContext(actor), output); }, "was moved");
+                auto movedRestored = std::move(restored);
+                f.reject([&] { restored.exportValues(output); }, "was moved");
+                require(output.mObjects.data() == outputStorage && sameValues(output, outputValue)
+                        && moved.result() == result,
+                    "moved equipment export changed prior values or effects");
+                rejected += 2;
+            }
+            std::cout << "equipment value rejection guards=" << rejected << '\n';
+        }
+
+        static void checkValueAllocations()
+        {
+            using namespace Allocations;
+            size_t failures = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    PlainEquipmentFixture f;
+                    f.seedValues(actor);
+                    auto& inventory = f.mInventories[actor];
+                    inventory.setInvListener(&f.mListener);
+                    inventory.setContListener(&f.mListener);
+                    inventory.setSelectedEnchantItem(inventory.begin());
+                    if (!equip)
+                        inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                    f.mEvents.clear();
+                    auto prepared = f.prepare(actor, equip);
+                    const auto result = prepared.result();
+                    const auto* effects = prepared.result().mEffects.data();
+                    const auto ctx = f.preparationContext(actor);
+                    PlainEquipmentValues saved, output;
+                    prepared.exportValues(ctx, saved);
+                    f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), output);
+                    const auto outputValue = output;
+                    const auto* outputStorage = output.mObjects.data();
+                    auto restored = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
+                    auto oldRestored = RestoredPlainEquipment::restore(output, f.mStore, output.mActor);
+                    const auto* oldStorage = oldRestored.mState.get();
+                    const auto before = f.snapshot();
+                    for (int operation = 0; operation < 3; ++operation)
+                    {
+                        Trace count;
+                        {
+                            Observe observe(count);
+                            PlainEquipmentValues temporary;
+                            if (operation == 0)
+                                prepared.exportValues(ctx, temporary);
+                            if (operation == 1)
+                            {
+                                auto temporaryRestore = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
+                            }
+                            if (operation == 2)
+                                restored.exportValues(temporary);
+                        }
+                        if (count.mTotal == 0 || count.mOutstanding != 0 || count.mTrackingOverflow != 0)
+                            std::cerr << "equipment value baseline operation=" << operation
+                                      << " allocations=" << count.mTotal << " outstanding=" << count.mOutstanding
+                                      << '\n';
+                        require(count.mTotal > 0 && count.mOutstanding == 0 && count.mTrackingOverflow == 0,
+                            "equipment value allocation baseline leaked or did not observe work");
+                        for (size_t fail = 1; fail <= count.mTotal; ++fail)
+                        {
+                            Trace trace;
+                            bool failed = false;
+                            {
+                                Observe observe(trace, fail);
+                                try
+                                {
+                                    if (operation == 0)
+                                        prepared.exportValues(ctx, output);
+                                    if (operation == 1)
+                                        oldRestored = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
+                                    if (operation == 2)
+                                        restored.exportValues(output);
+                                }
+                                catch (const std::bad_alloc&)
+                                {
+                                    failed = true;
+                                }
+                            }
+                            require(failed && trace.mFailures == 1 && trace.mOutstanding == 0
+                                    && trace.mTrackingOverflow == 0 && output.mObjects.data() == outputStorage
+                                    && sameValues(output, outputValue) && oldRestored.mState.get() == oldStorage,
+                                "equipment value allocation failure leaked or changed prior output storage/value");
+                            PlainEquipmentValues retained;
+                            oldRestored.exportValues(retained);
+                            require(sameValues(retained, outputValue) && prepared.result() == result
+                                    && prepared.result().mEffects.data() == effects,
+                                "equipment value allocation failure changed restored values or captured effects");
+                            f.unchanged(before);
+                            ++failures;
+                        }
+                    }
+                    PlainEquipmentValues recovered;
+                    prepared.exportValues(ctx, recovered);
+                    require(sameValues(recovered, saved), "equipment export retry changed values");
+                    auto retry = RestoredPlainEquipment::restore(recovered, f.mStore, saved.mActor);
+                    retry.exportValues(recovered);
+                    require(sameValues(recovered, saved), "equipment restore retry changed values");
+                    f.unchanged(before);
+                }
+            std::cout << "equipment value allocation failures=" << failures << '\n';
         }
 
         template <class F>
@@ -407,6 +933,10 @@ namespace MWWorld::Testing
                     const auto ctx = f.preparationContext(actor);
                     auto prepared = f.prepare(actor, true);
                     const auto value = prepared.result();
+                    PlainEquipmentValues exported;
+                    prepared.exportValues(ctx, exported);
+                    const auto exportedValue = exported;
+                    const auto* exportedStorage = exported.mObjects.data();
                     auto& store = f.mInventories[actor];
                     std::string_view message;
                     switch (test)
@@ -471,6 +1001,9 @@ namespace MWWorld::Testing
                             break;
                     }
                     f.reject([&] { prepared.validate(ctx); }, message);
+                    f.reject([&] { prepared.exportValues(ctx, exported); }, message);
+                    require(exported.mObjects.data() == exportedStorage && sameValues(exported, exportedValue),
+                        "stale equipment export changed prior output storage/value");
                     require(prepared.result() == value, "stale validation changed owned equipment result");
                     ++rejected;
                 }
@@ -780,6 +1313,26 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter)
     {
+        if (filter == "inventory-equipment-export")
+        {
+            PlainEquipmentFixture::checkExport();
+            return;
+        }
+        if (filter == "inventory-equipment-restore")
+        {
+            PlainEquipmentFixture::checkRestore();
+            return;
+        }
+        if (filter == "inventory-equipment-value-guards")
+        {
+            PlainEquipmentFixture::checkValueGuards();
+            return;
+        }
+        if (filter == "inventory-equipment-value-allocations")
+        {
+            PlainEquipmentFixture::checkValueAllocations();
+            return;
+        }
         if (filter == "inventory-equipment-guards")
         {
             PlainEquipmentFixture::checkGuards();

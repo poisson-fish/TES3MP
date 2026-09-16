@@ -1,13 +1,16 @@
 #include "plainequipment.hpp"
 
+#include <cmath>
 #include <limits>
 #include <tuple>
+#include <type_traits>
 
 #include "class.hpp"
 #include "esmstore.hpp"
 #include "inventorystore.hpp"
 #include "worldmodel.hpp"
 
+#include <components/compiler/locals.hpp>
 #include <components/esm3/objectstate.hpp>
 
 namespace MWWorld
@@ -52,6 +55,118 @@ namespace MWWorld
             value.mData = ref.mData.copyForContainerTransfer();
             return value;
         }
+
+        void serialize(const CellRefList<ESM::Clothing>::List& nodes, PlainEquipmentValues& output)
+        {
+            const Compiler::Locals declarations;
+            output.mObjects.reserve(nodes.size());
+            for (const auto& node : nodes)
+            {
+                if (node.mWorldModel || node.mData.getBaseNode() || node.mData.getLuaScripts()
+                    || node.mData.getCustomData() || node.mData.isDeletedByContentFile()
+                    || node.mData.mPhysicsPostponed)
+                    throw std::invalid_argument("Unsupported equipment runtime state for export");
+                auto& object = output.mObjects.emplace_back();
+                object.blank();
+                node.mRef.writeState(object);
+                node.mData.write(object, declarations);
+                object.mHasCustomState = false;
+            }
+        }
+
+        void textValue(std::string_view value, bool required = false)
+        {
+            if ((required && value.empty()) || value.size() > PlainEquipmentValues::MaxText
+                || value.find('\0') != std::string_view::npos)
+                throw std::invalid_argument("Invalid equipment text value");
+        }
+
+        void recordId(const ESM::RefId& id, bool required = false)
+        {
+            if (!required && id.empty())
+                return;
+            if (!id.is<ESM::StringRefId>())
+                throw std::invalid_argument("Equipment values require TES3 string IDs");
+            textValue(id.getRefIdString(), true);
+        }
+
+        void counterCovers(ESM::RefNum counter, ESM::RefNum id)
+        {
+            // Stock generation rolls index overflow into a more negative file.
+            if (!id.isSet()
+                || (id.mContentFile < 0
+                    && (id.mContentFile < counter.mContentFile
+                        || (id.mContentFile == counter.mContentFile && id.mIndex > counter.mIndex))))
+                throw std::invalid_argument("Equipment identity exceeds saved counter or is unset");
+        }
+
+        void validateValues(const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor)
+        {
+            if (input.mObjects.size() > PlainEquipmentValues::MaxItems || input.mActor != expectedActor
+                || !input.mActor.isSet() || input.mLastGenerated.mContentFile >= 0)
+                throw std::invalid_argument("Invalid equipment owner, membership or counter");
+            counterCovers(input.mLastGenerated, input.mActor);
+            const Compiler::Locals declarations;
+            int64_t total = 0;
+            bool shirtFound = input.mShirt == ESM::RefNum{};
+            bool selectedFound = input.mSelected == ESM::RefNum{};
+            for (size_t i = 0; i < input.mObjects.size(); ++i)
+            {
+                const auto& object = input.mObjects[i];
+                const auto& ref = object.mRef;
+                counterCovers(input.mLastGenerated, ref.mRefNum);
+                if (ref.mRefNum == input.mActor)
+                    throw std::invalid_argument("Equipment item aliases owner identity");
+                for (size_t j = 0; j < i; ++j)
+                    if (input.mObjects[j].mRef.mRefNum == ref.mRefNum)
+                        throw std::invalid_argument("Duplicate equipment identity");
+                recordId(ref.mRefID, true);
+                const auto* base = content.get<ESM::Clothing>().search(ref.mRefID);
+                if (!base || base->mData.mType != ESM::Clothing::Shirt || !base->mScript.empty()
+                    || !base->mEnchant.empty())
+                    throw std::invalid_argument("Equipment values require supplied plain shirt content");
+                for (const auto& id : { ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap })
+                    recordId(id);
+                textValue(ref.mGlobalVariable);
+                textValue(ref.mDestCell);
+                if (ref.mCount == std::numeric_limits<int>::min() || !std::isfinite(ref.mScale) || ref.mScale <= 0
+                    || ref.mChargeInt < -1 || !std::isfinite(ref.mChargeIntRemainder)
+                    || !std::isfinite(ref.mEnchantmentCharge) || ref.mEnchantmentCharge < -1)
+                    throw std::invalid_argument("Invalid equipment CellRef numeric value");
+                total += std::abs(static_cast<int64_t>(ref.mCount));
+                if (total > std::numeric_limits<int>::max())
+                    throw std::invalid_argument("Equipment total count bound exceeded");
+                for (const auto* position : { &ref.mPos, &ref.mDoorDest })
+                    for (int axis = 0; axis < 3; ++axis)
+                        if (!std::isfinite(position->pos[axis]) || !std::isfinite(position->rot[axis]))
+                            throw std::invalid_argument("Nonfinite equipment CellRef position");
+                if (object.mAnimationState.mScriptedAnims.size() > PlainEquipmentValues::MaxAnimations)
+                    throw std::invalid_argument("Oversized equipment animation state");
+                for (const auto& animation : object.mAnimationState.mScriptedAnims)
+                    textValue(animation.mGroup, true);
+                RefData::validateRestore(object, {}, declarations);
+                if (ref.mRefNum == input.mShirt)
+                {
+                    if (std::abs(ref.mCount) != 1)
+                        throw std::invalid_argument("Equipment shirt slot requires one active item");
+                    shirtFound = true;
+                }
+                if (ref.mRefNum == input.mSelected)
+                    selectedFound = true; // Stock selections may retain dormant members.
+            }
+            if (!shirtFound || !selectedFound)
+                throw std::invalid_argument("Foreign equipment shirt or selection identity");
+        }
+    }
+
+    void PlainEquipmentValues::swap(PlainEquipmentValues& other) noexcept
+    {
+        static_assert(std::is_nothrow_swappable_v<ESM::RefNum>);
+        std::swap(mActor, other.mActor);
+        std::swap(mShirt, other.mShirt);
+        std::swap(mSelected, other.mSelected);
+        std::swap(mLastGenerated, other.mLastGenerated);
+        mObjects.swap(other.mObjects);
     }
 
     struct PreparedPlainEquipment::State
@@ -313,5 +428,76 @@ namespace MWWorld
         if (!mState)
             throw std::invalid_argument("Equipment preparation was moved");
         return mState->mResult;
+    }
+
+    void PreparedPlainEquipment::exportValues(const PlainEquipmentContext& context, PlainEquipmentValues& output) const
+    {
+        validate(context);
+        const auto& result = mState->mResult;
+        PlainEquipmentValues staged{ result.mActor, result.mShirt, result.mSelected, result.mLastGenerated, {} };
+        serialize(mState->mCandidate.mLists.mClothes.mList, staged);
+        validateValues(staged, context.mStore, result.mActor);
+        validate(context);
+        output.swap(staged);
+    }
+
+    struct RestoredPlainEquipment::State
+    {
+        InventoryStore mInventory;
+        ESM::RefNum mActor, mLastGenerated;
+    };
+
+    RestoredPlainEquipment::RestoredPlainEquipment(std::unique_ptr<State> state)
+        : mState(std::move(state))
+    {
+    }
+    RestoredPlainEquipment::RestoredPlainEquipment(RestoredPlainEquipment&&) noexcept = default;
+    RestoredPlainEquipment& RestoredPlainEquipment::operator=(RestoredPlainEquipment&&) noexcept = default;
+    RestoredPlainEquipment::~RestoredPlainEquipment() = default;
+
+    RestoredPlainEquipment RestoredPlainEquipment::restore(
+        const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor)
+    {
+        validateValues(input, content, expectedActor);
+        auto staged = std::make_unique<State>();
+        staged->mActor = input.mActor;
+        staged->mLastGenerated = input.mLastGenerated;
+        auto& inventory = staged->mInventory;
+        const Compiler::Locals declarations;
+        for (const auto& object : input.mObjects)
+        {
+            auto& node = inventory.mLists.mClothes.mList.emplace_back(
+                object.mRef, content.get<ESM::Clothing>().search(object.mRef.mRefID));
+            node.mData = RefData::restore(object, {}, declarations);
+            const auto it = ContainerStoreIterator(&inventory, std::prev(inventory.mLists.mClothes.mList.end()));
+            if (object.mRef.mRefNum == input.mShirt)
+                inventory.mSlots[InventoryStore::Slot_Shirt] = it;
+            if (object.mRef.mRefNum == input.mSelected)
+                inventory.mSelectedEnchantItem = it;
+        }
+        inventory.mResolved = true;
+        return RestoredPlainEquipment(std::move(staged));
+    }
+
+    void RestoredPlainEquipment::exportValues(PlainEquipmentValues& output) const
+    {
+        if (!mState)
+            throw std::invalid_argument("Restored equipment was moved");
+        const auto& inventory = mState->mInventory;
+        const auto identity = [&](const ContainerStoreIterator& selection) {
+            if (selection == inventory.end())
+                return ESM::RefNum{};
+            // Dereferencing an iterator constructs Ptr and can allocate a lazy
+            // lifetime token in the node. Export must not mutate retained storage.
+            const auto& nodes = inventory.mLists.mClothes.mList;
+            for (auto it = nodes.begin(); it != nodes.end(); ++it)
+                if (ConstContainerStoreIterator(&inventory, it) == selection)
+                    return it->mRef.getRefNum();
+            throw std::logic_error("Restored equipment selection lost its member");
+        };
+        PlainEquipmentValues staged{ mState->mActor, identity(inventory.mSlots[InventoryStore::Slot_Shirt]),
+            identity(inventory.mSelectedEnchantItem), mState->mLastGenerated, {} };
+        serialize(inventory.mLists.mClothes.mList, staged);
+        output.swap(staged);
     }
 }

@@ -42,6 +42,7 @@ namespace MWWorld
     {
         friend class Testing::PlainEquipmentFixture;
         friend class PreparedPlainEquipment;
+        friend class RestoredPlainEquipment;
     public:
         static constexpr int Slot_Helmet = 0;
         static constexpr int Slot_Cuirass = 1;
