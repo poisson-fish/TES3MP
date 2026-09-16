@@ -32,6 +32,22 @@ namespace MWWorld::Testing
             validateText(id.getRefIdString(), false);
         }
 
+        void validateRestart(const TransferRestartMetadata& restart)
+        {
+            // Version 2 retains the codec's bounded generated-ID domain (-1).
+            // Exhausted but representable values are preserved, not reset; a
+            // future resumption path must reject revision/counter overflow.
+            if (restart.mRevision == 0 || restart.mRevision > std::numeric_limits<size_t>::max()
+                || restart.mLastGenerated.mContentFile != -1 || restart.mLastGenerated.mIndex == 0)
+                throw std::invalid_argument("Invalid detached restart metadata");
+        }
+
+        void validateRestartIdentity(const TransferRestartMetadata& restart, ESM::RefNum id)
+        {
+            if (id.mContentFile == -1 && id.mIndex > restart.mLastGenerated.mIndex)
+                throw std::invalid_argument("Detached identity exceeds saved generation counter");
+        }
+
     }
 
     const ESM::Miscellaneous& suppliedBase(const ESM::RefId& id, const RestoreContent& content)
@@ -45,6 +61,7 @@ namespace MWWorld::Testing
 
     void validateRestore(const SerializedPair& input, const RestoreContent& content)
     {
+        validateRestart(input.mRestart);
         constexpr size_t maxObjects = 1024;
         if (content.mBases.empty() || content.mBases.size() > maxObjects)
             throw std::invalid_argument("Invalid supplied base count");
@@ -90,6 +107,7 @@ namespace MWWorld::Testing
                 const auto id = inventory->mProposedIdentities[i];
                 if (!id.isSet() || id.mContentFile < -1 || ref.mRefNum.isSet())
                     throw std::invalid_argument("Invalid detached identity association");
+                validateRestartIdentity(input.mRestart, id);
                 size_t occurrences = 0;
                 for (const auto* collection : inventories)
                     occurrences += std::count(
@@ -125,7 +143,7 @@ namespace MWWorld::Testing
     {
         static_assert(std::endian::native == std::endian::little);
         constexpr size_t MaxObjects = 1024;
-        constexpr uint32_t CodecVersion = 1;
+        constexpr uint32_t CodecVersion = 2;
 
         [[noreturn]] void invalid()
         {
@@ -159,6 +177,11 @@ namespace MWWorld::Testing
                 return result;
             }
             ESM::RefNum identity() { return { number(), std::bit_cast<int32_t>(number()) }; }
+            uint64_t revision()
+            {
+                const uint64_t low = number();
+                return low | (static_cast<uint64_t>(number()) << 32);
+            }
             bool empty() const { return mBytes.empty(); }
             Cursor sub(uint32_t tag)
             {
@@ -213,7 +236,19 @@ namespace MWWorld::Testing
                 [&](const auto& id) { return id.getRefIdString() == name; }));
         }
 
-        std::array<uint32_t, 2> preflight(std::span<const char> bytes, const SaveBindings& bindings)
+        struct SavePreflight
+        {
+            std::array<uint32_t, 2> mCounts;
+            TransferRestartMetadata mRestart;
+        };
+
+        void validateRestartOwners(const TransferRestartMetadata& restart, const SaveEnvelope& envelope)
+        {
+            for (const auto id : { envelope.mSourceOwner, envelope.mDestinationOwner, envelope.mInitiator })
+                validateRestartIdentity(restart, id);
+        }
+
+        SavePreflight preflight(std::span<const char> bytes, const SaveBindings& bindings)
         {
             valid(bytes.size() <= MaxTransferSaveBytes);
             validateBindings(bindings);
@@ -244,6 +279,12 @@ namespace MWWorld::Testing
                 auto id = pair.sub(tag);
                 valid(id.identity() == expected && id.empty());
             }
+            auto revision = pair.sub(ESM::fourCC("RREV"));
+            auto counter = pair.sub(ESM::fourCC("LGEN"));
+            const TransferRestartMetadata restart{ revision.revision(), counter.identity() };
+            valid(revision.empty() && counter.empty());
+            validateRestart(restart);
+            validateRestartOwners(restart, e);
             auto sizes = pair.sub(ESM::fourCC("SIZE"));
             const std::array counts{ sizes.number(), sizes.number() };
             valid(sizes.empty() && pair.empty() && counts[0] <= MaxObjects && counts[1] <= MaxObjects);
@@ -259,6 +300,7 @@ namespace MWWorld::Testing
                     const auto value = id.identity();
                     valid(id.empty() && validIdentity(value) && value != e.mSourceOwner && value != e.mDestinationOwner
                         && value != e.mInitiator);
+                    validateRestartIdentity(restart, value);
                     valid(std::find(identities.begin(), identities.begin() + used, value) == identities.begin() + used);
                     identities[used++] = value;
                     size_t fields = 0, locals = 0, animations = 0, times = 0;
@@ -345,7 +387,7 @@ namespace MWWorld::Testing
                     valid(times == animations);
                 }
             valid(file.empty());
-            return counts;
+            return { counts, restart };
         }
 
         // Bounded output with seeking for ESMWriter's length backpatches. Every
@@ -418,6 +460,7 @@ namespace MWWorld::Testing
     {
         validateBindings(bindings);
         validateRestore(input, bindings.mContent);
+        validateRestartOwners(input.mRestart, bindings.mEnvelope);
         ByteBuffer buffer;
         std::ostream stream(&buffer);
         stream.exceptions(std::ios::badbit | std::ios::failbit);
@@ -435,6 +478,8 @@ namespace MWWorld::Testing
         writer.writeFormId(e.mSourceOwner, true, "SOWN");
         writer.writeFormId(e.mDestinationOwner, true, "DOWN");
         writer.writeFormId(e.mInitiator, true, "INIT");
+        writer.writeHNT("RREV", input.mRestart.mRevision);
+        writer.writeFormId(input.mRestart.mLastGenerated, true, "LGEN");
         writer.startSubRecord("SIZE");
         writer.writeT(static_cast<uint32_t>(input.mSource.mObjects.size()));
         writer.writeT(static_cast<uint32_t>(input.mDestination.mObjects.size()));
@@ -459,7 +504,7 @@ namespace MWWorld::Testing
 
     void decodeTransferSave(std::span<const char> bytes, const SaveBindings& bindings, SerializedPair& output)
     {
-        const auto counts = preflight(bytes, bindings);
+        const auto [counts, restart] = preflight(bytes, bindings);
         // All nested lengths, counts, RefIds and context identities have already
         // been checked. The bounded copy also gives ESMReader an owning stream.
         auto stream = std::make_unique<std::istringstream>(std::string(bytes.data(), bytes.size()), std::ios::binary);
@@ -470,6 +515,7 @@ namespace MWWorld::Testing
         reader.getRecHeader();
         reader.skipRecord(); // Exactly matched by allocation-free preflight.
         SerializedPair staged;
+        staged.mRestart = restart;
         size_t side = 0;
         for (auto* inventory : { &staged.mSource, &staged.mDestination })
         {
@@ -509,7 +555,6 @@ namespace MWWorld::Testing
         TransferSaveBytes canonical;
         encodeTransferSave(staged, bindings, canonical);
         valid(canonical.size() == bytes.size() && std::equal(canonical.begin(), canonical.end(), bytes.begin()));
-        output.mSource.swap(staged.mSource);
-        output.mDestination.swap(staged.mDestination);
+        output.swap(staged);
     }
 }

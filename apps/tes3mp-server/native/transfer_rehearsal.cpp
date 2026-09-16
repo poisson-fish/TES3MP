@@ -345,6 +345,8 @@ namespace MWWorld::Testing
                 .isComplete())
             throw std::invalid_argument("ObjectState serialization requires complete resolution");
         SerializedPair staged;
+        const auto& registry = pair.getRegistryStorage().getBindings();
+        staged.mRestart = { registry.mRevision, registry.mLastGenerated };
         const auto serialize = [&](const auto& storage, const auto& views, SerializedInventory& inventory) {
             serializeInventory(
                 storage,
@@ -356,8 +358,7 @@ namespace MWWorld::Testing
         };
         serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
         serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
-        output.mSource.swap(staged.mSource);
-        output.mDestination.swap(staged.mDestination);
+        output.swap(staged);
     }
 
     const PreparedContainerTransfer::MiscList& DisposableTransferRehearsal::sourceStorage() const

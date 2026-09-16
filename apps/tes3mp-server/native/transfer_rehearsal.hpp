@@ -6,7 +6,9 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <components/esm3/objectstate.hpp>
 
+#include <cstdint>
 #include <filesystem>
+#include <type_traits>
 
 namespace MWWorld::Testing
 {
@@ -39,9 +41,27 @@ namespace MWWorld::Testing
         }
     };
 
+    // Owned restart values, captured from the complete prepared registry. A
+    // counter can exceed every surviving identity; it is never inferred from nodes.
+    struct TransferRestartMetadata
+    {
+        uint64_t mRevision = 0;
+        ESM::RefNum mLastGenerated;
+        bool operator==(const TransferRestartMetadata&) const = default;
+    };
+
     struct SerializedPair
     {
         SerializedInventory mSource, mDestination;
+        TransferRestartMetadata mRestart;
+
+        void swap(SerializedPair& other) noexcept
+        {
+            mSource.swap(other.mSource);
+            mDestination.swap(other.mDestination);
+            static_assert(std::is_nothrow_swappable_v<TransferRestartMetadata>);
+            std::swap(mRestart, other.mRestart);
+        }
     };
 
     template <class Identity>

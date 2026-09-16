@@ -18,7 +18,8 @@ namespace MWWorld::Testing
     const ESM::Miscellaneous& suppliedBase(const ESM::RefId& id, const RestoreContent& content);
     void validateRestore(const SerializedPair& input, const RestoreContent& content);
 
-    // Test-target-only, little-endian, development format. The caller supplies
+    // Test-target-only, little-endian, development format (version 2 only).
+    // Persists owned restart metadata, not a live registry. The caller supplies
     // the trusted runtime/content identity and already interned content IDs.
     // These synthetic identities are not a production loadout fingerprint.
     struct SaveEnvelope
@@ -43,7 +44,7 @@ namespace MWWorld::Testing
     using TransferSaveBytes = std::vector<char>;
 
     // All bounds/relationships are checked before publishing either output.
-    // No services, pointers, registry, selections or iterators enter the format.
+    // No services, pointers, registry mappings, selections or iterators enter the format.
     void encodeTransferSave(const SerializedPair& input, const SaveBindings& bindings, TransferSaveBytes& output);
     void decodeTransferSave(std::span<const char> bytes, const SaveBindings& bindings, SerializedPair& output);
 }

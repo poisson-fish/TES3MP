@@ -363,6 +363,7 @@ namespace MWWorld::Testing
         struct RestoredPair
         {
             RestoredInventory mSource, mDestination;
+            TransferRestartMetadata mRestart;
         };
 
         void restorePair(
@@ -370,6 +371,7 @@ namespace MWWorld::Testing
         {
             validateRestore(input, content);
             auto staged = std::make_unique<RestoredPair>();
+            staged->mRestart = input.mRestart;
             const auto restore = [&](const SerializedInventory& saved, RestoredInventory& inventory) {
                 inventory.mProposedIdentities = saved.mProposedIdentities;
                 for (const auto& object : saved.mObjects)
@@ -391,14 +393,14 @@ namespace MWWorld::Testing
         void serializePair(const RestoredPair& pair, const Compiler::Locals& declarations, SerializedPair& output)
         {
             SerializedPair staged;
+            staged.mRestart = pair.mRestart;
             serializeInventory(
                 pair.mSource.mNodes, [&](size_t i) { return pair.mSource.mProposedIdentities.at(i); }, declarations,
                 staged.mSource);
             serializeInventory(
                 pair.mDestination.mNodes, [&](size_t i) { return pair.mDestination.mProposedIdentities.at(i); },
                 declarations, staged.mDestination);
-            output.mSource.swap(staged.mSource);
-            output.mDestination.swap(staged.mDestination);
+            output.swap(staged);
         }
 
         auto pairOutputState(const SerializedPair& output)
@@ -407,7 +409,7 @@ namespace MWWorld::Testing
                 return std::tuple{ pairOutputState(value.mObjects), value.mProposedIdentities,
                     value.mProposedIdentities.data(), value.mProposedIdentities.capacity() };
             };
-            return std::tuple{ inventory(output.mSource), inventory(output.mDestination) };
+            return std::tuple{ inventory(output.mSource), inventory(output.mDestination), output.mRestart };
         }
 
         template <bool ObjectStates>
@@ -416,6 +418,7 @@ namespace MWWorld::Testing
             if constexpr (ObjectStates)
             {
                 SerializedPair result;
+                result.mRestart = { 0x123456789ull, { 999, -1 } };
                 result.mSource.mObjects.push_back(outputSentinel());
                 result.mDestination.mObjects = { outputSentinel(), outputSentinel() };
                 result.mSource.mProposedIdentities.push_back({ 701, -1 });
@@ -836,12 +839,14 @@ namespace MWWorld::Testing
                 return std::tuple{ nodes, bases, strings, value.mProposedIdentities, value.mProposedIdentities.data(),
                     value.mProposedIdentities.capacity() };
             };
-            return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination) };
+            return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination), pair->mRestart };
         }
 
         RestoredPair expectedRestoration(const PreparedContainerTransfer& pair, bool serialized = true)
         {
             RestoredPair result;
+            const auto& registry = pair.getRelocation().mRegistry;
+            result.mRestart = { registry.mRevision, registry.mLastGenerated };
             const auto copy = [&](const auto& storage, const auto& views, RestoredInventory& inventory) {
                 size_t i = 0;
                 for (const auto& node : storage)
@@ -913,6 +918,7 @@ namespace MWWorld::Testing
 
         void checkRestored(const RestoredPair& restored, const RestoredPair& expected)
         {
+            require(restored.mRestart == expected.mRestart, "restoration lost accepted revision/generation counter");
             const auto check = [](const RestoredInventory& actual, const RestoredInventory& wanted) {
                 require(actual.mProposedIdentities == wanted.mProposedIdentities
                         && actual.mNodes.size() == wanted.mNodes.size(),
@@ -948,6 +954,7 @@ namespace MWWorld::Testing
 
         void checkSavedValues(const SerializedPair& actual, const SerializedPair& expected)
         {
+            require(actual.mRestart == expected.mRestart, "save/restore/save changed restart metadata");
             const auto check = [](const SerializedInventory& a, const SerializedInventory& b) {
                 require(a.mProposedIdentities == b.mProposedIdentities && a.mObjects.size() == b.mObjects.size(),
                     "save/restore/save lost membership or identities");
@@ -966,6 +973,19 @@ namespace MWWorld::Testing
             };
             check(actual.mSource, expected.mSource);
             check(actual.mDestination, expected.mDestination);
+        }
+
+        auto invalidRestartValues(TransferRestartMetadata valid)
+        {
+            auto values = std::vector<TransferRestartMetadata>{ { 0, valid.mLastGenerated },
+                { valid.mRevision, {} }, { valid.mRevision, { 1, -1 } },
+                { valid.mRevision, { valid.mLastGenerated.mIndex, 0 } },
+                { valid.mRevision, { valid.mLastGenerated.mIndex, -2 } },
+                { valid.mRevision, { UINT32_MAX, INT32_MIN } } };
+            if constexpr (sizeof(size_t) < sizeof(uint64_t))
+                values.push_back({ static_cast<uint64_t>(std::numeric_limits<size_t>::max()) + 1,
+                    valid.mLastGenerated });
+            return values;
         }
 
         template <class Verify>
@@ -1088,6 +1108,29 @@ namespace MWWorld::Testing
                 require(restoredState(output) == before && pairOutputState(bad) == saved
                         && contentState(supplied) == suppliedBefore,
                     "malformed restoration changed input, prior output or storage");
+                for (size_t ordinal = 1; ordinal <= trace.mTotal; ++ordinal)
+                {
+                    Allocations::Trace failure;
+                    caught = false;
+                    {
+                        Allocations::Observe observe(failure, ordinal);
+                        try
+                        {
+                            restorePair(bad, supplied, output);
+                        }
+                        catch (const std::exception&)
+                        {
+                            caught = true;
+                        }
+                    }
+                    require(caught && failure.mFailures == 1 && failure.mOutstanding == 0
+                            && failure.mTrackingOverflow == 0 && restoredState(output) == before
+                            && pairOutputState(bad) == saved && contentState(supplied) == suppliedBefore,
+                        "malformed restore allocation failure changed caller state or leaked");
+                    check(make());
+                    verify();
+                }
+                allocations += trace.mTotal;
                 verify();
                 restorePair(input, content, output);
                 check(output);
@@ -1099,6 +1142,8 @@ namespace MWWorld::Testing
                 change(bad);
                 reject(bad, content);
             };
+            for (auto restart : invalidRestartValues(input.mRestart))
+                mutate([&](auto& bad) { bad.mRestart = restart; });
             // Exercise errors on both sides, including the final destination node.
             for (bool destination : { false, true })
             {
@@ -1111,6 +1156,10 @@ namespace MWWorld::Testing
                     [&](auto& bad) { (destination ? bad.mDestination : bad.mSource).mProposedIdentities.back() = {}; });
                 mutate([&](auto& bad) {
                     (destination ? bad.mDestination : bad.mSource).mProposedIdentities.back().mContentFile = -2;
+                });
+                mutate([&](auto& bad) {
+                    (destination ? bad.mDestination : bad.mSource).mProposedIdentities.back()
+                        = { bad.mRestart.mLastGenerated.mIndex + 1, -1 };
                 });
                 object([](auto& s) { s.mRef.mRefNum = { 19, -1 }; });
                 object([](auto& s) { s.mRef.mRefID = {}; });
@@ -1234,6 +1283,9 @@ namespace MWWorld::Testing
 
         void checkPairOutput(const PreparedContainerTransfer& pair, const SerializedPair& output)
         {
+            const auto& registry = pair.getRelocation().mRegistry;
+            require(output.mRestart == TransferRestartMetadata{ registry.mRevision, registry.mLastGenerated },
+                "serialization lost complete prepared registry restart metadata");
             const auto check = [&](const auto& storage, const auto& views, const SerializedInventory& inventory) {
                 require(inventory.mObjects.size() == storage.size() && views.size() == storage.size()
                         && inventory.mProposedIdentities.size() == storage.size(),
@@ -1551,6 +1603,28 @@ namespace MWWorld::Testing
             if (!malformed)
                 return allocations;
 
+            // Preserve high 32 revision bits and the inclusive counter boundary.
+            // Values are carried verbatim even when no saved node owns that ID.
+            for (uint64_t revision : { uint64_t{ 1 }, uint64_t{ std::numeric_limits<size_t>::max() } })
+            {
+                auto boundary = input;
+                boundary.mRestart = { revision, { UINT32_MAX, -1 } };
+                TransferSaveBytes encoded;
+                encodeTransferSave(boundary, bindings, encoded);
+                SerializedPair decoded;
+                decodeTransferSave(encoded, bindings, decoded);
+                checkSavedValues(decoded, boundary);
+                std::unique_ptr<const RestoredPair> restored;
+                restorePair(decoded, bindings.mContent, restored);
+                SerializedPair saved;
+                serializePair(*restored, bindings.mContent.mDeclarations, saved);
+                checkSavedValues(saved, boundary);
+                TransferSaveBytes again;
+                encodeTransferSave(saved, bindings, again);
+                require(again == encoded, "restart metadata boundary lost through detached save");
+                verify();
+            }
+
             const auto reject = [&](std::span<const char> bad, const SaveBindings& supplied, bool preflight = false) {
                 auto output = pairOutputSentinel<true>();
                 const auto before = pairOutputState(output);
@@ -1677,6 +1751,51 @@ namespace MWWorld::Testing
             };
             for (auto tag : { "FORM", "FVER", "SOWN", "DOWN", "INIT" })
                 change(tag, 999999, true);
+            change("FVER", 1, true); // No version-1 migration or inferred metadata.
+            bad = bytes;
+            bad.erase(bad.begin() + find("RREV").mHeader, bad.begin() + find("LGEN").mHeader + 16);
+            put(bad, find("RREV").mRecord + 4, number(bytes, find("RREV").mRecord + 4) - 32);
+            put(bad, find("FVER").mHeader + 8, 1);
+            reject(bad, bindings, true); // Actual old layout without either field.
+            for (const auto restart : invalidRestartValues(input.mRestart))
+            {
+                bad = bytes;
+                const auto revision = find("RREV").mHeader + 8;
+                const auto counter = find("LGEN").mHeader + 8;
+                put(bad, revision, static_cast<uint32_t>(restart.mRevision));
+                put(bad, revision + 4, static_cast<uint32_t>(restart.mRevision >> 32));
+                put(bad, counter, restart.mLastGenerated.mIndex);
+                put(bad, counter + 4, std::bit_cast<uint32_t>(restart.mLastGenerated.mContentFile));
+                reject(bad, bindings, true);
+            }
+            // Strict framing: missing, short, long, duplicate and reordered
+            // metadata must fail before ESMReader allocation or output publication.
+            for (const auto tag : { "RREV", "LGEN" })
+                for (const size_t size : { size_t{ 0 }, size_t{ 4 }, size_t{ 12 } })
+                {
+                    const auto& field = find(tag);
+                    bad = bytes;
+                    bad.erase(bad.begin() + field.mHeader + 8, bad.begin() + field.mHeader + 8 + field.mSize);
+                    bad.insert(bad.begin() + field.mHeader + 8, size, 0);
+                    put(bad, field.mHeader + 4, static_cast<uint32_t>(size));
+                    put(bad, field.mRecord + 4,
+                        number(bytes, field.mRecord + 4) - static_cast<uint32_t>(field.mSize)
+                            + static_cast<uint32_t>(size));
+                    reject(bad, bindings, true);
+                }
+            for (const auto tag : { "RREV", "LGEN" })
+            {
+                const auto& field = find(tag);
+                bad = bytes;
+                bad.erase(bad.begin() + field.mHeader, bad.begin() + field.mHeader + 8 + field.mSize);
+                put(bad, field.mRecord + 4,
+                    number(bytes, field.mRecord + 4) - static_cast<uint32_t>(8 + field.mSize));
+                reject(bad, bindings, true);
+            }
+            bad = bytes;
+            std::swap_ranges(bad.begin() + find("RREV").mHeader, bad.begin() + find("RREV").mHeader + 16,
+                bad.begin() + find("LGEN").mHeader);
+            reject(bad, bindings, true);
             bad = bytes;
             put(bad, find("HEDR").mHeader + 16, UINT32_MAX); // Nested author length.
             reject(bad, bindings, true);
@@ -1705,6 +1824,22 @@ namespace MWWorld::Testing
             bad[find("NAME").mHeader + 8] = static_cast<char>(ESM::RefIdType::SizedString);
             reject(bad, bindings, true);
             const auto firstId = find("IDEN").mHeader + 8;
+            bad = bytes;
+            put(bad, firstId, input.mRestart.mLastGenerated.mIndex + 1);
+            put(bad, firstId + 4, UINT32_MAX);
+            reject(bad, bindings, true);
+            for (const auto tag : { "SOWN", "DOWN", "INIT" })
+            {
+                auto envelope = bindings.mEnvelope;
+                auto& id = std::string_view(tag) == "SOWN" ? envelope.mSourceOwner
+                    : std::string_view(tag) == "DOWN"     ? envelope.mDestinationOwner
+                                                         : envelope.mInitiator;
+                id = { input.mRestart.mLastGenerated.mIndex + 1, -1 };
+                bad = bytes;
+                put(bad, find(tag).mHeader + 8, id.mIndex);
+                put(bad, find(tag).mHeader + 12, UINT32_MAX);
+                reject(bad, { envelope, bindings.mContent, bindings.mReferenceIds }, true);
+            }
             for (uint32_t value : { 0u, bindings.mEnvelope.mSourceOwner.mIndex })
             {
                 bad = bytes;
@@ -1742,6 +1877,11 @@ namespace MWWorld::Testing
             reject(bad, bindings, true);
             append("XSAV", 1); // Well-framed duplicate extension.
             reject(bad, bindings);
+            for (const auto tag : { "RREV", "LGEN" })
+            {
+                append(tag, 1);
+                reject(bad, bindings, true);
+            }
             append("ANIS", MaxTransferObjectBytes / (find("ANIS").mSize + 8) + 1);
             reject(bad, bindings, true);
             const auto& text = find("XDST");
@@ -1775,9 +1915,12 @@ namespace MWWorld::Testing
             reject(bytes, { bindings.mEnvelope, noLocals, bindings.mReferenceIds });
             reject(bytes, { bindings.mEnvelope, bindings.mContent, bindings.mReferenceIds.first(1) }, true);
 
-            for (int mode = 0; mode < 18; ++mode)
+            const auto invalidRestarts = invalidRestartValues(input.mRestart);
+            for (size_t mode = 0; mode < 21 + invalidRestarts.size(); ++mode)
             {
                 auto invalid = input;
+                auto envelope = bindings.mEnvelope;
+                const SaveBindings supplied{ envelope, bindings.mContent, bindings.mReferenceIds };
                 auto& inventory = invalid.mSource;
                 auto& object = inventory.mObjects.front();
                 if (mode == 0)
@@ -1821,6 +1964,16 @@ namespace MWWorld::Testing
                     for (auto& animation : object.mAnimationState.mScriptedAnims)
                         animation.mGroup.assign(4096, 'a');
                 }
+                if (mode >= 18 && mode < 18 + invalidRestarts.size())
+                    invalid.mRestart = invalidRestarts[mode - 18];
+                if (mode >= 18 + invalidRestarts.size())
+                {
+                    const auto owner = mode - 18 - invalidRestarts.size();
+                    auto& id = owner == 0 ? envelope.mSourceOwner
+                        : owner == 1     ? envelope.mDestinationOwner
+                                         : envelope.mInitiator;
+                    id = { input.mRestart.mLastGenerated.mIndex + 1, -1 };
+                }
                 const auto retained = pairOutputState(invalid);
                 TransferSaveBytes output(57, 'x');
                 const auto before = byteState(output);
@@ -1830,7 +1983,7 @@ namespace MWWorld::Testing
                     Allocations::Observe observe(trace);
                     try
                     {
-                        encodeTransferSave(invalid, bindings, output);
+                        encodeTransferSave(invalid, supplied, output);
                     }
                     catch (const std::invalid_argument&)
                     {
@@ -1848,7 +2001,7 @@ namespace MWWorld::Testing
                         Allocations::Observe observe(failure, ordinal);
                         try
                         {
-                            encodeTransferSave(invalid, bindings, output);
+                            encodeTransferSave(invalid, supplied, output);
                         }
                         catch (const std::exception&)
                         {
@@ -1898,6 +2051,7 @@ namespace MWWorld::Testing
         void saveFixture(const DisposableTransferRehearsal& fixture, const Compiler::Locals& declarations,
             SerializedPair& output)
         {
+            output.mRestart = { fixture.mModel.getPtrRegistryRevision(), fixture.mModel.getLastGeneratedRefNum() };
             const auto save = [&](const auto& storage, SerializedInventory& inventory) {
                 auto it = storage.begin();
                 serializeInventory(storage, [&](size_t) { return (it++)->mRef.getRefNum(); }, declarations, inventory);
@@ -2401,6 +2555,18 @@ namespace MWWorld::Testing
                 writeInput(malformed);
                 reject(bindings);
             }
+            for (const char* tag : { "FVER", "RREV", "LGEN" })
+            {
+                auto malformed = bytes;
+                const auto found = std::search(malformed.begin(), malformed.end(), tag, tag + 4);
+                require(found != malformed.end(), "file restart metadata field missing");
+                const bool version = std::string_view(tag) == "FVER";
+                std::fill_n(found + 8, version ? 4 : 8, 0);
+                if (version)
+                    *(found + 8) = 1;
+                writeInput(malformed);
+                reject(bindings);
+            }
             auto trailing = bytes;
             trailing.push_back('x');
             writeInput(trailing);
@@ -2474,16 +2640,7 @@ namespace MWWorld::Testing
             const SaveBindings bindings{ envelope, content, referenceIds };
             SerializedPair prior, expectedSave;
             const auto saveInstalled = [&](SerializedPair& output) {
-                const auto save = [&](const auto& storage, SerializedInventory& inventory) {
-                    std::vector<ESM::RefNum> ids;
-                    for (const auto& node : storage)
-                        ids.push_back(node.mRef.getRefNum());
-                    serializeInventory(storage, [&](size_t i) { return ids.at(i); }, content.mDeclarations, inventory);
-                    for (auto& object : inventory.mObjects)
-                        object.mRef.mRefNum = {};
-                };
-                save(fixture.sourceStorage(), output.mSource);
-                save(fixture.destinationStorage(), output.mDestination);
+                saveFixture(fixture, content.mDeclarations, output);
             };
             saveInstalled(prior);
             auto pair = make();
@@ -2874,6 +3031,9 @@ namespace MWWorld::Testing
             ++const_cast<PtrRegistry::Snapshot&>(invalid.getRegistryStorage().getBindings()).mRevision;
             reject(std::move(invalid));
             invalid = make();
+            ++const_cast<PtrRegistry::Snapshot&>(invalid.getRegistryStorage().getBindings()).mLastGenerated.mIndex;
+            reject(std::move(invalid));
+            invalid = make();
             const_cast<CellRef&>(invalid.getSourceStorage().front().mRef).setCount(99);
             reject(std::move(invalid));
             const auto reconstruct = [](auto& node) {
@@ -3035,16 +3195,7 @@ namespace MWWorld::Testing
             verifyUnrelated();
             // Save the actual installed engine state in the same detached format.
             SerializedPair installed;
-            const auto saveInstalled = [&](const auto& storage, SerializedInventory& output) {
-                std::vector<ESM::RefNum> ids;
-                for (const auto& node : storage)
-                    ids.push_back(node.mRef.getRefNum());
-                serializeInventory(storage, [&](size_t i) { return ids.at(i); }, content.mDeclarations, output);
-                for (auto& object : output.mObjects)
-                    object.mRef.mRefNum = {};
-            };
-            saveInstalled(fixture.sourceStorage(), installed.mSource);
-            saveInstalled(fixture.destinationStorage(), installed.mDestination);
+            saveFixture(fixture, content.mDeclarations, installed);
             checkSavedValues(installed, *persisted);
             std::unique_ptr<const RestoredPair> restored;
             restorePair(*persisted, content, restored);
@@ -3505,6 +3656,23 @@ namespace MWWorld::Testing
                                 destination.setContListener(&listener);
                                 source.getWeight();
                                 destination.getWeight();
+                                if (inventoryRestore)
+                                {
+                                    // Generate and retire an actual registry node.
+                                    // Stacking consumes no ID: its accepted counter
+                                    // must remain beyond all surviving item IDs.
+                                    {
+                                        ManualRef retired(store, plainId);
+                                        fixture.mModel.registerPtr(retired.getPtr());
+                                    }
+                                    const auto counter = fixture.mModel.getLastGeneratedRefNum();
+                                    require(fixture.mModel.getPtr(counter).isEmpty(), "retired ID still registered");
+                                    for (const auto* storage : { &fixture.sourceStorage(), &fixture.destinationStorage(),
+                                             &fixture.otherStorage() })
+                                        for (const auto& node : *storage)
+                                            require(node.mRef.getRefNum().mIndex < counter.mIndex,
+                                                "restart fixture lacks counter beyond surviving IDs");
+                                }
                                 const std::array supplied{ ContainerStoreResolution(
                                     fixture.mOther, fixture.mOtherOwner.getPtr()) };
                                 const auto make = [&] {
