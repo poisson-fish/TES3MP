@@ -66,11 +66,16 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment NPC race is unavailable");
         }
 
-        const ESM::Spell& equipmentSpell(ESM::RefId id, const ESMStore& content)
+        const ESM::Spell& equipmentSpell(ESM::RefId id, const ESMStore& content, const ESM::NPC& npc)
         {
             const auto* spell = content.get<ESM::Spell>().search(id);
             if (!spell || (spell->mData.mType != ESM::Spell::ST_Spell && spell->mData.mType != ESM::Spell::ST_Power))
-                throw std::invalid_argument("Equipment NPC needs known spell/power content; passive effects require activation services");
+            {
+                MWMechanics::abilityFortifyLuckMagnitude(content, id);
+                const auto* race = content.get<ESM::Race>().search(npc.mRace);
+                if (!race || std::find(race->mPowers.mList.begin(), race->mPowers.mList.end(), id) == race->mPowers.mList.end())
+                    throw std::invalid_argument("Equipment passive ability must belong to the actor's race");
+            }
             return *spell;
         }
 
@@ -241,6 +246,7 @@ namespace MWWorld
             throw std::invalid_argument("Equipment stats require known NPC content");
         npcContent(*npc, content);
         bool ended = false;
+        float abilityMagnitude = 0;
         for (size_t i = 0; i < mSpells.size(); ++i)
         {
             if (mSpells[i].empty())
@@ -251,8 +257,21 @@ namespace MWWorld
             recordId(mSpells[i], true);
             if (ended || std::find(mSpells.begin(), mSpells.begin() + i, mSpells[i]) != mSpells.begin() + i)
                 throw std::invalid_argument("Invalid equipment NPC initialized spell list");
-            equipmentSpell(mSpells[i], content);
+            const auto& spell = equipmentSpell(mSpells[i], content, *npc);
+            if (spell.mData.mType == ESM::Spell::ST_Ability)
+            {
+                if (abilityMagnitude)
+                    throw std::invalid_argument("Equipment supports only one race ability");
+                abilityMagnitude = MWMechanics::abilityFortifyLuckMagnitude(content, spell.mId);
+            }
         }
+        if (const auto* race = content.get<ESM::Race>().search(npc->mRace))
+            for (const auto id : race->mPowers.mList)
+                if (equipmentSpell(id, content, *npc).mData.mType == ESM::Spell::ST_Ability
+                    && std::find(mSpells.begin(), mSpells.end(), id) == mSpells.end())
+                    throw std::invalid_argument("Equipment save omitted its race ability");
+        if (mAbilityMagnitude != abilityMagnitude)
+            throw std::invalid_argument("Equipment save passive contribution disagrees with content");
         for (const auto& value : mAttributes)
             if (!std::isfinite(value[0]) || value[0] < 0 || value[0] > 1000
                 || !std::isfinite(value[1]) || std::abs(value[1]) > 1000
@@ -286,7 +305,7 @@ namespace MWWorld
         const auto add = [&](const std::vector<ESM::RefId>& ids) {
             for (const auto id : ids)
             {
-                const auto* spell = &equipmentSpell(id, content);
+                const auto* spell = &equipmentSpell(id, content, *mBase);
                 if (!mStats.getSpells().hasSpell(spell))
                 {
                     if (mStats.getSpells().count() == EquipmentNpcStatsValues::MaxSpells)
@@ -303,6 +322,9 @@ namespace MWWorld
             add(race->mPowers.mList);
         if (mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
             mStats.recalculateMagicka(mMagickaMultiplier);
+        // Stock activation follows spell generation; abilities must not change
+        // the attributes used for auto-NPDT spell eligibility.
+        mStats.getActiveSpells().activateFortifyLuckAbility(mActor, mContent, mStats);
         mInitialSpells = values().mSpells;
     }
 
@@ -317,7 +339,7 @@ namespace MWWorld
         if (saved.mSpells != mInitialSpells || !mStats.getSpells().getSelectedSpell().empty())
             throw std::invalid_argument("Equipment NPC initialized spell membership changed");
         for (const auto* spell : mStats.getSpells())
-            if (&equipmentSpell(spell->mId, content) != spell)
+            if (&equipmentSpell(spell->mId, content, *mBase) != spell)
                 throw std::invalid_argument("Equipment NPC spell content binding changed");
     }
 
@@ -330,6 +352,10 @@ namespace MWWorld
             throw std::invalid_argument("Equipment NPC spell limit exceeded");
         for (size_t i = 0; i < spells.count(); ++i)
             result.mSpells[i] = spells.at(i)->mId;
+        for (const auto& spell : mStats.getActiveSpells())
+            if (spell.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues))
+                for (const auto& effect : spell.getEffects())
+                    result.mAbilityMagnitude += effect.mMagnitude;
         for (size_t i = 0; i < result.mAttributes.size(); ++i)
         {
             ESM::StatState<float> value;
@@ -350,6 +376,9 @@ namespace MWWorld
         values.validate(mContent);
         if (values.mBase != mBase->mId || values.mSpells != mInitialSpells)
             throw std::invalid_argument("Equipment NPC save base/initialized spells differ from bound actor");
+        // Fresh construction has already activated the validated race ability.
+        // Saved base values include it; retain that active owner while replacing
+        // the base values, then reconstruct only the shirt's modifier below.
         for (size_t i = 0; i < values.mAttributes.size(); ++i)
         {
             const auto id = ESM::Attribute::indexToRefId(static_cast<int>(i));

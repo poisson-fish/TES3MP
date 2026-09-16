@@ -424,10 +424,13 @@ namespace
 
 namespace MWMechanics
 {
-    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude)
+    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase)
     {
         auto value = stats.getAttribute(attribute);
-        value.setModifier(value.getModifier() + magnitude);
+        if (affectsBase)
+            value.setBase(value.getBase() + magnitude);
+        else
+            value.setModifier(value.getModifier() + magnitude);
         stats.setAttribute(attribute, value);
     }
 
@@ -828,16 +831,8 @@ namespace MWMechanics
             else if (effect.mEffectId == ESM::MagicEffect::FortifyAttribute)
             {
                 // Abilities affect base stats, but not for drain
-                if (spellParams.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues))
-                {
-                    auto& creatureStats = target.getClass().getCreatureStats(target);
-                    auto attribute = effect.getSkillOrAttribute();
-                    AttributeValue attr = creatureStats.getAttribute(attribute);
-                    attr.setBase(attr.getBase() + effect.mMagnitude);
-                    creatureStats.setAttribute(attribute, attr);
-                }
-                else
-                    fortifyAttribute(target, effect, effect.mMagnitude);
+                modifyFortifyAttribute(target.getClass().getCreatureStats(target), effect.getSkillOrAttribute(),
+                    effect.mMagnitude, spellParams.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues));
             }
             else if (effect.mEffectId == ESM::MagicEffect::DrainSkill)
             {
@@ -1150,16 +1145,8 @@ namespace MWMechanics
             else if (effect.mEffectId == ESM::MagicEffect::FortifyAttribute)
             {
                 // Abilities affect base stats, but not for drain
-                if (spellParams.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues))
-                {
-                    auto& creatureStats = target.getClass().getCreatureStats(target);
-                    auto attribute = effect.getSkillOrAttribute();
-                    AttributeValue attr = creatureStats.getAttribute(attribute);
-                    attr.setBase(attr.getBase() - effect.mMagnitude);
-                    creatureStats.setAttribute(attribute, attr);
-                }
-                else
-                    fortifyAttribute(target, effect, -effect.mMagnitude);
+                modifyFortifyAttribute(target.getClass().getCreatureStats(target), effect.getSkillOrAttribute(),
+                    -effect.mMagnitude, spellParams.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues));
             }
             else if (effect.mEffectId == ESM::MagicEffect::DrainSkill)
             {

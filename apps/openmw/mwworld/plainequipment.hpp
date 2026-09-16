@@ -23,6 +23,9 @@ namespace MWWorld
         // Fixed storage keeps untrusted decode preflight allocation-free.
         static constexpr size_t MaxSpells = 256;
         std::array<ESM::RefId, MaxSpells> mSpells{};
+        // Base Luck already includes this applied passive contribution. Its
+        // source is the single race ability in mSpells, never the shirt.
+        float mAbilityMagnitude = 0;
         std::array<std::array<float, 3>, ESM::Attribute::Length> mAttributes{};
         std::array<std::array<float, 3>, 3> mDynamic{};
         void validate(const ESMStore& content) const;
@@ -106,7 +109,7 @@ namespace MWWorld
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
         ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
         std::vector<ESM::ObjectState> mObjects;
-        // Format 3 stores the actor's complete bounded attribute/dynamic slice.
+        // NPC saves include initialized spells and the applied ability witness.
         // Skills, level, disposition and reputation stay at NPDT values; other
         // NPC state is outside this context, not part of this save.
         std::optional<EquipmentNpcStatsValues> mNpcStats;

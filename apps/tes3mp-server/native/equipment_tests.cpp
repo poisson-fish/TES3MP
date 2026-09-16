@@ -1810,6 +1810,14 @@ namespace MWWorld::Testing
             spell.mData.mType = ESM::Spell::ST_Power;
             mStore.insertStatic(spell);
             race.mPowers.mList.push_back(spell.mId);
+            ESM::Spell ability;
+            ability.blank();
+            ability.mId = ESM::RefId::stringRefId("equipment_ability");
+            ability.mData.mType = ESM::Spell::ST_Ability;
+            ability.mEffects.populate({ { ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Luck,
+                ESM::RT_Self, 0, 0, 7, 7 } });
+            mStore.insertStatic(ability);
+            race.mPowers.mList.push_back(ability.mId);
             mStore.insertStatic(race);
             ESM::NPC npc = *mActors[0]->getPtr().get<ESM::NPC>()->mBase;
             npc.mId = ESM::RefId::stringRefId("equipment_auto_npc");
@@ -1853,6 +1861,21 @@ namespace MWWorld::Testing
             auto* chance = const_cast<ESM::GameSetting*>(f.mStore.get<ESM::GameSetting>().find("fAutoSpellChance"));
             chance->mValue = ESM::Variant(200.f);
             require(selected().empty(), "NPC generated spell selection cached another content context's GMST");
+            stats.getSpells().add(f.mStore.get<ESM::Spell>().find(ESM::RefId::stringRefId("equipment_ability")), false);
+            stats.getSpells().add(f.mStore.get<ESM::Spell>().find(ESM::RefId::stringRefId("equipment_generated")), false);
+            auto& active = stats.getActiveSpells();
+            for (int refresh = 0; refresh < 2; ++refresh)
+            {
+                active.activateFortifyLuckAbility(f.mActors[1]->getPtr(), f.mStore, stats);
+                require(stats.getAttribute(ESM::Attribute::Luck).getBase() == 72
+                        && stats.getAttribute(ESM::Attribute::Luck).getModifier() == 0
+                        && stats.getSpells().count() == 2 && std::distance(active.begin(), active.end()) == 1
+                        && active.begin()->hasFlag(ESM::ActiveSpells::Flag_SpellStore)
+                        && active.begin()->hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues)
+                        && !active.begin()->getItem().isSet() && active.begin()->getEffects().front().mMagnitude == 7
+                        && stats.getMagicka().getCurrent() == 116 && stats.getFatigue().getCurrent() == 208,
+                    "Passive ability activation lost stock base-stat ownership or applied twice");
+            }
             std::cout << "stock auto-NPDT attributes/skills/dynamics and generated spell eligibility verified\n";
         }
 
@@ -1932,7 +1955,8 @@ namespace MWWorld::Testing
                         require(initialized.getSkill(ESM::Skill::indexToRefId(i)).getBase() == 10 + i,
                             "Explicit NPC initialization lost stock skills");
                 }
-                mNpcStats[actor]->mStats.setAttribute(ESM::Attribute::Luck, actor == 0 ? 40.f : 65.f);
+                if (!autoActor && actor == 1)
+                    mNpcStats[actor]->mStats.setAttribute(ESM::Attribute::Luck, 65.f);
                 if (seedRuntimeStats)
                 {
                     auto& stats = mNpcStats[actor]->mStats;
@@ -1965,25 +1989,39 @@ namespace MWWorld::Testing
             const auto& stats = mNpcStats[actor]->mStats;
             const auto& luck = stats.getAttribute(ESM::Attribute::Luck);
             const auto expected = equipped ? 9.f : 0.f;
-            require(luck.getModified() == (actor == 0 ? 40.f : 65.f) + expected
+            require(luck.getModified() == (actor == 0 ? 40.f : 72.f) + expected
                     && stats.getMagicEffects().getOrDefault(
-                        MWMechanics::EffectKey(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck)).getMagnitude() == expected,
+                        MWMechanics::EffectKey(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck)).getMagnitude() == expected + (actor == 1 ? 7.f : 0.f),
                 "Constant effect did not change the intended actor's gameplay attribute");
             const auto& known = stats.getSpells();
-            require(known.count() == (actor == 1 ? 3 : 0), "Equipment lost initialized NPC spells");
+            require(known.count() == (actor == 1 ? 4 : 0), "Equipment lost initialized NPC spells");
             if (actor == 1)
                 require(known.at(0)->mId == ESM::RefId::stringRefId("equipment_known")
                         && known.at(1)->mId == ESM::RefId::stringRefId("equipment_generated")
-                        && known.at(2)->mId == ESM::RefId::stringRefId("equipment_power"),
+                        && known.at(2)->mId == ESM::RefId::stringRefId("equipment_power")
+                        && known.at(3)->mId == ESM::RefId::stringRefId("equipment_ability"),
                     "Equipment regenerated/reordered NPC spells from changed runtime stats");
             const auto& spells = stats.getActiveSpells();
-            require(std::distance(spells.begin(), spells.end()) == (equipped ? 1 : 0),
-                "Constant effect applied more than once or survived removal");
-            if (equipped)
-                require(spells.begin()->getCaster() == mActors[actor]->getPtr().getCellRef().getRefNum()
-                        && spells.begin()->getItem() == mInventories[actor].getSlot(InventoryStore::Slot_Shirt)->getCellRef().getRefNum()
-                        && spells.begin()->getEffects().front().mMagnitude == 9,
-                    "Constant effect ownership/item identity mismatch");
+            require(std::distance(spells.begin(), spells.end()) == (equipped ? 1 : 0) + (actor == 1 ? 1 : 0),
+                "Passive/item effect applied more than once or lost its owner");
+            for (const auto& spell : spells)
+            {
+                require(spell.getCaster() == mActors[actor]->getPtr().getCellRef().getRefNum(),
+                    "Constant effect caster identity mismatch");
+                if (spell.hasFlag(ESM::ActiveSpells::Flag_SpellStore))
+                    require(actor == 1 && spell.getSourceSpellId() == ESM::RefId::stringRefId("equipment_ability")
+                            && spell.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues) && !spell.getItem().isSet()
+                            && spell.getEffects().front().mMagnitude == 7 && luck.getBase() == 72,
+                        "Passive ability lost separate base Luck ownership");
+                else
+                    require(equipped && spell.hasFlag(ESM::ActiveSpells::Flag_Equipment)
+                            && !spell.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues)
+                            && spell.getSourceSpellId() == ESM::RefId::stringRefId("equipment_shirt")
+                            && spell.getItem() == mInventories[actor].getSlot(InventoryStore::Slot_Shirt)->getCellRef().getRefNum()
+                            && spell.getEffects().front().mMagnitude == 9 && luck.getModifier() == 9,
+                        "Constant effect ownership/item identity mismatch");
+            }
+            spells.validateConstantFortifyLuck(mActors[actor]->getPtr(), mInventories[actor], mStore, stats);
         }
 
         static void checkEnchanted(const std::filesystem::path& scratch)
@@ -1991,6 +2029,8 @@ namespace MWWorld::Testing
             EquipmentScratch directory(scratch);
             PlainEquipmentFixture f;
             f.enableLuck();
+            f.checkLuck(0, false);
+            f.checkLuck(1, false);
             const auto& autoStats = f.mNpcStats[1]->stats();
             require(MWMechanics::autoCalcNpcSpells(autoStats.getSkills(), autoStats.getAttributes(),
                         f.mStore.get<ESM::Race>().find(f.mActors[1]->getPtr().get<ESM::NPC>()->mBase->mRace),
@@ -2038,7 +2078,7 @@ namespace MWWorld::Testing
                     require(sameValues(decoded, f.installedValues(actor)), "Enchanted save lost gameplay state");
                     ++commits;
                 }
-            std::cout << "constant Fortify Luck: explicit actor A 40->49->40->49, auto actor B 65->74->65->74; isolated commits="
+            std::cout << "constant Fortify Luck: explicit actor A 40->49->40->49, auto actor B ability 65+7=72->81->72->81; isolated commits="
                 << commits << '\n';
         }
 
@@ -2058,7 +2098,7 @@ namespace MWWorld::Testing
             const auto path = scratch / "guards.bin";
             size_t rejected = 0;
             for (size_t actor = 0; actor < 2; ++actor)
-                for (int test = 0; test < 12 + static_cast<int>(actor); ++test)
+                for (int test = 0; test < (actor == 0 ? 12 : 20); ++test)
                 {
                     PlainEquipmentFixture f;
                     f.enableLuck();
@@ -2096,13 +2136,42 @@ namespace MWWorld::Testing
                         case 11: f.mNpcStats[actor]->mStats.getSpells().setSelectedSpell(
                             ESM::RefId::stringRefId("equipment_known")); break;
                         case 12: f.mNpcStats[actor]->mStats.getSpells().clear(false); break;
+                        case 13:
+                        case 14:
+                        {
+                            auto* ability = const_cast<ESM::Spell*>(f.mStore.get<ESM::Spell>().find(
+                                ESM::RefId::stringRefId("equipment_ability")));
+                            if (test == 13) ability->mEffects.mList.front().mData.mMagnMax = 8;
+                            else ability->mEffects.mList.front().mData.mRange = ESM::RT_Target;
+                            break;
+                        }
+                        case 15:
+                            const_cast<ESM::Race*>(f.mStore.get<ESM::Race>().find(
+                                ESM::RefId::stringRefId("equipment_race")))->mPowers.mList.pop_back();
+                            break;
+                        default:
+                        {
+                            auto& active = f.mNpcStats[actor]->mStats.getActiveSpells();
+                            ESM::ActiveSpells state;
+                            active.writeState(state);
+                            auto& ability = state.mSpells.front();
+                            require(ability.mSourceSpellId == ESM::RefId::stringRefId("equipment_ability"),
+                                "Guard fixture lost passive ability");
+                            if (test == 16) ability.mCaster = f.mActors[0]->getPtr().getCellRef().getRefNum();
+                            if (test == 17) ability.mItem = state.mSpells.back().mItem;
+                            if (test == 18) state.mSpells.push_back(ability);
+                            if (test == 19) ability.mEffects.front().mFlags = ESM::ActiveEffect::Flag_Applied;
+                            active = MWMechanics::ActiveSpells{};
+                            active.readState(state);
+                            break;
+                        }
                     }
                     const auto before = f.snapshot();
                     faults = {};
                     bool caught = false;
                     try
                     {
-                        if (test >= 5)
+                        if (test >= 5 && test <= 12)
                         {
                             std::unique_ptr<const PlainEquipmentResult> internal;
                             f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared), sink,
@@ -2128,7 +2197,7 @@ namespace MWWorld::Testing
             const auto ids = referenceIds(good);
             EquipmentBytes encoded;
             encodeEquipment(good, { e, f.mStore, ids }, encoded);
-            for (int test = 0; test < 9; ++test)
+            for (int test = 0; test < 11; ++test)
             {
                 auto bad = good;
                 if (test == 0) bad.mNpcStats.reset();
@@ -2140,6 +2209,12 @@ namespace MWWorld::Testing
                 if (test == 6) bad.mNpcStats->mSpells[0] = bad.mNpcStats->mSpells[1];
                 if (test == 7) bad.mNpcStats->mSpells[1] = {};
                 if (test == 8) bad.mNpcStats->mSpells[0] = ESM::RefId::stringRefId("missing_equipment_spell");
+                if (test == 9) bad.mNpcStats->mAbilityMagnitude = 0;
+                if (test == 10)
+                {
+                    bad.mNpcStats->mSpells[3] = {};
+                    bad.mNpcStats->mAbilityMagnitude = 0;
+                }
                 auto output = encoded;
                 bool caught = false;
                 try { encodeEquipment(bad, { e, f.mStore, ids }, output); }
@@ -2147,16 +2222,24 @@ namespace MWWorld::Testing
                 require(caught && output == encoded, "Invalid NPC stat save was encoded");
                 ++rejected;
             }
-            for (int test = 0; test < 9; ++test)
+            for (int test = 0; test < 13; ++test)
             {
                 auto bad = encoded;
-                const std::string tag = test < 3 ? "FVER" : test == 3 ? "ATTR"
+                const std::string tag = test >= 10 ? "ABMG" : test == 9 || test < 3 ? "FVER" : test == 3 ? "ATTR"
                     : test < 6 ? "DYNA" : test == 7 ? "KSPL" : "SCNT";
                 const auto it = std::search(bad.begin(), bad.end(), tag.begin(), tag.end());
                 require(it != bad.end(), "Missing enchanted codec fixture field");
                 const auto offset = static_cast<size_t>(it - bad.begin()) + 8;
-                if (test < 3)
-                    bad[offset] = static_cast<char>(test + 1); // No inferred migration from formats 2/3.
+                if (test < 3 || test == 9)
+                    bad[offset] = static_cast<char>(test == 9 ? 4 : test + 1); // No inferred migration from formats 2/3/4.
+                else if (test == 11)
+                    bad[offset - 8] = 'X'; // The applied contribution is mandatory.
+                else if (test >= 10)
+                {
+                    const auto number = std::bit_cast<uint32_t>(test == 10 ? 0.f : std::numeric_limits<float>::quiet_NaN());
+                    for (size_t byte = 0; byte < 4; ++byte)
+                        bad[offset + byte] = static_cast<char>(number >> (8 * byte));
+                }
                 else if (test == 7)
                     bad[offset + 1] = '!'; // Unknown IDs must not be interned.
                 else
@@ -2225,7 +2308,7 @@ namespace MWWorld::Testing
             }
             // Reuse restart staging/installation: no new recovery fixture or
             // rollback path for saved-base mismatch and stale dynamic stats.
-            for (int test = 0; test < 4; ++test)
+            for (int test = 0; test < 5; ++test)
             {
                 const bool invalidSaved = test == 0 || test == 3;
                 PlainEquipmentFixture fresh(1);
@@ -2258,8 +2341,14 @@ namespace MWWorld::Testing
                     staged = fresh.stageRestart(1, fresh.mActors[1]->getPtr(), bindings, witness, detached);
                     if (test == 1)
                         fresh.mNpcStats[1]->mStats.setFatigue({ 100.f, 3.f, -4.f });
-                    else
+                    else if (test == 2)
                         staged->mNpcStats = fresh.mNpcStats[0];
+                    else
+                    {
+                        auto& effect = const_cast<ESM::Spell*>(fresh.mStore.get<ESM::Spell>().find(
+                            ESM::RefId::stringRefId("equipment_ability")))->mEffects.mList.front().mData;
+                        effect.mMagnMin = effect.mMagnMax = 8;
+                    }
                 }
                 const auto before = fresh.snapshot();
                 bool caught = false;

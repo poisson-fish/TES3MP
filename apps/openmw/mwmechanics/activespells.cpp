@@ -232,25 +232,140 @@ namespace MWMechanics
         return static_cast<ESM::ActiveSpells::Flags>(mFlags & flags) == flags;
     }
 
+    namespace
+    {
+        float fixedFortifyLuckMagnitude(const MWWorld::ESMStore& store, const ESM::EffectList& effects)
+        {
+            if (effects.mList.size() != 1)
+                throw std::invalid_argument("Expected one fixed Fortify Luck effect");
+            const auto& effect = effects.mList.front().mData;
+            const auto* magic = store.get<ESM::MagicEffect>().search(effect.mEffectID);
+            if (effect.mEffectID != ESM::MagicEffect::FortifyAttribute || effect.mAttribute != ESM::Attribute::Luck
+                || !effect.mSkill.empty() || effect.mRange != ESM::RT_Self || effect.mArea != 0
+                || effect.mMagnMin <= 0 || effect.mMagnMin > 1000 || effect.mMagnMin != effect.mMagnMax
+                || !magic || !(magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
+                || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude
+                    | ESM::MagicEffect::CasterLinked | ESM::MagicEffect::NonRecastable))
+                || !ESM::MagicEffect::getResistanceEffect(effect.mEffectID).empty())
+                throw std::invalid_argument("Unsupported constant Fortify Luck equipment effect");
+            return static_cast<float>(effect.mMagnMin);
+        }
+    }
+
     float constantFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId id)
     {
         if (id.empty())
             return 0;
         const auto* enchantment = store.get<ESM::Enchantment>().search(id);
-        if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
-            || enchantment->mEffects.mList.size() != 1)
-            throw std::invalid_argument("Equipment requires one constant Fortify Luck effect");
-        const auto& effect = enchantment->mEffects.mList.front().mData;
-        const auto* magic = store.get<ESM::MagicEffect>().search(effect.mEffectID);
-        if (effect.mEffectID != ESM::MagicEffect::FortifyAttribute || effect.mAttribute != ESM::Attribute::Luck
-            || !effect.mSkill.empty() || effect.mRange != ESM::RT_Self || effect.mArea != 0
-            || effect.mMagnMin <= 0 || effect.mMagnMin > 1000 || effect.mMagnMin != effect.mMagnMax
-            || !magic || !(magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
-            || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude
-                | ESM::MagicEffect::CasterLinked | ESM::MagicEffect::NonRecastable))
-            || !ESM::MagicEffect::getResistanceEffect(effect.mEffectID).empty())
-            throw std::invalid_argument("Unsupported constant Fortify Luck equipment effect");
-        return static_cast<float>(effect.mMagnMin);
+        if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect)
+            throw std::invalid_argument("Equipment requires a constant enchantment");
+        return fixedFortifyLuckMagnitude(store, enchantment->mEffects);
+    }
+
+    float abilityFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId id)
+    {
+        const auto* spell = store.get<ESM::Spell>().search(id);
+        if (!spell || spell->mData.mType != ESM::Spell::ST_Ability)
+            throw std::invalid_argument("Expected a passive Fortify Luck ability");
+        return fixedFortifyLuckMagnitude(store, spell->mEffects);
+    }
+
+    void ActiveSpells::visitNewSpells(const MWWorld::Ptr& actor, const CreatureStats& stats,
+        const std::function<void(const ActiveSpellParams&)>& add)
+    {
+        if (stats.isDead())
+            return;
+        for (const ESM::Spell* spell : stats.getSpells())
+            if (spell->mData.mType != ESM::Spell::ST_Spell && spell->mData.mType != ESM::Spell::ST_Power
+                && !isSpellActive(spell->mId))
+                add(ActiveSpellParams{ spell, actor, true });
+    }
+
+    void ActiveSpells::applyFixedFortifyLuck(const ActiveSpellParams& params, CreatureStats& stats)
+    {
+        // Actor-scoped source IDs suffice for this bounded ability/item pair.
+        auto& spell = *initParams(params, params.mSourceSpellId);
+        auto& effect = spell.mEffects.front();
+        effect.mMagnitude = effect.mMinMagnitude; // Fixed stock roll consumes no RNG.
+        modifyFortifyAttribute(stats, effect.getSkillOrAttribute(), effect.mMagnitude,
+            spell.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues));
+        stats.getMagicEffects().add(EffectKey(effect.mEffectId, effect.getSkillOrAttribute()), EffectParam(effect.mMagnitude));
+        effect.mFlags |= ESM::ActiveEffect::Flag_Applied;
+    }
+
+    void ActiveSpells::validateFortifyLuckState(const MWWorld::Ptr& actor,
+        const MWWorld::ESMStore& content, const CreatureStats& stats, bool allowInactiveAbility) const
+    {
+        if (&stats.getActiveSpells() != this || !actor.hasLiveReference()
+            || !actor.getCellRef().getRefNum().isSet() || stats.isDead()
+            || mIterating || !mQueue.empty() || !mPurges.empty())
+            throw std::invalid_argument("Invalid bounded actor/effect state");
+        const ESM::Spell* ability = nullptr;
+        for (const auto* spell : stats.getSpells())
+        {
+            if (content.get<ESM::Spell>().search(spell->mId) != spell)
+                throw std::invalid_argument("Passive spell content binding changed");
+            if (spell->mData.mType == ESM::Spell::ST_Spell || spell->mData.mType == ESM::Spell::ST_Power)
+                continue;
+            if (ability)
+                throw std::invalid_argument("Only one passive Fortify Luck ability is supported");
+            abilityFortifyLuckMagnitude(content, spell->mId);
+            ability = spell;
+        }
+        bool hasAbility = false, hasItem = false;
+        float abilityMagnitude = 0, itemMagnitude = 0;
+        const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);
+        for (const auto& spell : mSpells)
+        {
+            const bool passive = spell.mFlags == ESM::Compatibility::ActiveSpells::Type_Ability_Flags;
+            float magnitude;
+            int32_t index;
+            if (passive)
+            {
+                if (!ability || hasAbility || spell.mSourceSpellId != ability->mId || spell.mItem.isSet())
+                    throw std::invalid_argument("Passive ability ownership changed");
+                hasAbility = true;
+                magnitude = abilityMagnitude = abilityFortifyLuckMagnitude(content, ability->mId);
+                index = static_cast<int32_t>(ability->mEffects.mList.front().mIndex);
+            }
+            else
+            {
+                const auto* item = content.get<ESM::Clothing>().search(spell.mSourceSpellId);
+                if (hasItem || spell.mFlags != ESM::ActiveSpells::Flag_Equipment || !spell.mItem.isSet()
+                    || !item || item->mData.mType != ESM::Clothing::Shirt || !item->mScript.empty())
+                    throw std::invalid_argument("Constant equipment effect ownership changed");
+                hasItem = true;
+                magnitude = itemMagnitude = constantFortifyLuckMagnitude(content, item->mEnchant);
+                if (!magnitude)
+                    throw std::invalid_argument("Active equipment effect has no enchantment");
+                index = static_cast<int32_t>(content.get<ESM::Enchantment>().find(item->mEnchant)->mEffects.mList.front().mIndex);
+            }
+            if (spell.mCaster != actor.getCellRef().getRefNum() || spell.mActiveSpellId != spell.mSourceSpellId
+                || spell.mEffects.size() != 1 || !spell.mSource.isEmpty() || spell.mWorsenings != -1)
+                throw std::invalid_argument("Canonical effect identity changed");
+            const auto& effect = spell.mEffects.front();
+            const int flags = ESM::ActiveEffect::Flag_Applied
+                | (passive ? ESM::ActiveEffect::Flag_Ignore_Resistances : 0);
+            if (effect.mEffectId != key.mId || effect.getSkillOrAttribute() != key.mArg
+                || effect.mMagnitude != magnitude || effect.mMinMagnitude != magnitude || effect.mMaxMagnitude != magnitude
+                || effect.mFlags != flags || effect.mDuration != -1 || effect.mTimeLeft != -1 || effect.mEffectIndex != index)
+                throw std::invalid_argument("Canonical applied effect changed");
+        }
+        const float total = abilityMagnitude + itemMagnitude;
+        if ((!allowInactiveAbility && ability && !hasAbility)
+            || stats.getAttribute(ESM::Attribute::Luck).getModifier() != itemMagnitude
+            || stats.getMagicEffects().getOrDefault(key).getMagnitude() != total)
+            throw std::invalid_argument("Canonical Luck/effect state changed");
+        for (const auto& [effect, value] : stats.getMagicEffects())
+            if (!(effect == key) || value.getBase() != 0 || value.getModifier() != total)
+                throw std::invalid_argument("Unsupported magic effects");
+    }
+
+    void ActiveSpells::activateFortifyLuckAbility(const MWWorld::Ptr& actor,
+        const MWWorld::ESMStore& content, CreatureStats& stats)
+    {
+        validateFortifyLuckState(actor, content, stats, true);
+        visitNewSpells(actor, stats, [&](const ActiveSpellParams& params) { applyFixedFortifyLuck(params, stats); });
     }
 
     bool ActiveSpells::stillEquipped(const ActiveSpellParams& spell, const MWWorld::InventoryStore& inventory)
@@ -289,40 +404,23 @@ namespace MWMechanics
     void ActiveSpells::validateConstantFortifyLuck(const MWWorld::Ptr& actor,
         const MWWorld::InventoryStore& inventory, const MWWorld::ESMStore& content, const CreatureStats& stats) const
     {
+        validateFortifyLuckState(actor, content, stats, false);
         const auto item = inventory.getSlot(MWWorld::InventoryStore::Slot_Shirt);
         const float magnitude = item == inventory.end() ? 0
             : constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));
-        const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);
-        if (&stats.getActiveSpells() != this || mIterating || !mQueue.empty() || !mPurges.empty()
-            || stats.getAttribute(ESM::Attribute::Luck).getModifier() != magnitude
-            || stats.getMagicEffects().getOrDefault(key).getMagnitude() != magnitude
-            || mSpells.size() != (magnitude ? 1 : 0))
-            throw std::invalid_argument("Equipment canonical Luck/effect state changed");
-        for (const auto& [effect, value] : stats.getMagicEffects())
-            if (!(effect == key) || value.getBase() != 0 || value.getModifier() != magnitude)
-                throw std::invalid_argument("Equipment has unsupported magic effects");
-        if (!magnitude)
-            return;
-        const auto& spell = mSpells.front();
-        if (spell.mCaster != actor.getCellRef().getRefNum() || spell.mItem != item->getCellRef().getRefNum()
-            || spell.mSourceSpellId != item->getCellRef().getRefId() || spell.mActiveSpellId != spell.mSourceSpellId
-            || spell.mFlags != ESM::ActiveSpells::Flag_Equipment || spell.mEffects.size() != 1
-            || !spell.mSource.isEmpty())
-            throw std::invalid_argument("Equipment canonical effect ownership changed");
-        const auto& effect = spell.mEffects.front();
-        if (effect.mEffectId != key.mId || effect.getSkillOrAttribute() != key.mArg
-            || effect.mMagnitude != magnitude || effect.mMinMagnitude != magnitude || effect.mMaxMagnitude != magnitude
-            || effect.mFlags != ESM::ActiveEffect::Flag_Applied || effect.mDuration != -1 || effect.mTimeLeft != -1)
-            throw std::invalid_argument("Equipment canonical applied effect changed");
+        if (stats.getAttribute(ESM::Attribute::Luck).getModifier() != magnitude)
+            throw std::invalid_argument("Equipment canonical Luck disagrees with shirt");
+        for (const auto& spell : mSpells)
+            if (spell.hasFlag(ESM::ActiveSpells::Flag_Equipment)
+                && (item == inventory.end() || spell.mItem != item->getCellRef().getRefNum()
+                    || spell.mSourceSpellId != item->getCellRef().getRefId()))
+                throw std::invalid_argument("Equipment canonical item ownership changed");
     }
 
     void ActiveSpells::updateConstantFortifyLuck(const MWWorld::Ptr& actor,
         const MWWorld::InventoryStore& inventory, const MWWorld::ESMStore& content, CreatureStats& stats)
     {
-        if (&stats.getActiveSpells() != this || !actor.hasLiveReference()
-            || !actor.getCellRef().getRefNum().isSet() || mIterating || !mQueue.empty() || !mPurges.empty()
-            || mSpells.size() > 1)
-            throw std::invalid_argument("Invalid bounded equipment actor/effect state");
+        validateFortifyLuckState(actor, content, stats, false);
         for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
         {
             const auto item = inventory.getSlot(slot);
@@ -333,17 +431,11 @@ namespace MWMechanics
                 throw std::invalid_argument("Constant effect context requires a non-scripted shirt");
             constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));
         }
-        for (const auto& spell : mSpells)
-            if (spell.mCaster != actor.getCellRef().getRefNum() || spell.mFlags != ESM::ActiveSpells::Flag_Equipment
-                || spell.mEffects.size() != 1 || spell.mEffects[0].mEffectId != ESM::MagicEffect::FortifyAttribute
-                || spell.mEffects[0].getSkillOrAttribute() != ESM::Attribute::Luck
-                || spell.mEffects[0].mFlags != ESM::ActiveEffect::Flag_Applied)
-                throw std::invalid_argument("Foreign or unsupported constant equipment effect");
         const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);
         // Removal uses the saved applied magnitude, never a freshly rolled value.
         for (auto it = mSpells.begin(); it != mSpells.end();)
         {
-            if (stillEquipped(*it, inventory))
+            if (!it->hasFlag(ESM::ActiveSpells::Flag_Equipment) || stillEquipped(*it, inventory))
                 ++it;
             else
             {
@@ -353,17 +445,8 @@ namespace MWMechanics
                 it = mSpells.erase(it);
             }
         }
-        visitNewEquipment(actor, inventory, content, [&](const ActiveSpellParams& params) {
-            auto& spell = mSpells.emplace_back(params);
-            // One equipment spell per actor: a scoped source ID suffices here.
-            // Production/global active-spell identity allocation remains separate.
-            spell.mActiveSpellId = spell.mSourceSpellId;
-            auto& effect = spell.mEffects.front();
-            effect.mMagnitude = effect.mMinMagnitude; // validated fixed magnitude; stock roll consumes no RNG
-            modifyFortifyAttribute(stats, effect.getSkillOrAttribute(), effect.mMagnitude);
-            stats.getMagicEffects().add(key, EffectParam(effect.mMagnitude));
-            effect.mFlags = ESM::ActiveEffect::Flag_Applied;
-        });
+        visitNewEquipment(actor, inventory, content,
+            [&](const ActiveSpellParams& params) { applyFixedFortifyLuck(params, stats); });
     }
 
     void ActiveSpells::update(const MWWorld::Ptr& ptr, float duration)
@@ -429,19 +512,9 @@ namespace MWMechanics
             addToSpells(ptr, spell, context);
         mQueue.clear();
 
-        if (!creatureStats.isDead())
-        {
-            // Vanilla only does this on cell change I think
-            const auto& spells = creatureStats.getSpells();
-            for (const ESM::Spell* spell : spells)
-            {
-                if (spell->mData.mType != ESM::Spell::ST_Spell && spell->mData.mType != ESM::Spell::ST_Power
-                    && !isSpellActive(spell->mId))
-                {
-                    initParams(ptr, ActiveSpellParams{ spell, ptr, true }, context);
-                }
-            }
-        }
+        // Vanilla only does this on cell change I think.
+        visitNewSpells(ptr, creatureStats,
+            [&](const ActiveSpellParams& params) { initParams(ptr, params, context); });
 
         if (ptr.getClass().hasInventoryStore(ptr)
             && !(creatureStats.isDead() && creatureStats.isDeathAnimationFinished()))
@@ -576,11 +649,17 @@ namespace MWMechanics
         return false;
     }
 
+    ActiveSpells::Collection::iterator ActiveSpells::initParams(const ActiveSpellParams& params, ESM::RefId activeId)
+    {
+        auto it = mSpells.emplace(mSpells.end(), params);
+        it->setActiveSpellId(activeId);
+        return it;
+    }
+
     bool ActiveSpells::initParams(const MWWorld::Ptr& ptr, const ActiveSpellParams& params, UpdateContext& context)
     {
-        mSpells.emplace_back(params).setActiveSpellId(MWBase::Environment::get().getESMStore()->generateId());
-        auto it = mSpells.end();
-        --it;
+        auto it = initParams(params, {});
+        it->setActiveSpellId(MWBase::Environment::get().getESMStore()->generateId());
         // We instantly apply the effect with a duration of 0 so continuous effects can be purged before truly applying
         if (context.mUpdate && updateActiveSpell(ptr, 0.f, it, context))
             return false;

@@ -193,6 +193,7 @@ namespace MWWorld::Testing
                     stats.mSpells[i] = reference(equipment.sub(ESM::fourCC("KSPL")), bindings);
                     valid(!stats.mSpells[i].empty());
                 }
+                stats.mAbilityMagnitude = std::bit_cast<float>(equipment.field(ESM::fourCC("ABMG"), 4).number());
                 stats.validate(bindings.mContent);
             }
             valid(equipment.empty() && result.mCount <= PlainEquipmentValues::MaxItems && records == result.mCount + 1
@@ -398,6 +399,7 @@ namespace MWWorld::Testing
             writer.writeHNT("SCNT", static_cast<uint32_t>(end - spells.begin()));
             for (auto it = spells.begin(); it != end; ++it)
                 writer.writeHNRefId("KSPL", *it);
+            writer.writeHNT("ABMG", input.mNpcStats->mAbilityMagnitude);
         }
         writer.endRecord("EQUP");
         for (const auto& object : input.mObjects)

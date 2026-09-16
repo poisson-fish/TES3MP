@@ -29,6 +29,7 @@ namespace MWMechanics
     // Bounded constant-effect service: one fixed, positive, self Fortify Luck.
     // Empty enchantment is plain; unsupported content throws before mutation.
     float constantFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId enchantment);
+    float abilityFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId spell);
 
     /// \brief Lasting spell effects
     ///
@@ -111,18 +112,29 @@ namespace MWMechanics
 
         void update(const MWWorld::Ptr& ptr, float duration);
 
+        // Detached stats only; discovers initialized passive membership through
+        // the stock path. Supports at most one fixed Fortify Luck ability.
+        void activateFortifyLuckAbility(const MWWorld::Ptr& actor, const MWWorld::ESMStore& content,
+            CreatureStats& stats);
+
         // Checks the complete supported actor/effect relationship without mutation.
         void validateConstantFortifyLuck(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
             const MWWorld::ESMStore& content, const CreatureStats& stats) const;
 
         // Operates on detached/test-owned stats only. No Environment, rendering,
         // RNG or callbacks. Caller stages owned presentation after durability.
-        // Existing state must contain only this actor's bounded equipment effect.
+        // Existing state may also contain this actor's initialized Luck ability.
         void updateConstantFortifyLuck(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
             const MWWorld::ESMStore& content, CreatureStats& stats);
 
 
     private:
+        void visitNewSpells(const MWWorld::Ptr& actor, const CreatureStats& stats,
+            const std::function<void(const ActiveSpellParams&)>& add);
+        Collection::iterator initParams(const ActiveSpellParams& params, ESM::RefId activeId);
+        void applyFixedFortifyLuck(const ActiveSpellParams& params, CreatureStats& stats);
+        void validateFortifyLuckState(const MWWorld::Ptr& actor, const MWWorld::ESMStore& content,
+            const CreatureStats& stats, bool allowInactiveAbility) const;
         void visitNewEquipment(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
             const MWWorld::ESMStore& content, const std::function<void(const ActiveSpellParams&)>& add);
         static bool stillEquipped(const ActiveSpellParams& spell, const MWWorld::InventoryStore& inventory);
