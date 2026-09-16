@@ -214,19 +214,42 @@ namespace MWWorld::Testing
         });
     }
 
+    DisposableTransferRehearsal::TransferContexts DisposableTransferRehearsal::transferContexts(bool reverse) const
+    {
+        if (&mRemoval.mWorldModel != &mModel || &mDestinationAdd.mWorldModel != &mModel
+            || &mRemoval.mLocalScripts != &mSourceScripts
+            || (mDestinationAdd.mLocalScripts != &mSourceScripts
+                && mDestinationAdd.mLocalScripts != &mDestinationScripts))
+            throw std::invalid_argument("Disposable transfer service mismatch");
+        if (!reverse)
+            return { mRemoval, mDestinationAdd };
+        if (&mSourceAdd.mWorldModel != &mModel || mSourceAdd.mLocalScripts != &mSourceScripts
+            || &mSourceAdd.mStore != &mDestinationAdd.mStore
+            || mSourceAdd.mScriptManager != mDestinationAdd.mScriptManager
+            || !mSourceAdd.mContainer.hasLiveReference() || !mRemoval.mContainer.hasLiveReference()
+            || mSourceAdd.mContainer != mRemoval.mContainer
+            || mSourceAdd.mContainer.getReferenceLifetime() != mRemoval.mContainer.getReferenceLifetime())
+            throw std::invalid_argument("Disposable reverse transfer context mismatch");
+        auto addition = mSourceAdd;
+        addition.mPlayer = mDestinationAdd.mPlayer; // Authorized initiator, independent of direction.
+        return { { mModel, mDestinationAdd.mContainer, *mDestinationAdd.mLocalScripts,
+                     mDestinationAdd.mInventoryUpdated }, std::move(addition) };
+    }
+
     bool DisposableTransferRehearsal::commitDurably(
-        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestDurableSink& sink)
+        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestDurableSink& sink, bool reverse)
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
         if (mFailedClosed)
             throw TestDurabilityUncertain{};
         if (mActive)
             throw std::invalid_argument("Disposable rehearsal already active");
-        if (!sink || &mRemoval.mWorldModel != &mModel || &mDestinationAdd.mWorldModel != &mModel
-            || &mRemoval.mLocalScripts != &mSourceScripts
-            || (mDestinationAdd.mLocalScripts != &mSourceScripts
-                && mDestinationAdd.mLocalScripts != &mDestinationScripts))
-            throw std::invalid_argument("Disposable commit sink or service mismatch");
+        if (!sink)
+            throw std::invalid_argument("Disposable commit requires a sink");
+        const auto contexts = transferContexts(reverse);
+        auto& sourceStore = reverse ? mDestination : mSource;
+        auto& destinationStore = reverse ? mSource : mDestination;
+        auto& sourceService = contexts.mRemoval.mLocalScripts;
         mActive = true;
         struct Active
         {
@@ -237,7 +260,7 @@ namespace MWWorld::Testing
         // guard, including its private iterators, services and old inventory nodes.
         auto pair = std::move(input);
         SerializedPair saved;
-        serializePair(*this, pair, declarations, saved); // Full validation before storage reads.
+        serializePair(*this, pair, declarations, saved, reverse); // Full validation before storage reads.
 
         phase.set(Allocations::Phase::Setup);
         auto& source = const_cast<PreparedContainerTransfer::MiscList&>(pair.getSourceStorage());
@@ -246,7 +269,7 @@ namespace MWWorld::Testing
         auto& destinationScripts = const_cast<LocalScripts::PreparedStorage&>(pair.getDestinationScriptStorage());
         auto& registry = const_cast<PtrRegistry::PreparedStorage&>(pair.getRegistryStorage());
         auto& liveRegistry = mModel.mPtrRegistry;
-        auto& destinationService = *mDestinationAdd.mLocalScripts;
+        auto& destinationService = *contexts.mAddition.mLocalScripts;
         const bool shared = &sourceScripts == &destinationScripts;
         const auto selection = [](ContainerStore& store, auto& list, const ConstPtr& selected) {
             for (auto it = list.begin(); it != list.end(); ++it)
@@ -254,9 +277,9 @@ namespace MWWorld::Testing
                     return ContainerStoreIterator(&store, it);
             return store.end();
         };
-        const auto sourceSelection = selection(mSource, source, pair.getRelocation().mSourceSelection);
+        const auto sourceSelection = selection(sourceStore, source, pair.getRelocation().mSourceSelection);
         const auto destinationSelection
-            = selection(mDestination, destination, pair.getRelocation().mDestinationSelection);
+            = selection(destinationStore, destination, pair.getRelocation().mDestinationSelection);
         const auto cursor = [](auto& list, size_t position) {
             using Iterator = decltype(list.begin());
             return position == list.size() ? std::optional<Iterator>()
@@ -268,7 +291,7 @@ namespace MWWorld::Testing
         const auto counter = registry.mBindings.mLastGenerated;
 
         phase.set(Allocations::Phase::Revalidation);
-        if (!mSource.validateTransfer(pair, mDestination, mRemoval, mDestinationAdd).isComplete())
+        if (!sourceStore.validateTransfer(pair, destinationStore, contexts.mRemoval, contexts.mAddition).isComplete())
             throw std::invalid_argument("Disposable commit requires complete resolution");
         // No pair readers/validators are called after this point. Assign IDs only
         // to owned nodes while still detached, so even a throwing CellRef setter
@@ -278,8 +301,8 @@ namespace MWWorld::Testing
             for (auto& node : nodes)
                 node.mRef.setRefNum(ids[i++]);
         };
-        identities(source, saved.mSource.mProposedIdentities);
-        identities(destination, saved.mDestination.mProposedIdentities);
+        identities(source, (reverse ? saved.mDestination : saved.mSource).mProposedIdentities);
+        identities(destination, (reverse ? saved.mSource : saved.mDestination).mProposedIdentities);
 
         phase.set(Allocations::Phase::Persistence);
         const auto outcome = sink(saved);
@@ -298,25 +321,25 @@ namespace MWWorld::Testing
             for (auto* list : { &source, &destination })
                 for (auto& node : *list)
                     node.mWorldModel = &mModel;
-            static_assert(noexcept(source.swap(mSource.mLists.mMiscItems.mList)));
-            mSource.mLists.mMiscItems.mList.swap(source);
-            mDestination.mLists.mMiscItems.mList.swap(destination);
+            static_assert(noexcept(source.swap(sourceStore.mLists.mMiscItems.mList)));
+            sourceStore.mLists.mMiscItems.mList.swap(source);
+            destinationStore.mLists.mMiscItems.mList.swap(destination);
             // Stock iterator assignment only copies fields, weak witnesses and
             // list iterators; selected nodes and receiving end owners are staged.
-            mSource.mSelectedEnchantItem = sourceSelection;
-            mDestination.mSelectedEnchantItem = destinationSelection;
+            sourceStore.mSelectedEnchantItem = sourceSelection;
+            destinationStore.mSelectedEnchantItem = destinationSelection;
             for (auto* store : { &mSource, &mDestination })
             {
                 store->mRechargingItems.clear();
                 store->mWeightUpToDate = store->mRechargingItemsUpToDate = false;
                 store->mModified = true;
             }
-            static_assert(noexcept(mSourceScripts.mScripts.swap(sourceScripts.mEntries)));
-            mSourceScripts.mScripts.swap(sourceScripts.mEntries);
+            static_assert(noexcept(sourceService.mScripts.swap(sourceScripts.mEntries)));
+            sourceService.mScripts.swap(sourceScripts.mEntries);
             // list::swap need not preserve end iterators. End is a staged logical
             // position, materialized from the receiving list after its swap.
-            static_assert(noexcept(mSourceScripts.mScripts.end()));
-            mSourceScripts.mIter = sourceCursor ? *sourceCursor : mSourceScripts.mScripts.end();
+            static_assert(noexcept(sourceService.mScripts.end()));
+            sourceService.mIter = sourceCursor ? *sourceCursor : sourceService.mScripts.end();
             if (!shared)
             {
                 destinationService.mScripts.swap(destinationScripts.mEntries);
@@ -339,10 +362,12 @@ namespace MWWorld::Testing
     }
 
     void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
-        const Compiler::Locals& declarations, SerializedPair& output)
+        const Compiler::Locals& declarations, SerializedPair& output, bool reverse)
     {
-        if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
-                .isComplete())
+        const auto contexts = fixture.transferContexts(reverse);
+        const auto& source = reverse ? fixture.mDestination : fixture.mSource;
+        const auto& destination = reverse ? fixture.mSource : fixture.mDestination;
+        if (!source.validateTransfer(pair, destination, contexts.mRemoval, contexts.mAddition).isComplete())
             throw std::invalid_argument("ObjectState serialization requires complete resolution");
         const auto& sourceScripts = pair.getSourceScriptStorage();
         const auto& destinationScripts = pair.getDestinationScriptStorage();
@@ -372,10 +397,12 @@ namespace MWWorld::Testing
                 },
                 declarations, inventory);
         };
-        serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
-        serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
-        staged.mSource.mSelection = pair.getSourceSelection();
-        staged.mDestination.mSelection = pair.getDestinationSelection();
+        auto& savedSource = reverse ? staged.mDestination : staged.mSource;
+        auto& savedDestination = reverse ? staged.mSource : staged.mDestination;
+        serialize(pair.getSourceStorage(), pair.getRelocation().mSource, savedSource);
+        serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, savedDestination);
+        savedSource.mSelection = pair.getSourceSelection();
+        savedDestination.mSelection = pair.getDestinationSelection();
         auto& metadata = staged.mScripts;
         metadata.mShared = shared;
         metadata.mOther.reserve(otherCount);
@@ -402,9 +429,9 @@ namespace MWWorld::Testing
                 service.mEntries.push_back({ identity, entry.getScript() });
             }
         };
-        scripts(sourceScripts, pair.getSourceScripts().mCursor, metadata.mServices[0]);
+        scripts(sourceScripts, pair.getSourceScripts().mCursor, metadata.mServices[reverse && !shared ? 1 : 0]);
         if (!shared)
-            scripts(destinationScripts, pair.getDestinationScripts().mCursor, metadata.mServices[1]);
+            scripts(destinationScripts, pair.getDestinationScripts().mCursor, metadata.mServices[reverse ? 0 : 1]);
         output.swap(staged);
     }
 

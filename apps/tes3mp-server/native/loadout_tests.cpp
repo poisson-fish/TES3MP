@@ -5694,16 +5694,20 @@ namespace
         auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
         options.mContent.push_back("Inventory.esm");
         TES3MP::Native::Loadout loadout(options);
-        if (filter == "inventory-transfer-command" || filter == "inventory-transfer-restart-command")
+        if (filter == "inventory-transfer-command" || filter == "inventory-transfer-restart-command"
+            || filter == "inventory-transfer-return-restart")
         {
             MWWorld::Testing::checkTransferCommand(
-                loadout.store(), root / "inventory-command", filter == "inventory-transfer-restart-command");
+                loadout.store(), root / "inventory-command", filter == "inventory-transfer-restart-command",
+                filter == "inventory-transfer-return-restart");
             return;
         }
-        if (filter == "inventory-transfer-selections" || filter == "inventory-view-snapshot")
+        if (filter == "inventory-transfer-selections" || filter == "inventory-view-snapshot"
+            || filter == "inventory-transfer-return-selections")
         {
             MWWorld::Testing::checkTransferSelections(
-                loadout.store(), root / "inventory-selections", filter == "inventory-view-snapshot");
+                loadout.store(), root / "inventory-selections", filter == "inventory-view-snapshot",
+                filter == "inventory-transfer-return-selections");
             return;
         }
         if (filter == "inventory-transfer-file-sink")

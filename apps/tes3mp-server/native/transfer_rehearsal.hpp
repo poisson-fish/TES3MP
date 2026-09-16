@@ -205,8 +205,18 @@ namespace MWWorld::Testing
         // return Uncertain, never throw after it may have replaced durable bytes.
         using TestDurableSink = std::function<TestPersistenceResult(const SerializedPair&)>;
         bool commitDurably(
-            PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink);
+            PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink,
+            bool reverse = false);
         bool failedClosed() const noexcept { return mFailedClosed; }
+
+        // Operation roles may reverse; fixture/save owner and script-service roles
+        // stay fixed. Copies of stock contexts borrow only this fixture's services.
+        struct TransferContexts
+        {
+            ContainerStoreRemoveContext mRemoval;
+            ContainerStoreAddContext mAddition;
+        };
+        TransferContexts transferContexts(bool reverse) const;
 
         // Serialized, read-only projection of current owned fixture storage.
         // Validate all bounds/owner/registry/selection bindings before allocating;
@@ -322,7 +332,7 @@ namespace MWWorld::Testing
     };
 
     void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
-        const Compiler::Locals& declarations, SerializedPair& output);
+        const Compiler::Locals& declarations, SerializedPair& output, bool reverse = false);
 
     void checkTransferRehearsal(const ESMStore& content);
     void checkTransferRehearsalAllocations(const ESMStore& content);
@@ -336,10 +346,12 @@ namespace MWWorld::Testing
     void checkTransferRestartScripts(const ESMStore& content);
     void checkTransferRestartInstallation(const ESMStore& content);
     void checkTransferSelections(
-        const ESMStore& content, const std::filesystem::path& scratch, bool snapshotsOnly = false);
+        const ESMStore& content, const std::filesystem::path& scratch, bool snapshotsOnly = false,
+        bool returnTransfers = false);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
-    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart = false);
+    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart = false,
+        bool returnTransfers = false);
     void checkTransferCommit(const ESMStore& content);
 }
 

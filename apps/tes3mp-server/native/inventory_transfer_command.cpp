@@ -34,8 +34,9 @@ namespace MWWorld::Testing
             || counter.mIndex == std::numeric_limits<uint32_t>::max())
             throw std::invalid_argument("Inventory command saved counter exhausted or unsupported");
         const auto& envelope = bindings.mEnvelope;
-        if (id(command.mSourceOwner) != envelope.mSourceOwner
-            || id(command.mDestinationOwner) != envelope.mDestinationOwner
+        const bool reverse = id(command.mSourceOwner) == envelope.mDestinationOwner;
+        if (id(command.mSourceOwner) != (reverse ? envelope.mDestinationOwner : envelope.mSourceOwner)
+            || id(command.mDestinationOwner) != (reverse ? envelope.mSourceOwner : envelope.mDestinationOwner)
             || id(command.mInitiator) != envelope.mInitiator)
             throw std::invalid_argument("Inventory command save owner/initiator mismatch");
 
@@ -46,22 +47,26 @@ namespace MWWorld::Testing
             return current.hasLiveReference() && expected.hasLiveReference() && current == expected
                 && current.getReferenceLifetime() == expected.getReferenceLifetime();
         };
-        if (!matches(command.mSourceOwner, fixture.mSourceOwner.getPtr())
-            || !matches(command.mSourceOwner, fixture.mRemoval.mContainer)
-            || !matches(command.mDestinationOwner, fixture.mDestinationOwner.getPtr())
-            || !matches(command.mDestinationOwner, fixture.mDestinationAdd.mContainer)
+        const auto sourceOwner = reverse ? command.mDestinationOwner : command.mSourceOwner;
+        const auto destinationOwner = reverse ? command.mSourceOwner : command.mDestinationOwner;
+        if (!matches(sourceOwner, fixture.mSourceOwner.getPtr())
+            || !matches(sourceOwner, fixture.mRemoval.mContainer)
+            || !matches(destinationOwner, fixture.mDestinationOwner.getPtr())
+            || !matches(destinationOwner, fixture.mDestinationAdd.mContainer)
             || !matches(command.mInitiator, fixture.mDestinationAdd.mPlayer))
             throw std::invalid_argument("Inventory command current context mismatch");
         const auto item = fixture.mModel.getPtr(id(command.mItem));
-        if (!item.hasLiveReference() || item.getContainerStore() != &fixture.mSource)
+        auto& source = reverse ? fixture.mDestination : fixture.mSource;
+        auto& destination = reverse ? fixture.mSource : fixture.mDestination;
+        if (!item.hasLiveReference() || item.getContainerStore() != &source)
             throw std::invalid_argument("Inventory command item ownership mismatch");
 
         phase.set(Allocations::Phase::Preparation);
+        const auto contexts = fixture.transferContexts(reverse);
         const std::array resolved{ ContainerStoreResolution(fixture.mOther, fixture.mOtherOwner.getPtr()) };
-        auto pair = fixture.mSource.prepareTransfer(
-            item, command.mQuantity, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd, resolved);
-        if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
-                .isComplete())
+        auto pair = source.prepareTransfer(
+            item, command.mQuantity, destination, contexts.mRemoval, contexts.mAddition, resolved);
+        if (!source.validateTransfer(pair, destination, contexts.mRemoval, contexts.mAddition).isComplete())
             throw std::invalid_argument("Inventory command requires complete resolution");
 
         phase.set(Allocations::Phase::Result);
@@ -94,7 +99,8 @@ namespace MWWorld::Testing
                 TransferSaveBytes bytes;
                 encodeTransferSave(saved, bindings, bytes);
                 return sink.write(bytes, faults); // No fallible work after possible replacement.
-            });
+            },
+            reverse);
         if (!installed)
             return false;
         phase.set(Allocations::Phase::Publication);

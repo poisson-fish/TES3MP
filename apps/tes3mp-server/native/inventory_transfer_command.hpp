@@ -65,8 +65,9 @@ namespace MWWorld::Testing
     };
 
     // Test-target-only, synchronous, serialized access. The fixture fixes the
-    // source/destination stores and authorized initiator; commands cannot redirect
-    // its services. Borrowed fixture/content/bindings/sink must outlive the call;
+    // two owner stores and authorized initiator. Commands choose either direction;
+    // save owner/service roles stay fixed and commands cannot redirect services.
+    // Borrowed fixture/content/bindings/sink must outlive the call;
     // their consumers may not mutate or reenter. No production callers or dispatch.
     // Invalid input/preparation/encoding throws; safe file rejection returns false.
     // Uncertainty throws TestDurabilityUncertain and forbids retry of that composition.

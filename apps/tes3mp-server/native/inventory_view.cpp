@@ -43,8 +43,11 @@ namespace MWWorld::Testing
             && intent.mInitiator == command.mInitiator && command.mSourceOwner != command.mDestinationOwner);
         const bool destination = intent.mOwner == command.mDestinationOwner;
         valid(destination || intent.mOwner == command.mSourceOwner);
-        auto& view = mViews.mOwners[destination ? 1 : 0];
-        valid(view.mOwner == intent.mOwner);
+        valid(mViews.mOwners[0].mOwner != mViews.mOwners[1].mOwner);
+        const auto owner = std::find_if(mViews.mOwners.begin(), mViews.mOwners.end(),
+            [&](const auto& view) { return view.mOwner == intent.mOwner; });
+        valid(owner != mViews.mOwners.end());
+        auto& view = *owner;
         if (intent.mKind == InventoryNotificationKind::InventoryUpdated)
         {
             valid(view.mRevision == command.mExpectedRevision && view.mItems.size() <= MaxTransferInventoryItems);
