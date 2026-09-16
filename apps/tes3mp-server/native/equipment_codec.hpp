@@ -27,10 +27,10 @@ namespace MWWorld::Testing
     };
 
     inline constexpr uint32_t EquipmentFormatVersion = 1;
-    // Version 1 stays plain-only. Version 3 adds mandatory NPC base identity,
-    // eight attribute triples and three dynamic triples. Luck-only version 2
-    // is intentionally rejected: it cannot restore the missing actor values.
-    inline constexpr uint32_t NpcEquipmentFormatVersion = 3;
+    // Version 1 stays plain-only. Version 4 adds mandatory ordered initialized
+    // spell IDs to NPC format 3. Formats 2/3 are rejected, with no inferred
+    // initialization or default-value migration. Transfer v4 is independent.
+    inline constexpr uint32_t NpcEquipmentFormatVersion = 4;
     // Accommodate every supported combination of 65 items, 256 animations and
     // 4096-byte strings. These limits include stock fields and lossless fields.
     inline constexpr size_t MaxEquipmentBytes = 80 * 1024 * 1024;

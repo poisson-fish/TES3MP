@@ -1,6 +1,7 @@
 #include "npcstats.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
@@ -8,6 +9,7 @@
 #include <components/esm3/loadfact.hpp>
 #include <components/esm3/loadgmst.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <components/esm3/npcstats.hpp>
 
 #include <components/misc/strings/format.hpp>
@@ -18,6 +20,186 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
+
+namespace
+{
+    bool isEven(double d)
+    {
+        double intPart;
+        std::modf(d / 2.0, &intPart);
+        return 2.0 * intPart == d;
+    }
+
+    float round_ieee_754(float f)
+    {
+        float i = std::floor(f);
+        f -= i;
+        if (f < 0.5)
+            return i;
+        if (f > 0.5)
+            return i + 1.f;
+        if (isEven(i))
+            return i;
+        return i + 1.f;
+    }
+
+    void autoCalculateAttributes(const ESM::NPC* npc, MWMechanics::CreatureStats& creatureStats,
+        const MWWorld::ESMStore& content, std::optional<float> baseMagickaMultiplier)
+    {
+        const auto setAttribute = [&](ESM::RefId id, float base) {
+            auto value = creatureStats.getAttribute(id);
+            value.setBase(base);
+            if (baseMagickaMultiplier)
+                creatureStats.setAttribute(id, value, *baseMagickaMultiplier);
+            else
+                creatureStats.setAttribute(id, value);
+        };
+        // race bonus
+        const ESM::Race* race = content.get<ESM::Race>().find(npc->mRace);
+
+        bool male = (npc->mFlags & ESM::NPC::Female) == 0;
+
+        const auto& attributes = content.get<ESM::Attribute>();
+        int level = creatureStats.getLevel();
+        for (const ESM::Attribute& attribute : attributes)
+            setAttribute(
+                attribute.mId, static_cast<float>(race->mData.getAttribute(attribute.mId, male)));
+
+        // class bonus
+        const ESM::Class* npcClass = content.get<ESM::Class>().find(npc->mClass);
+
+        for (int attribute : npcClass->mData.mAttribute)
+        {
+            if (attribute >= 0 && attribute < ESM::Attribute::Length)
+            {
+                auto id = ESM::Attribute::indexToRefId(attribute);
+                setAttribute(id, creatureStats.getAttribute(id).getBase() + 10);
+            }
+        }
+
+        // skill bonus
+        for (const ESM::Attribute& attribute : attributes)
+        {
+            float modifierSum = 0;
+            int attributeIndex = ESM::Attribute::refIdToIndex(attribute.mId);
+
+            for (const ESM::Skill& skill : content.get<ESM::Skill>())
+            {
+                if (skill.mData.mAttribute != attributeIndex)
+                    continue;
+
+                // is this a minor or major skill?
+                float add = 0.2f;
+                int index = ESM::Skill::refIdToIndex(skill.mId);
+                for (const auto& skills : npcClass->mData.mSkills)
+                {
+                    if (skills[0] == index)
+                        add = 0.5;
+                    if (skills[1] == index)
+                        add = 1.0;
+                }
+                modifierSum += add;
+            }
+            setAttribute(attribute.mId,
+                std::min(
+                    round_ieee_754(creatureStats.getAttribute(attribute.mId).getBase() + (level - 1) * modifierSum),
+                    100.f));
+        }
+
+        // initial health
+        float strength = creatureStats.getAttribute(ESM::Attribute::Strength).getBase();
+        float endurance = creatureStats.getAttribute(ESM::Attribute::Endurance).getBase();
+
+        int multiplier = 3;
+
+        if (npcClass->mData.mSpecialization == ESM::Class::Combat)
+            multiplier += 2;
+        else if (npcClass->mData.mSpecialization == ESM::Class::Stealth)
+            multiplier += 1;
+
+        if (std::find(npcClass->mData.mAttribute.begin(), npcClass->mData.mAttribute.end(),
+                ESM::Attribute::refIdToIndex(ESM::Attribute::Endurance))
+            != npcClass->mData.mAttribute.end())
+            multiplier += 1;
+
+        creatureStats.setHealth(floor(0.5f * (strength + endurance)) + multiplier * (creatureStats.getLevel() - 1));
+    }
+
+    /**
+     * @brief autoCalculateSkills
+     *
+     * Skills are calculated with following formulae ( http://www.uesp.net/wiki/Morrowind:NPCs#Skills ):
+     *
+     * Skills: (Level - 1) × (Majority Multiplier + Specialization Multiplier)
+     *
+     *         The Majority Multiplier is 1.0 for a Major or Minor Skill, or 0.1 for a Miscellaneous Skill.
+     *
+     *         The Specialization Multiplier is 0.5 for a Skill in the same Specialization as the class,
+     *         zero for other Skills.
+     *
+     * and by adding class, race, specialization bonus.
+     */
+    void autoCalculateSkills(
+        const ESM::NPC* npc, MWMechanics::NpcStats& npcStats, const MWWorld::ESMStore& content)
+    {
+        const ESM::Class* npcClass = content.get<ESM::Class>().find(npc->mClass);
+
+        unsigned int level = npcStats.getLevel();
+
+        const ESM::Race* race = content.get<ESM::Race>().find(npc->mRace);
+
+        for (int i = 0; i < 2; ++i)
+        {
+            int bonus = (i == 0) ? 10 : 25;
+
+            for (const auto& skills : npcClass->mData.mSkills)
+            {
+                ESM::RefId id = ESM::Skill::indexToRefId(skills[i]);
+                if (!id.empty())
+                {
+                    npcStats.getSkill(id).setBase(npcStats.getSkill(id).getBase() + bonus);
+                }
+            }
+        }
+
+        for (const ESM::Skill& skill : content.get<ESM::Skill>())
+        {
+            float majorMultiplier = 0.1f;
+            float specMultiplier = 0.0f;
+
+            int raceBonus = 0;
+            int specBonus = 0;
+
+            int index = ESM::Skill::refIdToIndex(skill.mId);
+            auto bonusIt = std::find_if(race->mData.mBonus.begin(), race->mData.mBonus.end(),
+                [&](const auto& bonus) { return bonus.mSkill == index; });
+            if (bonusIt != race->mData.mBonus.end())
+                raceBonus = bonusIt->mBonus;
+
+            for (const auto& skills : npcClass->mData.mSkills)
+            {
+                // is this a minor or major skill?
+                if (std::find(skills.begin(), skills.end(), index) != skills.end())
+                {
+                    majorMultiplier = 1.0f;
+                    break;
+                }
+            }
+
+            // is this skill in the same Specialization as the class?
+            if (skill.mData.mSpecialization == npcClass->mData.mSpecialization)
+            {
+                specMultiplier = 0.5f;
+                specBonus = 5;
+            }
+
+            npcStats.getSkill(skill.mId).setBase(
+                std::min(round_ieee_754(npcStats.getSkill(skill.mId).getBase() + 5 + raceBonus + specBonus
+                             + (int(level) - 1) * (majorMultiplier + specMultiplier)),
+                    100.f)); // Must gracefully handle level 0
+        }
+    }
+}
 
 MWMechanics::NpcStats::NpcStats()
     : NpcStats(*MWBase::Environment::get().getESMStore())
@@ -63,6 +245,20 @@ void MWMechanics::NpcStats::initializeExplicitStats(const ESM::NPC& npc, std::op
     setLevel(npc.mNpdt.mLevel);
     setBaseDisposition(npc.mNpdt.mDisposition);
     setReputation(npc.mNpdt.mReputation);
+}
+
+void MWMechanics::NpcStats::initializeAutoStats(const ESM::NPC& npc, const MWWorld::ESMStore& content,
+    std::optional<float> baseMagickaMultiplier)
+{
+    if (npc.mNpdtType != ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+        throw std::invalid_argument("Autocalculated NPC stats require auto NPDT");
+    for (int i = 0; i < 3; ++i)
+        setDynamic(i, 10);
+    setLevel(npc.mNpdt.mLevel);
+    setBaseDisposition(npc.mNpdt.mDisposition);
+    setReputation(npc.mNpdt.mReputation);
+    autoCalculateAttributes(&npc, *this, content, baseMagickaMultiplier);
+    autoCalculateSkills(&npc, *this, content);
 }
 
 int MWMechanics::NpcStats::getBaseDisposition() const

@@ -19,6 +19,10 @@ namespace MWWorld
     struct EquipmentNpcStatsValues
     {
         ESM::RefId mBase;
+        // Initialized spell IDs in stock insertion order; unused tail is empty.
+        // Fixed storage keeps untrusted decode preflight allocation-free.
+        static constexpr size_t MaxSpells = 256;
+        std::array<ESM::RefId, MaxSpells> mSpells{};
         std::array<std::array<float, 3>, ESM::Attribute::Length> mAttributes{};
         std::array<std::array<float, 3>, 3> mDynamic{};
         void validate(const ESMStore& content) const;
@@ -26,7 +30,7 @@ namespace MWWorld
     };
 
     // One explicit actor's stock stats. This bounded context initializes NPDT
-    // stats only; it does not install NPC custom data, AI, spells or inventory.
+    // stats and initial known spells; it does not install custom data, AI or inventory.
     // No public mutable stats access: the equipment writer replaces a prepared
     // context only after durability. Content and actor must outlive validation.
     class EquipmentNpcStats
@@ -37,7 +41,9 @@ namespace MWWorld
         const ESM::RefNum mIdentity;
         const ESMStore& mContent;
         const ESM::NPC* mBase;
+        const int mNpdtType;
         float mMagickaMultiplier;
+        std::array<ESM::RefId, EquipmentNpcStatsValues::MaxSpells> mInitialSpells{};
         MWMechanics::NpcStats mStats;
         void restore(const EquipmentNpcStatsValues& values, const InventoryStore& inventory);
 

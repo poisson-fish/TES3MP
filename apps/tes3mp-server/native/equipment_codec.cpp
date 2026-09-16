@@ -186,6 +186,13 @@ namespace MWWorld::Testing
                 };
                 readTriples(ESM::fourCC("ATTR"), stats.mAttributes);
                 readTriples(ESM::fourCC("DYNA"), stats.mDynamic);
+                const auto count = equipment.field(ESM::fourCC("SCNT"), 4).number();
+                valid(count <= stats.mSpells.size());
+                for (size_t i = 0; i < count; ++i)
+                {
+                    stats.mSpells[i] = reference(equipment.sub(ESM::fourCC("KSPL")), bindings);
+                    valid(!stats.mSpells[i].empty());
+                }
                 stats.validate(bindings.mContent);
             }
             valid(equipment.empty() && result.mCount <= PlainEquipmentValues::MaxItems && records == result.mCount + 1
@@ -358,7 +365,11 @@ namespace MWWorld::Testing
                      object.mRef.mKey, object.mRef.mTrap })
                 knownId(id, bindings);
         if (input.mNpcStats)
+        {
             knownId(input.mNpcStats->mBase, bindings);
+            for (const auto id : input.mNpcStats->mSpells)
+                knownId(id, bindings);
+        }
         ByteBuffer buffer;
         std::ostream stream(&buffer);
         stream.exceptions(std::ios::badbit | std::ios::failbit);
@@ -382,6 +393,11 @@ namespace MWWorld::Testing
             writer.writeHNRefId("NPID", input.mNpcStats->mBase);
             writer.writeHNT("ATTR", input.mNpcStats->mAttributes);
             writer.writeHNT("DYNA", input.mNpcStats->mDynamic);
+            const auto& spells = input.mNpcStats->mSpells;
+            const auto end = std::find(spells.begin(), spells.end(), ESM::RefId{});
+            writer.writeHNT("SCNT", static_cast<uint32_t>(end - spells.begin()));
+            for (auto it = spells.begin(); it != end; ++it)
+                writer.writeHNRefId("KSPL", *it);
         }
         writer.endRecord("EQUP");
         for (const auto& object : input.mObjects)

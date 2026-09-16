@@ -42,6 +42,7 @@ namespace MWMechanics
     // Before the actor's Enchant skill adjustment. Does not execute any effects.
     float getEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& store);
     int calcSpellCost(const ESM::Spell& spell);
+    int calcSpellCost(const ESM::Spell& spell, const MWWorld::ESMStore& store);
 
     int getEffectiveEnchantmentCastCost(float castCost, const MWWorld::Ptr& actor);
     int getEffectiveEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::Ptr& actor);

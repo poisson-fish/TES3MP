@@ -21,6 +21,8 @@ namespace MWMechanics
 
     std::vector<ESM::RefId> autoCalcNpcSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race);
+    std::vector<ESM::RefId> autoCalcNpcSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
+        const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race, const MWWorld::ESMStore& store);
 
     std::vector<ESM::RefId> autoCalcPlayerSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race);
@@ -29,12 +31,18 @@ namespace MWMechanics
 
     bool attrSkillCheck(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes);
+    bool attrSkillCheck(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
+        const std::map<ESM::RefId, AttributeValue>& actorAttributes, const MWWorld::ESMStore& store);
 
     void calcWeakestSchool(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
         ESM::RefId& effectiveSchool, float& skillTerm);
+    void calcWeakestSchool(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
+        ESM::RefId& effectiveSchool, float& skillTerm, const MWWorld::ESMStore& store);
 
     float calcAutoCastChance(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes, ESM::RefId effectiveSchool);
+    float calcAutoCastChance(const ESM::Spell* spell, const std::map<ESM::RefId, SkillValue>& actorSkills,
+        const std::map<ESM::RefId, AttributeValue>& actorAttributes, ESM::RefId effectiveSchool, const MWWorld::ESMStore& store);
 
 }
 

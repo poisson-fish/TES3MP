@@ -60,6 +60,10 @@ namespace MWMechanics
         // inventory services remain with the NPC caller. The optional multiplier
         // supplies the actor's magicka policy without consulting global player state.
         void initializeExplicitStats(const ESM::NPC& npc, std::optional<float> baseMagickaMultiplier = {});
+        // Fresh stats only. Known/generated spells and final magicka refresh are
+        // initialized by the caller, as in stock NPC custom-data startup.
+        void initializeAutoStats(const ESM::NPC& npc, const MWWorld::ESMStore& content,
+            std::optional<float> baseMagickaMultiplier = {});
 
         int getBaseDisposition() const;
         void setBaseDisposition(int disposition);

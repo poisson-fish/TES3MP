@@ -93,10 +93,18 @@ namespace MWMechanics
 
     int calcSpellCost(const ESM::Spell& spell)
     {
+        // Fixed-cost records never needed an Environment/content service.
+        if (!(spell.mData.mFlags & ESM::Spell::F_Autocalc))
+            return spell.mData.mCost;
+        return calcSpellCost(spell, *MWBase::Environment::get().getESMStore());
+    }
+
+    int calcSpellCost(const ESM::Spell& spell, const MWWorld::ESMStore& store)
+    {
         if (!(spell.mData.mFlags & ESM::Spell::F_Autocalc))
             return spell.mData.mCost;
 
-        float cost = getTotalCost(spell.mEffects);
+        float cost = getTotalCost(spell.mEffects, store);
 
         return static_cast<int>(std::round(cost));
     }

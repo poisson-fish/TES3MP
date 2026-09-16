@@ -12,8 +12,11 @@
 
 #include <components/compiler/locals.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/statstate.hpp>
+
+#include "../mwmechanics/autocalcspell.hpp"
 
 namespace MWWorld
 {
@@ -34,15 +37,52 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment reference registry binding changed");
         }
 
+        void npcContent(const ESM::NPC& npc, const ESMStore& content)
+        {
+            if (npc.mNpdtType == ESM::NPC::NPC_DEFAULT)
+            {
+                if (npc.mNpdt.mHealth == 0)
+                    throw std::invalid_argument("Equipment NPC death initialization requires world time");
+            }
+            else if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+            {
+                const auto* race = content.get<ESM::Race>().search(npc.mRace);
+                if (!race || !content.get<ESM::Class>().search(npc.mClass) || npc.mNpdt.mLevel < 1)
+                    throw std::invalid_argument("Equipment auto NPC requires race/class and living level");
+                // Bound the eligible context before any stock health setter can
+                // enter death/time services. The shared formulas remain stock.
+                for (int i = 0; i < ESM::Attribute::Length; ++i)
+                {
+                    const auto value = race->mData.getAttribute(ESM::Attribute::indexToRefId(i), npc.isMale());
+                    if (value < 1 || value > 100)
+                        throw std::invalid_argument("Equipment auto NPC requires positive TES3 race attributes");
+                }
+            }
+            else
+                throw std::invalid_argument("Unsupported equipment NPDT type");
+            if (!npc.mScript.empty() || !npc.mFaction.empty())
+                throw std::invalid_argument("Equipment NPC scripts/faction initialization is unsupported");
+            if (!npc.mRace.empty() && !content.get<ESM::Race>().search(npc.mRace))
+                throw std::invalid_argument("Equipment NPC race is unavailable");
+        }
+
+        const ESM::Spell& equipmentSpell(ESM::RefId id, const ESMStore& content)
+        {
+            const auto* spell = content.get<ESM::Spell>().search(id);
+            if (!spell || (spell->mData.mType != ESM::Spell::ST_Spell && spell->mData.mType != ESM::Spell::ST_Power))
+                throw std::invalid_argument("Equipment NPC needs known spell/power content; passive effects require activation services");
+            return *spell;
+        }
+
         const ESM::NPC& equipmentNpc(const Ptr& actor, const ESMStore& content)
         {
             if (!actor.hasLiveReference() || !actor.getCellRef().getRefNum().isSet()
                 || actor.getType() != ESM::NPC::sRecordId || actor.getRefData().getCustomData())
-                throw std::invalid_argument("Equipment NPC requires a live explicit owner without another stat writer");
+                throw std::invalid_argument("Equipment NPC requires a live owner without another stat writer");
             const auto* npc = actor.get<ESM::NPC>()->mBase;
-            if (content.get<ESM::NPC>().search(actor.getCellRef().getRefId()) != npc
-                || npc->mNpdtType != ESM::NPC::NPC_DEFAULT || npc->mNpdt.mHealth == 0)
-                throw std::invalid_argument("Equipment NPC requires living explicit NPDT content");
+            if (content.get<ESM::NPC>().search(actor.getCellRef().getRefId()) != npc)
+                throw std::invalid_argument("Equipment NPC content binding changed");
+            npcContent(*npc, content);
             if (content.get<ESM::Attribute>().getSize() != ESM::Attribute::Length
                 || content.get<ESM::Skill>().getSize() != ESM::Skill::Length)
                 throw std::invalid_argument("Equipment NPC requires complete TES3 stat definitions");
@@ -197,8 +237,22 @@ namespace MWWorld
     void EquipmentNpcStatsValues::validate(const ESMStore& content) const
     {
         const auto* npc = content.get<ESM::NPC>().search(mBase);
-        if (!npc || npc->mNpdtType != ESM::NPC::NPC_DEFAULT || npc->mNpdt.mHealth == 0)
-            throw std::invalid_argument("Equipment stats require living explicit NPC content");
+        if (!npc)
+            throw std::invalid_argument("Equipment stats require known NPC content");
+        npcContent(*npc, content);
+        bool ended = false;
+        for (size_t i = 0; i < mSpells.size(); ++i)
+        {
+            if (mSpells[i].empty())
+            {
+                ended = true;
+                continue;
+            }
+            recordId(mSpells[i], true);
+            if (ended || std::find(mSpells.begin(), mSpells.begin() + i, mSpells[i]) != mSpells.begin() + i)
+                throw std::invalid_argument("Invalid equipment NPC initialized spell list");
+            equipmentSpell(mSpells[i], content);
+        }
         for (const auto& value : mAttributes)
             if (!std::isfinite(value[0]) || value[0] < 0 || value[0] > 1000
                 || !std::isfinite(value[1]) || std::abs(value[1]) > 1000
@@ -219,25 +273,63 @@ namespace MWWorld
         , mIdentity(actor.hasLiveReference() ? actor.getCellRef().getRefNum() : ESM::RefNum{})
         , mContent(content)
         , mBase(&equipmentNpc(actor, content))
+        , mNpdtType(mBase->mNpdtType)
         , mMagickaMultiplier(npcMagickaMultiplier(content))
         , mStats(content)
     {
-        mStats.initializeExplicitStats(*mBase, mMagickaMultiplier);
+        if (mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+            mStats.initializeAutoStats(*mBase, content, mMagickaMultiplier);
+        else
+            mStats.initializeExplicitStats(*mBase, mMagickaMultiplier);
+        // Stock startup order: base spells, generated instance spells, race powers.
+        // Use owned instance membership, never the shared base-record SpellList.
+        const auto add = [&](const std::vector<ESM::RefId>& ids) {
+            for (const auto id : ids)
+            {
+                const auto* spell = &equipmentSpell(id, content);
+                if (!mStats.getSpells().hasSpell(spell))
+                {
+                    if (mStats.getSpells().count() == EquipmentNpcStatsValues::MaxSpells)
+                        throw std::invalid_argument("Equipment NPC initialized spell limit exceeded");
+                    mStats.getSpells().add(spell, false);
+                }
+            }
+        };
+        add(mBase->mSpells.mList);
+        const auto* race = content.get<ESM::Race>().search(mBase->mRace);
+        if (mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+            add(MWMechanics::autoCalcNpcSpells(mStats.getSkills(), mStats.getAttributes(), race, content));
+        if (race)
+            add(race->mPowers.mList);
+        if (mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+            mStats.recalculateMagicka(mMagickaMultiplier);
+        mInitialSpells = values().mSpells;
     }
 
     void EquipmentNpcStats::validate(const Ptr& actor, const ESMStore& content) const
     {
         if (&content != &mContent || !mActor.hasLiveReference() || !sameReference(actor, mActor)
             || &equipmentNpc(actor, content) != mBase || actor.getCellRef().getRefNum() != mIdentity
-            || npcMagickaMultiplier(content) != mMagickaMultiplier)
+            || mBase->mNpdtType != mNpdtType || npcMagickaMultiplier(content) != mMagickaMultiplier)
             throw std::invalid_argument("Equipment NPC stat actor/content binding changed");
-        values().validate(content);
+        const auto saved = values();
+        saved.validate(content);
+        if (saved.mSpells != mInitialSpells || !mStats.getSpells().getSelectedSpell().empty())
+            throw std::invalid_argument("Equipment NPC initialized spell membership changed");
+        for (const auto* spell : mStats.getSpells())
+            if (&equipmentSpell(spell->mId, content) != spell)
+                throw std::invalid_argument("Equipment NPC spell content binding changed");
     }
 
     EquipmentNpcStatsValues EquipmentNpcStats::values() const
     {
         EquipmentNpcStatsValues result;
         result.mBase = mBase->mId;
+        const auto& spells = mStats.getSpells();
+        if (spells.count() > result.mSpells.size())
+            throw std::invalid_argument("Equipment NPC spell limit exceeded");
+        for (size_t i = 0; i < spells.count(); ++i)
+            result.mSpells[i] = spells.at(i)->mId;
         for (size_t i = 0; i < result.mAttributes.size(); ++i)
         {
             ESM::StatState<float> value;
@@ -256,8 +348,8 @@ namespace MWWorld
     void EquipmentNpcStats::restore(const EquipmentNpcStatsValues& values, const InventoryStore& inventory)
     {
         values.validate(mContent);
-        if (values.mBase != mBase->mId)
-            throw std::invalid_argument("Equipment NPC save base differs from bound actor");
+        if (values.mBase != mBase->mId || values.mSpells != mInitialSpells)
+            throw std::invalid_argument("Equipment NPC save base/initialized spells differ from bound actor");
         for (size_t i = 0; i < values.mAttributes.size(); ++i)
         {
             const auto id = ESM::Attribute::indexToRefId(static_cast<int>(i));

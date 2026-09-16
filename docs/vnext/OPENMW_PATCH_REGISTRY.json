@@ -6,11 +6,13 @@
       "id": "M2-001",
       "slice": "explicit actor constant-effect shirt mechanics",
       "owner": "OpenMW server runtime",
-      "purpose": "Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Autocalculated NPCs, death, full NPC services and general effect execution remain outside this interface.",
+      "purpose": "Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart; NPC equipment format 4 requires those IDs and rejects incomplete formats 2/3. Passive abilities, death, full NPC services and general effect execution remain outside this interface.",
       "paths": [
         "apps/openmw/mwclass/npc.cpp",
         "apps/openmw/mwmechanics/npcstats.cpp",
         "apps/openmw/mwmechanics/npcstats.hpp",
+        "apps/openmw/mwmechanics/autocalcspell.cpp",
+        "apps/openmw/mwmechanics/autocalcspell.hpp",
         "apps/openmw/mwmechanics/activespells.cpp",
         "apps/openmw/mwmechanics/activespells.hpp",
         "apps/openmw/mwmechanics/creaturestats.cpp",
@@ -19,6 +21,7 @@
         "apps/openmw/mwmechanics/spelleffects.hpp"
       ],
       "tests": [
+        "tes3mp_native_loadout_tests inventory-equipment-npc-initialization",
         "tes3mp_native_loadout_tests inventory-equipment-enchanted",
         "tes3mp_native_loadout_tests inventory-equipment-enchanted-guards",
         "tes3mp_native_loadout_tests inventory-equipment-enchanted-durability",
@@ -31,7 +34,7 @@
       "id": "M1-003",
       "slice": "native enchantment calculation probe",
       "owner": "OpenMW server runtime",
-      "purpose": "Share effect and enchantment cost/charge calculations with explicit ESMStore inputs; use each loadout's GMSTs and preserve stock Environment wrappers over the same arithmetic.",
+      "purpose": "Share effect, spell and enchantment cost/charge calculations with explicit ESMStore inputs; use each loadout's GMSTs and preserve stock Environment wrappers over the same arithmetic.",
       "paths": ["apps/openmw/mwmechanics/spellutil.cpp", "apps/openmw/mwmechanics/spellutil.hpp"],
       "tests": ["tes3mp_native_loadout_tests enchantment-cost", "tes3mp_native_loadout_tests enchantment-rejection"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
