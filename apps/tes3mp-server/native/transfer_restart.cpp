@@ -2,7 +2,11 @@
 #include "transfer_save_codec.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+
+#include <apps/openmw/mwworld/esmstore.hpp>
+#include <components/compiler/locals.hpp>
 
 namespace MWWorld::Testing
 {
@@ -68,9 +72,8 @@ namespace MWWorld::Testing
         return mStorage->getItem(id);
     }
 
-    void DisposableTransferRehearsal::prepareRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
-        const SaveEnvelope& envelope, const RestartBindings& fresh,
-        std::unique_ptr<const RestartRegistry>& output) const
+    void DisposableTransferRehearsal::validateRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
+        const SaveEnvelope& envelope, const RestartBindings& fresh) const
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
         if (mFailedClosed)
@@ -161,7 +164,18 @@ namespace MWWorld::Testing
             }
         }
 
-        phase.set(Allocations::Phase::Preparation);
+    }
+
+    void DisposableTransferRehearsal::prepareRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
+        const SaveEnvelope& envelope, const RestartBindings& fresh,
+        std::unique_ptr<const RestartRegistry>& output) const
+    {
+        validateRestartRegistry(decoded, restored, envelope, fresh);
+        Allocations::InPhase phase(Allocations::Phase::Preparation);
+        const auto& metadata = decoded.mRestart;
+        const std::array inventories{ &restored.mSource, &restored.mDestination };
+        const auto& owners = fresh.mOwners;
+        const auto& stores = fresh.mStores;
         auto candidate = std::make_unique<RestartRegistry>();
         candidate->mFresh = fresh;
         auto& bindings = candidate->mBindings;
@@ -199,6 +213,195 @@ namespace MWWorld::Testing
             }
         phase.set(Allocations::Phase::Publication);
         std::unique_ptr<const RestartRegistry> ready = std::move(candidate);
+        static_assert(noexcept(output.swap(ready)));
+        output.swap(ready);
+    }
+    DisposableTransferRehearsal::RestartScriptBindings DisposableTransferRehearsal::restartScriptBindings() const
+    {
+        if (mSourceAdd.mLocalScripts != &mSourceScripts || mOtherAdd.mLocalScripts != &mSourceScripts
+            || (mDestinationAdd.mLocalScripts != &mSourceScripts
+                && mDestinationAdd.mLocalScripts != &mDestinationScripts))
+            throw std::invalid_argument("Restart script service association changed");
+        RestartScriptBindings result;
+        result.mRegistry = restartBindings();
+        result.mServices = { &mSourceScripts, mDestinationAdd.mLocalScripts, &mSourceScripts };
+        for (size_t i = 0; i < result.mServices.size(); ++i)
+        {
+            const auto& service = *result.mServices[i];
+            if (service.mScripts.size() > MaxTransferScriptEntries)
+                throw std::invalid_argument("Restart script service bound exceeded");
+            result.mLifetimes[i] = service.mRestartLifetime.bind();
+            result.mOriginal[i] = service.snapshot();
+        }
+        return result;
+    }
+
+    void DisposableTransferRehearsal::validateRestartScriptLifetimes(const RestartScriptBindings& fresh)
+    {
+        for (const auto& owner : fresh.mRegistry.mOwners)
+            if (!owner.hasLiveReference())
+                throw std::invalid_argument("Restart script owner lifetime changed");
+        for (size_t i = 0; i < fresh.mRegistry.mStores.size(); ++i)
+        {
+            const auto& lifetime = fresh.mRegistry.mLifetimes[i];
+            const auto* store = fresh.mRegistry.mStores[i];
+            if (lifetime.expired() || !store || store->mResolutionLifetime != lifetime.lock()
+                || store->mStorageIdentity != fresh.mRegistry.mStorage[i])
+                throw std::invalid_argument("Restart script store lifetime/storage changed");
+        }
+        for (size_t i = 0; i < fresh.mServices.size(); ++i)
+        {
+            const auto* service = fresh.mServices[i];
+            if (fresh.mLifetimes[i].expired() || !service
+                || !service->mRestartLifetime.matches(fresh.mLifetimes[i].lock()))
+                throw std::invalid_argument("Restart script service lifetime changed");
+        }
+    }
+
+    const LocalScripts::PreparedStorage& DisposableTransferRehearsal::RestartScripts::getSourceStorage() const
+    {
+        validateRestartScriptLifetimes(mFresh);
+        for (const auto& item : mItems)
+            if (!item.hasLiveReference())
+                throw std::invalid_argument("Restart script item lifetime changed");
+        return *mStorage[0];
+    }
+
+    const LocalScripts::PreparedStorage& DisposableTransferRehearsal::RestartScripts::getDestinationStorage() const
+    {
+        const auto& source = getSourceStorage();
+        return mShared ? source : *mStorage[1];
+    }
+
+    void DisposableTransferRehearsal::prepareRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
+        const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
+        const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const
+    {
+        Allocations::InPhase phase(Allocations::Phase::Validation);
+        // Reuse the complete registry input checks without constructing another
+        // registry. No service address is followed before its exact role validates.
+        validateRestartRegistry(decoded, restored, envelope, fresh.mRegistry);
+        validateRestore(decoded, content);
+        const auto valid = [](bool condition) {
+            if (!condition)
+                throw std::invalid_argument("Invalid detached restart script binding or metadata");
+        };
+        const auto& scripts = decoded.mScripts;
+        valid(restored.mScripts == scripts);
+        const std::array<const LocalScripts*, 3> services{
+            &mSourceScripts, scripts.mShared ? &mSourceScripts : &mDestinationScripts, &mSourceScripts };
+        valid(fresh.mServices == services && mSourceAdd.mLocalScripts == services[0]
+            && mDestinationAdd.mLocalScripts == services[1] && mOtherAdd.mLocalScripts == services[2]);
+        validateRestartScriptLifetimes(fresh);
+        for (size_t role = 0; role < services.size(); ++role)
+        {
+            const auto& service = *services[role];
+            const auto& original = fresh.mOriginal[role];
+            valid(service.usesStore(mSourceAdd.mStore) && original.mEntries.size() <= MaxTransferScriptEntries
+                && original.mEntries.size() == service.mScripts.size() && original.mCursor <= original.mEntries.size());
+            size_t i = 0;
+            size_t cursor = service.mScripts.size();
+            for (auto it = service.mScripts.begin(); it != service.mScripts.end(); ++it, ++i)
+            {
+                const auto item = it->getItem();
+                valid(item.hasLiveReference());
+                valid(original.mEntries[i] == service.prepareRemove(&item.getCellRef()));
+                if (it == service.mIter)
+                    cursor = i;
+            }
+            valid(cursor == original.mCursor);
+        }
+
+        const auto& bindings = registry.mBindings;
+        valid(registry.mStorage && bindings.mRevision == decoded.mRestart.mRevision
+            && bindings.mLastGenerated == decoded.mRestart.mLastGenerated
+            && registry.mStorage->mBindings == bindings && registry.mStorage->mResult == &bindings);
+        const auto& rf = registry.mFresh;
+        const auto& supplied = fresh.mRegistry;
+        valid(rf.mStores == supplied.mStores && rf.mStorage == supplied.mStorage);
+        // Compare lifetime identities, not only pointers, including empty stores.
+        for (size_t i = 0; i < rf.mOwners.size(); ++i)
+            valid(rf.mOwners[i].getReferenceLifetime() == supplied.mOwners[i].getReferenceLifetime()
+                && !rf.mLifetimes[i].expired() && rf.mLifetimes[i].lock() == supplied.mLifetimes[i].lock());
+        const std::array inventories{ &restored.mSource, &restored.mDestination };
+        const std::array saved{ &decoded.mSource, &decoded.mDestination };
+        const auto count = 3 + supplied.mOther.size() + restored.mSource.mNodes.size() + restored.mDestination.mNodes.size();
+        valid(bindings.mEntries.size() == count && registry.mStorage->mIndex.size() == count);
+        const auto exact = [&](ESM::RefNum id, const ConstPtr& expected, const ContainerStore* container) {
+            const auto item = registry.getItem(id);
+            const auto found = bindings.mEntries.find(id);
+            valid(item.hasLiveReference() && item.mRef == expected.mRef && item.mCell == expected.mCell
+                && item.mContainerStore == container && item.getReferenceLifetime() == expected.getReferenceLifetime()
+                && found != bindings.mEntries.end() && found->second.references(item.mRef)
+                && found->second.getCell() == item.mCell && found->second.getContainer() == container);
+        };
+        for (const auto& owner : supplied.mOwners)
+            exact(owner.getCellRef().getRefNum(), owner, owner.mContainerStore);
+        const auto itemState = [&](const ConstPtr& item, ESM::RefId baseId, bool configured) {
+            const auto* node = item.get<ESM::Miscellaneous>();
+            valid(node && node->mBase == &suppliedBase(baseId, content) && node->mRef.getRefId() == baseId);
+            const auto& locals = node->mData.getLocals();
+            valid(locals.getScriptId() == (configured ? node->mBase->mScript : ESM::RefId())
+                && (!configured || !locals.getScriptId().empty()));
+            valid(locals.mShorts.size() == (configured ? content.mDeclarations.get('s').size() : 0)
+                && locals.mLongs.size() == (configured ? content.mDeclarations.get('l').size() : 0)
+                && locals.mFloats.size() == (configured ? content.mDeclarations.get('f').size() : 0));
+            for (const auto value : locals.mShorts)
+                valid(value >= -32768 && value <= 32767);
+            for (const auto value : locals.mFloats)
+                valid(std::isfinite(value));
+        };
+        for (size_t side = 0; side < inventories.size(); ++side)
+            for (size_t i = 0; i < inventories[side]->mViews.size(); ++i)
+            {
+                const auto& item = inventories[side]->mViews[i];
+                exact(inventories[side]->mProposedIdentities[i], item, supplied.mStores[side]);
+                itemState(item, saved[side]->mObjects[i].mRef.mRefID, saved[side]->mObjects[i].mHasLocals != 0);
+            }
+        valid(scripts.mOther.size() == supplied.mOther.size());
+        for (const auto& [id, item] : supplied.mOther)
+        {
+            exact(id, item, supplied.mStores[2]);
+            const auto found = std::find_if(scripts.mOther.begin(), scripts.mOther.end(),
+                [&](const auto& value) { return value.mIdentity == id; });
+            valid(found != scripts.mOther.end());
+            itemState(item, found->mBase, found->mConfigured);
+        }
+
+        phase.set(Allocations::Phase::Preparation);
+        auto candidate = std::make_unique<RestartScripts>();
+        candidate->mFresh = fresh;
+        candidate->mRestart = decoded.mRestart;
+        candidate->mShared = scripts.mShared;
+        candidate->mItems.reserve(count - 3);
+        for (const auto* inventory : inventories)
+            for (const auto& item : inventory->mViews)
+                candidate->mItems.push_back(item);
+        for (const auto& [id, item] : supplied.mOther)
+            candidate->mItems.push_back(item);
+        for (size_t side = 0; side < (scripts.mShared ? 1u : 2u); ++side)
+        {
+            const auto* service = services[side];
+            const auto& savedService = scripts.mServices[side];
+            LocalScripts::PreparedList list;
+            list.mResult.mEntries.reserve(savedService.mEntries.size());
+            std::vector<Ptr> items;
+            items.reserve(savedService.mEntries.size());
+            for (const auto& entry : savedService.mEntries)
+            {
+                // Validated stock Ptr copies preserve witnesses; no lazy capture,
+                // locals initialization, live registration or script call occurs.
+                const auto item = registry.mStorage->mIndex.at(entry.mIdentity);
+                // Stock relocation creates immutable registration tokens through
+                // prepareListAddition; prepareStorage owns the normal list nodes.
+                service->prepareListAddition(list, { entry.mScript, nullptr }, &item.getCellRef(), item.mContainerStore);
+                items.push_back(item);
+            }
+            list.mResult.mCursor = savedService.mCursor;
+            candidate->mStorage[side] = service->prepareStorage(list.mResult, list.mResult, {}, items);
+        }
+        phase.set(Allocations::Phase::Publication);
+        std::unique_ptr<const RestartScripts> ready = std::move(candidate);
         static_assert(noexcept(output.swap(ready)));
         output.swap(ready);
     }

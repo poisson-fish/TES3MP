@@ -61,6 +61,9 @@ namespace MWWorld
         Scripts mScripts;
         Scripts::iterator mIter;
         const MWWorld::ESMStore& mStore;
+        // Opt-in restart binding witness. Copy/move starts a fresh identity;
+        // weak consumers cannot keep this service alive after destruction.
+        mutable PreparedNodeIdentity mRestartLifetime;
 
         Scripts::const_iterator find(const CellRef* ref) const;
         void erase(Scripts::const_iterator iter);

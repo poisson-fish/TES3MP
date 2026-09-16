@@ -263,8 +263,9 @@ MWWorld::LocalScripts::PreparedList MWWorld::LocalScripts::prepareList(const Rem
 void MWWorld::LocalScripts::prepareListAddition(
     PreparedList& prepared, const Registration& addition, const CellRef* ref, ContainerStore* container) const
 {
-    // Only a fresh detached destination node may enter this preparation path.
-    // Stock duplicate replacement remains in add(); it is never an installation here.
+    // The caller validates the detached node or explicit context lifetime. Only
+    // references absent from the original list may enter this owned preparation.
+    // Stock duplicate replacement remains in add(); this never installs a list.
     if (!ref || std::ranges::any_of(prepared.mOriginal.mEntries, [&](const Removal& entry) {
             return entry.references(ref);
         }))

@@ -234,6 +234,47 @@ namespace MWWorld::Testing
             const SaveEnvelope& envelope, const RestartBindings& fresh,
             std::unique_ptr<const RestartRegistry>& output) const;
 
+        struct RestartScriptBindings
+        {
+            RestartBindings mRegistry;
+            // Source/destination/other roles, with explicit sharing.
+            std::array<const LocalScripts*, 3> mServices{};
+            std::array<std::weak_ptr<const void>, 3> mLifetimes;
+            std::array<LocalScripts::List, 3> mOriginal;
+        };
+        RestartScriptBindings restartScriptBindings() const;
+
+        class RestartScripts
+        {
+            friend class DisposableTransferRehearsal;
+            RestartScriptBindings mFresh;
+            TransferRestartMetadata mRestart;
+            bool mShared = true;
+            std::vector<ConstPtr> mItems;
+            std::array<std::unique_ptr<LocalScripts::PreparedStorage>, 2> mStorage;
+
+        public:
+            RestartScripts() = default;
+            RestartScripts(const RestartScripts&) = delete;
+            RestartScripts& operator=(const RestartScripts&) = delete;
+            const TransferRestartMetadata& getRestart() const { return mRestart; }
+            const LocalScripts::PreparedStorage& getSourceStorage() const;
+            const LocalScripts::PreparedStorage& getDestinationStorage() const;
+        };
+
+        // No installation, locals initialization or execution. Inputs/dependencies
+        // remain caller-owned and serialized. Only an owned candidate is published.
+        void prepareRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
+            const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
+            const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const;
+
+    private:
+        void validateRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
+            const SaveEnvelope& envelope, const RestartBindings& fresh) const;
+        static void validateRestartScriptLifetimes(const RestartScriptBindings& fresh);
+
+    public:
+
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
         const PreparedContainerTransfer::MiscList& destinationStorage() const;
@@ -261,6 +302,7 @@ namespace MWWorld::Testing
     void checkTransferRestore(const ESMStore& content);
     void checkTransferRestartRegistry(const ESMStore& content);
     void checkTransferScriptMetadata(const ESMStore& content);
+    void checkTransferRestartScripts(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);
