@@ -6222,7 +6222,7 @@ namespace
     {
         if (filter.starts_with("inventory-equipment-"))
         {
-            MWWorld::Testing::checkPlainEquipment(filter);
+            MWWorld::Testing::checkPlainEquipment(filter, root);
             return;
         }
         if (filter == "enumeration-normalized")

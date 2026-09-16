@@ -4,18 +4,16 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). Plain equipment now has a bounded,
-  actor/runtime/content-bound in-memory byte codec with strict preflight and
-  detached round trips. This remains synthetic staging, not live mutation,
-  equipment file persistence or production integration.
-- **Next action:** add a test-target-only equipment file adapter around
-  [equipment_codec](../../apps/tes3mp-server/native/equipment_codec.hpp), reusing
-  the [transfer file sink](../../apps/tes3mp-server/native/transfer_file_sink.hpp)
-  durability discipline with equipment-specific bounds and trusted bindings.
-  Prove bounded read/decode/detached restart, unchanged prior bytes/outputs on
-  pre-replacement failure and fail-closed uncertain replacement; keep live
-  installation and effect execution deferred. Preserve transfer version 4 and
-  fixed owner/service roles.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). Plain equipment now has a
+  test-target-only bound file adapter and atomic detached file restart. This is
+  synthetic persistence staging, not live installation or production integration.
+- **Next action:** add a test-target-only durable plain-equipment commit boundary
+  around [PreparedPlainEquipment](../../apps/openmw/mwworld/plainequipment.hpp):
+  stage actor-local installation and captured gameplay effects, revalidate trusted
+  caller/actor/service witnesses, then persist through
+  [EquipmentFileSink](../../apps/tes3mp-server/native/equipment_file.hpp) before
+  nonthrowing installation and owned publication. Preserve stock effect semantics
+  and fail closed on uncertainty; limit the slice to existing plain shirts.
 - **Session scope:** complete 2–3 closely related bounded slices sequentially;
   one slice at a time limits concurrent scope, not slices per session. After
   review and commit, summarize results/commit and provide a ready-to-paste next
@@ -26,78 +24,71 @@
 
 ## Implemented M2 slices
 
-[PlainEquipmentValues](../../apps/openmw/mwworld/plainequipment.hpp) exposes its
-existing semantic validator to the codec. Equipment format 1 is separate from
-transfer version 4. It binds an explicit runtime string, content digest and
-trusted actor identity; supplied, already interned TES3 reference IDs prevent
-untrusted name interning. These synthetic bindings are not authentication or a
-production loadout fingerprint.
+[EquipmentFileSink](../../apps/tes3mp-server/native/equipment_file.cpp) validates
+and encodes equipment format 1 with trusted runtime/content/actor bindings before
+I/O. Complete owned bytes publish only after acceptance by nonthrowing swap.
+The adapter retains no borrowed bindings, pointers or iterators. Synthetic
+bindings remain neither authentication nor a production loadout fingerprint.
 
-Encoding uses stock ObjectState/CellRef/animation serializers plus lossless
-fields for stock clamps and omissions. It preserves all supported values,
-clothing identities, signed counts, dormant membership, shirt slot, selection,
-and exact proposed generation counters, including rollover and representable
-exhaustion. Byte growth is checked before allocation. Limits are 80 MiB total,
-2 MiB per object, 65 objects, 256 animations per object and 4096-byte text.
+[BoundedFileSink](../../apps/tes3mp-server/native/bounded_file.cpp) extracts the
+existing transfer sink's byte-only durability discipline: exclusive sibling
+staging, bounded short writes, checked flush/close, replacement, barrier and
+allocation-free verification. Safe rejection preserves prior committed bytes and
+output storage/value. Replacement uncertainty is sticky and blocks even encoding
+on retry. Recovery requires a new composition after validated restart. Windows
+requests write-through replacement; no separate directory-fsync or power-loss
+proof is claimed. Transfer format 4 and its 8 MiB bound are unchanged.
 
-Decode first scans views and fixed arrays without allocating input storage.
-It checks the complete envelope, field order/types/lengths, nested text and
-animation bounds, supplied content, identities, counts, shirt and selection.
-Only then does stock ESMReader construct owned values. Shared semantic validation
-and canonical re-encoding reject unsupported values, redundant fields and
-inconsistent stock/lossless data before nonthrowing output swap. No borrowed
-pointers or iterators are serialized or published.
+Equipment reads check regular-file size on the opened handle before allocating
+bytes; the equipment bound is 80 MiB, with existing 2 MiB/object, 65-object,
+256-animation and 4096-byte text codec limits. Exact reads, EOF and close precede
+publication. Restart stages read, strict codec decode and detached restoration,
+then publishes one complete owned object. Every read/decode/restore failure
+preserves prior output storage/value. Caller content must outlive restored stock
+storage; no owner, registry, listener or script service is installed.
 
-[Two-actor tests](../../apps/tes3mp-server/native/equipment_tests.cpp) prove
-encode/decode/detached-restore/re-export/re-encode consistency for split/no-split,
-restack/incompatible targets, signed and dormant nodes, 65-node output and exact
-counters. Maximum strings/animations, empty inventory, distinct clothing bases,
-and source destruction/input mutation exercise bounds and owned lifetimes.
-Every truncated prefix and focused malformed/oversized/binding rejection
-preserve prior output storage/value, both live actors and captured effect intents.
-Individual C++ allocation failures cover encoding, decoding, combined detached
-restoration/re-export, semantic rejection and canonical-byte rejection, with
-leak-free cleanup and deterministic retries.
-
-Prepared equipment still runs shared stock mechanics in protected actor-local
-storage, revalidates witnessed live state and captures gameplay effect intents.
-Detached restoration installs no owner, registry, listeners or script services.
-Caller content must outlive restored storage. No gameplay effect is suppressed
-or executed by this codec.
+[Focused tests](../../apps/tes3mp-server/native/equipment_tests.cpp) cover both
+actors, complete supported values, distinct clothing identities, signed counts,
+dormant membership/selection, shirt slot, split/restack behavior, maximum nodes,
+and exact counters including rollover/exhaustion. Re-export/re-encoding is byte
+identical. A valid 9,574,212-byte file proves the equipment bound reaches every
+I/O stage. Source destruction, file removal and empty inventory exercise owned
+lifetimes. Faults preserve both live actors and captured effect intents; uncertain
+files contain a complete prior/new state with no accepted result or effects.
 
 ## Fresh verification
 
 Windows MSVC, scripts/setup_msvc_env.ps1 -PreferLatest, RelWithDebInfo,
-build/vnext-product, 2026-09-16. Target tes3mp_native_loadout_tests and each
-individual filter below exited **0**. Logs use build/logs/native-equipment-.
+build/vnext-product, 2026-09-16. Target tes3mp_native_loadout_tests and these
+individual filters exited **0**. Logs are under build/logs.
 
-| Filter suffix | Evidence / log suffix |
-|---|---|
-| codec-encode | 2 deterministic owned encodes; codec-encode.log |
-| codec | 16 byte/detached round trips; codec.log |
-| codec-guards | 3,350 rejection cases; codec-guards.log |
-| codec-bounds | 7 bounds/lifetime cases; codec-bounds.log |
-| codec-allocations | 2,175 injected failures; codec-allocations.log |
+| Filter | Evidence | Log |
+|---|---|---|
+| inventory-equipment-file-write | 2 bound writes | native-equipment-file-write.log |
+| inventory-equipment-file-restart | 16 detached round trips | native-equipment-file-restart.log |
+| inventory-equipment-file-guards | 12 safe, 16 uncertain, 62 read/input rejections | native-equipment-file-guards.log |
+| inventory-equipment-file-allocations | 1,836 injected failures, leak-free cleanup | native-equipment-file-allocations.log |
+| inventory-equipment-file-bounds | 3 bounds/lifetime cases | native-equipment-file-bounds.log |
+| inventory-equipment-codec | 16 byte/detached round trips | native-equipment-file-codec.log |
+| inventory-equipment-restore | 16 detached round trips | native-equipment-file-restore.log |
+| inventory-transfer-file-sink | 48 cases; 384 safe, 384 uncertain, 31 input rejections; 1,024 allocation failures | native-equipment-transfer-file-sink.log |
 
-Full filters start with inventory-equipment-. Final build: codec-build.log.
-An initial build exited 2 for a test helper's fourCC argument type; allocation
-checks exited 1 because MSVC preflight rejection made zero observed C++
-allocations. Both test issues were fixed and their checks rerun successfully.
-Documentation budget and local links ran individually, exit **0**:
-build/logs/docs-budget.log and docs-links.log.
+Final build: native-equipment-file-final-build.log. Documentation budget and
+local links ran individually, exit **0**: docs-budget.log and docs-links.log.
+No build/test failures occurred in this session.
 
 ## Limits and inherited evidence
 
-Equipment file persistence, live installation, production integration, scripts,
-enchantments, other slots/types and durable request/notification deduplication
-remain deferred. No equipment success is durably acknowledged or published.
-Runtime scenes/caches are not saved values; postponed physics is rejected.
-Access remains serialized and actor-local.
+Live equipment installation, production integration, scripts, enchantments,
+other slots/types and durable request/notification deduplication remain deferred.
+File acceptance authorizes no gameplay success notification or effect execution.
+Runtime scenes/caches are not saved values; postponed physics remains rejected.
+Access requires one serialized writer and an existing private scratch directory.
 
 Transfer trusted caller matching, fixed owner/service roles, version-4 selections,
-exact saved counters, persistence-before-install and owned publication are unchanged.
-Prior transfer and equipment preparation/value checks are inherited, not rerun.
-Allocation tracking excludes direct C allocation, other threads and private external
-allocators. No full suites, expensive gates or upstream baseline tests ran.
-M1/TR evidence, independent networking, migration base, broad headless dependencies
-and baseline provenance debt are unchanged.
+exact counters, persistence-before-install and owned publication are unchanged.
+Other transfer/preparation/codec guards retain prior evidence. Allocation tracking
+excludes direct C allocation, other threads and private external allocators.
+No full suites, expensive gates or upstream baseline tests ran. M1/TR evidence,
+independent networking, migration base, broad headless dependencies and baseline
+provenance debt are unchanged.

@@ -20,6 +20,8 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
     equipment_tests.cpp equipment_tests.hpp
     equipment_codec.cpp equipment_codec.hpp
+    equipment_file.cpp equipment_file.hpp
+    bounded_file.cpp bounded_file.hpp test_persistence.hpp
     transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
     transfer_save_codec.cpp transfer_save_codec.hpp
     transfer_restart.cpp

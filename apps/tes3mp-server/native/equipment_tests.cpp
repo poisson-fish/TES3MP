@@ -1,8 +1,10 @@
 #include "equipment_tests.hpp"
 #include "equipment_codec.hpp"
+#include "equipment_file.hpp"
 #include "test_allocations.hpp"
 
 #include <bit>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -33,6 +35,38 @@ namespace MWWorld::Testing
         {
             if (!condition)
                 throw std::runtime_error(message);
+        }
+
+        struct EquipmentScratch
+        {
+            std::filesystem::path mPath;
+            explicit EquipmentScratch(const std::filesystem::path& path)
+                : mPath(path)
+            {
+                require(std::filesystem::create_directory(mPath), "equipment scratch directory already exists");
+            }
+            ~EquipmentScratch()
+            {
+                std::error_code ignored;
+                std::filesystem::remove_all(mPath, ignored);
+            }
+        };
+
+        EquipmentBytes equipmentFileBytes(const std::filesystem::path& path)
+        {
+            EquipmentBytes bytes;
+            FileFaults faults;
+            require(readEquipmentFile(path, bytes, faults) == FileReadResult::Read,
+                "equipment file reopen failed");
+            return bytes;
+        }
+
+        void writeEquipmentInput(const std::filesystem::path& path, std::span<const char> bytes)
+        {
+            std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+            stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            stream.close();
+            require(!stream.fail(), "equipment input fixture write failed");
         }
     }
 
@@ -393,8 +427,51 @@ namespace MWWorld::Testing
             std::cout << "equipment deterministic owned encodes=2\n";
         }
 
-        static void checkRestore(bool codec = false)
+        static void checkFileWrite(const std::filesystem::path& scratch)
         {
+            EquipmentScratch directory(scratch);
+            PlainEquipmentFixture f;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                f.seedValues(actor);
+                auto prepared = f.prepare(actor, true);
+                const auto effects = prepared.result();
+                const auto before = f.snapshot();
+                PlainEquipmentValues saved;
+                prepared.exportValues(f.preparationContext(actor), saved);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                const EquipmentBindings bindings{ e, f.mStore, ids };
+                const auto path = scratch / (actor == 0 ? "actor-a.bin" : "actor-b.bin");
+                EquipmentFileSink file(path);
+                EquipmentBytes output{ 'o', 'l', 'd' }, expected;
+                encodeEquipment(saved, bindings, expected);
+                FileFaults faults{ FileFault::None, 17 };
+                require(file.write(saved, bindings, output, faults) == TestPersistenceResult::Accepted
+                        && !file.failedClosed() && output == expected && equipmentFileBytes(path) == expected
+                        && faults.mWrites > 1 && faults.mReads > 1,
+                    "equipment file did not persist complete encoded values with short I/O");
+                PlainEquipmentValues decoded;
+                decodeEquipment(output, bindings, decoded);
+                require(sameValues(saved, decoded), "equipment file write lost supported values");
+                const auto* storage = output.data();
+                auto invalid = saved;
+                invalid.mActor = f.mActors[1 - actor]->getPtr().getCellRef().getRefNum();
+                faults = {};
+                f.reject([&] { file.write(invalid, bindings, output, faults); }, "owner");
+                require(output == expected && output.data() == storage && faults.mWrites == 0
+                        && equipmentFileBytes(path) == expected && prepared.result() == effects,
+                    "equipment binding rejection touched file/output/effects");
+                f.unchanged(before);
+            }
+            std::cout << "equipment bound file writes=2\n";
+        }
+
+        static void checkRestore(bool codec = false, const std::filesystem::path& scratch = {})
+        {
+            std::optional<EquipmentScratch> directory;
+            if (!scratch.empty())
+                directory.emplace(scratch);
             size_t roundTrips = 0;
             for (size_t actor = 0; actor < 2; ++actor)
                 for (int variant = 0; variant < 8; ++variant)
@@ -440,6 +517,7 @@ namespace MWWorld::Testing
                         require(prepared.result() == effects, "equipment round trip altered prepared effects");
                     }
                     EquipmentBytes bytes;
+                    std::unique_ptr<const RestoredPlainEquipment> fromFile;
                     if (codec)
                     {
                         // Exercise stock clamping/omissions, including fields
@@ -449,6 +527,13 @@ namespace MWWorld::Testing
                         object.mRef.mTeleport = false;
                         object.mRef.mIsLocked = false;
                         object.mAnimationState.mScriptedAnims[0].mTime = -3.5f;
+                        if (directory)
+                        {
+                            auto shirt = *f.mItems[actor].get<ESM::Clothing>()->mBase;
+                            shirt.mId = ESM::RefId::stringRefId("equipment_file_second_shirt");
+                            f.mStore.insertStatic(shirt);
+                            object.mRef.mRefID = shirt.mId;
+                        }
                         const auto expected = saved;
                         const auto ids = referenceIds(saved);
                         const auto e = envelope(saved.mActor);
@@ -456,6 +541,23 @@ namespace MWWorld::Testing
                         encodeEquipment(saved, bindings, bytes);
                         decodeEquipment(bytes, bindings, saved); // Replace a nonempty output.
                         require(sameValues(saved, expected), "equipment byte codec lost supported values");
+                        if (directory)
+                        {
+                            const auto path = scratch / "equipment.bin";
+                            EquipmentFileSink file(path);
+                            EquipmentBytes committed;
+                            FileFaults faults{ FileFault::None, 17 };
+                            require(file.write(saved, bindings, committed, faults) == TestPersistenceResult::Accepted
+                                    && committed == bytes,
+                                "equipment restart fixture write failed");
+                            faults = { FileFault::None, 13 };
+                            require(restartEquipmentFile(path, bindings, fromFile, faults) == FileReadResult::Read
+                                    && faults.mReads > 1,
+                                "equipment detached file restart failed");
+                            PlainEquipmentValues fileValues;
+                            fromFile->exportValues(fileValues);
+                            require(sameValues(fileValues, expected), "equipment file restart lost complete values");
+                        }
                     }
                     auto restored = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
                     PlainEquipmentValues again;
@@ -484,10 +586,21 @@ namespace MWWorld::Testing
                     PlainEquipmentValues independent;
                     moved.exportValues(independent);
                     require(sameValues(again, independent), "restored equipment aliased mutable input values");
+                    if (fromFile)
+                    {
+                        fromFile->exportValues(independent);
+                        require(sameValues(again, independent), "file restart borrowed mutable input values");
+                        EquipmentBytes reencoded;
+                        const auto ids = referenceIds(independent);
+                        const auto e = envelope(independent.mActor);
+                        encodeEquipment(independent, { e, f.mStore, ids }, reencoded);
+                        require(reencoded == bytes, "equipment file restart re-encoding changed saved bytes");
+                    }
                     f.unchanged(before);
                     ++roundTrips;
                 }
-            std::cout << "equipment " << (codec ? "byte/detached" : "detached") << " round trips=" << roundTrips
+            std::cout << "equipment " << (directory ? "file/detached" : codec ? "byte/detached" : "detached")
+                      << " round trips=" << roundTrips
                       << '\n';
         }
 
@@ -1093,6 +1206,490 @@ namespace MWWorld::Testing
                     f.unchanged(before);
                 }
             std::cout << "equipment codec allocation failures=" << failures << '\n';
+        }
+
+        static void checkFileGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t safe = 0, uncertain = 0, rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture f;
+                f.seedValues(actor);
+                for (auto& inventory : f.mInventories)
+                {
+                    inventory.setInvListener(&f.mListener);
+                    inventory.setContListener(&f.mListener);
+                    inventory.setSelectedEnchantItem(inventory.begin());
+                }
+                auto prepared = f.prepare(actor, true);
+                const auto effects = prepared.result();
+                const auto* effectStorage = prepared.result().mEffects.data();
+                const auto before = f.snapshot();
+                PlainEquipmentValues saved, oldValues;
+                prepared.exportValues(f.preparationContext(actor), saved);
+                f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), oldValues);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                const EquipmentBindings bindings{ e, f.mStore, ids };
+                auto prior = saved;
+                prior.mObjects[0].mRef.mGlobalVariable += "_prior";
+                EquipmentBytes priorBytes, newBytes;
+                encodeEquipment(prior, bindings, priorBytes);
+                encodeEquipment(saved, bindings, newBytes);
+                require(priorBytes != newBytes, "file guards lost distinct prior/new bytes");
+                const auto path = scratch / "committed.bin";
+                const auto input = scratch / "external.bin";
+                auto temporary = path;
+                temporary += ".tmp";
+                const auto seed = [&] {
+                    EquipmentFileSink file(path);
+                    FileFaults faults;
+                    EquipmentBytes bytes;
+                    require(file.write(prior, bindings, bytes, faults) == TestPersistenceResult::Accepted,
+                        "equipment prior file setup failed");
+                };
+                seed();
+                EquipmentBytes output{ 'o', 'l', 'd' };
+                const auto outputValue = output;
+                const auto* outputStorage = output.data();
+                std::unique_ptr<const RestoredPlainEquipment> restored = std::make_unique<RestoredPlainEquipment>(
+                    RestoredPlainEquipment::restore(oldValues, f.mStore, oldValues.mActor));
+                const auto* restoredOutput = restored.get();
+                const auto* restoredStorage = restored->mState.get();
+                const auto unchanged = [&] {
+                    require(output == outputValue && output.data() == outputStorage
+                            && restored.get() == restoredOutput && restored->mState.get() == restoredStorage
+                            && prepared.result() == effects && prepared.result().mEffects.data() == effectStorage,
+                        "equipment file failure changed output storage/value or captured effects");
+                    PlainEquipmentValues retained;
+                    restored->exportValues(retained);
+                    require(sameValues(retained, oldValues), "equipment file failure changed detached nodes");
+                    f.unchanged(before);
+                };
+                EquipmentFileSink file(path);
+                for (auto failure :
+                    { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close, FileFault::Replace })
+                {
+                    FileFaults faults{ failure, 17 };
+                    require(file.write(saved, bindings, output, faults) == TestPersistenceResult::Rejected
+                            && !file.failedClosed() && equipmentFileBytes(path) == priorBytes
+                            && !std::filesystem::exists(temporary),
+                        "pre-replacement equipment failure changed committed bytes or poisoned sink");
+                    require(failure != FileFault::Write || faults.mWrites == 1, "equipment short write seam missed");
+                    unchanged();
+                    ++safe;
+                }
+                writeEquipmentInput(temporary, priorBytes);
+                FileFaults faults;
+                require(file.write(saved, bindings, output, faults) == TestPersistenceResult::Rejected
+                        && equipmentFileBytes(temporary) == priorBytes && equipmentFileBytes(path) == priorBytes,
+                    "equipment exclusive staging touched another writer's file");
+                std::filesystem::remove(temporary);
+                unchanged();
+                ++safe;
+                for (auto failure : { FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier,
+                         FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof,
+                         FileFault::ReadClose })
+                {
+                    seed();
+                    EquipmentFileSink uncertainFile(path);
+                    faults = { failure, 17 };
+                    require(uncertainFile.write(saved, bindings, output, faults) == TestPersistenceResult::Uncertain
+                            && uncertainFile.failedClosed() && !std::filesystem::exists(temporary),
+                        "uncertain equipment replacement emitted acceptance or leaked staging");
+                    const auto bytes = equipmentFileBytes(path);
+                    require(bytes == (failure == FileFault::ReplaceError ? priorBytes : newBytes),
+                        "uncertain equipment replacement left a partial file");
+                    // A poisoned adapter cannot even allocate/encode on retry.
+                    faults = {};
+                    Allocations::Trace trace;
+                    TestPersistenceResult blocked;
+                    {
+                        Allocations::Observe observe(trace, 1);
+                        blocked = uncertainFile.write(saved, bindings, output, faults);
+                    }
+                    require(blocked == TestPersistenceResult::Uncertain && trace.mTotal == 0
+                            && faults.mWrites == 0 && faults.mReads == 0 && equipmentFileBytes(path) == bytes,
+                        "uncertain equipment sink allowed an in-place retry");
+                    unchanged();
+                    std::unique_ptr<const RestoredPlainEquipment> recovered;
+                    require(restartEquipmentFile(path, bindings, recovered, faults) == FileReadResult::Read,
+                        "uncertain equipment file could not restart detached");
+                    PlainEquipmentValues recoveredValues;
+                    recovered->exportValues(recoveredValues);
+                    EquipmentBytes reencoded;
+                    encodeEquipment(recoveredValues, bindings, reencoded);
+                    require(reencoded == bytes, "uncertain restart did not preserve complete prior/new state");
+                    ++uncertain;
+                }
+                seed();
+                for (auto failure : { FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read,
+                         FileFault::ReadEof, FileFault::ReadClose })
+                {
+                    faults = { failure, 17 };
+                    require(readEquipmentFile(path, output, faults) == FileReadResult::Unavailable,
+                        "equipment failed read published bytes");
+                    faults = { failure, 17 };
+                    require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Unavailable,
+                        "equipment failed read published a restart");
+                    unchanged();
+                    ++rejected;
+                }
+                const auto rejectInput = [&](std::span<const char> bytes, const EquipmentBindings& expected) {
+                    writeEquipmentInput(input, bytes);
+                    faults = { FileFault::None, 17 };
+                    bool failed = false;
+                    try
+                    {
+                        restartEquipmentFile(input, expected, restored, faults);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        failed = true;
+                    }
+                    require(failed, "equipment file accepted malformed or mismatched input");
+                    unchanged();
+                    require(equipmentFileBytes(path) == priorBytes, "equipment input failure changed committed file");
+                    ++rejected;
+                };
+                for (size_t length : { size_t{ 0 }, size_t{ 1 }, size_t{ 15 }, size_t{ 16 },
+                         fieldAt(newBytes, ESM::fourCC("ACTR")).mData + 3, newBytes.size() / 2, newBytes.size() - 1 })
+                    rejectInput(std::span(newBytes).first(length), bindings);
+                for (int corruption = 0; corruption < 10; ++corruption)
+                {
+                    auto bad = newBytes;
+                    switch (corruption)
+                    {
+                        case 0:
+                            bad.push_back('!');
+                            break;
+                        case 1:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("FVER")).mData, 4);
+                            break;
+                        case 2:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("SIZE")).mData, 66);
+                            break;
+                        case 3:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("LGEN")).mData, 1);
+                            break;
+                        case 4:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("SHRT")).mData, oldValues.mActor.mIndex);
+                            break;
+                        case 5:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("SELE")).mData + 4, 0);
+                            break;
+                        case 6:
+                            bad[fieldAt(bad, ESM::fourCC("NAME")).mData + 1] = '!';
+                            break;
+                        case 7:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("NAM9")).mData, 0x80000000);
+                            break;
+                        case 8:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("FLAG")).mData, 8);
+                            break;
+                        case 9:
+                            putNumber(bad, fieldAt(bad, ESM::fourCC("XSCL")).mData,
+                                std::bit_cast<uint32_t>(1.75f));
+                            break;
+                    }
+                    rejectInput(bad, bindings);
+                }
+                for (int mismatch = 0; mismatch < 5; ++mismatch)
+                {
+                    auto foreign = e;
+                    auto foreignIds = ids;
+                    ESMStore absentContent;
+                    if (mismatch == 0)
+                        foreign.mRuntime += "_other";
+                    if (mismatch == 1)
+                        foreign.mContent[0] ^= 1;
+                    if (mismatch == 2)
+                        foreign.mActor = oldValues.mActor;
+                    if (mismatch == 3)
+                        foreignIds.clear();
+                    rejectInput(newBytes, { foreign, mismatch == 4 ? absentContent : f.mStore, foreignIds });
+                }
+                // Sparse over-bound file: both paths must reject size before even
+                // the first C++ allocation or data read on the opened handle.
+                writeEquipmentInput(input, {});
+                std::filesystem::resize_file(input, MaxEquipmentBytes + 1);
+                for (bool restart : { false, true })
+                {
+                    faults = {};
+                    Allocations::Trace trace;
+                    FileReadResult result;
+                    {
+                        Allocations::Observe observe(trace, 1);
+                        result = restart ? restartEquipmentFile(input, bindings, restored, faults)
+                                         : readEquipmentFile(input, output, faults);
+                    }
+                    require(result == FileReadResult::TooLarge && trace.mTotal == 0 && faults.mReads == 0,
+                        "equipment oversized file allocated/read before checking size");
+                    unchanged();
+                    ++rejected;
+                }
+                std::filesystem::remove(input);
+                for (const auto& unavailable : { input, scratch })
+                {
+                    faults = {};
+                    require(readEquipmentFile(unavailable, output, faults) == FileReadResult::Unavailable,
+                        "equipment read accepted absent/nonregular file");
+                    faults = {};
+                    require(restartEquipmentFile(unavailable, bindings, restored, faults) == FileReadResult::Unavailable,
+                        "equipment restart accepted absent/nonregular file");
+                    unchanged();
+                    ++rejected;
+                }
+                require(equipmentFileBytes(path) == priorBytes, "equipment read guards changed committed bytes");
+                // All safe rejections leave the original adapter usable.
+                faults = {};
+                require(file.write(saved, bindings, output, faults) == TestPersistenceResult::Accepted
+                        && output == newBytes && equipmentFileBytes(path) == newBytes,
+                    "equipment retry after safe rejection did not persist exact bytes");
+                faults = {};
+                require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Read,
+                    "equipment retry after read rejection failed");
+                PlainEquipmentValues retried;
+                restored->exportValues(retried);
+                require(sameValues(saved, retried) && prepared.result() == effects,
+                    "equipment retry lost values or changed captured effects");
+                f.unchanged(before);
+            }
+            std::cout << "equipment file safe-rejections=" << safe << " uncertain=" << uncertain
+                      << " read/input-rejections=" << rejected << '\n';
+        }
+
+        static void checkFileBounds(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            const auto path = scratch / "equipment.bin";
+            PlainEquipmentValues expected;
+            EquipmentEnvelope e;
+            std::vector<ESM::RefId> ids;
+            EquipmentBytes committed;
+            {
+                PlainEquipmentFixture source;
+                source.seedValues(1);
+                auto prepared = source.prepare(1, true);
+                prepared.exportValues(source.preparationContext(1), expected);
+                e = envelope(expected.mActor);
+                ids = referenceIds(expected);
+                EquipmentFileSink file(path);
+                FileFaults faults;
+                require(file.write(expected, { e, source.mStore, ids }, committed, faults)
+                        == TestPersistenceResult::Accepted,
+                    "equipment lifetime fixture write failed");
+            }
+            PlainEquipmentFixture replacement;
+            const auto before = replacement.snapshot();
+            const EquipmentBindings bindings{ e, replacement.mStore, ids };
+            std::unique_ptr<const RestoredPlainEquipment> restored;
+            FileFaults faults;
+            require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Read,
+                "equipment restart depended on destroyed source actors/content");
+            std::filesystem::remove(path);
+            PlainEquipmentValues actual;
+            restored->exportValues(actual);
+            EquipmentBytes reencoded;
+            encodeEquipment(actual, bindings, reencoded);
+            require(sameValues(expected, actual) && reencoded == committed,
+                "equipment restored output borrowed source/file storage");
+
+            // Valid equipment larger than transfer's 8 MiB cap must traverse
+            // write, post-replacement verification, read, decode and restore.
+            auto object = expected.mObjects[0];
+            object.mRef.mCount = -1;
+            auto animation = object.mAnimationState.mScriptedAnims[0];
+            animation.mGroup.assign(PlainEquipmentValues::MaxText, 'a');
+            object.mAnimationState.mScriptedAnims.assign(PlainEquipmentValues::MaxAnimations, animation);
+            expected.mObjects.assign(9, object);
+            for (size_t i = 0; i < expected.mObjects.size(); ++i)
+                expected.mObjects[i].mRef.mRefNum = { static_cast<uint32_t>(100 + i), -1 };
+            expected.mObjects.back().mRef.mCount = 0;
+            expected.mShirt = expected.mObjects.front().mRef.mRefNum;
+            expected.mSelected = expected.mObjects.back().mRef.mRefNum;
+            expected.mLastGenerated = { 900, -2 };
+            EquipmentFileSink file(path);
+            faults = {};
+            require(file.write(expected, bindings, committed, faults) == TestPersistenceResult::Accepted
+                    && committed.size() > 8 * 1024 * 1024 && committed.size() <= MaxEquipmentBytes,
+                "equipment file reused transfer's smaller bound");
+            faults = {};
+            require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Read,
+                "large equipment file restart failed");
+            restored->exportValues(actual);
+            encodeEquipment(actual, bindings, reencoded);
+            require(sameValues(expected, actual) && reencoded == committed,
+                "large equipment file lost animations, signed/dormant values or exact counters");
+            const size_t largeBytes = committed.size();
+            expected.mObjects.clear();
+            expected.mShirt = {};
+            expected.mSelected = {};
+            faults = {};
+            require(file.write(expected, bindings, committed, faults) == TestPersistenceResult::Accepted,
+                "empty equipment file write failed");
+            faults = {};
+            require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Read,
+                "empty equipment file restart failed");
+            restored->exportValues(actual);
+            require(sameValues(expected, actual), "empty equipment file lost actor or saved counter");
+            replacement.unchanged(before);
+            std::cout << "equipment file bounds/lifetime cases=3 large-file-bytes=" << largeBytes << '\n';
+        }
+
+        static void checkFileAllocations(const std::filesystem::path& scratch)
+        {
+            using namespace Allocations;
+            EquipmentScratch directory(scratch);
+            size_t failures = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    PlainEquipmentFixture f;
+                    f.seedValues(actor);
+                    auto& inventory = f.mInventories[actor];
+                    inventory.setInvListener(&f.mListener);
+                    inventory.setContListener(&f.mListener);
+                    inventory.setSelectedEnchantItem(inventory.begin());
+                    if (!equip)
+                        inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                    f.mEvents.clear();
+                    auto prepared = f.prepare(actor, equip);
+                    const auto effects = prepared.result();
+                    const auto* effectStorage = prepared.result().mEffects.data();
+                    const auto before = f.snapshot();
+                    PlainEquipmentValues saved, oldValues;
+                    prepared.exportValues(f.preparationContext(actor), saved);
+                    f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), oldValues);
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                    const auto path = scratch / "equipment.bin";
+                    auto temporary = path;
+                    temporary += ".tmp";
+                    auto prior = saved;
+                    prior.mObjects[0].mRef.mGlobalVariable += "_prior";
+                    EquipmentBytes priorBytes, newBytes;
+                    encodeEquipment(prior, bindings, priorBytes);
+                    encodeEquipment(saved, bindings, newBytes);
+                    const auto seed = [&] {
+                        EquipmentFileSink initial(path);
+                        EquipmentBytes bytes;
+                        FileFaults faults;
+                        require(initial.write(prior, bindings, bytes, faults) == TestPersistenceResult::Accepted,
+                            "equipment allocation prior setup failed");
+                    };
+                    seed();
+                    EquipmentFileSink file(path);
+                    FileFaults faults;
+                    EquipmentBytes output{ 'o', 'l', 'd' };
+                    const auto outputValue = output;
+                    const auto* outputStorage = output.data();
+                    std::unique_ptr<const RestoredPlainEquipment> restored = std::make_unique<RestoredPlainEquipment>(
+                        RestoredPlainEquipment::restore(oldValues, f.mStore, oldValues.mActor));
+                    const auto* restoredOutput = restored.get();
+                    const auto* restoredStorage = restored->mState.get();
+                    for (int operation = 0; operation < 5; ++operation)
+                    {
+                        const auto run = [&](EquipmentBytes& bytes, std::unique_ptr<const RestoredPlainEquipment>& owner) {
+                            if (operation == 0)
+                            {
+                                EquipmentFileSink construction(path);
+                                return true;
+                            }
+                            if (operation == 1)
+                                return file.write(saved, bindings, bytes, faults) == TestPersistenceResult::Accepted;
+                            if (operation == 2)
+                                return readEquipmentFile(path, bytes, faults) == FileReadResult::Read;
+                            if (operation == 3)
+                                return restartEquipmentFile(path, bindings, owner, faults) == FileReadResult::Read;
+                            // Stage re-export/re-encoding too, then publish both
+                            // complete owned outputs without a fallible step.
+                            std::unique_ptr<const RestoredPlainEquipment> staged;
+                            if (restartEquipmentFile(path, bindings, staged, faults) != FileReadResult::Read)
+                                return false;
+                            PlainEquipmentValues values;
+                            staged->exportValues(values);
+                            EquipmentBytes encoded;
+                            encodeEquipment(values, bindings, encoded);
+                            bytes.swap(encoded);
+                            owner = std::move(staged);
+                            return true;
+                        };
+                        {
+                            EquipmentBytes bytes;
+                            std::unique_ptr<const RestoredPlainEquipment> owner;
+                            faults = {};
+                            require(run(bytes, owner), "equipment file allocation warmup failed");
+                        }
+                        seed();
+                        Trace count;
+                        bool accepted = false;
+                        faults = {};
+                        {
+                            Observe observe(count);
+                            EquipmentBytes bytes;
+                            std::unique_ptr<const RestoredPlainEquipment> owner;
+                            accepted = run(bytes, owner);
+                        }
+                        require(accepted && count.mTotal > 0 && count.mOutstanding == 0 && count.mTrackingOverflow == 0,
+                            "equipment file allocation baseline missed work or leaked");
+                        seed();
+                        for (size_t fail = 1; fail <= count.mTotal; ++fail)
+                        {
+                            Trace trace;
+                            bool failed = false;
+                            accepted = false;
+                            faults = {};
+                            {
+                                Observe observe(trace, fail);
+                                try
+                                {
+                                    accepted = run(output, restored);
+                                }
+                                catch (const std::exception&)
+                                {
+                                    failed = true;
+                                }
+                            }
+                            if (!failed || accepted || trace.mFailures != 1 || trace.mOutstanding != 0)
+                                std::cerr << "equipment file allocation operation=" << operation << " fail=" << fail
+                                          << " rejected=" << failed << " accepted=" << accepted
+                                          << " injected=" << trace.mFailures << " outstanding=" << trace.mOutstanding << '\n';
+                            require(failed && !accepted && trace.mFailures == 1 && trace.mOutstanding == 0
+                                    && trace.mTrackingOverflow == 0 && faults.mWrites == 0 && !file.failedClosed()
+                                    && output == outputValue && output.data() == outputStorage
+                                    && restored.get() == restoredOutput && restored->mState.get() == restoredStorage
+                                    && equipmentFileBytes(path) == priorBytes && !std::filesystem::exists(temporary)
+                                    && prepared.result() == effects && prepared.result().mEffects.data() == effectStorage,
+                                "equipment file allocation failure changed prior bytes/output/effects");
+                            PlainEquipmentValues retained;
+                            restored->exportValues(retained);
+                            require(sameValues(retained, oldValues), "equipment allocation failure changed owned nodes");
+                            f.unchanged(before);
+                            ++failures;
+                        }
+                        // Fail just beyond the measured operation: success must
+                        // neither allocate after replacement nor grow on retry.
+                        Trace retry;
+                        faults = {};
+                        {
+                            Observe observe(retry, count.mTotal + 1);
+                            EquipmentBytes bytes;
+                            std::unique_ptr<const RestoredPlainEquipment> owner;
+                            accepted = run(bytes, owner);
+                        }
+                        require(accepted && retry.mFailures == 0 && retry.mTotal == count.mTotal
+                                && retry.mOutstanding == 0 && retry.mTrackingOverflow == 0
+                                && equipmentFileBytes(path) == (operation == 1 ? newBytes : priorBytes),
+                            "equipment file deterministic retry failed or leaked");
+                        seed();
+                    }
+                    require(prepared.result() == effects, "equipment file allocation checks changed effect intents");
+                    f.unchanged(before);
+                }
+            std::cout << "equipment file allocation failures=" << failures << " remaining-after-cleanup=0\n";
         }
 
         static void checkValueGuards()
@@ -1992,8 +2589,33 @@ namespace MWWorld::Testing
         }
     };
 
-    void checkPlainEquipment(std::string_view filter)
+    void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-file-bounds")
+        {
+            PlainEquipmentFixture::checkFileBounds(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-file-allocations")
+        {
+            PlainEquipmentFixture::checkFileAllocations(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-file-guards")
+        {
+            PlainEquipmentFixture::checkFileGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-file-restart")
+        {
+            PlainEquipmentFixture::checkRestore(true, scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-file-write")
+        {
+            PlainEquipmentFixture::checkFileWrite(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-codec-bounds")
         {
             PlainEquipmentFixture::checkCodecBounds();
