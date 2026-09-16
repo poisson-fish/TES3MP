@@ -6,6 +6,7 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <components/esm3/objectstate.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <type_traits>
@@ -63,6 +64,26 @@ namespace MWWorld::Testing
             std::swap(mRestart, other.mRestart);
         }
     };
+
+    // Test-only detached stock lists. Views capture lifetimes during restoration,
+    // so registry preparation never lazily changes an input node's witness.
+    struct RestoredInventory
+    {
+        PreparedContainerTransfer::MiscList mNodes;
+        std::vector<ESM::RefNum> mProposedIdentities;
+        std::vector<ConstPtr> mViews;
+    };
+
+    struct RestoredPair
+    {
+        RestoredInventory mSource, mDestination;
+        TransferRestartMetadata mRestart;
+    };
+
+    struct RestoreContent;
+    struct SaveEnvelope;
+    void restorePair(
+        const SerializedPair& input, const RestoreContent& content, std::unique_ptr<const RestoredPair>& output);
 
     template <class Identity>
     void serializeInventory(const PreparedContainerTransfer::MiscList& storage, Identity identity,
@@ -139,6 +160,40 @@ namespace MWWorld::Testing
             PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink);
         bool failedClosed() const noexcept { return mFailedClosed; }
 
+        // Explicit fresh fixture bindings, including dormant other-store nodes.
+        // Store addresses are compare-only until owner lifetimes validate.
+        struct RestartBindings
+        {
+            std::array<Ptr, 3> mOwners;
+            std::array<const ContainerStore*, 3> mStores;
+            std::array<std::shared_ptr<const void>, 3> mStorage;
+            std::array<std::weak_ptr<const void>, 3> mLifetimes;
+            std::vector<std::pair<ESM::RefNum, Ptr>> mOther;
+        };
+        RestartBindings restartBindings() const;
+
+        class RestartRegistry
+        {
+            friend class DisposableTransferRehearsal;
+            RestartBindings mFresh;
+            PtrRegistry::Snapshot mBindings;
+            std::unique_ptr<PtrRegistry::PreparedStorage> mStorage;
+
+        public:
+            RestartRegistry() = default;
+            RestartRegistry(const RestartRegistry&) = delete;
+            RestartRegistry& operator=(const RestartRegistry&) = delete;
+            const PtrRegistry::Snapshot& getBindings() const { return mBindings; }
+            ConstPtr getItem(ESM::RefNum id) const;
+        };
+
+        // No installation or service reconstruction. Every borrowed input must
+        // outlive use and remain serialized/unchanged. Complete validation precedes
+        // staging; only the owned candidate pointer is published, by noexcept swap.
+        void prepareRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
+            const SaveEnvelope& envelope, const RestartBindings& fresh,
+            std::unique_ptr<const RestartRegistry>& output) const;
+
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
         const PreparedContainerTransfer::MiscList& destinationStorage() const;
@@ -164,6 +219,7 @@ namespace MWWorld::Testing
     void checkTransferObjectState(const ESMStore& content);
     void checkTransferLocalsRestore(const ESMStore& content);
     void checkTransferRestore(const ESMStore& content);
+    void checkTransferRestartRegistry(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);

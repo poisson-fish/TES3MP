@@ -5714,6 +5714,11 @@ namespace
             MWWorld::Testing::checkTransferCommit(loadout.store());
             return;
         }
+        if (filter == "inventory-transfer-restart-registry")
+        {
+            MWWorld::Testing::checkTransferRestartRegistry(loadout.store());
+            return;
+        }
         if (filter == "inventory-transfer-restore")
         {
             MWWorld::Testing::checkTransferRestore(loadout.store());

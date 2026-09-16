@@ -6,92 +6,89 @@
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). The test-only inventory command joins
   owned intent, protected preparation, encoded file commit, owned success,
-  fresh decode, detached restore and save. Version 2 now preserves the accepted
-  registry revision and last-generated instance ID. Production durability and
-  live atomic transfer remain unproven.
-- **Next action:** prepare a test-only detached restart registry candidate for a
-  fresh disposable fixture, using decoded version-2 metadata, restored inventory
-  nodes and explicit fresh owner/other-store bindings. Preserve the saved revision
-  and counter verbatim; validate complete membership, identity collisions,
-  ownership/lifetimes and bounds before publication. Cover missing/stale bindings,
-  allocation cleanup/retry and counters beyond surviving IDs. Keep installation,
-  script-service reconstruction and command resumption deferred. This supplies
-  the registry preparation needed for later end-to-end authoritative inventory
-  command resumption in a fresh fixture.
+  fresh decode and detached restore/save. Detached restart registry preparation
+  now preserves the accepted revision and generation counter without installation.
+  Production durability and live atomic transfer remain unproven.
+- **Next action:** persist bounded owned restart script-service metadata from the
+  complete protected prepared services: shared/distinct service association,
+  ordered registration instance IDs/script IDs and cursor positions. Extend the
+  test codec with an explicit version change and strict membership/bounds checks;
+  prove fresh decode after fixture destruction preserves registered versus
+  unregistered configured items, dormant entries and service order/cursors.
+  Cover malformed metadata, allocation cleanup and retry without changing caller
+  outputs or fixtures. Keep script-service reconstruction, installation and command
+  resumption deferred. Exact registration state is needed before detached service
+  reconstruction can safely resume the authoritative inventory operation.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[Owned restart metadata](../../apps/tes3mp-server/native/transfer_rehearsal.hpp)
-contains a 64-bit revision and engine instance counter, separately from inventory
-ObjectStates and identity associations.
-[Serialization](../../apps/tes3mp-server/native/transfer_rehearsal.cpp) captures
-both from the complete protected prepared registry after stock validation and
-before sink acceptance. Pair publication swaps inventories and metadata together
-without throwing. The existing command result remains preallocated while detached;
-persistence still precedes installation, retirement and success publication.
+[Restart preparation](../../apps/tes3mp-server/native/transfer_restart.cpp)
+creates a test-only candidate containing stock registry storage. It requires
+explicit fresh owner/other-store bindings, empty source/destination fixture stores,
+decoded version-2 inventory membership and detached restored nodes. It checks exact
+membership, identity collisions, current registration/ownership, independent node
+and store lifetimes, storage identity and collection/metadata bounds before staging.
+No saved pointer is followed to resolve an old fixture. Borrowed base records and
+all inputs must outlive use; access remains synchronous and serialized.
 
-[Codec version 2](../../apps/tes3mp-server/native/transfer_save_codec.cpp) requires
-ordered, exact-width revision/counter fields. Revision must be positive and fit
-local `size_t`; the counter must be positive with content-file index `-1`, retaining
-the codec's existing generated-ID domain. Every generated item, owner and initiator
-ID must be at or below the counter. Representable maximum values round-trip;
-future command resumption must guard exhaustion rather than wrap or reset them.
-Version 1 is rejected without migration or reconstruction from surviving nodes.
+Restoration now captures node lifetime views while staging the owned lists, so
+registry preparation does not lazily allocate witnesses in caller nodes. The
+candidate retains the saved revision and last-generated ID verbatim, including
+counters beyond every surviving node and representable maxima. It never calls
+registry insertion/identity generation or assigns node identities/WorldModel.
+Publication swaps only the owned candidate pointer without allocation. Failed
+preparation preserves the existing output allocation, detached nodes and fixtures;
+staging cleanup and healthy retries are exercised. Candidate lookups reject expired
+fixture/store/node witnesses and replaced storage.
 
-Fresh file reopen/decode and detached restore/save preserve metadata and canonical
-bytes after the original fixture is destroyed. Tests generate and retire an actual
-registry node before preparation; stacking retains its counter beyond surviving
-item IDs. Malformed fields, framing, identities and allocation failures preserve
-caller outputs/storage and fixture state. Rejection paths check cleanup and healthy
-retries. Protected ownership, storage, lifetime and iterator guards remain intact.
+[Focused tests](../../apps/tes3mp-server/native/transfer_rehearsal_tests.cpp)
+encode before destroying the original fixture, then decode, restore and bind a fresh
+disposable fixture. They cover plain/scripted items, shared/distinct services,
+stacking, full/partial removal, signed/zero counts, empty inventories, malformed
+metadata/membership, collisions, stale/missing bindings and changed ownership.
+Fresh other-store state is explicitly supplied synthetic state, not reconstructed
+from this save. All restart composition links only into `tes3mp_native_loadout_tests`.
 
-Safe file failures preserve prior bytes. Uncertain outcomes retain the uninstalled
-fixture/result and latch both sink and fixture closed, including retry with a fresh
-sink. Detached decoding is the only recovery exercised. No listener notification
-or script instruction is dispatched. All transfer composition remains linked only
-into `tes3mp_native_loadout_tests`.
+Protected transfer ownership/storage/lifetime/iterator guards, persistence-before-
+install, preallocated command success and sticky fail-closed uncertainty are
+unchanged. Restart preparation also rejects a failed-closed fixture. No listener
+notification or script instruction is dispatched by restart preparation.
 
 ## Fresh verification
 
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
-`build/vnext-product`, 2026-09-15; build and each filter individually, exit **0**:
+`build/vnext-product`, 2026-09-15; build and filters individually, exit **0**:
 
 - `tes3mp_native_loadout_tests` build.
-- `inventory-transfer-command`: **48** cases, **2,208** safe rejections,
-  **96** stale/repeated intents, **384** fail-closed outcomes, **1,571** injected
-  allocation failures, including both result allocations.
-- `inventory-transfer-file-sink`: **48** cases, **384** safe file rejections,
-  **384** fail-closed outcomes, **31** invalid-file rejections and **988**
-  injected allocation failures.
-- `inventory-transfer-codec`: **48** cases, **3,412** malformed rejections,
-  **33,328** commit-path and **17,798** encoding/decoding allocation failures.
-- `inventory-transfer-commit`: **48** cases, **30,182** allocation failures.
+- `inventory-transfer-restart-registry`: **48** cases, **3,981** malformed/stale
+  rejections, **1,432** injected allocation failures; valid preflight and candidate
+  publication allocate **0**, tracked blocks after cleanup **0**.
 - `inventory-transfer-restore`: **48** cases, **226** malformed rejections,
-  **2,588** allocation failures.
+  **2,866** injected allocation failures, **48** incomplete pairs; tracked blocks
+  after cleanup **0**.
 
-Installation, retirement, success-publication allocations and tracked blocks after
-cleanup remain **0**. Logs: `build/logs/native-inventory-restart-`, then `build`,
-`command`, `file-sink`, `codec`, `commit` or `restore`, followed by `.log`.
-Documentation budget and local-link checks run individually also passed, exit **0**,
-with `docs-budget.log` and `docs-links.log` under that prefix. No verification failed;
-no complete suites, expensive gates or upstream baseline tests ran.
+Logs: `build/logs/native-restart-registry-`, followed by `build`, `focused` or
+`restore`, then `.log`. Documentation budget and local-link checks run individually
+also passed, exit **0**, with `docs-budget.log` and `docs-links.log` under that
+prefix. No verification failed. No other filters, complete suites, expensive gates
+or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Commands are synchronous, serialized and fixture-only. Revision rejection is
-in-process contention protection, not authentication or durable deduplication.
-Restoration still creates no registry, services or selections and cannot resume
-commands. Production callers, live restore installation, notifications, script
-execution and durable request deduplication remain deferred.
+The save still omits script-service registration membership/order/cursors and
+selections; configured locals and item counts cannot establish exact registration
+state. The candidate installs nothing and cannot resume commands. Script-service
+reconstruction, production callers, notifications, script execution and durable
+request deduplication remain deferred. Future resumption must reject revision/ID
+exhaustion rather than wrapping or resetting saved values.
 
-File evidence is synthetic single-writer Windows I/O in isolated scratch space,
-not crash/power-loss or production durability; POSIX and 32-bit bounds were not
-executed. Runtime/content bindings remain synthetic. Equipment, gold/other types,
-Lua/custom state, content deletion and postponed physics remain outside this slice.
-Borrowed dependencies must outlive use; consumers forbid mutation/reentry.
-Allocation tracking excludes direct C allocation, other threads and private external
-allocators. M1 real-content/enchantment evidence was not rerun; TR remains unverified.
-Networking and migration base are unchanged. Broad headless dependencies and
-baseline provenance debt remain.
+Earlier command/file-sink/codec/commit verification is inherited, not rerun here.
+File evidence remains synthetic single-writer Windows I/O, not crash/power-loss or
+production durability; POSIX and 32-bit bounds were not executed. Equipment,
+gold/other types, Lua/custom state, content deletion and postponed physics remain
+outside this slice. Allocation tracking excludes direct C allocation, other threads
+and private external allocators. M1 real-content/enchantment evidence was not rerun;
+TR remains unverified. Networking and the migration base are unchanged. Broad
+headless dependencies and baseline provenance debt remain.
