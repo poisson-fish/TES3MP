@@ -161,6 +161,23 @@ MWWorld::ContainerStoreIterator MWWorld::InventoryStore::add(
 
 void MWWorld::InventoryStore::equip(int slot, const ContainerStoreIterator& iterator)
 {
+    equip(slot, iterator, stockEquipmentContext());
+}
+
+MWWorld::InventoryStoreEquipmentContext MWWorld::InventoryStore::stockEquipmentContext()
+{
+    return { stockStackContext(), getPtr(), MWMechanics::getPlayer(),
+        [](const Ptr& item, const ESM::RefId& script) {
+            item.getRefData().getLocals().setVarByInt(script, "onpcequip", 0);
+        },
+        [this](const Ptr&) { fireEquipmentChangedEvent(); } };
+}
+
+void MWWorld::InventoryStore::equip(
+    int slot, const ContainerStoreIterator& iterator, const InventoryStoreEquipmentContext& context)
+{
+    if (!context.mEquipmentChanged || !context.mUnsetOnPCEquip)
+        throw std::logic_error("Equipment requires explicit effect consumers");
     if (iterator == end())
         throw std::runtime_error("can't equip end() iterator, use unequip function instead");
 
@@ -178,20 +195,21 @@ void MWWorld::InventoryStore::equip(int slot, const ContainerStoreIterator& iter
         throw std::runtime_error("invalid slot");
 
     if (mSlots[slot] != end())
-        unequipSlot(slot);
+        unequipSlot(slot, context);
 
     // unstack item pointed to by iterator if required
     if (iterator != end() && !slots.second
         && iterator->getCellRef().getCount() > 1) // if slots.second is true, item can stay stacked when equipped
     {
-        unstack(*iterator);
+        unstack(*iterator, 1, context.mStack);
     }
 
     mSlots[slot] = iterator;
 
     flagAsModified();
 
-    fireEquipmentChangedEvent();
+    if (mUpdatesEnabled)
+        context.mEquipmentChanged(context.mActor);
 }
 
 void MWWorld::InventoryStore::unequipAll()
@@ -606,6 +624,14 @@ int MWWorld::InventoryStore::remove(const Ptr& item, int count, bool equipReplac
 
 MWWorld::ContainerStoreIterator MWWorld::InventoryStore::unequipSlot(int slot, bool applyUpdates)
 {
+    return unequipSlot(slot, stockEquipmentContext(), applyUpdates);
+}
+
+MWWorld::ContainerStoreIterator MWWorld::InventoryStore::unequipSlot(
+    int slot, const InventoryStoreEquipmentContext& context, bool applyUpdates)
+{
+    if (!context.mEquipmentChanged || !context.mUnsetOnPCEquip)
+        throw std::logic_error("Equipment requires explicit effect consumers");
     if (slot < 0 || slot >= static_cast<int>(mSlots.size()))
         throw std::runtime_error("slot number out of range");
 
@@ -620,14 +646,14 @@ MWWorld::ContainerStoreIterator MWWorld::InventoryStore::unequipSlot(int slot, b
 
         if (it->getCellRef().getCount())
         {
-            retval = restack(*it);
+            retval = restack(*it, context.mStack);
 
-            if (getPtr() == MWMechanics::getPlayer())
+            if (context.mActor == context.mPlayer)
             {
                 // Unset OnPCEquip Variable on item's script, if it has a script with that variable declared
                 const ESM::RefId& script = it->getClass().getScript(*it);
                 if (!script.empty())
-                    (*it).getRefData().getLocals().setVarByInt(script, "onpcequip", 0);
+                    context.mUnsetOnPCEquip(*it, script);
             }
 
             if ((mSelectedEnchantItem != end()) && (mSelectedEnchantItem == it))
@@ -636,9 +662,9 @@ MWWorld::ContainerStoreIterator MWWorld::InventoryStore::unequipSlot(int slot, b
             }
         }
 
-        if (applyUpdates)
+        if (applyUpdates && mUpdatesEnabled)
         {
-            fireEquipmentChangedEvent();
+            context.mEquipmentChanged(context.mActor);
         }
 
         return retval;

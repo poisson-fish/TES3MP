@@ -366,6 +366,29 @@ void MWWorld::ContainerStore::setContListener(MWWorld::ContainerStoreListener* l
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::unstack(const Ptr& ptr, int count)
 {
     resolve();
+    return unstack(ptr, count, stockStackContext());
+}
+
+MWWorld::ContainerStoreStackContext MWWorld::ContainerStore::stockStackContext()
+{
+    return { *MWBase::Environment::get().getESMStore(),
+        [](const Ptr& item) {
+            auto& environment = MWBase::Environment::get();
+            environment.getWorldModel()->registerPtr(item);
+            const auto& script = item.getClass().getScript(item);
+            if (!script.empty())
+                environment.getWorld()->getLocalScripts().add(script, item);
+        },
+        [this](const Ptr& item, int count) { remove(item, count); },
+        [](const Ptr& item) { item.getCellRef().setCount(0); } };
+}
+
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::unstack(
+    const Ptr& ptr, int count, const ContainerStoreStackContext& context)
+{
+    if (!isResolved() || !context.mRegisterSplit || !context.mRemoveSplit)
+        throw std::logic_error("Unstack requires resolved storage and explicit services");
+    mModified = true; // Resolved-store part of stock resolve(), without an owner lookup.
     if (ptr.getCellRef().getCount() <= count)
         return end();
     MWWorld::ContainerStoreIterator it = addNewStack(ptr, subtractItems(ptr.getCellRef().getCount(false), count));
@@ -373,13 +396,8 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::unstack(const Ptr& ptr,
     MWWorld::Ptr newPtr = *it;
     newPtr.getCellRef().unsetRefNum();
     newPtr.getRefData().setLuaScripts(nullptr);
-    MWBase::Environment::get().getWorldModel()->registerPtr(newPtr);
-
-    const ESM::RefId& script = it->getClass().getScript(*it);
-    if (!script.empty())
-        MWBase::Environment::get().getWorld()->getLocalScripts().add(script, *it);
-
-    remove(ptr, ptr.getCellRef().getCount() - count);
+    context.mRegisterSplit(newPtr);
+    context.mRemoveSplit(ptr, ptr.getCellRef().getCount() - count);
 
     return it;
 }
@@ -387,6 +405,15 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::unstack(const Ptr& ptr,
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::restack(const MWWorld::Ptr& item)
 {
     resolve();
+    return restack(item, stockStackContext());
+}
+
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::restack(
+    const Ptr& item, const ContainerStoreStackContext& context)
+{
+    if (!isResolved() || !context.mDeleteStack)
+        throw std::logic_error("Restack requires resolved storage and explicit cleanup");
+    mModified = true;
     MWWorld::ContainerStoreIterator retval = end();
     for (MWWorld::ContainerStoreIterator iter(begin()); iter != end(); ++iter)
     {
@@ -402,11 +429,11 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::restack(const MWWorld::
 
     for (MWWorld::ContainerStoreIterator iter(begin()); iter != end(); ++iter)
     {
-        if (stacks(*iter, item))
+        if (stacks(*iter, item, context.mStore))
         {
             iter->getCellRef().setCount(
                 addItems(iter->getCellRef().getCount(false), item.getCellRef().getCount(false)));
-            item.getCellRef().setCount(0);
+            context.mDeleteStack(item);
             retval = iter;
             break;
         }

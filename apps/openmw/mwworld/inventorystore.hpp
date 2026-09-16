@@ -15,6 +15,17 @@ namespace MWMechanics
 
 namespace MWWorld
 {
+    struct InventoryStoreEquipmentContext
+    {
+        ContainerStoreStackContext mStack;
+        Ptr mActor;
+        Ptr mPlayer;
+        std::function<void(const Ptr&, const ESM::RefId&)> mUnsetOnPCEquip;
+        // May run gameplay effects as well as presentation. Preparation must
+        // capture the intent, never invoke a live listener on detached state.
+        std::function<void(const Ptr&)> mEquipmentChanged;
+    };
+
     class InventoryStoreListener
     {
     public:
@@ -29,6 +40,8 @@ namespace MWWorld
     ///< \brief Variant of the ContainerStore for NPCs
     class InventoryStore : public ContainerStore
     {
+        friend class Testing::PlainEquipmentFixture;
+        friend class PreparedPlainEquipment;
     public:
         static constexpr int Slot_Helmet = 0;
         static constexpr int Slot_Cuirass = 1;
@@ -75,6 +88,7 @@ namespace MWWorld
         void initSlots(TSlots& slots);
 
         void fireEquipmentChangedEvent();
+        InventoryStoreEquipmentContext stockEquipmentContext();
 
         void storeEquipmentState(
             const MWWorld::LiveCellRefBase& ref, size_t index, ESM::InventoryState& inventory) const override;
@@ -112,6 +126,7 @@ namespace MWWorld
         /// the newly inserted item.
 
         void equip(int slot, const ContainerStoreIterator& iterator);
+        void equip(int slot, const ContainerStoreIterator& iterator, const InventoryStoreEquipmentContext& context);
         ///< \warning \a iterator can not be an end()-iterator, use unequip function instead
 
         bool isEquipped(const MWWorld::ConstPtr& item);
@@ -140,6 +155,8 @@ namespace MWWorld
         /// @return the number of items actually removed
 
         ContainerStoreIterator unequipSlot(int slot, bool applyUpdates = true);
+        ContainerStoreIterator unequipSlot(
+            int slot, const InventoryStoreEquipmentContext& context, bool applyUpdates = true);
         ///< Unequip \a slot.
         ///
         /// @return an iterator to the item that was previously in the slot

@@ -48,8 +48,10 @@ namespace MWWorld
     namespace Testing
     {
         class DisposableTransferRehearsal;
+        class PlainEquipmentFixture;
     }
     class ContainerStore;
+    class PreparedPlainEquipment;
     class ESMStore;
     class LocalScripts;
     class WorldModel;
@@ -80,11 +82,24 @@ namespace MWWorld
         std::function<void(const Ptr&)> mInventoryUpdated;
     };
 
+    // Synchronous stock mechanics. Callers own registration, removal (including
+    // derived InventoryStore effects) and zero-count script cleanup. Detached
+    // preparation supplies these services over its own storage/effect intents.
+    // This seam alone does not make live mutation failure-atomic.
+    struct ContainerStoreStackContext
+    {
+        const ESMStore& mStore;
+        std::function<void(const Ptr&)> mRegisterSplit;
+        std::function<void(const Ptr&, int)> mRemoveSplit;
+        std::function<void(const Ptr&)> mDeleteStack;
+    };
+
     // Capture from a current store, then pass by value without following saved
     // pointers. This witnesses a borrowed store; it never keeps that store alive.
     class ContainerStoreResolution
     {
         friend class ContainerStore;
+        friend class PreparedPlainEquipment;
         struct Lifetime
         {
             const ContainerStore* mStore;
@@ -527,6 +542,8 @@ namespace MWWorld
         friend class ContainerStoreIteratorBase<Ptr>;
         friend class ContainerStoreIteratorBase<ConstPtr>;
         friend class Testing::DisposableTransferRehearsal;
+        friend class Testing::PlainEquipmentFixture;
+        friend class PreparedPlainEquipment;
     };
 
     class ContainerStore
@@ -582,6 +599,8 @@ namespace MWWorld
 
     protected:
         ContainerStoreListener* mListener = nullptr;
+
+        ContainerStoreStackContext stockStackContext();
 
         // Used in clone() to unset refnums of copies.
         // (RefNum should be unique, copy can not have the same RefNum).
@@ -818,12 +837,14 @@ namespace MWWorld
         ///< Restore charge on enchanted items. Note this should only be done for the player.
 
         ContainerStoreIterator unstack(const Ptr& ptr, int count = 1);
+        ContainerStoreIterator unstack(const Ptr& ptr, int count, const ContainerStoreStackContext& context);
         ///< Unstack an item in this container. The item's count will be set to count, then a new stack will be added
         ///< with (origCount-count).
         ///
         /// @return an iterator to the new stack, or end() if no new stack was created.
 
         MWWorld::ContainerStoreIterator restack(const MWWorld::Ptr& item);
+        ContainerStoreIterator restack(const Ptr& item, const ContainerStoreStackContext& context);
         ///< Attempt to re-stack an item in this container.
         /// If a compatible stack is found, the item's count is added to that stack, then the original is deleted.
         /// @return If the item was stacked, return the stack, otherwise return the old (untouched) item.
@@ -888,6 +909,8 @@ namespace MWWorld
         friend class PreparedContainerTransfer;
         // Defined/linked only by the disposable native test target.
         friend class Testing::DisposableTransferRehearsal;
+        friend class Testing::PlainEquipmentFixture;
+        friend class PreparedPlainEquipment;
     };
 
     template <class T, class U>

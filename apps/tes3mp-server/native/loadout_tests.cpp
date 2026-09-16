@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "equipment_tests.hpp"
 #include "transfer_rehearsal.hpp"
 
 #include <cmath>
@@ -6219,6 +6220,11 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter.starts_with("inventory-equipment-"))
+        {
+            MWWorld::Testing::checkPlainEquipment(filter);
+            return;
+        }
         if (filter == "enumeration-normalized")
         {
             // Simulate records interned by an earlier load in this process,

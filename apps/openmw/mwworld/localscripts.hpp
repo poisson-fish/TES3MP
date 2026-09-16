@@ -172,6 +172,10 @@ namespace MWWorld
 
         bool usesStore(const ESMStore& store) const { return &mStore == &store; }
 
+        // Weak service identity; preparation cannot keep a destroyed or replaced
+        // service alive by retaining its witness.
+        std::weak_ptr<const void> lifetimeWitness() const { return mRestartLifetime.bind(); }
+
         void startIteration();
         ///< Set the iterator to the begin of the script list.
 
