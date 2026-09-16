@@ -1,12 +1,14 @@
 #include "equipment_codec.hpp"
 
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwmechanics/activespells.hpp>
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/esmwriter.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <cmath>
 #include <limits>
 #include <sstream>
 
@@ -144,6 +146,7 @@ namespace MWWorld::Testing
         {
             ESM::RefNum mActor, mShirt, mSelected, mCounter;
             uint32_t mCount;
+            std::optional<std::array<float, 3>> mLuck;
         };
 
         Preflight preflight(std::span<const char> bytes, const EquipmentBindings& bindings)
@@ -159,7 +162,8 @@ namespace MWWorld::Testing
             const auto records = data.number();
             valid(header.empty());
             auto equipment = file.record(ESM::fourCC("EQUP"));
-            valid(equipment.field(ESM::fourCC("FVER"), 4).number() == EquipmentFormatVersion);
+            const auto version = equipment.field(ESM::fourCC("FVER"), 4).number();
+            valid(version == EquipmentFormatVersion || version == LuckEquipmentFormatVersion);
             valid(text(equipment.sub(ESM::fourCC("RUNT")).mBytes) == bindings.mEnvelope.mRuntime);
             const auto content = equipment.field(ESM::fourCC("CONT"), 32).mBytes;
             valid(std::equal(content.begin(), content.end(), bindings.mEnvelope.mContent.begin(),
@@ -170,6 +174,15 @@ namespace MWWorld::Testing
             result.mSelected = equipment.field(ESM::fourCC("SELE"), 8).identity();
             result.mCounter = equipment.field(ESM::fourCC("LGEN"), 8).identity();
             result.mCount = equipment.field(ESM::fourCC("SIZE"), 4).number();
+            if (version == LuckEquipmentFormatVersion)
+            {
+                auto luck = equipment.field(ESM::fourCC("LUCK"), 12);
+                result.mLuck = { std::bit_cast<float>(luck.number()), std::bit_cast<float>(luck.number()),
+                    std::bit_cast<float>(luck.number()) };
+                valid(std::isfinite((*result.mLuck)[0]) && (*result.mLuck)[0] >= 0 && (*result.mLuck)[0] <= 1000
+                    && std::isfinite((*result.mLuck)[1]) && (*result.mLuck)[1] >= 0 && (*result.mLuck)[1] <= 1000
+                    && std::isfinite((*result.mLuck)[2]) && (*result.mLuck)[2] >= 0 && (*result.mLuck)[2] <= 2000);
+            }
             valid(equipment.empty() && result.mCount <= PlainEquipmentValues::MaxItems && records == result.mCount + 1
                 && result.mActor == bindings.mEnvelope.mActor && result.mCounter.mContentFile < 0);
             covers(result.mCounter, result.mActor);
@@ -177,6 +190,7 @@ namespace MWWorld::Testing
             bool shirtFound = result.mShirt == ESM::RefNum{};
             bool selectedFound = result.mSelected == ESM::RefNum{};
             int64_t total = 0;
+            float luckMagnitude = 0;
             for (size_t i = 0; i < result.mCount; ++i)
             {
                 auto object = file.record(ESM::REC_CLOT);
@@ -189,7 +203,10 @@ namespace MWWorld::Testing
                 const auto baseId = reference(object.sub(ESM::fourCC("NAME")), bindings);
                 const auto* base = bindings.mContent.get<ESM::Clothing>().search(baseId);
                 valid(base && base->mData.mType == ESM::Clothing::Shirt && base->mScript.empty()
-                    && base->mEnchant.empty());
+                    && (result.mLuck || base->mEnchant.empty()));
+                const auto magnitude = MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant);
+                if (id == result.mShirt)
+                    luckMagnitude = magnitude;
                 const auto optionalId = [&](uint32_t tag) {
                     if (object.next(tag))
                         reference(object.sub(tag), bindings);
@@ -255,7 +272,8 @@ namespace MWWorld::Testing
                     object.field(ESM::fourCC("XTIM"), 4);
                 valid(object.empty());
             }
-            valid(file.empty() && shirtFound && selectedFound);
+            valid(file.empty() && shirtFound && selectedFound
+                && (!result.mLuck || (*result.mLuck)[1] == luckMagnitude));
             return result;
         }
 
@@ -343,7 +361,7 @@ namespace MWWorld::Testing
         writer.setRecordCount(static_cast<int>(1 + input.mObjects.size()));
         writer.save(stream);
         writer.startRecord("EQUP");
-        writer.writeHNT("FVER", EquipmentFormatVersion);
+        writer.writeHNT("FVER", input.mLuck ? LuckEquipmentFormatVersion : EquipmentFormatVersion);
         writer.writeHNString("RUNT", bindings.mEnvelope.mRuntime);
         writer.writeHNT("CONT", bindings.mEnvelope.mContent);
         writer.writeFormId(input.mActor, true, "ACTR");
@@ -351,6 +369,8 @@ namespace MWWorld::Testing
         writer.writeFormId(input.mSelected, true, "SELE");
         writer.writeFormId(input.mLastGenerated, true, "LGEN");
         writer.writeHNT("SIZE", static_cast<uint32_t>(input.mObjects.size()));
+        if (input.mLuck)
+            writer.writeHNT("LUCK", *input.mLuck);
         writer.endRecord("EQUP");
         for (const auto& object : input.mObjects)
         {
@@ -374,6 +394,7 @@ namespace MWWorld::Testing
         reader.getRecHeader();
         reader.skipRecord();
         PlainEquipmentValues staged{ checked.mActor, checked.mShirt, checked.mSelected, checked.mCounter, {} };
+        staged.mLuck = checked.mLuck;
         staged.mObjects.reserve(checked.mCount);
         for (size_t i = 0; i < checked.mCount; ++i)
         {

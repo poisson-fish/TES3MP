@@ -100,6 +100,7 @@ namespace MWMechanics
 
     public:
         CreatureStats();
+        explicit CreatureStats(const MWWorld::ESMStore& store);
 
         DrawState getDrawState() const;
         void setDrawState(DrawState state);

@@ -21,8 +21,15 @@ namespace ESM
     struct Spell;
 }
 
+namespace MWWorld { class ESMStore; class InventoryStore; }
+
 namespace MWMechanics
 {
+    class CreatureStats;
+    // Bounded constant-effect service: one fixed, positive, self Fortify Luck.
+    // Empty enchantment is plain; unsupported content throws before mutation.
+    float constantFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId enchantment);
+
     /// \brief Lasting spell effects
     ///
     /// \note The name of this class is slightly misleading, since it also handles lasting potion
@@ -104,7 +111,22 @@ namespace MWMechanics
 
         void update(const MWWorld::Ptr& ptr, float duration);
 
+        // Checks the complete supported actor/effect relationship without mutation.
+        void validateConstantFortifyLuck(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
+            const MWWorld::ESMStore& content, const CreatureStats& stats) const;
+
+        // Operates on detached/test-owned stats only. No Environment, rendering,
+        // RNG or callbacks. Caller stages owned presentation after durability.
+        // Existing state must contain only this actor's bounded equipment effect.
+        void updateConstantFortifyLuck(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
+            const MWWorld::ESMStore& content, CreatureStats& stats);
+
+
     private:
+        void visitNewEquipment(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
+            const MWWorld::ESMStore& content, const std::function<void(const ActiveSpellParams&)>& add);
+        static bool stillEquipped(const ActiveSpellParams& spell, const MWWorld::InventoryStore& inventory);
+
         using ParamsPredicate = std::function<bool(const ActiveSpellParams&)>;
         using EffectPredicate = std::function<bool(const ActiveSpellParams&, const ESM::ActiveEffect&)>;
         using Predicate = std::variant<ParamsPredicate, EffectPredicate>;

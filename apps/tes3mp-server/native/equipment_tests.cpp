@@ -13,6 +13,7 @@
 #include <stdexcept>
 
 #include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwmechanics/creaturestats.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/customdata.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -23,6 +24,7 @@
 #include <components/compiler/locals.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadcont.hpp>
+#include <components/esm3/loadench.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/readerscache.hpp>
@@ -95,6 +97,9 @@ namespace MWWorld::Testing
         std::array<std::unique_ptr<ManualRef>, 2> mActors;
         std::array<InventoryStore, 2> mInventories;
         std::array<Ptr, 2> mItems;
+        // This harness owns only the supported Luck slice of each actor's stats.
+        // No NPC custom-data or second writer is installed alongside it.
+        std::array<std::shared_ptr<MWMechanics::CreatureStats>, 2> mLuckStats;
         std::vector<std::string> mEvents;
         Listener mListener;
 
@@ -244,6 +249,7 @@ namespace MWWorld::Testing
             std::unique_ptr<const PlainEquipmentValues> mValues;
             ContainerStoreIterator mShirt, mSelected;
             Ptr mItem;
+            std::shared_ptr<MWMechanics::CreatureStats> mLuckStats;
 
             RestartInstallation(const RestartBindings& fresh, InventoryStore& target)
                 : mFresh(fresh)
@@ -290,6 +296,20 @@ namespace MWWorld::Testing
                     staged->mItem = node;
             }
             phase.set(Phase::Result);
+            if (saved.mLuck)
+            {
+                staged->mLuckStats = std::make_shared<MWMechanics::CreatureStats>(mStore);
+                MWMechanics::AttributeValue luck;
+                luck.setBase((*saved.mLuck)[0]);
+                // Restore the supported stat after deriving the active effect.
+                staged->mLuckStats->setAttribute(ESM::Attribute::Luck, luck);
+                staged->mLuckStats->getActiveSpells().updateConstantFortifyLuck(caller, candidate, mStore, *staged->mLuckStats);
+                luck = staged->mLuckStats->getAttribute(ESM::Attribute::Luck);
+                luck.damage((*saved.mLuck)[2]);
+                staged->mLuckStats->setAttribute(ESM::Attribute::Luck, luck);
+                require(luck.getModifier() == (*saved.mLuck)[1] && luck.getDamage() == (*saved.mLuck)[2],
+                    "Restart Luck differs from accepted values");
+            }
             staged->mValues = std::make_unique<const PlainEquipmentValues>(std::move(saved));
             phase.set(Phase::Revalidation);
             validateRestart(actor, caller, bindings, fresh);
@@ -391,6 +411,7 @@ namespace MWWorld::Testing
                 registry.mRevision = staged->mFresh.mRevision + 1;
                 registry.mLastGenerated = restored.mLastGenerated;
                 mItems[actor] = staged->mItem;
+                mLuckStats[actor].swap(staged->mLuckStats);
                 mRestartActor.reset();
                 phase.set(Phase::Publication);
                 output.swap(staged->mValues);
@@ -1087,6 +1108,7 @@ namespace MWWorld::Testing
                 registry.mRevision = staged->mRevision;
                 registry.mLastGenerated = staged->mSaved.mLastGenerated;
                 mItems[actor] = staged->mItem;
+                mLuckStats[actor].swap(staged->mPrepared.installationLuckStats());
                 mActorEffects[actor].mListener.mCalls = staged->mEffects.mListener.mCalls;
                 mActorEffects[actor].mListener.mRemovals.swap(staged->mEffects.mListener.mRemovals);
                 mActorEffects[actor].mInventoryUpdates = staged->mEffects.mInventoryUpdates;
@@ -1122,6 +1144,11 @@ namespace MWWorld::Testing
                 it->mRef.writeState(object);
                 it->mData.write(object, Compiler::Locals{});
                 object.mHasCustomState = false;
+            }
+            if (mLuckStats[actor])
+            {
+                const auto& luck = mLuckStats[actor]->getAttribute(ESM::Attribute::Luck);
+                result.mLuck = { luck.getBase(), luck.getModifier(), luck.getDamage() };
             }
             return result;
         }
@@ -1708,6 +1735,417 @@ namespace MWWorld::Testing
             }
         }
 
+        void enableLuck()
+        {
+            ESM::Attribute attribute;
+            attribute.mId = ESM::Attribute::Luck;
+            mStore.insertStatic(attribute);
+            ESM::MagicEffect magic;
+            magic.blank();
+            magic.mId = ESM::MagicEffect::FortifyAttribute;
+            magic.mData.mFlags = ESM::MagicEffect::AppliedOnce | ESM::MagicEffect::TargetAttribute;
+            mStore.insertStatic(magic);
+            ESM::Enchantment enchantment;
+            enchantment.blank();
+            enchantment.mId = ESM::RefId::stringRefId("equipment_luck");
+            enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+            enchantment.mEffects.populate({ { ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Luck,
+                ESM::RT_Self, 0, 0, 9, 9 } });
+            mStore.insertStatic(enchantment);
+            auto* shirt = const_cast<ESM::Clothing*>(mStore.get<ESM::Clothing>().find(ESM::RefId::stringRefId("equipment_shirt")));
+            shirt->mEnchant = enchantment.mId;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                mLuckStats[actor] = std::make_shared<MWMechanics::CreatureStats>(mStore);
+                mLuckStats[actor]->setAttribute(ESM::Attribute::Luck, actor == 0 ? 40.f : 65.f);
+                bindEffects(actor);
+            }
+        }
+
+        void checkLuck(size_t actor, bool equipped) const
+        {
+            const auto& stats = *mLuckStats[actor];
+            const auto& luck = stats.getAttribute(ESM::Attribute::Luck);
+            const auto expected = equipped ? 9.f : 0.f;
+            require(luck.getModified() == (actor == 0 ? 40.f : 65.f) + expected
+                    && stats.getMagicEffects().getOrDefault(
+                        MWMechanics::EffectKey(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck)).getMagnitude() == expected,
+                "Constant effect did not change the intended actor's gameplay attribute");
+            const auto& spells = stats.getActiveSpells();
+            require(std::distance(spells.begin(), spells.end()) == (equipped ? 1 : 0),
+                "Constant effect applied more than once or survived removal");
+            if (equipped)
+                require(spells.begin()->getCaster() == mActors[actor]->getPtr().getCellRef().getRefNum()
+                        && spells.begin()->getItem() == mInventories[actor].getSlot(InventoryStore::Slot_Shirt)->getCellRef().getRefNum()
+                        && spells.begin()->getEffects().front().mMagnitude == 9,
+                    "Constant effect ownership/item identity mismatch");
+        }
+
+        static void checkEnchanted(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            PlainEquipmentFixture f;
+            f.enableLuck();
+            size_t commits = 0;
+            for (bool equip : { true, false, true })
+                for (size_t actor = 0; actor < 2; ++actor)
+                {
+                    const auto before = f.snapshot();
+                    const auto path = scratch / (actor == 0 ? "a.bin" : "b.bin");
+                    EquipmentFileSink sink(path);
+                    auto command = f.equipmentCommand(actor, equip);
+                    const auto e = envelope(f.mActors[actor]->getPtr().getCellRef().getRefNum());
+                    const auto ids = referenceIds(f.installedValues(actor));
+                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                    std::unique_ptr<const EquipmentSuccess> output;
+                    EquipmentBytes bytes;
+                    FileFaults faults;
+                    require(executeEquipment(f, { command.mActor }, command, sink, bindings, output, bytes, faults)
+                            == TestPersistenceResult::Accepted && output && output->mCommand == command,
+                        "Enchanted equipment command failed");
+                    f.checkLuck(actor, equip);
+                    require(output->mLuck == f.installedValues(actor).mLuck, "Owned success lost Luck values");
+                    f.unchangedActor(before, 1 - actor);
+                    // A mechanics refresh on the same equipped item must not add its modifier again.
+                    f.mLuckStats[actor]->getActiveSpells().updateConstantFortifyLuck(
+                        f.mActors[actor]->getPtr(), f.mInventories[actor], f.mStore, *f.mLuckStats[actor]);
+                    f.checkLuck(actor, equip);
+                    PlainEquipmentValues decoded;
+                    decodeEquipment(bytes, bindings, decoded);
+                    require(sameValues(decoded, f.installedValues(actor)), "Enchanted save lost gameplay state");
+                    ++commits;
+                }
+            std::cout << "constant Fortify Luck: actor A 40->49->40->49, actor B 65->74->65->74; isolated commits="
+                << commits << '\n';
+        }
+
+        TestPersistenceResult luckCommand(size_t actor, bool equip, const std::filesystem::path& path,
+            std::unique_ptr<const EquipmentSuccess>& output, EquipmentBytes& bytes, FileFaults& faults)
+        {
+            EquipmentFileSink sink(path);
+            const auto command = equipmentCommand(actor, equip);
+            const auto e = envelope(mActors[actor]->getPtr().getCellRef().getRefNum());
+            const auto ids = referenceIds(installedValues(actor));
+            return executeEquipment(*this, { command.mActor }, command, sink, { e, mStore, ids }, output, bytes, faults);
+        }
+
+        static void checkEnchantedGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            const auto path = scratch / "guards.bin";
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int test = 0; test < 9; ++test)
+                {
+                    PlainEquipmentFixture f;
+                    f.enableLuck();
+                    std::unique_ptr<const EquipmentSuccess> output;
+                    EquipmentBytes bytes;
+                    FileFaults faults;
+                    require(f.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                        "Enchanted guard setup failed");
+                    const auto priorBytes = bytes;
+                    const auto* priorOutput = output.get();
+                    const auto priorValue = *output;
+                    const auto* priorStorage = bytes.data();
+                    const auto e = envelope(f.mActors[actor]->getPtr().getCellRef().getRefNum());
+                    const auto ids = referenceIds(f.installedValues(actor));
+                    EquipmentFileSink sink(path);
+                    auto command = f.equipmentCommand(actor, false);
+                    auto caller = EquipmentCaller{ command.mActor };
+                    auto prepared = f.prepare(actor, false);
+                    auto* enchantment = const_cast<ESM::Enchantment*>(f.mStore.get<ESM::Enchantment>().find(
+                        ESM::RefId::stringRefId("equipment_luck")));
+                    switch (test)
+                    {
+                        case 0: caller.mActor = ownedId(f.mActors[1 - actor]->getPtr().getCellRef().getRefNum()); break;
+                        case 1: --command.mExpectedRevision; break;
+                        case 2: enchantment->mEffects.mList.front().mData.mMagnMax = 10; break;
+                        case 3: enchantment->mEffects.mList.front().mData.mRange = ESM::RT_Target; break;
+                        case 4: enchantment->mEffects.mList.front().mData.mAttribute = ESM::Attribute::Strength; break;
+                        case 5: f.mLuckStats[actor]->setAttribute(ESM::Attribute::Luck, 80.f); break;
+                        case 6: f.mLuckStats[actor]->getActiveSpells() = MWMechanics::ActiveSpells{}; break;
+                        case 7: f.mLuckStats[actor]->getMagicEffects().add(
+                            { ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck }, MWMechanics::EffectParam(1)); break;
+                        case 8: f.mLuckStats[actor] = f.mLuckStats[1 - actor]; break;
+                    }
+                    const auto before = f.snapshot();
+                    faults = {};
+                    bool caught = false;
+                    try
+                    {
+                        if (test >= 5)
+                        {
+                            std::unique_ptr<const PlainEquipmentResult> internal;
+                            f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared), sink,
+                                { e, f.mStore, ids }, internal, bytes, faults);
+                        }
+                        else
+                            executeEquipment(f, caller, command, sink, { e, f.mStore, ids }, output, bytes, faults);
+                    }
+                    catch (const std::invalid_argument&) { caught = true; }
+                    if (!caught)
+                        std::cerr << "enchanted guard accepted actor=" << actor << " case=" << test << '\n';
+                    require(caught && output.get() == priorOutput && *output == priorValue && bytes == priorBytes
+                            && bytes.data() == priorStorage && faults.mWrites == 0 && equipmentFileBytes(path) == priorBytes,
+                        "Enchanted validation failure changed publication/file");
+                    f.unchanged(before);
+                    ++rejected;
+                }
+            // Version 1 cannot acquire enchantment semantics; v2 cannot lie about the consequence.
+            PlainEquipmentFixture f;
+            f.enableLuck();
+            const auto good = f.installedValues(0);
+            const auto e = envelope(good.mActor);
+            const auto ids = referenceIds(good);
+            EquipmentBytes encoded;
+            encodeEquipment(good, { e, f.mStore, ids }, encoded);
+            for (int test = 0; test < 3; ++test)
+            {
+                auto bad = good;
+                if (test == 0) bad.mLuck.reset();
+                if (test == 1) (*bad.mLuck)[1] = 9;
+                if (test == 2) (*bad.mLuck)[0] = std::numeric_limits<float>::quiet_NaN();
+                auto output = encoded;
+                bool caught = false;
+                try { encodeEquipment(bad, { e, f.mStore, ids }, output); }
+                catch (const std::invalid_argument&) { caught = true; }
+                require(caught && output == encoded, "Invalid Luck save was encoded");
+                ++rejected;
+            }
+            for (int test = 0; test < 2; ++test)
+            {
+                auto bad = encoded;
+                const std::string tag = test == 0 ? "FVER" : "LUCK";
+                const auto it = std::search(bad.begin(), bad.end(), tag.begin(), tag.end());
+                require(it != bad.end(), "Missing enchanted codec fixture field");
+                const auto offset = static_cast<size_t>(it - bad.begin()) + 8;
+                if (test == 0)
+                    bad[offset] = 1; // v1 must reject the v2 extension, not reinterpret it.
+                else
+                {
+                    const auto number = std::bit_cast<uint32_t>(9.f);
+                    for (size_t byte = 0; byte < 4; ++byte)
+                        bad[offset + 4 + byte] = static_cast<char>(number >> (8 * byte));
+                }
+                auto output = good;
+                const auto* storage = output.mObjects.data();
+                bool caught = false;
+                try { decodeEquipment(bad, { e, f.mStore, ids }, output); }
+                catch (const std::invalid_argument&) { caught = true; }
+                require(caught && sameValues(output, good) && output.mObjects.data() == storage,
+                    "Enchanted version/consequence byte rejection changed output");
+                ++rejected;
+            }
+            std::cout << "enchanted preparation/content/actor/stat/save rejections=" << rejected << '\n';
+        }
+
+        static void checkEnchantedDurability(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            const auto path = scratch / "durable.bin";
+            size_t failures = 0, recoveries = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                    for (auto failure : { FileFault::Flush, FileFault::ReplaceError, FileFault::AfterReplace })
+                    {
+                        PlainEquipmentValues prior, proposed;
+                        EquipmentBytes actual;
+                        bool restoredEquipped = false;
+                        {
+                            PlainEquipmentFixture f;
+                            f.enableLuck();
+                            std::unique_ptr<const EquipmentSuccess> output;
+                            EquipmentBytes bytes;
+                            FileFaults faults;
+                            // Ensure both possible recovered files are complete v2 states.
+                            if (equip)
+                            {
+                                require(f.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                                    "Enchanted durability setup equip failed");
+                                faults = {};
+                                require(f.luckCommand(actor, false, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                                    "Enchanted durability setup unequip failed");
+                            }
+                            else
+                                require(f.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                                    "Enchanted durability setup failed");
+                            prior = f.installedValues(actor);
+                            const auto command = f.equipmentCommand(actor, equip);
+                            const auto item = f.mWorld.getPtr({ command.mItem.mIndex, command.mItem.mContentFile });
+                            auto prepared = PreparedPlainEquipment::prepare(
+                                ContainerStoreResolution(f.mInventories[actor], f.mActors[actor]->getPtr()), item,
+                                item.getCellRef().getRefNum(), f.mWorld.getPtrRegistryRevision(), equip, f.preparationContext(actor));
+                            prepared.exportValues(f.preparationContext(actor), proposed);
+                            const auto before = f.snapshot();
+                            const auto* outputStorage = output.get();
+                            const auto outputValue = *output;
+                            const auto* bytesStorage = bytes.data();
+                            const auto priorBytes = bytes;
+                            faults = { failure, 17 };
+                            const auto outcome = f.luckCommand(actor, equip, path, output, bytes, faults);
+                            require(outcome == (failure == FileFault::Flush ? TestPersistenceResult::Rejected : TestPersistenceResult::Uncertain)
+                                    && output.get() == outputStorage && *output == outputValue
+                                    && bytes.data() == bytesStorage && bytes == priorBytes,
+                                "Failed enchanted durability published success");
+                            f.unchanged(before);
+                            f.checkLuck(actor, !equip);
+                            require(!std::filesystem::exists(path.string() + ".tmp"), "Enchanted failure left staging file");
+                            ++failures;
+                            if (failure == FileFault::Flush)
+                            {
+                                require(equipmentFileBytes(path) == priorBytes, "Safe failure replaced enchanted save");
+                                faults = {};
+                                require(f.luckCommand(actor, equip, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                                    "Safe enchanted retry failed");
+                                f.checkLuck(actor, equip);
+                            }
+                            else
+                            {
+                                for (size_t blockedActor = 0; blockedActor < 2; ++blockedActor)
+                                {
+                                    const auto blocked = f.equipmentCommand(blockedActor, blockedActor == actor ? equip : true);
+                                    EquipmentFileSink freshSink(path);
+                                    const auto e = envelope(f.mActors[blockedActor]->getPtr().getCellRef().getRefNum());
+                                    const auto ids = referenceIds(f.installedValues(blockedActor));
+                                    faults = {};
+                                    require(executeEquipment(f, { blocked.mActor }, blocked, freshSink,
+                                                { e, f.mStore, ids }, output, bytes, faults) == TestPersistenceResult::Uncertain
+                                            && faults.mWrites == 0, "Uncertain enchanted fixture accepted another command");
+                                }
+                                f.unchanged(before);
+                            }
+                            actual = equipmentFileBytes(path);
+                            restoredEquipped = failure == FileFault::ReplaceError ? !equip : equip;
+                        } // Destroy all old actors, stats, preparations and sinks before recovery.
+                        PlainEquipmentFixture fresh(actor);
+                        fresh.enableLuck();
+                        const auto expected = failure == FileFault::ReplaceError ? prior : proposed;
+                        const auto e = envelope(expected.mActor);
+                        const auto ids = referenceIds(expected);
+                        const EquipmentBindings bindings{ e, fresh.mStore, ids };
+                        const auto witness = fresh.restartBindings(expected.mLastGenerated);
+                        std::unique_ptr<const PlainEquipmentValues> restored;
+                        EquipmentBytes bytes;
+                        FileFaults faults;
+                        const auto other = fresh.snapshot();
+                        require(fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), path, bindings, witness,
+                                    restored, bytes, faults) == FileReadResult::Read
+                                && sameValues(*restored, expected) && sameValues(fresh.installedValues(actor), expected)
+                                && bytes == actual && fresh.mActorEffects[actor].mListener.mCalls == 0
+                                && fresh.mActorEffects[actor].mNotifications.empty(),
+                            "Enchanted restart changed durable consequence or replayed publication");
+                        fresh.checkLuck(actor, restoredEquipped);
+                        fresh.unchangedActor(other, 1 - actor);
+                        std::unique_ptr<const EquipmentSuccess> output;
+                        faults = {};
+                        require(fresh.luckCommand(actor, !restoredEquipped, path, output, bytes, faults)
+                                == TestPersistenceResult::Accepted, "Enchanted recovery continuation failed");
+                        fresh.checkLuck(actor, !restoredEquipped);
+                        ++recoveries;
+                    }
+            std::cout << "enchanted durability failures=" << failures << " fresh recoveries/continuations=" << recoveries << '\n';
+        }
+
+        static void checkEnchantedAllocations(const std::filesystem::path& scratch)
+        {
+            using namespace Allocations;
+            EquipmentScratch directory(scratch);
+            const auto path = scratch / "allocations.bin";
+            size_t failures = 0, retries = 0;
+            // Equip and unequip differ in effect insertion/removal; restart owns
+            // a newly reconstructed stats object. Sweep each new path once.
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                size_t allocations = 0;
+                for (size_t fail = 0; fail <= allocations + 1; ++fail)
+                {
+                    auto f = std::make_unique<PlainEquipmentFixture>();
+                    f->enableLuck();
+                    std::unique_ptr<const EquipmentSuccess> output;
+                    EquipmentBytes bytes;
+                    FileFaults faults;
+                    require(f->luckCommand(0, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                        "Allocation fixture initial equip failed");
+                    if (mode == 0)
+                    {
+                        faults = {};
+                        require(f->luckCommand(0, false, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                            "Allocation fixture initial unequip failed");
+                    }
+                    const auto saved = f->installedValues(0);
+                    const auto persisted = equipmentFileBytes(path);
+                    if (mode == 2)
+                    {
+                        f.reset();
+                        f = std::make_unique<PlainEquipmentFixture>(0);
+                        f->enableLuck();
+                    }
+                    const auto before = f->snapshot();
+                    const auto* outputStorage = output.get();
+                    const auto outputValue = *output;
+                    const auto oldBytes = bytes;
+                    const auto* bytesStorage = bytes.data();
+                    const auto e = envelope(saved.mActor);
+                    const auto ids = referenceIds(saved);
+                    const EquipmentBindings bindings{ e, f->mStore, ids };
+                    const auto fresh = mode == 2 ? std::optional(f->restartBindings(saved.mLastGenerated)) : std::nullopt;
+                    std::unique_ptr<const PlainEquipmentValues> restored;
+                    faults = {};
+                    Trace trace;
+                    bool caught = false;
+                    {
+                        Observe observe(trace, fail);
+                        try
+                        {
+                            if (mode == 2)
+                            {
+                                if (f->restartEquipment(0, f->mActors[0]->getPtr(), path, bindings, *fresh,
+                                        restored, bytes, faults) != FileReadResult::Read)
+                                    throw std::runtime_error("Allocation restart I/O failure");
+                            }
+                            else if (f->luckCommand(0, mode == 0, path, output, bytes, faults) != TestPersistenceResult::Accepted)
+                                throw std::runtime_error("Allocation command I/O failure");
+                        }
+                        catch (const std::exception&) { caught = true; }
+                        if (!caught)
+                        {
+                            f->checkLuck(0, mode != 1);
+                            output.reset();
+                            restored.reset();
+                            EquipmentBytes{}.swap(bytes);
+                            f.reset();
+                        }
+                    }
+                    if (fail == 0)
+                        allocations = trace.mTotal;
+                    require(trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                        "Enchanted allocation rejection/cleanup leaked owned state");
+                    if (fail > 0 && fail <= allocations)
+                    {
+                        require(caught && trace.mFailures == 1 && !restored && output.get() == outputStorage
+                                && *output == outputValue && bytes.data() == bytesStorage && bytes == oldBytes
+                                && equipmentFileBytes(path) == persisted && trace.visits(Phase::Installation) == 0
+                                && trace.visits(Phase::Publication) == 0,
+                            "Enchanted allocation failure changed canonical state, file or success");
+                        f->unchanged(before);
+                        require(!std::filesystem::exists(path.string() + ".tmp"), "Allocation failure left temporary file");
+                        ++failures;
+                    }
+                    else
+                    {
+                        require(!caught && trace.mFailures == 0 && trace.mTotal == allocations
+                                && trace.allocations(Phase::Installation) == 0 && trace.allocations(Phase::Publication) == 0
+                                && trace.allocations(Phase::Retirement) == 0,
+                            "Enchanted success allocated after durable acceptance");
+                        ++retries;
+                    }
+                }
+            }
+            std::cout << "enchanted individually failed allocations=" << failures
+                << " successful end-of-sweep retries=" << retries << " remaining-after-cleanup=0\n";
+        }
+
         InventoryStoreEquipmentContext context(size_t actor, size_t player)
         {
             return { { mStore,
@@ -1760,7 +2198,7 @@ namespace MWWorld::Testing
 
         PlainEquipmentContext preparationContext(size_t actor) const
         {
-            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr() };
+            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr(), mLuckStats[actor] };
         }
 
         PreparedPlainEquipment prepare(size_t actor, bool equip)
@@ -1769,6 +2207,29 @@ namespace MWWorld::Testing
                 ContainerStoreResolution(mInventories[actor], mActors[actor]->getPtr()), mItems[actor],
                 mItems[actor].getCellRef().getRefNum(), mWorld.getPtrRegistryRevision(), equip,
                 preparationContext(actor));
+        }
+
+        std::string luckState(size_t actor) const
+        {
+            if (!mLuckStats[actor])
+                return {};
+            std::ostringstream stream(std::ios::binary);
+            ESM::ESMWriter writer;
+            writer.save(stream);
+            writer.startRecord("LUCK");
+            ESM::ActiveSpells active;
+            mLuckStats[actor]->getActiveSpells().writeState(active);
+            active.save(writer);
+            for (const auto& [key, value] : mLuckStats[actor]->getMagicEffects())
+            {
+                writer.writeHNRefId("EFID", key.mId);
+                writer.writeHNRefId("ARG_", key.mArg);
+                writer.writeHNT("BASE", value.getBase());
+                writer.writeHNT("MODI", value.getModifier());
+            }
+            writer.endRecord("LUCK");
+            writer.close();
+            return stream.str();
         }
 
         struct Snapshot
@@ -1781,6 +2242,9 @@ namespace MWWorld::Testing
                 RefData mData;
                 const SceneUtil::PositionAttitudeTransform* mScene;
             };
+            std::array<const MWMechanics::CreatureStats*, 2> mLuckStorage{};
+            std::array<MWMechanics::AttributeValue, 2> mLuck;
+            std::array<std::string, 2> mLuckEffects;
             PtrRegistry::Snapshot mRegistry;
             LocalScripts::List mScripts;
             std::array<std::vector<Node>, 2> mNodes;
@@ -1822,6 +2286,10 @@ namespace MWWorld::Testing
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto& store = mInventories[i];
+                result.mLuckStorage[i] = mLuckStats[i].get();
+                result.mLuckEffects[i] = luckState(i);
+                if (mLuckStats[i])
+                    result.mLuck[i] = mLuckStats[i]->getAttribute(ESM::Attribute::Luck);
                 result.mActorEffects[i] = { mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates };
                 result.mRemovals[i] = mActorEffects[i].mListener.mRemovals;
                 result.mNotifications[i] = mActorEffects[i].mNotifications;
@@ -1853,6 +2321,9 @@ namespace MWWorld::Testing
         void unchangedActor(const Snapshot& before, size_t i) const
         {
             const auto& store = mInventories[i];
+            require(before.mLuckStorage[i] == mLuckStats[i].get() && before.mLuckEffects[i] == luckState(i)
+                    && (!mLuckStats[i] || before.mLuck[i] == mLuckStats[i]->getAttribute(ESM::Attribute::Luck)),
+                "Equipment rejection changed canonical Luck state");
             require(before.mActorEffects[i]
                         == std::pair{ mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates }
                     && before.mRemovals[i] == mActorEffects[i].mListener.mRemovals
@@ -1906,6 +2377,7 @@ namespace MWWorld::Testing
         {
             return std::tie(a.mActor, a.mShirt, a.mSelected, a.mLastGenerated)
                 == std::tie(b.mActor, b.mShirt, b.mSelected, b.mLastGenerated)
+                && a.mLuck == b.mLuck
                 && std::equal(a.mObjects.begin(), a.mObjects.end(), b.mObjects.begin(), b.mObjects.end(), sameObject);
         }
 
@@ -2020,7 +2492,7 @@ namespace MWWorld::Testing
                     ++revision; // Same stock counter semantics as commitEquipment.
             phase.set(Phase::Result);
             auto staged = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ command,
-                ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision });
+                ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision, result.mLuck });
             std::unique_ptr<const PlainEquipmentResult> internal;
             const auto outcome = commitEquipment(actor, actorPtr, std::move(prepared), file, bindings, internal, bytes, faults);
             if (outcome == TestPersistenceResult::Accepted)
@@ -5478,6 +5950,26 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-enchanted-allocations")
+        {
+            PlainEquipmentFixture::checkEnchantedAllocations(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-enchanted-guards")
+        {
+            PlainEquipmentFixture::checkEnchantedGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-enchanted-durability")
+        {
+            PlainEquipmentFixture::checkEnchantedDurability(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-enchanted")
+        {
+            PlainEquipmentFixture::checkEnchanted(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-command")
         {
             PlainEquipmentFixture::checkCommand(scratch);

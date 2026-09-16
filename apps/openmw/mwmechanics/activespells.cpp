@@ -232,6 +232,140 @@ namespace MWMechanics
         return static_cast<ESM::ActiveSpells::Flags>(mFlags & flags) == flags;
     }
 
+    float constantFortifyLuckMagnitude(const MWWorld::ESMStore& store, ESM::RefId id)
+    {
+        if (id.empty())
+            return 0;
+        const auto* enchantment = store.get<ESM::Enchantment>().search(id);
+        if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
+            || enchantment->mEffects.mList.size() != 1)
+            throw std::invalid_argument("Equipment requires one constant Fortify Luck effect");
+        const auto& effect = enchantment->mEffects.mList.front().mData;
+        const auto* magic = store.get<ESM::MagicEffect>().search(effect.mEffectID);
+        if (effect.mEffectID != ESM::MagicEffect::FortifyAttribute || effect.mAttribute != ESM::Attribute::Luck
+            || !effect.mSkill.empty() || effect.mRange != ESM::RT_Self || effect.mArea != 0
+            || effect.mMagnMin <= 0 || effect.mMagnMin > 1000 || effect.mMagnMin != effect.mMagnMax
+            || !magic || !(magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
+            || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude
+                | ESM::MagicEffect::CasterLinked | ESM::MagicEffect::NonRecastable))
+            || !ESM::MagicEffect::getResistanceEffect(effect.mEffectID).empty())
+            throw std::invalid_argument("Unsupported constant Fortify Luck equipment effect");
+        return static_cast<float>(effect.mMagnMin);
+    }
+
+    bool ActiveSpells::stillEquipped(const ActiveSpellParams& spell, const MWWorld::InventoryStore& inventory)
+    {
+        for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
+        {
+            const auto item = inventory.getSlot(slot);
+            if (item != inventory.end() && item->getCellRef().getRefNum().isSet()
+                && item->getCellRef().getRefNum() == spell.mItem)
+                return true;
+        }
+        return false;
+    }
+
+    void ActiveSpells::visitNewEquipment(const MWWorld::Ptr& actor, const MWWorld::InventoryStore& inventory,
+        const MWWorld::ESMStore& content, const std::function<void(const ActiveSpellParams&)>& add)
+    {
+        for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
+        {
+            const auto item = inventory.getSlot(slot);
+            if (item == inventory.end())
+                continue;
+            const auto id = item->getClass().getEnchantment(*item);
+            const auto* enchantment = id.empty() ? nullptr : content.get<ESM::Enchantment>().search(id);
+            if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect)
+                continue;
+            if (std::find_if(mSpells.begin(), mSpells.end(), [&](const ActiveSpellParams& spell) {
+                    return spell.mItem == item->getCellRef().getRefNum()
+                        && spell.hasFlag(ESM::ActiveSpells::Flag_Equipment)
+                        && spell.mSourceSpellId == item->getCellRef().getRefId();
+                }) == mSpells.end())
+                add(ActiveSpellParams{ *item, enchantment, actor });
+        }
+    }
+
+    void ActiveSpells::validateConstantFortifyLuck(const MWWorld::Ptr& actor,
+        const MWWorld::InventoryStore& inventory, const MWWorld::ESMStore& content, const CreatureStats& stats) const
+    {
+        const auto item = inventory.getSlot(MWWorld::InventoryStore::Slot_Shirt);
+        const float magnitude = item == inventory.end() ? 0
+            : constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));
+        const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);
+        if (&stats.getActiveSpells() != this || mIterating || !mQueue.empty() || !mPurges.empty()
+            || stats.getAttribute(ESM::Attribute::Luck).getModifier() != magnitude
+            || stats.getMagicEffects().getOrDefault(key).getMagnitude() != magnitude
+            || mSpells.size() != (magnitude ? 1 : 0))
+            throw std::invalid_argument("Equipment canonical Luck/effect state changed");
+        for (const auto& [effect, value] : stats.getMagicEffects())
+            if (!(effect == key) || value.getBase() != 0 || value.getModifier() != magnitude)
+                throw std::invalid_argument("Equipment has unsupported magic effects");
+        if (!magnitude)
+            return;
+        const auto& spell = mSpells.front();
+        if (spell.mCaster != actor.getCellRef().getRefNum() || spell.mItem != item->getCellRef().getRefNum()
+            || spell.mSourceSpellId != item->getCellRef().getRefId() || spell.mActiveSpellId != spell.mSourceSpellId
+            || spell.mFlags != ESM::ActiveSpells::Flag_Equipment || spell.mEffects.size() != 1
+            || !spell.mSource.isEmpty())
+            throw std::invalid_argument("Equipment canonical effect ownership changed");
+        const auto& effect = spell.mEffects.front();
+        if (effect.mEffectId != key.mId || effect.getSkillOrAttribute() != key.mArg
+            || effect.mMagnitude != magnitude || effect.mMinMagnitude != magnitude || effect.mMaxMagnitude != magnitude
+            || effect.mFlags != ESM::ActiveEffect::Flag_Applied || effect.mDuration != -1 || effect.mTimeLeft != -1)
+            throw std::invalid_argument("Equipment canonical applied effect changed");
+    }
+
+    void ActiveSpells::updateConstantFortifyLuck(const MWWorld::Ptr& actor,
+        const MWWorld::InventoryStore& inventory, const MWWorld::ESMStore& content, CreatureStats& stats)
+    {
+        if (&stats.getActiveSpells() != this || !actor.hasLiveReference()
+            || !actor.getCellRef().getRefNum().isSet() || mIterating || !mQueue.empty() || !mPurges.empty()
+            || mSpells.size() > 1)
+            throw std::invalid_argument("Invalid bounded equipment actor/effect state");
+        for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
+        {
+            const auto item = inventory.getSlot(slot);
+            if (item == inventory.end())
+                continue;
+            if (slot != MWWorld::InventoryStore::Slot_Shirt || item->getType() != ESM::Clothing::sRecordId
+                || !item->getClass().getScript(*item).empty())
+                throw std::invalid_argument("Constant effect context requires a non-scripted shirt");
+            constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));
+        }
+        for (const auto& spell : mSpells)
+            if (spell.mCaster != actor.getCellRef().getRefNum() || spell.mFlags != ESM::ActiveSpells::Flag_Equipment
+                || spell.mEffects.size() != 1 || spell.mEffects[0].mEffectId != ESM::MagicEffect::FortifyAttribute
+                || spell.mEffects[0].getSkillOrAttribute() != ESM::Attribute::Luck
+                || spell.mEffects[0].mFlags != ESM::ActiveEffect::Flag_Applied)
+                throw std::invalid_argument("Foreign or unsupported constant equipment effect");
+        const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);
+        // Removal uses the saved applied magnitude, never a freshly rolled value.
+        for (auto it = mSpells.begin(); it != mSpells.end();)
+        {
+            if (stillEquipped(*it, inventory))
+                ++it;
+            else
+            {
+                const auto magnitude = it->mEffects.front().mMagnitude;
+                stats.getMagicEffects().add(key, EffectParam(-magnitude));
+                modifyFortifyAttribute(stats, ESM::Attribute::Luck, -magnitude);
+                it = mSpells.erase(it);
+            }
+        }
+        visitNewEquipment(actor, inventory, content, [&](const ActiveSpellParams& params) {
+            auto& spell = mSpells.emplace_back(params);
+            // One equipment spell per actor: a scoped source ID suffices here.
+            // Production/global active-spell identity allocation remains separate.
+            spell.mActiveSpellId = spell.mSourceSpellId;
+            auto& effect = spell.mEffects.front();
+            effect.mMagnitude = effect.mMinMagnitude; // validated fixed magnitude; stock roll consumes no RNG
+            modifyFortifyAttribute(stats, effect.getSkillOrAttribute(), effect.mMagnitude);
+            stats.getMagicEffects().add(key, EffectParam(effect.mMagnitude));
+            effect.mFlags = ESM::ActiveEffect::Flag_Applied;
+        });
+    }
+
     void ActiveSpells::update(const MWWorld::Ptr& ptr, float duration)
     {
         if (mIterating)
@@ -316,35 +450,14 @@ namespace MWMechanics
             if (store.getInvListener() != nullptr)
             {
                 context.mPlayNonLooping = !store.isFirstEquip();
-                const auto world = MWBase::Environment::get().getWorld();
-                for (int slotIndex = 0; slotIndex < MWWorld::InventoryStore::Slots; slotIndex++)
-                {
-                    auto slot = store.getSlot(slotIndex);
-                    if (slot == store.end())
-                        continue;
-                    const ESM::RefId& enchantmentId = slot->getClass().getEnchantment(*slot);
-                    if (enchantmentId.empty())
-                        continue;
-                    const ESM::Enchantment* enchantment
-                        = world->getStore().get<ESM::Enchantment>().search(enchantmentId);
-                    if (enchantment == nullptr || enchantment->mData.mType != ESM::Enchantment::ConstantEffect)
-                        continue;
-                    if (std::find_if(mSpells.begin(), mSpells.end(),
-                            [&](const ActiveSpellParams& params) {
-                                return params.mItem == slot->getCellRef().getRefNum()
-                                    && params.hasFlag(ESM::ActiveSpells::Flag_Equipment)
-                                    && params.mSourceSpellId == slot->getCellRef().getRefId();
-                            })
-                        != mSpells.end())
-                        continue;
-                    // world->breakInvisibility leads to a stack overflow as it calls this method so just break
-                    // invisibility manually
-                    purgeEffect(ptr, ESM::MagicEffect::Invisibility);
-                    applyPurges(ptr);
-                    const bool added = initParams(ptr, ActiveSpellParams{ *slot, enchantment, ptr }, context);
-                    if (added)
-                        context.mUpdateSpellWindow = true;
-                }
+                visitNewEquipment(ptr, store, *MWBase::Environment::get().getESMStore(),
+                    [&](const ActiveSpellParams& params) {
+                        // breakInvisibility calls update recursively; purge directly.
+                        purgeEffect(ptr, ESM::MagicEffect::Invisibility);
+                        applyPurges(ptr);
+                        if (initParams(ptr, params, context))
+                            context.mUpdateSpellWindow = true;
+                    });
             }
         }
 
@@ -446,17 +559,7 @@ namespace MWMechanics
             {
                 // Remove effects tied to equipment that has been unequipped
                 const auto& store = ptr.getClass().getInventoryStore(ptr);
-                remove = true;
-                for (int slotIndex = 0; slotIndex < MWWorld::InventoryStore::Slots; slotIndex++)
-                {
-                    auto slot = store.getSlot(slotIndex);
-                    if (slot != store.end() && slot->getCellRef().getRefNum().isSet()
-                        && slot->getCellRef().getRefNum() == spellIt->mItem)
-                    {
-                        remove = false;
-                        break;
-                    }
-                }
+                remove = !stillEquipped(*spellIt, store);
             }
             if (remove)
             {

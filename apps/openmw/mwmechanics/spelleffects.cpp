@@ -106,11 +106,7 @@ namespace
 
     void fortifyAttribute(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
     {
-        auto& creatureStats = target.getClass().getCreatureStats(target);
-        auto attribute = effect.getSkillOrAttribute();
-        auto attr = creatureStats.getAttribute(attribute);
-        attr.setModifier(attr.getModifier() + magnitude);
-        creatureStats.setAttribute(attribute, attr);
+        MWMechanics::modifyFortifyAttribute(target.getClass().getCreatureStats(target), effect.getSkillOrAttribute(), magnitude);
     }
 
     void damageSkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
@@ -428,6 +424,13 @@ namespace
 
 namespace MWMechanics
 {
+    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude)
+    {
+        auto value = stats.getAttribute(attribute);
+        value.setModifier(value.getModifier() + magnitude);
+        stats.setAttribute(attribute, value);
+    }
+
     namespace
     {
         ESM::ActiveEffect::Flags applyActorMagicEffect(const MWWorld::Ptr& target, const MWWorld::Ptr& caster,

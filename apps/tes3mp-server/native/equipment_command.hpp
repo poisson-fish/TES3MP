@@ -5,6 +5,8 @@
 #include "test_persistence.hpp"
 
 #include <vector>
+#include <array>
+#include <optional>
 
 namespace MWWorld::Testing
 {
@@ -39,6 +41,7 @@ namespace MWWorld::Testing
         EquipmentCommand mCommand;
         InventoryInstanceId mShirt, mSelected, mLastGenerated;
         std::uint64_t mRevision = 0;
+        std::optional<std::array<float, 3>> mLuck;
         bool operator==(const EquipmentSuccess&) const = default;
     };
 
@@ -50,7 +53,7 @@ namespace MWWorld::Testing
     // recovery into an explicitly fresh fixture. All failures preserve output
     // allocation/value and bytes. Owned success swaps only after durable install.
     // Preserve stock counters (including revision rollover), 64-node preparation
-    // and 65-node format-1 saves. Revision is not a request-deduplication token.
+    // and 65-node saves (plain format 1; bounded Luck format 2). Revision is not a request-deduplication token.
     TestPersistenceResult executeEquipment(PlainEquipmentFixture& fixture, EquipmentCaller caller,
         EquipmentCommand command, EquipmentFileSink& file, const EquipmentBindings& bindings,
         std::unique_ptr<const EquipmentSuccess>& output, std::vector<char>& bytes, FileFaults& faults);

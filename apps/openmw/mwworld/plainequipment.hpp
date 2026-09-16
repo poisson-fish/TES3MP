@@ -3,7 +3,12 @@
 
 #include "containerstore.hpp"
 
+#include <array>
+#include <optional>
+
 #include <components/esm3/objectstate.hpp>
+
+namespace MWMechanics { class CreatureStats; }
 
 namespace MWWorld
 {
@@ -16,6 +21,9 @@ namespace MWWorld
         const LocalScripts& mLocalScripts;
         Ptr mActor;
         Ptr mPlayer;
+        // Opt-in test-owned Luck state; keeps its source alive through revalidation.
+        std::shared_ptr<const MWMechanics::CreatureStats> mLuckStats;
+
     };
 
     struct PlainEquipmentResult
@@ -45,6 +53,7 @@ namespace MWWorld
         };
         ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
         std::vector<Item> mItems; // Includes dormant nodes; owned IDs/values only.
+        std::optional<std::array<float, 3>> mLuck;
         std::vector<Effect> mEffects;
         bool operator==(const PlainEquipmentResult&) const = default;
     };
@@ -58,6 +67,11 @@ namespace MWWorld
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
         ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
         std::vector<ESM::ObjectState> mObjects;
+        // Format-2 extension: Luck base, modifier, damage. Other actor stats are
+        // outside this bounded equipment save. Active equipment is derived from
+        // the shirt and fixed content; modifier must agree with that consequence.
+        std::optional<std::array<float, 3>> mLuck;
+
         void validate(const ESMStore& content, ESM::RefNum expectedActor) const;
         void swap(PlainEquipmentValues& other) noexcept;
     };
@@ -88,9 +102,10 @@ namespace MWWorld
     };
 
     // Bounded engine preparation, NOT a command/installation/persistence API.
-    // Only resolved, <=64-node, plain-shirt inventories and one slot are supported.
+    // Only resolved, <=64-node shirt inventories and one slot are supported.
     // Actor/player must match; callers still provide authentication/serialization.
-    // Reject scripts, enchantments, Lua/custom state and other slots/types visibly.
+    // Plain by default; explicit Luck stats opt into one fixed constant effect.
+    // Reject scripts, other enchantments, Lua/custom state and other slots/types.
     // Content/WorldModel must outlive validation; store/reference/service lifetimes
     // are witnessed. Revalidation checks current state, not mutation history.
     // Failure leaves live storage, services, effects and prior caller output intact.
@@ -103,6 +118,7 @@ namespace MWWorld
         // Only the test-owned fixture may stage installation. No public mutation
         // or persistence API: revalidate and require the exact receiving store.
         InventoryStore& installationCandidate(const PlainEquipmentContext& context, const InventoryStore& target);
+        std::shared_ptr<MWMechanics::CreatureStats>& installationLuckStats();
 
     public:
         static constexpr size_t MaxItems = 64;

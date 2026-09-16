@@ -19,8 +19,13 @@
 namespace MWMechanics
 {
     CreatureStats::CreatureStats()
+        : CreatureStats(*MWBase::Environment::get().getESMStore())
     {
-        for (const ESM::Attribute& attribute : MWBase::Environment::get().getESMStore()->get<ESM::Attribute>())
+    }
+
+    CreatureStats::CreatureStats(const MWWorld::ESMStore& store)
+    {
+        for (const ESM::Attribute& attribute : store.get<ESM::Attribute>())
         {
             mAttributes.emplace(attribute.mId, AttributeValue{});
         }

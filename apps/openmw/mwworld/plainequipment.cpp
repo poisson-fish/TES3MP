@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "class.hpp"
+#include "../mwmechanics/creaturestats.hpp"
 #include "esmstore.hpp"
 #include "inventorystore.hpp"
 #include "worldmodel.hpp"
@@ -108,6 +109,7 @@ namespace MWWorld
             counterCovers(input.mLastGenerated, input.mActor);
             const Compiler::Locals declarations;
             int64_t total = 0;
+            float magnitude = 0;
             bool shirtFound = input.mShirt == ESM::RefNum{};
             bool selectedFound = input.mSelected == ESM::RefNum{};
             for (size_t i = 0; i < input.mObjects.size(); ++i)
@@ -123,8 +125,11 @@ namespace MWWorld
                 recordId(ref.mRefID, true);
                 const auto* base = content.get<ESM::Clothing>().search(ref.mRefID);
                 if (!base || base->mData.mType != ESM::Clothing::Shirt || !base->mScript.empty()
-                    || !base->mEnchant.empty())
+                    || (!input.mLuck && !base->mEnchant.empty()))
                     throw std::invalid_argument("Equipment values require supplied plain shirt content");
+                const auto effect = MWMechanics::constantFortifyLuckMagnitude(content, base->mEnchant);
+                if (ref.mRefNum == input.mShirt)
+                    magnitude = effect;
                 for (const auto& id : { ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap })
                     recordId(id);
                 textValue(ref.mGlobalVariable);
@@ -154,6 +159,13 @@ namespace MWWorld
                 if (ref.mRefNum == input.mSelected)
                     selectedFound = true; // Stock selections may retain dormant members.
             }
+            if (input.mLuck)
+            {
+                const auto& luck = *input.mLuck;
+                if (!std::isfinite(luck[0]) || luck[0] < 0 || luck[0] > 1000
+                    || luck[1] != magnitude || !std::isfinite(luck[2]) || luck[2] < 0 || luck[2] > 2000)
+                    throw std::invalid_argument("Equipment Luck state disagrees with constant effect");
+            }
             if (!shirtFound || !selectedFound)
                 throw std::invalid_argument("Foreign equipment shirt or selection identity");
         }
@@ -172,6 +184,7 @@ namespace MWWorld
         std::swap(mSelected, other.mSelected);
         std::swap(mLastGenerated, other.mLastGenerated);
         mObjects.swap(other.mObjects);
+        mLuck.swap(other.mLuck);
     }
 
     struct PreparedPlainEquipment::State
@@ -194,6 +207,8 @@ namespace MWWorld
         // RefData aliases and iterators. Construct fresh storage and relocate slots.
         InventoryStore mCandidate;
         PlainEquipmentResult mResult;
+        std::shared_ptr<MWMechanics::CreatureStats> mLuckStats;
+        MWMechanics::AttributeValue mBeforeLuck;
 
         State(const ContainerStoreResolution& resolution, const PlainEquipmentContext& context)
             : mResolution(resolution)
@@ -253,12 +268,13 @@ namespace MWWorld
             item.mContainerStore = &store;
             registered(item, context.mWorldModel);
             if (context.mStore.get<ESM::Clothing>().search(node.mRef.getRefId()) != node.mBase
-                || !node.mBase->mScript.empty() || !node.mBase->mEnchant.empty()
+                || !node.mBase->mScript.empty() || (!context.mLuckStats && !node.mBase->mEnchant.empty())
                 || node.mBase->mData.mType != ESM::Clothing::Shirt || !node.mData.getLocals().getScriptId().empty()
                 || !node.mData.getLocals().isEmpty() || node.mData.getLuaScripts() || node.mData.getCustomData()
                 || node.mData.isDeletedByContentFile() || node.mRef.getCount(false) == std::numeric_limits<int>::min()
                 || context.mLocalScripts.prepareRemove(&node.mRef).hasRegistration())
                 throw std::invalid_argument("Equipment preparation supports only plain non-scripted shirts");
+            MWMechanics::constantFortifyLuckMagnitude(context.mStore, node.mBase->mEnchant);
         }
 
         void capture(const InventoryStore& source)
@@ -294,6 +310,20 @@ namespace MWWorld
                     mCandidate.mSelectedEnchantItem = it;
             }
             mCandidate.mResolved = true;
+            if (mContext.mLuckStats)
+            {
+                mContext.mLuckStats->getActiveSpells().validateConstantFortifyLuck(
+                    mContext.mActor, source, mContext.mStore, *mContext.mLuckStats);
+                mBeforeLuck = mContext.mLuckStats->getAttribute(ESM::Attribute::Luck);
+                mLuckStats = std::make_shared<MWMechanics::CreatureStats>(mContext.mStore);
+                auto base = mBeforeLuck;
+                base.setModifier(0);
+                mLuckStats->setAttribute(ESM::Attribute::Luck, base);
+                mLuckStats->getActiveSpells().updateConstantFortifyLuck(
+                    mContext.mActor, mCandidate, mContext.mStore, *mLuckStats);
+                if (mLuckStats->getAttribute(ESM::Attribute::Luck) != mBeforeLuck)
+                    throw std::invalid_argument("Equipment source Luck disagrees with equipped effect");
+            }
             mResult.mActor = mContext.mActor.getCellRef().getRefNum();
             mResult.mLastGenerated = mRegistry.mLastGenerated;
         }
@@ -302,9 +332,14 @@ namespace MWWorld
         {
             if (mScriptsLifetime.expired() || &context.mStore != &mContext.mStore
                 || &context.mWorldModel != &mContext.mWorldModel || &context.mLocalScripts != &mContext.mLocalScripts
+                || context.mLuckStats != mContext.mLuckStats
+                || (context.mLuckStats && context.mLuckStats->getAttribute(ESM::Attribute::Luck) != mBeforeLuck)
                 || !sameReference(context.mActor, mContext.mActor) || !sameReference(context.mPlayer, mContext.mPlayer))
                 throw std::invalid_argument("Equipment preparation context/service changed");
             const auto& source = inventory(mResolution, context);
+            if (context.mLuckStats)
+                context.mLuckStats->getActiveSpells().validateConstantFortifyLuck(
+                    context.mActor, source, context.mStore, *context.mLuckStats);
             if (context.mWorldModel.snapshotPtrRegistry() != mRegistry || context.mLocalScripts.snapshot() != mScripts
                 || source.mInventoryListener != mEquipmentListener || source.mListener != mContainerListener
                 || position(source, source.mSlots[InventoryStore::Slot_Shirt]) != mShirt
@@ -379,6 +414,14 @@ namespace MWWorld
                 mCandidate.equip(InventoryStore::Slot_Shirt, item, context);
             else
                 mCandidate.unequipSlot(InventoryStore::Slot_Shirt, context);
+            if (mLuckStats)
+                mLuckStats->getActiveSpells().updateConstantFortifyLuck(
+                    mContext.mActor, mCandidate, mContext.mStore, *mLuckStats);
+            if (mLuckStats)
+            {
+                const auto& luck = mLuckStats->getAttribute(ESM::Attribute::Luck);
+                mResult.mLuck = { luck.getBase(), luck.getModifier(), luck.getDamage() };
+            }
             mResult.mShirt = position(mCandidate, mCandidate.mSlots[InventoryStore::Slot_Shirt]);
             mResult.mSelected = position(mCandidate, mCandidate.mSelectedEnchantItem);
             for (const auto& ref : mCandidate.mLists.mClothes.mList)
@@ -444,11 +487,17 @@ namespace MWWorld
         return mState->mCandidate;
     }
 
+    std::shared_ptr<MWMechanics::CreatureStats>& PreparedPlainEquipment::installationLuckStats()
+    {
+        return mState->mLuckStats;
+    }
+
     void PreparedPlainEquipment::exportValues(const PlainEquipmentContext& context, PlainEquipmentValues& output) const
     {
         validate(context);
         const auto& result = mState->mResult;
         PlainEquipmentValues staged{ result.mActor, result.mShirt, result.mSelected, result.mLastGenerated, {} };
+        staged.mLuck = result.mLuck;
         serialize(mState->mCandidate.mLists.mClothes.mList, staged);
         validateValues(staged, context.mStore, result.mActor);
         validate(context);
@@ -460,6 +509,7 @@ namespace MWWorld
         InventoryStore mInventory;
         ESM::RefNum mActor, mLastGenerated;
         const ESMStore* mContent = nullptr;
+        std::optional<std::array<float, 3>> mLuck;
     };
 
     RestoredPlainEquipment::RestoredPlainEquipment(std::unique_ptr<State> state)
@@ -478,6 +528,7 @@ namespace MWWorld
         staged->mActor = input.mActor;
         staged->mLastGenerated = input.mLastGenerated;
         staged->mContent = &content;
+        staged->mLuck = input.mLuck;
         auto& inventory = staged->mInventory;
         const Compiler::Locals declarations;
         for (const auto& object : input.mObjects)
@@ -527,6 +578,7 @@ namespace MWWorld
         };
         PlainEquipmentValues staged{ mState->mActor, identity(inventory.mSlots[InventoryStore::Slot_Shirt]),
             identity(inventory.mSelectedEnchantItem), mState->mLastGenerated, {} };
+        staged.mLuck = mState->mLuck;
         serialize(inventory.mLists.mClothes.mList, staged);
         output.swap(staged);
     }

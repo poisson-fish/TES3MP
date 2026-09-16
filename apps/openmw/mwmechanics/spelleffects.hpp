@@ -13,6 +13,9 @@ namespace MWWorld
 
 namespace MWMechanics
 {
+    class CreatureStats;
+    // Shared attribute mutation; explicit stats also permit isolated preparation.
+    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude);
     struct MagicApplicationResult
     {
         enum class Type
