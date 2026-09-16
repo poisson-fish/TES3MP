@@ -4,7 +4,7 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). A test-only inventory command now joins
+- **Milestone:** M2 in [PLAN.md](PLAN.md). The test-only inventory command joins
   owned intent, complete protected preparation, encoded file commit, owned success,
   fresh reopen/decode, detached restore and save over disposable fixtures.
   Production durability and live atomic transfer remain unproven.
@@ -51,10 +51,14 @@ decode only, never installation into the uncertain fixture.
 
 ## Fresh verification
 
+The existing adapter at `2d0d31a9ae5e907f2e8e0d5deefb55f485d72695` was reviewed
+against the command slice and freshly verified on 2026-09-15. No code changes
+were needed; restart metadata remains the next implementation slice.
+
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
 `build/vnext-product`, individually, exit **0**:
 
-- `tes3mp_native_loadout_tests` build and reviewed rebuilds.
+- `tes3mp_native_loadout_tests` build.
 - `inventory-transfer-command`: **48** plain/scripted cases, shared/distinct
   script services, both configured player initiators, partial/full removal,
   stacking, signed counts, dormant nodes and cursor positions. **2,208** safe
@@ -73,9 +77,11 @@ Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
 - `inventory-transfer-commit`: **48** cases, **30,182** allocation failures.
 - `inventory-transfer-restore`: **218** rejections, **2,588** allocation failures.
 
-Logs use `build/logs/native-inventory-command-`; final command/build logs end in
-`command-reviewed.log` and `build-reviewed.log`. No verification failed. No complete
-suites, expensive gates or upstream baseline tests ran.
+Logs use `build/logs/native-inventory-command-recheck-`, with `build`, `command`,
+`file-sink`, `codec`, `commit` and `restore` suffixes followed by `.log`.
+The individual documentation budget and local-link checks also passed, exit **0**
+(`docs-budget.log` and `docs-links.log` under the same prefix). No verification
+failed. No complete suites, expensive gates or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
