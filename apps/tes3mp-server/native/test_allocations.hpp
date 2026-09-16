@@ -12,6 +12,7 @@ namespace MWWorld::Testing::Allocations
     {
         Outside,
         Preparation,
+        Result,
         ConsumerCopy,
         Validation,
         Setup,
@@ -21,6 +22,7 @@ namespace MWWorld::Testing::Allocations
         Persistence,
         Installation,
         Retirement,
+        Publication,
         Count
     };
     struct Trace

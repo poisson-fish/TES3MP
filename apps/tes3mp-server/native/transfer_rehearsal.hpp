@@ -146,6 +146,7 @@ namespace MWWorld::Testing
     void checkTransferRestore(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
+    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommit(const ESMStore& content);
 }
 

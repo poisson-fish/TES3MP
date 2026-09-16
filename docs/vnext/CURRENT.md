@@ -4,92 +4,93 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). Fully resolved non-gold MISC pairs now
-  support persistence-gated disposable-fixture commit through the bounded codec
-  and a **test-only synchronous byte-file sink**, followed by fresh reopen,
-  decode, detached restore and save. Production durability and live atomic
-  transfer remain unproven.
-- **Next action:** implement a test-only app-local inventory command adapter over
-  the disposable fixture. Accept owned source/destination owner, initiator and
-  item-instance IDs, quantity and expected registry revision; resolve current
-  contexts, prepare the complete protected pair, encode and commit through the
-  file sink. Publish an owned success result only after accepted installation.
-  Prove stale/repeated intents, invalid bindings, file/allocation failures and
-  sticky uncertainty cannot mutate or report success. Keep production callers,
-  live restore installation, notifications, scripts and durable request deduplication
-  deferred; this joins the proven pieces into one explicit authoritative intent.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). A test-only inventory command now joins
+  owned intent, complete protected preparation, encoded file commit, owned success,
+  fresh reopen/decode, detached restore and save over disposable fixtures.
+  Production durability and live atomic transfer remain unproven.
+- **Next action:** persist the accepted registry revision and last-generated
+  instance ID as owned restart metadata in a new test-only transfer codec version.
+  Capture both from the complete prepared registry before acceptance; carry them
+  through command/file commit, fresh decode, detached restore and save. Validate
+  bounds and identity relationships, including a counter beyond surviving item
+  IDs; never reconstruct the counter only from surviving nodes. Reject old-version
+  and malformed metadata without changing outputs or fixtures. This supplies the
+  missing revision/identity basis for later fresh-fixture command resumption;
+  live restore installation and durable request deduplication remain deferred.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[The file sink](../../apps/tes3mp-server/native/transfer_file_sink.cpp) is linked
-only into `tes3mp_native_loadout_tests`. It reuses OS mechanics inspected in
-`canonical_persistence_file.cpp`, without its independent gameplay schema:
-exclusive sibling `.tmp` creation, complete short-write loops, flush on the writing
-handle, checked close, replacement and fresh byte-for-byte readback before
-acceptance. Windows uses `FlushFileBuffers` and `MoveFileExW` with replacement,
-write-through and bounded lock/share retries. The POSIX branch uses file `fsync`,
-rename and parent-directory `fsync`; that branch was not executed here.
+The [command adapter](../../apps/tes3mp-server/native/inventory_transfer_command.cpp)
+and its [owned values](../../apps/tes3mp-server/native/inventory_transfer_command.hpp)
+are linked only into `tes3mp_native_loadout_tests`. Commands contain source and
+destination owner, initiator and item-instance IDs, positive quantity and expected
+registry revision. Results contain the accepted command, destination instance,
+signed source/destination counts and installed revision; no engine objects,
+pointers, services or iterators cross that value boundary.
 
-Paths are allocated before writes. Native write/flush/replace/readback and cleanup
-allocate no observed C++ state. Opened-handle regular-file size checks enforce the
-8 MiB cap before buffer allocation; exact reads and an EOF check reject short or
-growing files. Read output publishes by nonthrowing swap. Existing foreign staging
-files are preserved; cleanup removes only staging created by this sink.
+Each call resolves current registry identities against the fixture's fixed
+source/destination stores and configured initiator, checks lifetime and save-owner
+bindings, and supplies the fixture's other store for complete protected resolution.
+Stock preparation/validation retains ownership, storage, lifetime, script and
+iterator guards. The success allocation is prepared while the pair is detached.
+[Disposable commit](../../apps/tes3mp-server/native/transfer_rehearsal.cpp) encodes
+with existing `SaveBindings` and invokes
+[TransferFileSink](../../apps/tes3mp-server/native/transfer_file_sink.cpp).
+Only accepted installation/retirement is followed by a nonthrowing result swap.
+No notification, listener callback or script instruction is dispatched.
 
-Safe pre-replacement rejection preserves prior bytes and fixture state and allows
-retry. Replacement errors, failed post-replacement barriers or failed readback
-return explicit uncertainty. The sink latches closed, and
-[disposable commit](../../apps/tes3mp-server/native/transfer_rehearsal.cpp) throws
-an allocation-free uncertainty signal and permanently blocks both commit entry
-points and rehearsal. No acceptance, installation or notification follows.
-Tests reopen coherent prior/new files after uncertainty without installing them.
-Acceptance still precedes nonthrowing, allocation-free installation/retirement;
-protected ownership, storage, lifetime and iterator validation remain intact.
-
-The [codec](../../apps/tes3mp-server/native/transfer_save_codec.cpp) is unchanged:
-version 1 binds OpenMW format 37, caller-supplied runtime/content identity and
-source/destination owners plus initiator. Complete supported ObjectStates and
-separate unique instance identities retain engine values, script locals, dormant
-nodes and signed counts. Allocation-free framing/binding preflight, canonical
-re-encoding and supplied interned RefIds preserve its existing validation limits.
-No pointers, services, registry storage, selections or iterators enter the file.
+Safe validation, allocation and pre-replacement file failures preserve fixture
+state and caller result storage; file rejection also preserves prior bytes and
+permits retry. Foreign staging files remain untouched. Uncertainty preserves the
+uninstalled fixture/result, leaves coherent prior/new bytes in the exercised
+fault cases, and latches the sink and fixture closed. Subsequent commands reject
+without allocation or I/O even with a fresh sink. Recovery here is fresh detached
+decode only, never installation into the uncertain fixture.
 
 ## Fresh verification
 
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
-`build/vnext-product`, individually, final exit **0**:
+`build/vnext-product`, individually, exit **0**:
 
-- `tes3mp_native_loadout_tests` build/rebuilds.
+- `tes3mp_native_loadout_tests` build and reviewed rebuilds.
+- `inventory-transfer-command`: **48** plain/scripted cases, shared/distinct
+  script services, both configured player initiators, partial/full removal,
+  stacking, signed counts, dormant nodes and cursor positions. **2,208** safe
+  rejections, **96** stale/repeated intents, **384** fail-closed outcomes and
+  **1,567** injected allocation failures, including both result allocations.
+  Plain and scripted representative command paths exhaust every observed ordinal;
+  every matrix case checks successful cleanup with the next ordinal armed.
+  Installation, retirement and publication allocations and remaining tracked
+  blocks are **0**. Accepted results survive fixture destruction; fresh file
+  reopen/decode, detached restore and save reproduce the committed bytes.
 - `inventory-transfer-file-sink`: **48** cases, **384** safe file rejections,
-  **384** fail-closed outcomes, **28** invalid-file rejections and **981** injected
-  allocation failures. Constructor/read/decode/rejection and representative
-  commit ordinals are exhausted; successful cleanup is observed in every case.
-  Installation/retirement allocations and remaining tracked blocks are **0**.
+  **384** fail-closed outcomes, **28** invalid-file rejections and **981**
+  injected allocation failures.
 - `inventory-transfer-codec`: **48** cases, **3,344** invalid-input rejections,
   **33,232** commit-path and **17,600** codec allocation failures.
 - `inventory-transfer-commit`: **48** cases, **30,182** allocation failures.
 - `inventory-transfer-restore`: **218** rejections, **2,588** allocation failures.
 
-Logs use `build/logs/native-inventory-file-sink-`. The new filter initially exited
-**1** on an assertion comparing distinct prepared-node addresses; semantic
-ownership/order checks fixed it. A later run exited **1** at prior-file setup;
-bounded Windows replacement retries and diagnostics were added. Each failed
-filter reran **0** before continuing. No complete suites, expensive gates or
-upstream baseline tests ran.
+Logs use `build/logs/native-inventory-command-`; final command/build logs end in
+`command-reviewed.log` and `build-reviewed.log`. No verification failed. No complete
+suites, expensive gates or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Evidence is synchronous synthetic Windows file I/O, not process-crash, power-loss,
-filesystem-independent or production durability. One writer, an isolated scratch
-directory and serialized access are assumed. Uncertain fixtures are discarded;
-no live recovery is implemented. The little-endian format uses synthetic trusted
-identities, not production fingerprints/authentication or durable request IDs.
-Detached restoration reconstructs no services, registry or selections. Equipment,
-gold/other types, Lua/custom state, scene/content-deletion state and postponed
-physics remain outside scope. Borrowed content must outlive use; sinks forbid
-mutation/reentry. Allocation tracking excludes direct C allocation, other threads
-and private external allocators. M1 real-content/enchantment evidence was not
-rerun; TR remains unverified. Networking and migration base are unchanged. Broad
-openmw-lib headless dependencies and whole-baseline provenance debt remain.
+The command is synchronous, serialized and fixture-only. Its revision rejection
+is in-process contention protection, not authentication or durable deduplication.
+Codec version 1 persists neither registry revision nor the last-generated counter;
+detached restoration reconstructs no registry, services or selections and cannot
+resume commands. Runtime/content identities remain synthetic trusted bindings.
+
+File evidence is synthetic Windows I/O with one writer and an isolated scratch
+directory, not crash/power-loss or production durability; POSIX was not executed.
+Production callers, live restore installation, notifications and script execution
+remain deferred. Equipment, gold/other types, Lua/custom state, content-deletion
+state and postponed physics remain outside this slice. Borrowed dependencies must
+outlive use; consumers forbid mutation/reentry. Allocation tracking excludes direct
+C allocation, other threads and private external allocators. M1 real-content and
+enchantment evidence was not rerun; TR remains unverified. Networking and migration
+base are unchanged. Broad headless dependencies and baseline provenance debt remain.
