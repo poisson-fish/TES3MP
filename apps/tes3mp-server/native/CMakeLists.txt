@@ -18,7 +18,7 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
-    equipment_tests.cpp equipment_tests.hpp
+    equipment_tests.cpp equipment_tests.hpp equipment_command.hpp
     equipment_codec.cpp equipment_codec.hpp
     equipment_file.cpp equipment_file.hpp
     bounded_file.cpp bounded_file.hpp test_persistence.hpp

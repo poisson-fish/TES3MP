@@ -1,5 +1,6 @@
 #include "equipment_tests.hpp"
 #include "equipment_codec.hpp"
+#include "equipment_command.hpp"
 #include "equipment_file.hpp"
 #include "test_allocations.hpp"
 
@@ -1966,6 +1967,71 @@ namespace MWWorld::Testing
             return saved;
         }
 
+        static InventoryInstanceId ownedId(ESM::RefNum id) { return { id.mIndex, id.mContentFile }; }
+
+        EquipmentCommand equipmentCommand(size_t actor, bool equip) const
+        {
+            const auto& inventory = mInventories[actor];
+            const auto item = equip ? inventory.begin()
+                : ConstContainerStoreIterator(inventory.mSlots[InventoryStore::Slot_Shirt]);
+            require(item != inventory.end(), "equipment command requires a current active shirt");
+            return { ownedId(mActors[actor]->getPtr().getCellRef().getRefNum()),
+                ownedId(item->getCellRef().getRefNum()), mWorld.getPtrRegistryRevision(),
+                equip ? EquipmentRequestedState::Equipped : EquipmentRequestedState::Unequipped };
+        }
+
+        TestPersistenceResult execute(EquipmentCaller caller, EquipmentCommand command, EquipmentFileSink& file,
+            const EquipmentBindings& bindings, std::unique_ptr<const EquipmentSuccess>& output,
+            EquipmentBytes& bytes, FileFaults& faults)
+        {
+            using namespace Allocations;
+            InPhase phase(Phase::Validation);
+            if (mFailedClosed || file.failedClosed())
+            {
+                mFailedClosed = true;
+                return TestPersistenceResult::Uncertain;
+            }
+            const auto id = [](InventoryInstanceId value) { return ESM::RefNum{ value.mIndex, value.mContentFile }; };
+            if (mRestartActor || !id(command.mActor).isSet() || !id(command.mItem).isSet()
+                || caller.mActor != command.mActor || command.mExpectedRevision != mWorld.getPtrRegistryRevision()
+                || (command.mState != EquipmentRequestedState::Equipped
+                    && command.mState != EquipmentRequestedState::Unequipped))
+                throw std::invalid_argument("Equipment command caller, identity, revision or state invalid");
+            const auto actorPtr = mWorld.getPtr(id(command.mActor));
+            if (!actorPtr.hasLiveReference() || actorPtr.getCellRef().getRefNum() != id(command.mActor))
+                throw std::invalid_argument("Equipment command actor registry identity mismatch");
+            size_t actor = 0;
+            for (; actor < mActors.size(); ++actor)
+                if (mActors[actor] && sameReference(actorPtr, mActors[actor]->getPtr()))
+                    break;
+            validateCaller(actor, actorPtr);
+            const auto item = mWorld.getPtr(id(command.mItem));
+            if (!item.hasLiveReference() || item.getContainerStore() != &mInventories[actor])
+                throw std::invalid_argument("Equipment command item ownership or lifetime mismatch");
+
+            phase.set(Phase::Preparation);
+            auto prepared = PreparedPlainEquipment::prepare(ContainerStoreResolution(mInventories[actor], actorPtr),
+                item, id(command.mItem), static_cast<size_t>(command.mExpectedRevision),
+                command.mState == EquipmentRequestedState::Equipped, preparationContext(actor));
+            const auto& result = prepared.result();
+            auto revision = mWorld.getPtrRegistryRevision();
+            for (const auto& effect : result.mEffects)
+                if (effect.mKind == PlainEquipmentResult::EffectKind::RegisterSplit)
+                    ++revision; // Same stock counter semantics as commitEquipment.
+            phase.set(Phase::Result);
+            auto staged = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ command,
+                ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision });
+            std::unique_ptr<const PlainEquipmentResult> internal;
+            const auto outcome = commitEquipment(actor, actorPtr, std::move(prepared), file, bindings, internal, bytes, faults);
+            if (outcome == TestPersistenceResult::Accepted)
+            {
+                phase.set(Phase::Publication);
+                output.swap(staged);
+            }
+            phase.set(Phase::Retirement);
+            return outcome;
+        }
+
         void checkInstalledMembership(size_t actor, const PlainEquipmentValues& expected) const
         {
             require(sameValues(installedValues(actor), expected), "continuation lost exact installed values");
@@ -2038,12 +2104,17 @@ namespace MWWorld::Testing
 
         void commitContinuation(size_t actor, bool equip, EquipmentFileSink& file,
             const std::filesystem::path& path, std::unique_ptr<const PlainEquipmentResult>& output,
-            EquipmentBytes& bytes, size_t failAt = 0)
+            EquipmentBytes& bytes, size_t failAt = 0, std::unique_ptr<const EquipmentSuccess>* commandOutput = nullptr)
         {
+            const auto anchor = mItems[actor];
             auto prepared = prepareContinuation(actor, equip);
+            const auto oldItem = mItems[actor];
+            // The command must resolve its own item even after this fixture's
+            // retained anchor became dormant in a prior restack.
+            if (commandOutput)
+                mItems[actor] = anchor;
             const auto before = snapshot();
             const auto prior = installedValues(actor);
-            const auto oldItem = mItems[actor];
             const auto identity = oldItem.getCellRef().getRefNum();
             const auto count = oldItem.getCellRef().getCount(false);
             // An independent expected ledger for these homogeneous shirt cases;
@@ -2099,14 +2170,21 @@ namespace MWWorld::Testing
             FileFaults faults{ FileFault::None, 17 };
             Allocations::Trace trace;
             TestPersistenceResult outcome;
+            const auto command = equipmentCommand(actor, equip);
             {
                 Allocations::Observe observe(trace, failAt);
-                outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
-                    file, bindings, output, bytes, faults);
+                if (commandOutput)
+                    outcome = executeEquipment(*this, { command.mActor }, command, file, bindings, *commandOutput, bytes, faults);
+                else
+                    outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
+                        file, bindings, output, bytes, faults);
             }
             PlainEquipmentValues decoded;
             decodeEquipment(equipmentFileBytes(path), bindings, decoded);
-            require(outcome == TestPersistenceResult::Accepted && output && *output == expected
+            const EquipmentSuccess expectedSuccess{ command, ownedId(expected.mShirt), ownedId(expected.mSelected),
+                ownedId(expected.mLastGenerated), static_cast<size_t>(before.mRegistry.mRevision + splits) };
+            require(outcome == TestPersistenceResult::Accepted
+                    && (commandOutput ? *commandOutput && **commandOutput == expectedSuccess : output && *output == expected)
                     && sameValues(saved, decoded) && bytes == equipmentFileBytes(path) && !oldItem.hasLiveReference()
                     && mWorld.getLastGeneratedRefNum() == expected.mLastGenerated
                     && mWorld.getPtrRegistryRevision() == before.mRegistry.mRevision + splits
@@ -2130,11 +2208,183 @@ namespace MWWorld::Testing
                         "continuation changed unrelated actor registry mapping");
         }
 
-        static void checkRestartContinuation(const std::filesystem::path& scratch)
+        static void checkCommandGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            enum class Guard
+            {
+                Caller, EmptyCaller, EmptyActor, EmptyItem, MissingActor, MissingItem, OtherActor, OtherItem,
+                ActorAsItem, ItemAsActor, OldRevision, FutureRevision, EmptyRevision, DormantItem, InvalidState,
+                WrongState, MissingActorMapping, MissingItemMapping, WrongActorMapping, WrongItemMapping,
+                ExpiredItem, ActorBinding, RuntimeBinding, ContentBinding
+            };
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                    for (auto guard : { Guard::Caller, Guard::EmptyCaller, Guard::EmptyActor, Guard::EmptyItem,
+                             Guard::MissingActor, Guard::MissingItem, Guard::OtherActor, Guard::OtherItem,
+                             Guard::ActorAsItem, Guard::ItemAsActor, Guard::OldRevision, Guard::FutureRevision,
+                             Guard::EmptyRevision, Guard::DormantItem, Guard::InvalidState, Guard::WrongState,
+                             Guard::MissingActorMapping, Guard::MissingItemMapping, Guard::WrongActorMapping,
+                             Guard::WrongItemMapping, Guard::ExpiredItem, Guard::ActorBinding,
+                             Guard::RuntimeBinding, Guard::ContentBinding })
+                    {
+                        PlainEquipmentFixture f;
+                        for (size_t i = 0; i < 2; ++i)
+                            f.seedValues(i);
+                        auto& inventory = f.mInventories[actor];
+                        auto dormant = inventory.addNewStack(f.mItems[actor], 1);
+                        dormant->getCellRef().unsetRefNum();
+                        f.mWorld.registerPtr(*dormant);
+                        dormant->getCellRef() = dormant->getCellRef().copyWithCount(0);
+                        if (!equip)
+                            inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                        f.bindEffects(0);
+                        f.bindEffects(1);
+                        // Fixture-owned lazy service witness is setup storage,
+                        // not a retained allocation from the rejected command.
+                        f.mScripts.lifetimeWitness();
+                        const auto path = scratch / "guard.bin";
+                        const auto otherPath = scratch / "guard-other.bin";
+                        EquipmentBytes priorBytes, otherBytes;
+                        for (size_t i : { actor, 1 - actor })
+                        {
+                            const auto saved = f.installedValues(i);
+                            const auto ids = referenceIds(saved);
+                            const auto e = envelope(saved.mActor);
+                            EquipmentFileSink initial(i == actor ? path : otherPath);
+                            FileFaults faults;
+                            require(initial.write(saved, { e, f.mStore, ids }, i == actor ? priorBytes : otherBytes, faults)
+                                    == TestPersistenceResult::Accepted,
+                                "equipment command guard file setup failed");
+                        }
+                        const auto values = f.installedValues(actor);
+                        const auto ids = referenceIds(values);
+                        auto e = envelope(values.mActor);
+                        auto command = f.equipmentCommand(actor, equip);
+                        const auto original = command;
+                        EquipmentCaller caller{ command.mActor };
+                        const auto other = ownedId(f.mActors[1 - actor]->getPtr().getCellRef().getRefNum());
+                        const auto itemId = f.mItems[actor].getCellRef().getRefNum();
+                        switch (guard)
+                        {
+                            case Guard::Caller: caller.mActor = other; break;
+                            case Guard::EmptyCaller: caller.mActor = {}; break;
+                            case Guard::EmptyActor: command.mActor = caller.mActor = {}; break;
+                            case Guard::EmptyItem: command.mItem = {}; break;
+                            case Guard::MissingActor: command.mActor = caller.mActor = { 123456, -1 }; break;
+                            case Guard::MissingItem: command.mItem = { 123456, -1 }; break;
+                            case Guard::OtherActor: command.mActor = caller.mActor = other; break;
+                            case Guard::OtherItem: command.mItem = ownedId(f.mItems[1 - actor].getCellRef().getRefNum()); break;
+                            case Guard::ActorAsItem: command.mItem = command.mActor; break;
+                            case Guard::ItemAsActor: command.mActor = caller.mActor = command.mItem; break;
+                            case Guard::OldRevision: --command.mExpectedRevision; break;
+                            case Guard::FutureRevision: ++command.mExpectedRevision; break;
+                            case Guard::EmptyRevision: command.mExpectedRevision = 0; break;
+                            case Guard::DormantItem: command.mItem = ownedId(dormant->getCellRef().getRefNum()); break;
+                            case Guard::InvalidState: command.mState = static_cast<EquipmentRequestedState>(255); break;
+                            case Guard::WrongState:
+                                command.mState = equip ? EquipmentRequestedState::Unequipped : EquipmentRequestedState::Equipped;
+                                break;
+                            case Guard::MissingActorMapping: f.mWorld.mPtrRegistry.mIndex.erase(values.mActor); break;
+                            case Guard::MissingItemMapping: f.mWorld.mPtrRegistry.mIndex.erase(itemId); break;
+                            case Guard::WrongActorMapping:
+                                f.mWorld.mPtrRegistry.mIndex.at(values.mActor) = f.mActors[1 - actor]->getPtr();
+                                break;
+                            case Guard::WrongItemMapping:
+                                f.mWorld.mPtrRegistry.mIndex.at(itemId) = *dormant;
+                                break;
+                            case Guard::ExpiredItem:
+                                // Retain an expired registry witness; never dereference it in command resolution.
+                                inventory.mLists.mClothes.mList.front().mWorldModel = nullptr;
+                                inventory.mLists.mClothes.mList.pop_front();
+                                inventory.mSlots[InventoryStore::Slot_Shirt] = inventory.end();
+                                break;
+                            case Guard::ActorBinding: e.mActor = f.mActors[1 - actor]->getPtr().getCellRef().getRefNum(); break;
+                            case Guard::RuntimeBinding: e.mRuntime += "-wrong"; break;
+                            case Guard::ContentBinding: e.mContent[0] ^= 1; break;
+                        }
+                        auto output = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ original, {}, {}, {}, 999 });
+                        const auto* outputStorage = output.get();
+                        const auto outputValue = *output;
+                        auto bytes = priorBytes;
+                        const auto* byteStorage = bytes.data();
+                        const auto before = f.snapshot();
+                        const auto anchors = f.mItems;
+                        EquipmentFileSink file(path);
+                        FileFaults faults;
+                        Allocations::Trace trace;
+                        bool caught = false;
+                        {
+                            Allocations::Observe observe(trace);
+                            try
+                            {
+                                executeEquipment(f, caller, command, file, { e, f.mStore, ids }, output, bytes, faults);
+                            }
+                            catch (const std::invalid_argument& error)
+                            {
+                                caught = !std::string_view(error.what()).empty();
+                            }
+                        }
+                        if (!caught || trace.visits(Allocations::Phase::Persistence) != 0 || trace.mOutstanding != 0)
+                            std::cerr << "command guard actor=" << actor << " equip=" << equip
+                                      << " case=" << static_cast<int>(guard) << " caught=" << caught
+                                      << " persistence=" << trace.visits(Allocations::Phase::Persistence)
+                                      << " outstanding=" << trace.mOutstanding << '\n';
+                        require(caught && output.get() == outputStorage && *output == outputValue
+                                && bytes.data() == byteStorage && bytes == priorBytes
+                                && equipmentFileBytes(path) == priorBytes && equipmentFileBytes(otherPath) == otherBytes
+                                && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp"))
+                                && !std::filesystem::exists(std::filesystem::path(otherPath).concat(".tmp"))
+                                && faults.mWrites == 0 && !file.failedClosed() && !f.mFailedClosed
+                                && trace.visits(Allocations::Phase::Persistence) == 0
+                                && trace.visits(Allocations::Phase::Installation) == 0
+                                && trace.visits(Allocations::Phase::Publication) == 0
+                                && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                                && sameReference(f.mItems[0], anchors[0]) && sameReference(f.mItems[1], anchors[1]),
+                            "equipment command rejection changed state, publication, files or effects");
+                        f.unchanged(before);
+                        ++rejected;
+                    }
+            std::cout << "equipment owned command caller/identity/revision/state/binding rejections=" << rejected << '\n';
+        }
+
+        static void checkCommand(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            std::unique_ptr<const EquipmentSuccess> success;
+            EquipmentBytes bytes;
+            size_t commits = 0;
+            {
+                PlainEquipmentFixture f;
+                for (size_t actor = 0; actor < 2; ++actor)
+                {
+                    f.seedValues(actor);
+                    f.bindEffects(actor);
+                }
+                std::unique_ptr<const PlainEquipmentResult> internal;
+                for (size_t actor = 0; actor < 2; ++actor)
+                {
+                    const auto path = scratch / (actor == 0 ? "first.bin" : "second.bin");
+                    EquipmentFileSink file(path);
+                    for (bool equip : { true, false, true, false })
+                    {
+                        f.commitContinuation(actor, equip, file, path, internal, bytes, 0, &success);
+                        ++commits;
+                    }
+                }
+            }
+            require(success && success->mCommand.mActor.mIndex != 0 && !bytes.empty(),
+                "equipment command publication borrowed a destroyed fixture");
+            std::cout << "equipment owned command isolated commits=" << commits << '\n';
+        }
+
+        static void checkRestartContinuation(const std::filesystem::path& scratch, bool commands = false)
         {
             EquipmentScratch directory(scratch);
             size_t commits = 0;
             std::unique_ptr<const PlainEquipmentResult> output;
+            std::unique_ptr<const EquipmentSuccess> success;
             EquipmentBytes bytes;
             for (size_t actor = 0; actor < 2; ++actor)
                 for (bool equipped : { false, true })
@@ -2151,7 +2401,7 @@ namespace MWWorld::Testing
                         EquipmentFileSink file(path);
                         for (bool equip : { !equipped, equipped, !equipped })
                         {
-                            f.commitContinuation(actor, equip, file, path, output, bytes);
+                            f.commitContinuation(actor, equip, file, path, output, bytes, 0, commands ? &success : nullptr);
                             ++commits;
                         }
                         // The same fixture can operate on its other actor; that
@@ -2161,17 +2411,18 @@ namespace MWWorld::Testing
                         const auto actorFile = equipmentFileBytes(path);
                         for (bool equip : { true, false })
                         {
-                            f.commitContinuation(1 - actor, equip, otherFile, otherPath, output, bytes);
+                            f.commitContinuation(1 - actor, equip, otherFile, otherPath, output, bytes, 0, commands ? &success : nullptr);
                             require(equipmentFileBytes(path) == actorFile, "other actor overwrote restored actor file");
                             ++commits;
                         }
                     }
-            require(output && !output->mItems.empty() && !bytes.empty(), "continuation publication borrowed fixture");
+            require((commands ? success && success->mCommand.mActor.mIndex != 0 : output && !output->mItems.empty())
+                    && !bytes.empty(), "continuation publication borrowed fixture");
             std::cout << "equipment post-restart isolated commits=" << commits << '\n';
         }
 
         size_t continuationAllocations(size_t actor, bool equip, const std::filesystem::path& path,
-            const std::filesystem::path& otherPath)
+            const std::filesystem::path& otherPath, bool commands = false)
         {
             using namespace Allocations;
             auto proposal = prepareContinuation(actor, equip);
@@ -2193,6 +2444,10 @@ namespace MWWorld::Testing
             const auto otherBytes = equipmentFileBytes(otherPath);
             auto output = std::make_unique<const PlainEquipmentResult>(expected);
             const auto* outputStorage = output.get();
+            const auto command = equipmentCommand(actor, equip);
+            auto success = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ command, {}, {}, {}, 999 });
+            const auto* successStorage = success.get();
+            const auto successValue = *success;
             EquipmentBytes bytes{ 'o', 'l', 'd' };
             const auto bytesValue = bytes;
             const auto* bytesStorage = bytes.data();
@@ -2201,6 +2456,7 @@ namespace MWWorld::Testing
                 unchanged(before);
                 require(&proposal.result() == proposalStorage && proposal.result() == expected
                         && output.get() == outputStorage && *output == expected
+                        && success.get() == successStorage && *success == successValue
                         && bytes.data() == bytesStorage && bytes == bytesValue
                         && equipmentFileBytes(path) == priorBytes && equipmentFileBytes(otherPath) == otherBytes
                         && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp"))
@@ -2219,7 +2475,8 @@ namespace MWWorld::Testing
                 "continuation preparation allocation baseline leaked");
             unchangedOutput();
             size_t failures = 0;
-            for (size_t fail = 1; fail <= preparation.mTotal; ++fail)
+            // Command sweeps below already include preparation in every attempt.
+            for (size_t fail = 1; !commands && fail <= preparation.mTotal; ++fail)
             {
                 Trace trace;
                 bool rejected = false;
@@ -2256,8 +2513,10 @@ namespace MWWorld::Testing
                     Observe observe(trace, fail);
                     try
                     {
-                        outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
-                            fresh, bindings, output, bytes, faults);
+                        outcome = commands
+                            ? executeEquipment(*this, { command.mActor }, command, fresh, bindings, success, bytes, faults)
+                            : commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
+                                fresh, bindings, output, bytes, faults);
                     }
                     catch (const std::exception&)
                     {
@@ -2285,13 +2544,13 @@ namespace MWWorld::Testing
             EquipmentFileSink retry(path);
             // The ledger verifies this retry's complete values and only its new
             // effects. Arming the next allocation also covers the accepted tail.
-            commitContinuation(actor, equip, retry, path, output, bytes, count.mTotal + 1);
+            commitContinuation(actor, equip, retry, path, output, bytes, count.mTotal + 1, commands ? &success : nullptr);
             require(equipmentFileBytes(otherPath) == otherBytes,
                 "continuation allocation retry changed the other actor file");
             return failures;
         }
 
-        static void checkRestartContinuationAllocations(const std::filesystem::path& scratch)
+        static void checkRestartContinuationAllocations(const std::filesystem::path& scratch, bool commands = false)
         {
             EquipmentScratch directory(scratch);
             size_t failures = 0, retries = 0;
@@ -2319,11 +2578,12 @@ namespace MWWorld::Testing
                         {
                             EquipmentFileSink initial(path);
                             std::unique_ptr<const PlainEquipmentResult> output;
+                            std::unique_ptr<const EquipmentSuccess> success;
                             EquipmentBytes bytes;
-                            f.commitContinuation(actor, true, initial, path, output, bytes);
+                            f.commitContinuation(actor, true, initial, path, output, bytes, 0, commands ? &success : nullptr);
                         }
                         failures += f.continuationAllocations(actor, equip, path,
-                            actor == restoredActor ? otherPath : restoredPath);
+                            actor == restoredActor ? otherPath : restoredPath, commands);
                         ++retries;
                     }
             std::cout << "equipment post-restart allocation failures=" << failures
@@ -2467,7 +2727,7 @@ namespace MWWorld::Testing
             std::cout << "equipment post-restart stale/caller/binding/lifetime rejections and retries=" << rejected << '\n';
         }
 
-        static void checkRestartContinuationPersistence(const std::filesystem::path& scratch)
+        static void checkRestartContinuationPersistence(const std::filesystem::path& scratch, bool commands = false)
         {
             EquipmentScratch directory(scratch);
             size_t safe = 0, uncertain = 0, blocked = 0;
@@ -2482,11 +2742,24 @@ namespace MWWorld::Testing
                             f.startContinuation(restoredActor, continuationSave(restoredActor, false, true),
                                 scratch / "restart.bin");
                             const auto path = scratch / "persistence.bin";
+                            const auto otherPath = scratch / "persistence-other.bin";
+                            EquipmentBytes otherBytes;
+                            {
+                                const auto otherValues = f.installedValues(1 - actor);
+                                const auto otherIds = referenceIds(otherValues);
+                                const auto otherEnvelope = envelope(otherValues.mActor);
+                                EquipmentFileSink initial(otherPath);
+                                FileFaults faults;
+                                require(initial.write(otherValues, { otherEnvelope, f.mStore, otherIds }, otherBytes, faults)
+                                        == TestPersistenceResult::Accepted,
+                                    "post-restart persistence other actor file setup failed");
+                            }
                             EquipmentFileSink file(path);
                             EquipmentBytes bytes;
                             std::unique_ptr<const PlainEquipmentResult> output;
+                            std::unique_ptr<const EquipmentSuccess> success;
                             if (!equip)
-                                f.commitContinuation(actor, true, file, path, output, bytes);
+                                f.commitContinuation(actor, true, file, path, output, bytes, 0, commands ? &success : nullptr);
                             auto prepared = f.prepareContinuation(actor, equip);
                             PlainEquipmentValues saved;
                             prepared.exportValues(f.preparationContext(actor), saved);
@@ -2502,6 +2775,11 @@ namespace MWWorld::Testing
                             require(priorBytes != newBytes, "post-restart persistence requires distinct files");
                             if (!output)
                                 output = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                            if (!success)
+                                success = std::make_unique<const EquipmentSuccess>();
+                            const auto* successStorage = success.get();
+                            const auto successValue = *success;
+                            const auto command = f.equipmentCommand(actor, equip);
                             bytes = priorBytes;
                             const auto* outputStorage = output.get();
                             const auto outputValue = *output;
@@ -2512,15 +2790,20 @@ namespace MWWorld::Testing
                             TestPersistenceResult outcome;
                             {
                                 Allocations::Observe observe(trace);
-                                outcome = f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
-                                    file, bindings, output, bytes, faults);
+                                outcome = commands
+                                    ? executeEquipment(f, { command.mActor }, command, file, bindings, success, bytes, faults)
+                                    : f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                        file, bindings, output, bytes, faults);
                             }
                             const bool poisoned = failure >= FileFault::ReplaceError;
                             const auto actual = equipmentFileBytes(path);
                             const auto unchanged = [&] {
                                 f.unchanged(before);
                                 require(output.get() == outputStorage && *output == outputValue
-                                        && bytes.data() == byteStorage && bytes == priorBytes && equipmentFileBytes(path) == actual,
+                                        && success.get() == successStorage && *success == successValue
+                                        && bytes.data() == byteStorage && bytes == priorBytes && equipmentFileBytes(path) == actual
+                                        && equipmentFileBytes(otherPath) == otherBytes
+                                        && !std::filesystem::exists(std::filesystem::path(otherPath).concat(".tmp")),
                                     "post-restart failed commit changed prior publication/file");
                             };
                             require(outcome == (poisoned ? TestPersistenceResult::Uncertain : TestPersistenceResult::Rejected)
@@ -2537,8 +2820,9 @@ namespace MWWorld::Testing
                             unchanged();
                             if (!poisoned)
                             {
-                                f.commitContinuation(actor, equip, file, path, output, bytes);
-                                require(sameValues(f.installedValues(actor), saved), "safe retry changed intended values");
+                                f.commitContinuation(actor, equip, file, path, output, bytes, 0, commands ? &success : nullptr);
+                                require(sameValues(f.installedValues(actor), saved) && equipmentFileBytes(otherPath) == otherBytes,
+                                    "safe retry changed intended values or other actor file");
                                 ++safe;
                                 continue;
                             }
@@ -2550,14 +2834,18 @@ namespace MWWorld::Testing
                                     const auto retryValues = f.installedValues(retryActor);
                                     const auto retryIds = referenceIds(retryValues);
                                     const auto retryEnvelope = envelope(retryValues.mActor);
+                                    const auto retryCommand = f.equipmentCommand(retryActor, retryEquip);
                                     const auto retryPath = scratch / "fresh-sink.bin";
                                     EquipmentFileSink fresh(retryPath);
                                     faults = {};
                                     Allocations::Trace retryTrace;
                                     {
                                         Allocations::Observe observe(retryTrace, 1);
-                                        outcome = f.commitEquipment(retryActor, f.mActors[retryActor]->getPtr(), std::move(retry),
-                                            freshSink ? fresh : file, { retryEnvelope, f.mStore, retryIds }, output, bytes, faults);
+                                        outcome = commands
+                                            ? executeEquipment(f, { retryCommand.mActor }, retryCommand, freshSink ? fresh : file,
+                                                { retryEnvelope, f.mStore, retryIds }, success, bytes, faults)
+                                            : f.commitEquipment(retryActor, f.mActors[retryActor]->getPtr(), std::move(retry),
+                                                freshSink ? fresh : file, { retryEnvelope, f.mStore, retryIds }, output, bytes, faults);
                                     }
                                     require(outcome == TestPersistenceResult::Uncertain && retryTrace.mTotal == 0
                                             && faults.mWrites == 0 && !std::filesystem::exists(retryPath),
@@ -2571,11 +2859,13 @@ namespace MWWorld::Testing
                       << " blocked actor/sink retries=" << blocked << '\n';
         }
 
-        static void checkRestartContinuationRecovery(const std::filesystem::path& scratch, bool allocations = false)
+        static void checkRestartContinuationRecovery(
+            const std::filesystem::path& scratch, bool allocations = false, bool commands = false)
         {
             EquipmentScratch directory(scratch);
             size_t recoveredFiles = 0, commits = 0, allocationFailures = 0;
-            std::unique_ptr<const PlainEquipmentResult> output;
+            auto output = std::make_unique<const PlainEquipmentResult>();
+            std::unique_ptr<const EquipmentSuccess> success;
             EquipmentBytes bytes;
             for (size_t actor = 0; actor < 2; ++actor)
                 for (bool equip : { true, false })
@@ -2594,12 +2884,15 @@ namespace MWWorld::Testing
                             PlainEquipmentFixture f(actor);
                             f.startContinuation(actor, continuationSave(actor, equip, true), path);
                             EquipmentFileSink file(path);
-                            f.commitContinuation(actor, !equip, file, path, output, bytes);
+                            f.commitContinuation(actor, !equip, file, path, output, bytes, 0, commands ? &success : nullptr);
                             const auto prior = f.installedValues(actor);
                             const auto priorBytes = equipmentFileBytes(path);
                             const auto outputValue = *output;
                             const auto* outputStorage = output.get();
                             const auto* byteStorage = bytes.data();
+                            const auto* successStorage = success.get();
+                            const auto successValue = success ? *success : EquipmentSuccess{};
+                            const auto command = f.equipmentCommand(actor, equip);
                             auto prepared = f.prepareContinuation(actor, equip);
                             PlainEquipmentValues saved;
                             prepared.exportValues(f.preparationContext(actor), saved);
@@ -2612,10 +2905,14 @@ namespace MWWorld::Testing
                                 "subsequent uncertain commit requires distinct state and prior committed effects");
                             const auto before = f.snapshot();
                             FileFaults faults{ failure, 17 };
-                            require(f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
-                                        file, bindings, output, bytes, faults) == TestPersistenceResult::Uncertain
+                            const auto outcome = commands
+                                ? executeEquipment(f, { command.mActor }, command, file, bindings, success, bytes, faults)
+                                : f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                    file, bindings, output, bytes, faults);
+                            require(outcome == TestPersistenceResult::Uncertain
                                     && f.mFailedClosed && file.failedClosed()
                                     && output.get() == outputStorage && *output == outputValue
+                                    && success.get() == successStorage && (!success || *success == successValue)
                                     && bytes.data() == byteStorage && bytes == priorBytes,
                                 "subsequent uncertain commit installed or published unaccepted operation");
                             f.unchanged(before);
@@ -2674,9 +2971,9 @@ namespace MWWorld::Testing
                         for (bool next : { nextEquip, !nextEquip })
                         {
                             if (allocations)
-                                allocationFailures += recovered.continuationAllocations(actor, next, path, otherPath);
+                                allocationFailures += recovered.continuationAllocations(actor, next, path, otherPath, commands);
                             else
-                                recovered.commitContinuation(actor, next, freshSink, path, output, bytes);
+                                recovered.commitContinuation(actor, next, freshSink, path, output, bytes, 0, commands ? &success : nullptr);
                             ++commits;
                         }
                         const auto actorBytes = equipmentFileBytes(path);
@@ -2684,22 +2981,23 @@ namespace MWWorld::Testing
                         for (bool next : { true, false })
                         {
                             if (allocations)
-                                allocationFailures += recovered.continuationAllocations(1 - actor, next, otherPath, path);
+                                allocationFailures += recovered.continuationAllocations(1 - actor, next, otherPath, path, commands);
                             else
-                                recovered.commitContinuation(1 - actor, next, otherSink, otherPath, output, bytes);
+                                recovered.commitContinuation(1 - actor, next, otherSink, otherPath, output, bytes, 0, commands ? &success : nullptr);
                             require(equipmentFileBytes(path) == actorBytes, "recovery continuation crossed actor files");
                             ++commits;
                         }
                         ++recoveredFiles;
                     }
-            require(output && !output->mItems.empty() && !bytes.empty(), "recovery publication borrowed destroyed owner");
+            require((commands ? success && success->mCommand.mActor.mIndex != 0 : output && !output->mItems.empty())
+                    && !bytes.empty(), "recovery publication borrowed destroyed owner");
             std::cout << "equipment subsequent uncertain fresh recoveries=" << recoveredFiles
                       << " isolated continuation commits=" << commits
                       << " allocation failures=" << allocationFailures << '\n';
         }
 
         void rejectContinuationBoundary(size_t actor, bool equip, std::string_view diagnostic,
-            const std::filesystem::path& path, const std::filesystem::path& otherPath)
+            const std::filesystem::path& path, const std::filesystem::path& otherPath, bool commands = false)
         {
             const auto prior = installedValues(actor);
             const auto ids = referenceIds(prior);
@@ -2708,6 +3006,9 @@ namespace MWWorld::Testing
                 prior.mActor, prior.mShirt, prior.mSelected, prior.mLastGenerated, {}, {} });
             const auto* outputStorage = output.get();
             const auto outputValue = *output;
+            auto success = std::make_unique<const EquipmentSuccess>();
+            const auto* successStorage = success.get();
+            const auto successValue = *success;
             auto bytes = equipmentFileBytes(path);
             const auto bytesValue = bytes;
             const auto* bytesStorage = bytes.data();
@@ -2721,8 +3022,14 @@ namespace MWWorld::Testing
                 Allocations::Observe observe(trace);
                 try
                 {
-                    commitEquipment(actor, mActors[actor]->getPtr(), prepareContinuation(actor, equip),
-                        fresh, { e, mStore, ids }, output, bytes, faults);
+                    if (commands)
+                    {
+                        const auto command = equipmentCommand(actor, equip);
+                        executeEquipment(*this, { command.mActor }, command, fresh, { e, mStore, ids }, success, bytes, faults);
+                    }
+                    else
+                        commitEquipment(actor, mActors[actor]->getPtr(), prepareContinuation(actor, equip),
+                            fresh, { e, mStore, ids }, output, bytes, faults);
                 }
                 catch (const std::invalid_argument& error)
                 {
@@ -2735,6 +3042,7 @@ namespace MWWorld::Testing
                     && trace.visits(Allocations::Phase::Publication) == 0
                     && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
                     && output.get() == outputStorage && *output == outputValue
+                    && success.get() == successStorage && *success == successValue
                     && bytes.data() == bytesStorage && bytes == bytesValue
                     && equipmentFileBytes(path) == bytesValue && equipmentFileBytes(otherPath) == otherBytes
                     && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp")),
@@ -2743,10 +3051,11 @@ namespace MWWorld::Testing
             checkInstalledMembership(actor, prior);
         }
 
-        static void checkRestartContinuationBoundaries(const std::filesystem::path& scratch)
+        static void checkRestartContinuationBoundaries(const std::filesystem::path& scratch, bool commands = false)
         {
             EquipmentScratch directory(scratch);
             size_t restarts = 0, recoveries = 0, rejected = 0, commits = 0;
+            std::unique_ptr<const EquipmentSuccess> success;
             for (size_t actor = 0; actor < 2; ++actor)
                 for (bool capacity : { true, false })
                     for (bool split : { true, false })
@@ -2782,7 +3091,7 @@ namespace MWWorld::Testing
                                 EquipmentBytes bytes;
                                 if (fault == FileFault::None)
                                 {
-                                    f.commitContinuation(actor, true, file, path, output, bytes);
+                                    f.commitContinuation(actor, true, file, path, output, bytes, 0, commands ? &success : nullptr);
                                     recovery = f.installedValues(actor);
                                     accepted = bytes;
                                     ++commits;
@@ -2805,10 +3114,18 @@ namespace MWWorld::Testing
                                     const auto* byteStorage = bytes.data();
                                     const auto before = f.snapshot();
                                     FileFaults faults{ fault, 17 };
-                                    require(f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
-                                                file, bindings, output, bytes, faults) == TestPersistenceResult::Uncertain
+                                    success = std::make_unique<const EquipmentSuccess>();
+                                    const auto* successStorage = success.get();
+                                    const auto successValue = *success;
+                                    const auto command = f.equipmentCommand(actor, true);
+                                    const auto outcome = commands
+                                        ? executeEquipment(f, { command.mActor }, command, file, bindings, success, bytes, faults)
+                                        : f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                            file, bindings, output, bytes, faults);
+                                    require(outcome == TestPersistenceResult::Uncertain
                                             && f.mFailedClosed && file.failedClosed() && output.get() == outputStorage
-                                            && *output == outputValue && bytes.data() == byteStorage && bytes == priorBytes,
+                                            && *output == outputValue && bytes.data() == byteStorage && bytes == priorBytes
+                                            && success.get() == successStorage && *success == successValue,
                                         "boundary uncertain commit installed or published");
                                     f.unchanged(before);
                                     recovery = fault == FileFault::ReplaceError ? saved : next;
@@ -2843,7 +3160,7 @@ namespace MWWorld::Testing
                             // split available; new-file recovery already used it.
                             if (!recovery.mShirt.isSet())
                             {
-                                f.commitContinuation(actor, true, fresh, path, output, bytes);
+                                f.commitContinuation(actor, true, fresh, path, output, bytes, 0, commands ? &success : nullptr);
                                 ++commits;
                             }
                             if (capacity && split)
@@ -2855,13 +3172,13 @@ namespace MWWorld::Testing
                                 // preparation bound. Do not prune dormant nodes.
                                 for (bool equip : { false, true })
                                 {
-                                    f.rejectContinuationBoundary(actor, equip, "bounded plain clothing", path, otherPath);
+                                    f.rejectContinuationBoundary(actor, equip, "bounded plain clothing", path, otherPath, commands);
                                     ++rejected;
                                 }
                             }
                             else
                             {
-                                f.commitContinuation(actor, false, fresh, path, output, bytes);
+                                f.commitContinuation(actor, false, fresh, path, output, bytes, 0, commands ? &success : nullptr);
                                 ++commits;
                                 if (!capacity && split)
                                 {
@@ -2869,15 +3186,15 @@ namespace MWWorld::Testing
                                             == ESM::RefNum{ std::numeric_limits<uint32_t>::max(),
                                                 std::numeric_limits<int32_t>::min() },
                                         "last split did not consume exactly the final generation");
-                                    f.rejectContinuationBoundary(actor, true, "counter exhausted", path, otherPath);
+                                    f.rejectContinuationBoundary(actor, true, "counter exhausted", path, otherPath, commands);
                                     ++rejected;
                                 }
                                 else
                                 {
                                     const auto counter = f.mWorld.getLastGeneratedRefNum();
                                     const auto nodes = f.installedValues(actor).mObjects.size();
-                                    f.commitContinuation(actor, true, fresh, path, output, bytes);
-                                    f.commitContinuation(actor, false, fresh, path, output, bytes);
+                                    f.commitContinuation(actor, true, fresh, path, output, bytes, 0, commands ? &success : nullptr);
+                                    f.commitContinuation(actor, false, fresh, path, output, bytes, 0, commands ? &success : nullptr);
                                     commits += 2;
                                     require(f.mWorld.getLastGeneratedRefNum() == counter
                                             && f.installedValues(actor).mObjects.size() == nodes
@@ -2889,7 +3206,7 @@ namespace MWWorld::Testing
                             EquipmentFileSink other(otherPath);
                             for (bool equip : { true, false })
                             {
-                                f.commitContinuation(1 - actor, equip, other, otherPath, output, bytes);
+                                f.commitContinuation(1 - actor, equip, other, otherPath, output, bytes, 0, commands ? &success : nullptr);
                                 require(equipmentFileBytes(path) == actorFile,
                                     "boundary continuation changed restored actor file");
                                 ++commits;
@@ -5152,8 +5469,55 @@ namespace MWWorld::Testing
         }
     };
 
+    TestPersistenceResult executeEquipment(PlainEquipmentFixture& fixture, EquipmentCaller caller,
+        EquipmentCommand command, EquipmentFileSink& file, const EquipmentBindings& bindings,
+        std::unique_ptr<const EquipmentSuccess>& output, std::vector<char>& bytes, FileFaults& faults)
+    {
+        return fixture.execute(caller, command, file, bindings, output, bytes, faults);
+    }
+
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-command")
+        {
+            PlainEquipmentFixture::checkCommand(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-command-guards")
+        {
+            PlainEquipmentFixture::checkCommandGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-command-boundaries")
+        {
+            PlainEquipmentFixture::checkRestartContinuationBoundaries(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-command-restart")
+        {
+            PlainEquipmentFixture::checkRestartContinuation(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-command-allocations")
+        {
+            PlainEquipmentFixture::checkRestartContinuationAllocations(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-command-persistence")
+        {
+            PlainEquipmentFixture::checkRestartContinuationPersistence(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-command-recovery")
+        {
+            PlainEquipmentFixture::checkRestartContinuationRecovery(scratch, false, true);
+            return;
+        }
+        if (filter == "inventory-equipment-command-recovery-allocations")
+        {
+            PlainEquipmentFixture::checkRestartContinuationRecovery(scratch, true, true);
+            return;
+        }
         if (filter == "inventory-equipment-restart-continuation-boundaries")
         {
             PlainEquipmentFixture::checkRestartContinuationBoundaries(scratch);
