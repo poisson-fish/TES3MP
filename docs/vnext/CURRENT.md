@@ -4,14 +4,13 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). Plain-shirt equipment now has
-  actor-local durable commits and fresh-fixture restart installation in
-  test-owned stores. Production integration remains deferred.
-- **Next action:** prove post-restart equip/unequip continuation through
-  `PlainEquipmentFixture::commitEquipment` with a fresh `EquipmentFileSink`:
-  preserve the other actor, exact counters and dormant selections, then recover
-  a subsequent uncertain commit into another fresh fixture. Keep equipment
-  format 1 and existing plain-shirt scope.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). Plain-shirt equipment has actor-local
+  durable commits, fresh-fixture restart, post-restart continuation and subsequent
+  uncertain-commit recovery in test-owned stores. Production integration is deferred.
+- **Next action:** inject allocation failures through post-restart equip/unequip
+  preparation and `PlainEquipmentFixture::commitEquipment` with a fresh
+  `EquipmentFileSink`, proving unchanged state/output/file, cleanup and safe retry
+  for the restored actor and the other actor separately. Keep equipment format 1.
 - **Session scope:** complete 2–3 closely related bounded slices sequentially;
   one slice at a time limits concurrent scope, not slices per session. After
   review and commit, summarize results/commit and provide a ready-to-paste next
@@ -23,80 +22,81 @@
 ## Implemented M2 slices
 
 [PlainEquipmentFixture](../../apps/tes3mp-server/native/equipment_tests.cpp)
-requires an explicitly constructed fresh restart target with empty inventory.
-It validates trusted caller/runtime/content/actor bindings, both store lifetimes
-and storage identities, script-service lifetime, current registry mappings and
-reference lifetimes, supported listeners/slots, and saved generation coverage
-for every retained identity. Ordinary, consumed and uncertain fixtures reject
-restart. Incoming identities cannot collide with retained mappings.
+now proves equip/unequip continuation through its existing durable commit path
+with fresh sinks after restart. Tests resolve current active members for each
+new operation: a restacked shirt remains a registered dormant node and cannot
+stand in for an active equip target. An independent expected transition/effect
+ledger verifies signed counts, raw membership, shirt, active/dormant/unset
+selection, exact generation and registry counters, including unsigned rollover.
+Exported semantic fields match decoded durable bytes and installed values.
 
-[RestoredPlainEquipment](../../apps/openmw/mwworld/plainequipment.hpp)
-retains its constructing content binding and captures node lifetime witnesses
-before publication. Private fixture access validates exact actor/counter/content
-and current base-record identity. Staging preserves signed counts, raw dormant
-membership, shirt and selection, and prepares a bounded replacement registry.
-Rejection preserves detached input and prior live/output state.
+The restored actor and the other actor commit separately in the same fixture.
+Each operation preserves the other actor's nodes, values, lifetimes, selections,
+listeners, effects and registry mappings. Actor files remain separate. Only new
+committed operations add removal, inventory-update and equipment-change effects;
+restart adds none. Publication remains owned after fixtures are destroyed.
 
-[Equipment file restart](../../apps/tes3mp-server/native/equipment_file.cpp)
-can return the exact bytes from its single bounded read with the complete
-detached owner. Fixture composition finishes reading, decoding, validation,
-allocation, byte-for-byte re-encoding and relocation before a nonthrowing
-installation/publication block. It publishes owned semantic values and bytes;
-borrowed pointers and iterators remain internal. It never replays equip,
-removal, inventory-notification or script effects.
+Post-restart guards cover mismatched/expired trusted callers, runtime/content/
+actor bindings, stale preparation after same-actor and other-actor commits,
+reconstructed script services, foreign/expired store lifetimes, storage identity,
+listeners, counts and selection. Each rejection preserves prior state, output
+storage/value and file, reaches no persistence/publication, and permits a newly
+prepared retry after intentional test mutations are repaired.
 
-Installation preserves the unrelated actor's nodes, values, lifetimes, services,
-listeners and registry mappings. It restores the saved generation counter
-exactly, including rollover/exhaustion and counters beyond surviving IDs.
-Equipment format 1 has no persisted registry revision: the fresh registry's
-revision advances once, including unsigned rollover. Installation invalidates
-old storage bindings and consumes fresh restart authorization.
+Post-restart persistence faults cover creation, write, flush, close, replacement,
+barrier and verification reads. Safe failures preserve prior state/output/file
+and allow retry. Uncertainty installs/publishes nothing and blocks the entire
+fixture through both actors, the used sink and fresh sinks with valid actor
+bindings, before allocation or I/O. Uncertain fixtures also reject restart.
 
-Existing durable commits still finish fallible work before file acceptance.
-Safe rejection preserves state/output/file and permits retry. Uncertain commits
-install/publish nothing and permanently block the whole old fixture, including
-another actor, a new sink and attempted restart. Fresh recovery now installs
-complete prior/new files from all tested uncertain boundaries without effects.
+After a successful post-restart operation, another uncertain equip/unequip commit
+is recovered into a second explicitly fresh fixture after the old fixture and
+sink are destroyed. Every tested boundary restores complete prior/new actor-local
+values and exact bytes/counters, preserves that fresh fixture's unrelated actor,
+and replays no old or uncertain effects. Both actors then continue independently
+through fresh sinks. This does not implement a complete two-player world save.
 
 ## Fresh verification
 
 Windows MSVC, scripts/setup_msvc_env.ps1 -PreferLatest, RelWithDebInfo,
-build/vnext-product, 2026-09-16. Target tes3mp_native_loadout_tests and each
-individual filter below exited **0**. No test/build failures occurred.
-Logs are under build/logs; build: native-equipment-restart-final-build.log.
+build/vnext-product, 2026-09-16. Final target tes3mp_native_loadout_tests build
+exited **0**; log: build/logs/native-equipment-continuation-build.log.
+Each filter below ran individually and exited **0**, including reruns after the
+shared assertion changed. Logs are `build/logs/native-equipment-<suffix>.log`.
 
-| Filter suffix after inventory-equipment- | Evidence | Log suffix after native-equipment- |
-|---|---|---|
-| restart-staging | 2 isolated actor preparations | restart-staging.log |
-| restart | 14 exact installs, consumed authorization | restart.log |
-| restart-guards | 94 stale/binding/lifetime/bound rejections | restart-guards.log |
-| restart-read | 24 read/decode failures and safe retries | restart-read.log |
-| restart-allocations | 1,046 individually injected failures | restart-allocations.log |
-| commit-persistence | 20 safe failures, 32 uncertain fresh recoveries | restart-persistence.log |
-| value-allocations | 272 restoration/export regression failures | restart-value-allocations.log |
-| file-allocations | 1,848 file regression failures | restart-file-allocations.log |
-| commit-allocations | 927 commit regression failures | restart-commit-allocations.log |
+| Filter suffix after inventory-equipment- | Evidence |
+|---|---|
+| restart-continuation | 40 isolated commits, selections and counter rollover |
+| restart-continuation-guards | 64 rejection-and-retry cases |
+| restart-continuation-persistence | 40 safe retries, 64 uncertain outcomes, 256 blocked actor/sink retries |
+| restart-continuation-recovery | 32 subsequent uncertain recoveries, 128 continuation commits |
 
-Installation/publication/retirement allocated nothing; tracked cleanup was
-leak-free. Success includes empty, dormant-only and maximum-node inventories,
-signed counts, selections, destroyed source fixtures and exact semantic fields.
-Documentation budget and local links ran individually, exit **0**:
-docs-budget.log and docs-links.log.
+Installation/publication/retirement allocated nothing in observed successful
+commits. Failed persistence staging had no tracked leaks. Two test-helper build
+errors (exit 2) and one fault-boundary assertion failure (exit 1) were corrected;
+each failed check was rerun successfully before proceeding. Documentation budget
+and local links ran individually, exit **0**: docs-budget.log and docs-links.log.
 
 ## Limits and inherited evidence
 
-Post-restart command continuation, production integration, scripts, enchantments,
-other slots/types and durable request/notification deduplication remain deferred.
-This is actor-local equipment recovery, not a complete two-player world save.
-Equipment format 1, the 80 MiB bound and strict detached restoration remain.
+Only test coverage and this handoff changed. Existing restart validation,
+allocation, codec, file and commit evidence is inherited; post-restart allocation
+injection and continuation at capacity/exhaustion boundaries remain unproved.
+Scripts, enchantments, other slots/types, production integration and durable
+request/notification deduplication remain deferred. Unsupported behavior rejects
+visibly. Equipment format 1, its 80 MiB bound and strict detached restoration remain.
+Format 1 saves the generation counter, not registry revision; restart advances
+the fresh fixture's registry revision once and consumes its restart authorization.
+
 Content/WorldModel must outlive validation; access requires one serialized writer
 and private scratch storage. Runtime scenes/caches are not saved values;
 postponed physics rejects. Windows write-through replacement is not a separate
-directory-fsync or power-loss proof.
+directory-fsync or power-loss proof. Allocation tracking excludes direct C
+allocation, other threads and private external allocators.
 
-Transfer trusted caller matching, fixed owner/service roles, format-4 selections,
-durability-before-install and owned publication are unchanged. Allocation tracking
-excludes direct C allocation, other threads and private external allocators.
-No full suites, expensive gates or upstream baseline tests ran. Earlier commit,
-codec, M1/TR and independent-networking evidence, the migration base, broad
-headless dependencies and baseline provenance debt are inherited unchanged.
+Server authority, engine-independent networking, trusted caller matching, fixed
+transfer owner/service roles, transfer format-4 selections, durability-before-install
+and owned publication are unchanged. Borrowed pointers/iterators stay internal.
+No complete suites, expensive gates or upstream baseline tests ran. Earlier M1/TR
+and independent-networking evidence, the migration base, broad headless dependencies
+and baseline provenance debt are inherited unchanged.

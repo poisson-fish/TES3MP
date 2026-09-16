@@ -1947,6 +1947,571 @@ namespace MWWorld::Testing
             return object;
         }
 
+        // Restart scenarios use only owned saved values after the source dies.
+        static PlainEquipmentValues continuationSave(size_t actor, bool equipped, bool dormantSelection)
+        {
+            PlainEquipmentFixture source;
+            source.seedValues(actor);
+            auto& inventory = source.mInventories[actor];
+            auto dormant = inventory.addNewStack(source.mItems[actor], 1);
+            dormant->getCellRef().unsetRefNum();
+            source.mWorld.registerPtr(*dormant);
+            dormant->getCellRef() = dormant->getCellRef().copyWithCount(0);
+            inventory.mSelectedEnchantItem = dormantSelection ? dormant : inventory.begin();
+            if (!equipped)
+                inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), source.context(actor, actor));
+            PlainEquipmentValues saved;
+            source.prepare(actor, equipped).exportValues(source.preparationContext(actor), saved);
+            saved.mLastGenerated = { 900, -1 }; // Deliberately beyond surviving IDs.
+            return saved;
+        }
+
+        void checkInstalledMembership(size_t actor, const PlainEquipmentValues& expected) const
+        {
+            require(sameValues(installedValues(actor), expected), "continuation lost exact installed values");
+            for (const auto& node : mInventories[actor].mLists.mClothes.mList)
+            {
+                const auto ptr = mWorld.getPtr(node.mRef.getRefNum());
+                require(ptr.hasLiveReference() && ptr.mRef == &node && node.mWorldModel == &mWorld
+                        && ptr.mContainerStore == &mInventories[actor],
+                    "continuation lost signed/active/dormant registry membership");
+            }
+        }
+
+        void installContinuationFile(size_t actor, const PlainEquipmentValues& saved,
+            const std::filesystem::path& path, const EquipmentBytes& expectedBytes)
+        {
+            const auto ids = referenceIds(saved);
+            const auto e = envelope(saved.mActor);
+            const EquipmentBindings bindings{ e, mStore, ids };
+            const auto before = snapshot();
+            const auto witnesses = restartBindings(saved.mLastGenerated);
+            std::unique_ptr<const PlainEquipmentValues> output;
+            EquipmentBytes bytes;
+            FileFaults faults;
+            require(restartEquipment(actor, mActors[actor]->getPtr(), path, bindings, witnesses, output, bytes, faults)
+                        == FileReadResult::Read
+                    && output && sameValues(*output, saved) && bytes == expectedBytes
+                    && equipmentFileBytes(path) == expectedBytes && !mRestartActor && !mFailedClosed
+                    && mWorld.getPtrRegistryRevision() == before.mRegistry.mRevision + 1
+                    && mWorld.mPtrRegistry.mIndex.size() == before.mRegistry.mEntries.size() + saved.mObjects.size()
+                    && mActorEffects[actor].mListener.mCalls == before.mActorEffects[actor].first
+                    && mActorEffects[actor].mInventoryUpdates == before.mActorEffects[actor].second
+                    && mActorEffects[actor].mListener.mRemovals == before.mRemovals[actor]
+                    && mActorEffects[actor].mNotifications == before.mNotifications[actor]
+                    && mScripts.snapshot() == before.mScripts && mEvents == before.mEvents,
+                "continuation restart changed file/counters or replayed effects");
+            checkInstalledMembership(actor, saved);
+            unchangedActor(before, 1 - actor);
+            for (const auto& [id, binding] : before.mRegistry.mEntries)
+                require(mWorld.snapshotPtrRegistry().mEntries.at(id) == binding,
+                    "continuation restart changed retained registry mapping");
+        }
+
+        EquipmentBytes startContinuation(size_t actor, const PlainEquipmentValues& saved,
+            const std::filesystem::path& path)
+        {
+            seedValues(1 - actor);
+            EquipmentBytes bytes;
+            {
+                EquipmentFileSink initial(path);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                FileFaults faults;
+                require(initial.write(saved, { e, mStore, ids }, bytes, faults) == TestPersistenceResult::Accepted,
+                    "continuation initial file setup failed");
+            } // Every post-restart command uses another sink.
+            installContinuationFile(actor, saved, path, bytes);
+            return bytes;
+        }
+
+        PreparedPlainEquipment prepareContinuation(size_t actor, bool equip)
+        {
+            // Resolve a current member for each new operation. A restacked shirt
+            // remains a registered dormant node, not a valid new equip request.
+            auto& inventory = mInventories[actor];
+            const auto item = equip ? inventory.begin() : inventory.mSlots[InventoryStore::Slot_Shirt];
+            require(item != inventory.end(), "continuation requires a current active shirt");
+            mItems[actor] = *item;
+            return prepare(actor, equip);
+        }
+
+        void commitContinuation(size_t actor, bool equip, EquipmentFileSink& file,
+            const std::filesystem::path& path, std::unique_ptr<const PlainEquipmentResult>& output,
+            EquipmentBytes& bytes)
+        {
+            auto prepared = prepareContinuation(actor, equip);
+            const auto before = snapshot();
+            const auto prior = installedValues(actor);
+            const auto oldItem = mItems[actor];
+            const auto identity = oldItem.getCellRef().getRefNum();
+            const auto count = oldItem.getCellRef().getCount(false);
+            // An independent expected ledger for these homogeneous shirt cases;
+            // this is not a second general equipment implementation.
+            PlainEquipmentResult expected{ prior.mActor, equip ? identity : ESM::RefNum{}, prior.mSelected,
+                prior.mLastGenerated, {}, {} };
+            for (const auto& object : prior.mObjects)
+                expected.mItems.push_back({ object.mRef.mRefNum, object.mRef.mRefID, object.mRef.mCount });
+            auto original = std::find_if(expected.mItems.begin(), expected.mItems.end(),
+                [&](const auto& item) { return item.mIdentity == identity; });
+            using Kind = PlainEquipmentResult::EffectKind;
+            size_t splits = 0, updates = 0;
+            auto removals = before.mRemovals[actor];
+            auto notifications = before.mNotifications[actor];
+            int calls = 1;
+            if (equip && std::abs(count) > 1)
+            {
+                splits = 1;
+                updates = 2;
+                calls = 2;
+                if (++expected.mLastGenerated.mIndex == 0)
+                    --expected.mLastGenerated.mContentFile;
+                const int sign = count > 0 ? 1 : -1;
+                original->mCount = sign;
+                expected.mItems.push_back({ expected.mLastGenerated, original->mBase, count - sign });
+                expected.mEffects = { { Kind::RegisterSplit, prior.mActor, expected.mLastGenerated, 0 },
+                    { Kind::InventoryUpdated, prior.mActor, {}, 0 },
+                    { Kind::ItemRemoved, prior.mActor, identity, std::abs(count) - 1 },
+                    { Kind::InventoryUpdated, prior.mActor, {}, 0 } };
+                removals.emplace_back(identity, std::abs(count) - 1);
+                notifications.insert(notifications.end(), 2, prior.mActor);
+            }
+            else if (!equip)
+            {
+                auto remainder = std::find_if(expected.mItems.begin(), expected.mItems.end(),
+                    [&](const auto& item) { return item.mIdentity != identity && item.mCount != 0; });
+                if (remainder != expected.mItems.end())
+                {
+                    remainder->mCount += count;
+                    original->mCount = 0;
+                    expected.mEffects.push_back({ Kind::DeleteStackScript, prior.mActor, identity, 0 });
+                }
+                if (expected.mSelected == identity)
+                    expected.mSelected = {};
+            }
+            expected.mEffects.push_back({ Kind::EquipmentChanged, prior.mActor, {}, 0 });
+            require(prepared.result() == expected, "continuation differs from exact shirt transition/effect ledger");
+            PlainEquipmentValues saved;
+            prepared.exportValues(preparationContext(actor), saved);
+            const auto ids = referenceIds(saved);
+            const auto e = envelope(saved.mActor);
+            const EquipmentBindings bindings{ e, mStore, ids };
+            FileFaults faults{ FileFault::None, 17 };
+            Allocations::Trace trace;
+            TestPersistenceResult outcome;
+            {
+                Allocations::Observe observe(trace);
+                outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
+                    file, bindings, output, bytes, faults);
+            }
+            PlainEquipmentValues decoded;
+            decodeEquipment(equipmentFileBytes(path), bindings, decoded);
+            require(outcome == TestPersistenceResult::Accepted && output && *output == expected
+                    && sameValues(saved, decoded) && bytes == equipmentFileBytes(path) && !oldItem.hasLiveReference()
+                    && mWorld.getLastGeneratedRefNum() == expected.mLastGenerated
+                    && mWorld.getPtrRegistryRevision() == before.mRegistry.mRevision + splits
+                    && mWorld.mPtrRegistry.mIndex.size() == before.mRegistry.mEntries.size() + splits
+                    && mActorEffects[actor].mListener.mCalls == before.mActorEffects[actor].first + calls
+                    && mActorEffects[actor].mInventoryUpdates == before.mActorEffects[actor].second + updates
+                    && mActorEffects[actor].mListener.mRemovals == removals
+                    && mActorEffects[actor].mNotifications == notifications
+                    && mScripts.snapshot() == before.mScripts && mEvents == before.mEvents
+                    && trace.allocations(Allocations::Phase::Installation) == 0
+                    && trace.allocations(Allocations::Phase::Publication) == 0
+                    && trace.allocations(Allocations::Phase::Retirement) == 0,
+                "continuation lost durable values/counters or emitted effects beyond the new commit");
+            checkInstalledMembership(actor, saved);
+            unchangedActor(before, 1 - actor);
+            for (const auto& [id, binding] : before.mRegistry.mEntries)
+                if (binding.getContainer() != &mInventories[actor])
+                    require(mWorld.snapshotPtrRegistry().mEntries.at(id) == binding,
+                        "continuation changed unrelated actor registry mapping");
+        }
+
+        static void checkRestartContinuation(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t commits = 0;
+            std::unique_ptr<const PlainEquipmentResult> output;
+            EquipmentBytes bytes;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equipped : { false, true })
+                    for (bool dormant : { false, true })
+                    {
+                        auto saved = continuationSave(actor, equipped, dormant);
+                        if (dormant)
+                            saved.mLastGenerated = { std::numeric_limits<uint32_t>::max(), -2 };
+                        PlainEquipmentFixture f(actor);
+                        if (dormant)
+                            f.mWorld.mPtrRegistry.mRevision = std::numeric_limits<size_t>::max() - 1;
+                        const auto path = scratch / "continued.bin";
+                        f.startContinuation(actor, saved, path);
+                        EquipmentFileSink file(path);
+                        for (bool equip : { !equipped, equipped, !equipped })
+                        {
+                            f.commitContinuation(actor, equip, file, path, output, bytes);
+                            ++commits;
+                        }
+                        // The same fixture can operate on its other actor; that
+                        // actor's file is independent, not a two-player world save.
+                        const auto otherPath = scratch / "other.bin";
+                        EquipmentFileSink otherFile(otherPath);
+                        const auto actorFile = equipmentFileBytes(path);
+                        for (bool equip : { true, false })
+                        {
+                            f.commitContinuation(1 - actor, equip, otherFile, otherPath, output, bytes);
+                            require(equipmentFileBytes(path) == actorFile, "other actor overwrote restored actor file");
+                            ++commits;
+                        }
+                    }
+            require(output && !output->mItems.empty() && !bytes.empty(), "continuation publication borrowed fixture");
+            std::cout << "equipment post-restart isolated commits=" << commits << '\n';
+        }
+
+        static void checkRestartContinuationGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t rejected = 0;
+            for (size_t restoredActor = 0; restoredActor < 2; ++restoredActor)
+                for (size_t actor = 0; actor < 2; ++actor)
+                    for (int test = 0; test < 16; ++test)
+                    {
+                        PlainEquipmentFixture f(restoredActor);
+                        f.startContinuation(restoredActor, continuationSave(restoredActor, false, true),
+                            scratch / "restart.bin");
+                        auto prepared = f.prepareContinuation(actor, true);
+                        const auto prior = f.installedValues(actor);
+                        const auto ids = referenceIds(prior);
+                        auto e = envelope(prior.mActor);
+                        ESMStore foreign;
+                        const ESMStore* content = &f.mStore;
+                        auto caller = f.mActors[actor]->getPtr();
+                        auto& inventory = f.mInventories[actor];
+                        const auto oldStorage = inventory.mStorageIdentity;
+                        const auto oldSelection = inventory.mSelectedEnchantItem;
+                        const auto oldCount = f.mItems[actor].getCellRef().getCount(false);
+                        const auto path = scratch / "guard.bin";
+                        EquipmentFileSink file(path);
+                        EquipmentBytes bytes;
+                        FileFaults faults;
+                        require(file.write(prior, { e, f.mStore, ids }, bytes, faults) == TestPersistenceResult::Accepted,
+                            "post-restart guard file setup failed");
+                        auto output = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                        std::optional<InventoryStore> alternate;
+                        switch (test)
+                        {
+                            case 0: caller = f.mActors[1 - actor]->getPtr(); break;
+                            case 1: caller.mContainerStore = &inventory; break;
+                            case 2:
+                            {
+                                ManualRef dead(f.mStore, ESM::RefId::stringRefId("equipment_actor"));
+                                dead.getPtr().getCellRef().setRefNum(prior.mActor);
+                                caller = dead.getPtr();
+                                break;
+                            }
+                            case 3: e.mRuntime += "-foreign"; break;
+                            case 4: e.mContent[0] ^= 1; break;
+                            case 5: e.mActor = f.mActors[1 - actor]->getPtr().getCellRef().getRefNum(); break;
+                            case 6: content = &foreign; break;
+                            case 7:
+                            {
+                                // Same desired operation is possible again, but
+                                // the old nodes/preparation no longer authorize it.
+                                f.commitContinuation(actor, true, file, path, output, bytes);
+                                f.commitContinuation(actor, false, file, path, output, bytes);
+                                break;
+                            }
+                            case 8:
+                            {
+                                const auto otherPath = scratch / "other.bin";
+                                EquipmentFileSink other(otherPath);
+                                f.commitContinuation(1 - actor, true, other, otherPath, output, bytes);
+                                break;
+                            }
+                            case 9:
+                                std::destroy_at(&f.mScripts);
+                                std::construct_at(&f.mScripts, f.mStore);
+                                break;
+                            case 10:
+                            case 11:
+                            {
+                                alternate.emplace();
+                                alternate->setPtr(caller, f.mWorld);
+                                Misc::Rng::Generator rng{ 0 };
+                                alternate->fill({}, {}, rng);
+                                auto item = *alternate->addNewStack(f.mItems[actor], 2);
+                                item.getCellRef().unsetRefNum();
+                                f.mWorld.registerPtr(item);
+                                prepared = PreparedPlainEquipment::prepare(ContainerStoreResolution(*alternate, caller),
+                                    item, item.getCellRef().getRefNum(), f.mWorld.getPtrRegistryRevision(), true,
+                                    f.preparationContext(actor));
+                                if (test == 11)
+                                {
+                                    alternate.reset();
+                                    alternate.emplace(); // Same address, expired lifetime.
+                                }
+                                break;
+                            }
+                            case 12: inventory.setInvListener(&f.mListener); break;
+                            case 13: f.mItems[actor].getCellRef().setCount(2); break;
+                            case 14: inventory.mSelectedEnchantItem = inventory.begin(); break;
+                            case 15: inventory.mStorageIdentity = f.mInventories[1 - actor].mStorageIdentity; break;
+                        }
+                        const auto before = f.snapshot();
+                        const auto priorBytes = equipmentFileBytes(path);
+                        const auto* outputStorage = output.get();
+                        const auto outputValue = *output;
+                        const auto* byteStorage = bytes.data();
+                        const auto byteValue = bytes;
+                        faults = {};
+                        Allocations::Trace trace;
+                        bool failed = false;
+                        {
+                            Allocations::Observe observe(trace);
+                            try
+                            {
+                                f.commitEquipment(actor, caller, std::move(prepared), file,
+                                    { e, *content, ids }, output, bytes, faults);
+                            }
+                            catch (const std::invalid_argument& error)
+                            {
+                                failed = !std::string_view(error.what()).empty();
+                            }
+                        }
+                        if (!failed)
+                            std::cerr << "post-restart guard restored=" << restoredActor << " actor=" << actor
+                                      << " case=" << test << '\n';
+                        require(failed && output.get() == outputStorage && *output == outputValue
+                                && bytes.data() == byteStorage && bytes == byteValue && equipmentFileBytes(path) == priorBytes
+                                && faults.mWrites == 0 && trace.visits(Allocations::Phase::Persistence) == 0
+                                && trace.visits(Allocations::Phase::Installation) == 0
+                                && trace.visits(Allocations::Phase::Publication) == 0 && !file.failedClosed() && !f.mFailedClosed,
+                            "post-restart guard changed state/output/file or poisoned safe retry");
+                        f.unchanged(before);
+                        // Restore intentional test mutations; expired services,
+                        // nodes and preparations are replaced by current ones.
+                        alternate.reset();
+                        if (test == 12)
+                            f.bindEffects(actor);
+                        if (test == 13)
+                            f.mItems[actor].getCellRef().setCount(oldCount);
+                        if (test == 14)
+                            inventory.mSelectedEnchantItem = oldSelection;
+                        if (test == 15)
+                            inventory.mStorageIdentity = oldStorage;
+                        f.commitContinuation(actor, true, file, path, output, bytes);
+                        ++rejected;
+                    }
+            std::cout << "equipment post-restart stale/caller/binding/lifetime rejections and retries=" << rejected << '\n';
+        }
+
+        static void checkRestartContinuationPersistence(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t safe = 0, uncertain = 0, blocked = 0;
+            for (size_t restoredActor = 0; restoredActor < 2; ++restoredActor)
+                for (size_t actor = 0; actor < 2; ++actor)
+                    for (bool equip : { true, false })
+                        for (auto failure : { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close,
+                                 FileFault::Replace, FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier,
+                                 FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
+                        {
+                            PlainEquipmentFixture f(restoredActor);
+                            f.startContinuation(restoredActor, continuationSave(restoredActor, false, true),
+                                scratch / "restart.bin");
+                            const auto path = scratch / "persistence.bin";
+                            EquipmentFileSink file(path);
+                            EquipmentBytes bytes;
+                            std::unique_ptr<const PlainEquipmentResult> output;
+                            if (!equip)
+                                f.commitContinuation(actor, true, file, path, output, bytes);
+                            auto prepared = f.prepareContinuation(actor, equip);
+                            PlainEquipmentValues saved;
+                            prepared.exportValues(f.preparationContext(actor), saved);
+                            const auto prior = f.installedValues(actor);
+                            const auto ids = referenceIds(saved);
+                            const auto e = envelope(prior.mActor);
+                            const EquipmentBindings bindings{ e, f.mStore, ids };
+                            FileFaults faults;
+                            EquipmentBytes priorBytes, newBytes;
+                            require(file.write(prior, bindings, priorBytes, faults) == TestPersistenceResult::Accepted,
+                                "post-restart persistence prior file setup failed");
+                            encodeEquipment(saved, bindings, newBytes);
+                            require(priorBytes != newBytes, "post-restart persistence requires distinct files");
+                            if (!output)
+                                output = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                            bytes = priorBytes;
+                            const auto* outputStorage = output.get();
+                            const auto outputValue = *output;
+                            const auto* byteStorage = bytes.data();
+                            const auto before = f.snapshot();
+                            faults = { failure, 17 };
+                            Allocations::Trace trace;
+                            TestPersistenceResult outcome;
+                            {
+                                Allocations::Observe observe(trace);
+                                outcome = f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                    file, bindings, output, bytes, faults);
+                            }
+                            const bool poisoned = failure >= FileFault::ReplaceError;
+                            const auto actual = equipmentFileBytes(path);
+                            const auto unchanged = [&] {
+                                f.unchanged(before);
+                                require(output.get() == outputStorage && *output == outputValue
+                                        && bytes.data() == byteStorage && bytes == priorBytes && equipmentFileBytes(path) == actual,
+                                    "post-restart failed commit changed prior publication/file");
+                            };
+                            require(outcome == (poisoned ? TestPersistenceResult::Uncertain : TestPersistenceResult::Rejected)
+                                    && f.mFailedClosed == poisoned && file.failedClosed() == poisoned
+                                    && faults.mReached == (failure == FileFault::Replace ? FileFault::Close
+                                        : failure == FileFault::ReplaceError || failure == FileFault::AfterReplace
+                                            ? FileFault::Replace : failure >= FileFault::ReadOpen ? FileFault::Read : failure)
+                                    && trace.visits(Allocations::Phase::Installation) == 0
+                                    && trace.visits(Allocations::Phase::Publication) == 0
+                                    && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                                    && actual == (failure > FileFault::ReplaceError ? newBytes : priorBytes)
+                                    && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp")),
+                                "post-restart persistence failure installed effects or left incomplete file");
+                            unchanged();
+                            if (!poisoned)
+                            {
+                                f.commitContinuation(actor, equip, file, path, output, bytes);
+                                require(sameValues(f.installedValues(actor), saved), "safe retry changed intended values");
+                                ++safe;
+                                continue;
+                            }
+                            for (size_t retryActor = 0; retryActor < 2; ++retryActor)
+                                for (bool freshSink : { false, true })
+                                {
+                                    const bool retryEquip = !f.installedValues(retryActor).mShirt.isSet();
+                                    auto retry = f.prepareContinuation(retryActor, retryEquip);
+                                    const auto retryValues = f.installedValues(retryActor);
+                                    const auto retryIds = referenceIds(retryValues);
+                                    const auto retryEnvelope = envelope(retryValues.mActor);
+                                    const auto retryPath = scratch / "fresh-sink.bin";
+                                    EquipmentFileSink fresh(retryPath);
+                                    faults = {};
+                                    Allocations::Trace retryTrace;
+                                    {
+                                        Allocations::Observe observe(retryTrace, 1);
+                                        outcome = f.commitEquipment(retryActor, f.mActors[retryActor]->getPtr(), std::move(retry),
+                                            freshSink ? fresh : file, { retryEnvelope, f.mStore, retryIds }, output, bytes, faults);
+                                    }
+                                    require(outcome == TestPersistenceResult::Uncertain && retryTrace.mTotal == 0
+                                            && faults.mWrites == 0 && !std::filesystem::exists(retryPath),
+                                        "post-restart uncertainty bypassed fixture through valid actor/fresh sink");
+                                    unchanged();
+                                    ++blocked;
+                                }
+                            ++uncertain;
+                        }
+            std::cout << "equipment post-restart safe failures/retries=" << safe << " uncertain=" << uncertain
+                      << " blocked actor/sink retries=" << blocked << '\n';
+        }
+
+        static void checkRestartContinuationRecovery(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t recoveredFiles = 0, commits = 0;
+            std::unique_ptr<const PlainEquipmentResult> output;
+            EquipmentBytes bytes;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                    for (auto failure : { FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier,
+                             FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
+                    {
+                        const auto path = scratch / "recovery.bin";
+                        PlainEquipmentValues recovery;
+                        EquipmentBytes acceptedFile;
+                        {
+                            PlainEquipmentFixture f(actor);
+                            f.startContinuation(actor, continuationSave(actor, equip, true), path);
+                            EquipmentFileSink file(path);
+                            f.commitContinuation(actor, !equip, file, path, output, bytes);
+                            const auto prior = f.installedValues(actor);
+                            const auto priorBytes = equipmentFileBytes(path);
+                            const auto outputValue = *output;
+                            const auto* outputStorage = output.get();
+                            const auto* byteStorage = bytes.data();
+                            auto prepared = f.prepareContinuation(actor, equip);
+                            PlainEquipmentValues saved;
+                            prepared.exportValues(f.preparationContext(actor), saved);
+                            const auto ids = referenceIds(saved);
+                            const auto e = envelope(saved.mActor);
+                            const EquipmentBindings bindings{ e, f.mStore, ids };
+                            EquipmentBytes newBytes;
+                            encodeEquipment(saved, bindings, newBytes);
+                            require(priorBytes != newBytes && f.mActorEffects[actor].mListener.mCalls != 0,
+                                "subsequent uncertain commit requires distinct state and prior committed effects");
+                            const auto before = f.snapshot();
+                            FileFaults faults{ failure, 17 };
+                            require(f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                        file, bindings, output, bytes, faults) == TestPersistenceResult::Uncertain
+                                    && f.mFailedClosed && file.failedClosed()
+                                    && output.get() == outputStorage && *output == outputValue
+                                    && bytes.data() == byteStorage && bytes == priorBytes,
+                                "subsequent uncertain commit installed or published unaccepted operation");
+                            f.unchanged(before);
+                            acceptedFile = equipmentFileBytes(path);
+                            recovery = failure == FileFault::ReplaceError ? prior : saved;
+                            require(acceptedFile == (failure == FileFault::ReplaceError ? priorBytes : newBytes),
+                                "subsequent uncertain commit left a partial actor-local file");
+                            // An uncertain composition cannot reuse consumed restart
+                            // authority even with bindings from another fresh fixture.
+                            PlainEquipmentFixture fresh(actor);
+                            std::unique_ptr<const PlainEquipmentValues> rejectedOutput;
+                            EquipmentBytes rejectedBytes{ 'o', 'l', 'd' };
+                            faults = {};
+                            bool rejected = false;
+                            try
+                            {
+                                f.restartEquipment(actor, f.mActors[actor]->getPtr(), path, bindings,
+                                    fresh.restartBindings(recovery.mLastGenerated), rejectedOutput, rejectedBytes, faults);
+                            }
+                            catch (const std::invalid_argument& error)
+                            {
+                                rejected = !std::string_view(error.what()).empty();
+                            }
+                            require(rejected && !rejectedOutput && rejectedBytes == EquipmentBytes({ 'o', 'l', 'd' })
+                                    && faults.mReads == 0 && equipmentFileBytes(path) == acceptedFile,
+                                "uncertain fixture restarted in place");
+                            f.unchanged(before);
+                        } // All old live nodes, services, sinks and preparation are gone.
+
+                        PlainEquipmentFixture recovered(actor);
+                        recovered.seedValues(1 - actor);
+                        // This actor belongs to the new fixture, not to the file.
+                        recovered.mItems[1 - actor].getCellRef().setCount(actor == 0 ? -7 : 4);
+                        recovered.mInventories[1 - actor].setSelectedEnchantItem(recovered.mInventories[1 - actor].begin());
+                        recovered.installContinuationFile(actor, recovery, path, acceptedFile);
+                        require(recovered.mActorEffects[actor].mListener.mCalls == 0
+                                && recovered.mActorEffects[actor].mListener.mRemovals.empty()
+                                && recovered.mActorEffects[actor].mInventoryUpdates == 0
+                                && recovered.mActorEffects[actor].mNotifications.empty(),
+                            "fresh recovery replayed previously committed or uncertain operation effects");
+                        EquipmentFileSink freshSink(path);
+                        const bool nextEquip = !recovery.mShirt.isSet();
+                        for (bool next : { nextEquip, !nextEquip })
+                        {
+                            recovered.commitContinuation(actor, next, freshSink, path, output, bytes);
+                            ++commits;
+                        }
+                        const auto actorBytes = equipmentFileBytes(path);
+                        const auto otherPath = scratch / "recovery-other.bin";
+                        EquipmentFileSink otherSink(otherPath);
+                        for (bool next : { true, false })
+                        {
+                            recovered.commitContinuation(1 - actor, next, otherSink, otherPath, output, bytes);
+                            require(equipmentFileBytes(path) == actorBytes, "recovery continuation crossed actor files");
+                            ++commits;
+                        }
+                        ++recoveredFiles;
+                    }
+            require(output && !output->mItems.empty() && !bytes.empty(), "recovery publication borrowed destroyed owner");
+            std::cout << "equipment subsequent uncertain fresh recoveries=" << recoveredFiles
+                      << " isolated continuation commits=" << commits << '\n';
+        }
+
         static void checkExport()
         {
             PlainEquipmentValues retained;
@@ -4202,6 +4767,26 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-restart-continuation-recovery")
+        {
+            PlainEquipmentFixture::checkRestartContinuationRecovery(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-continuation-guards")
+        {
+            PlainEquipmentFixture::checkRestartContinuationGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-continuation-persistence")
+        {
+            PlainEquipmentFixture::checkRestartContinuationPersistence(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-continuation")
+        {
+            PlainEquipmentFixture::checkRestartContinuation(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-restart-staging")
         {
             PlainEquipmentFixture::checkRestartStaging();
