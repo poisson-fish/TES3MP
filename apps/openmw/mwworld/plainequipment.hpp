@@ -56,6 +56,7 @@ namespace MWWorld
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
         ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
         std::vector<ESM::ObjectState> mObjects;
+        void validate(const ESMStore& content, ESM::RefNum expectedActor) const;
         void swap(PlainEquipmentValues& other) noexcept;
     };
 

@@ -1,6 +1,8 @@
 #include "equipment_tests.hpp"
+#include "equipment_codec.hpp"
 #include "test_allocations.hpp"
 
+#include <bit>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -343,7 +345,55 @@ namespace MWWorld::Testing
             std::cout << "equipment full-value exports=8\n";
         }
 
-        static void checkRestore()
+        static std::vector<ESM::RefId> referenceIds(const PlainEquipmentValues& values)
+        {
+            std::vector<ESM::RefId> ids;
+            for (const auto& object : values.mObjects)
+                for (const auto& id : { object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul, object.mRef.mFaction,
+                         object.mRef.mKey, object.mRef.mTrap })
+                    if (!id.empty() && std::find(ids.begin(), ids.end(), id) == ids.end())
+                        ids.push_back(id);
+            return ids;
+        }
+
+        static EquipmentEnvelope envelope(ESM::RefNum actor)
+        {
+            return { "synthetic-equipment-runtime-1", { 1, 2, 3 }, actor };
+        }
+
+        static void checkCodecEncode()
+        {
+            EquipmentBytes retained;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture f;
+                f.seedValues(actor);
+                auto prepared = f.prepare(actor, true);
+                const auto effects = prepared.result();
+                PlainEquipmentValues values;
+                prepared.exportValues(f.preparationContext(actor), values);
+                const auto ids = referenceIds(values);
+                const auto e = envelope(values.mActor);
+                const EquipmentBindings bindings{ e, f.mStore, ids };
+                const auto before = f.snapshot();
+                encodeEquipment(values, bindings, retained);
+                EquipmentBytes again;
+                encodeEquipment(values, bindings, again);
+                require(!retained.empty() && retained == again && retained.size() < MaxEquipmentObjectBytes,
+                    "equipment encoding is empty, oversized or nondeterministic");
+                const auto saved = retained;
+                const auto* storage = retained.data();
+                values.mActor = f.mActors[1 - actor]->getPtr().getCellRef().getRefNum();
+                f.reject([&] { encodeEquipment(values, bindings, retained); }, "owner");
+                require(retained == saved && retained.data() == storage && prepared.result() == effects,
+                    "equipment encode rejection changed prior bytes or effects");
+                f.unchanged(before);
+            }
+            require(!retained.empty(), "equipment bytes did not survive fixture destruction");
+            std::cout << "equipment deterministic owned encodes=2\n";
+        }
+
+        static void checkRestore(bool codec = false)
         {
             size_t roundTrips = 0;
             for (size_t actor = 0; actor < 2; ++actor)
@@ -389,12 +439,38 @@ namespace MWWorld::Testing
                         prepared.exportValues(f.preparationContext(actor), saved);
                         require(prepared.result() == effects, "equipment round trip altered prepared effects");
                     }
+                    EquipmentBytes bytes;
+                    if (codec)
+                    {
+                        // Exercise stock clamping/omissions, including fields
+                        // whose door/lock switch is off and negative anim time.
+                        auto& object = saved.mObjects[0];
+                        object.mRef.mScale = actor == 0 ? 0.125f : 8.f;
+                        object.mRef.mTeleport = false;
+                        object.mRef.mIsLocked = false;
+                        object.mAnimationState.mScriptedAnims[0].mTime = -3.5f;
+                        const auto expected = saved;
+                        const auto ids = referenceIds(saved);
+                        const auto e = envelope(saved.mActor);
+                        const EquipmentBindings bindings{ e, f.mStore, ids };
+                        encodeEquipment(saved, bindings, bytes);
+                        decodeEquipment(bytes, bindings, saved); // Replace a nonempty output.
+                        require(sameValues(saved, expected), "equipment byte codec lost supported values");
+                    }
                     auto restored = RestoredPlainEquipment::restore(saved, f.mStore, saved.mActor);
                     PlainEquipmentValues again;
                     auto moved = std::move(restored);
                     moved.exportValues(again);
                     require(sameValues(saved, again),
                         "equipment export/restore/export lost values, slot, selection or exact counter");
+                    if (codec)
+                    {
+                        EquipmentBytes reencoded;
+                        const auto ids = referenceIds(again);
+                        const auto e = envelope(again.mActor);
+                        encodeEquipment(again, { e, f.mStore, ids }, reencoded);
+                        require(bytes == reencoded, "equipment restored re-encoding changed bytes");
+                    }
                     if (variant == 6)
                         require(again.mObjects.size() == PlainEquipmentValues::MaxItems
                                 && again.mLastGenerated == ESM::RefNum{ 0, -2 },
@@ -411,7 +487,612 @@ namespace MWWorld::Testing
                     f.unchanged(before);
                     ++roundTrips;
                 }
-            std::cout << "equipment detached round trips=" << roundTrips << '\n';
+            std::cout << "equipment " << (codec ? "byte/detached" : "detached") << " round trips=" << roundTrips
+                      << '\n';
+        }
+
+        static uint32_t numberAt(const EquipmentBytes& bytes, size_t offset)
+        {
+            require(offset + 4 <= bytes.size(), "test field offset is outside equipment bytes");
+            uint32_t value = 0;
+            for (size_t i = 0; i < 4; ++i)
+                value |= static_cast<uint32_t>(static_cast<unsigned char>(bytes[offset + i])) << (8 * i);
+            return value;
+        }
+
+        static void putNumber(EquipmentBytes& bytes, size_t offset, uint32_t value)
+        {
+            require(offset + 4 <= bytes.size(), "test mutation is outside equipment bytes");
+            for (size_t i = 0; i < 4; ++i)
+                bytes[offset + i] = static_cast<char>(value >> (8 * i));
+        }
+
+        struct ByteField
+        {
+            size_t mRecord, mData, mSize;
+        };
+
+        static ByteField fieldAt(const EquipmentBytes& bytes, uint32_t tag, size_t occurrence = 0)
+        {
+            for (size_t record = 0; record < bytes.size();)
+            {
+                const size_t end = record + 16 + numberAt(bytes, record + 4);
+                for (size_t field = record + 16; field < end;)
+                {
+                    const auto size = numberAt(bytes, field + 4);
+                    if (numberAt(bytes, field) == tag && occurrence-- == 0)
+                        return { record, field + 8, size };
+                    field += 8 + size;
+                }
+                record = end;
+            }
+            throw std::runtime_error("equipment test field missing");
+        }
+
+        static void replaceField(EquipmentBytes& bytes, uint32_t tag, std::span<const char> replacement)
+        {
+            const auto field = fieldAt(bytes, tag);
+            const auto recordSize = numberAt(bytes, field.mRecord + 4);
+            bytes.erase(bytes.begin() + field.mData, bytes.begin() + field.mData + field.mSize);
+            bytes.insert(bytes.begin() + field.mData, replacement.begin(), replacement.end());
+            putNumber(bytes, field.mData - 4, static_cast<uint32_t>(replacement.size()));
+            putNumber(bytes, field.mRecord + 4, static_cast<uint32_t>(recordSize - field.mSize + replacement.size()));
+        }
+
+        static void checkCodecGuards()
+        {
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture f;
+                f.seedValues(actor);
+                auto& inventory = f.mInventories[actor];
+                inventory.setInvListener(&f.mListener);
+                inventory.setContListener(&f.mListener);
+                auto prepared = f.prepare(actor, true);
+                PlainEquipmentValues saved, output;
+                prepared.exportValues(f.preparationContext(actor), saved);
+                f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), output);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                const EquipmentBindings bindings{ e, f.mStore, ids };
+                EquipmentBytes good;
+                encodeEquipment(saved, bindings, good);
+                EquipmentBytes byteOutput{ 'p', 'r', 'i', 'o', 'r' };
+                const auto byteValue = byteOutput;
+                const auto* byteStorage = byteOutput.data();
+                const auto outputValue = output;
+                const auto* outputStorage = output.mObjects.data();
+                auto restored = RestoredPlainEquipment::restore(output, f.mStore, output.mActor);
+                const auto* restoredStorage = restored.mState.get();
+                const auto effects = prepared.result();
+                const auto* effectStorage = prepared.result().mEffects.data();
+                const auto before = f.snapshot();
+                const auto unchanged = [&] {
+                    require(output.mObjects.data() == outputStorage && sameValues(output, outputValue)
+                            && byteOutput.data() == byteStorage && byteOutput == byteValue
+                            && restored.mState.get() == restoredStorage && prepared.result() == effects
+                            && prepared.result().mEffects.data() == effectStorage,
+                        "equipment codec rejection changed output storage/value or captured effects");
+                    PlainEquipmentValues retained;
+                    restored.exportValues(retained);
+                    require(sameValues(retained, outputValue), "codec rejection changed restored nodes");
+                    f.unchanged(before);
+                };
+                const auto rejectBytes = [&](std::span<const char> bytes, const EquipmentBindings& expected,
+                                             bool preflightOnly = true) {
+                    Allocations::Trace trace;
+                    bool failed = false;
+                    {
+                        Allocations::Observe observe(trace);
+                        try
+                        {
+                            decodeEquipment(bytes, expected, output);
+                        }
+                        catch (const std::exception&)
+                        {
+                            failed = true;
+                        }
+                    }
+                    require(failed && trace.mOutstanding == 0, "malformed equipment bytes accepted or leaked");
+                    // The sole permitted preflight allocation is the exception's
+                    // diagnostic. No stream/object/string storage may be staged.
+                    if (preflightOnly)
+                        require(trace.mTotal <= 1, "equipment preflight allocated external data before rejection");
+                    unchanged();
+                    ++rejected;
+                };
+                for (size_t size = 0; size < good.size(); ++size)
+                    rejectBytes(std::span(good).first(size), bindings);
+                auto bad = good;
+                bad.push_back('x');
+                rejectBytes(bad, bindings);
+                bad.assign(MaxEquipmentBytes + 1, 0);
+                rejectBytes(bad, bindings);
+                for (int test = 0; test < 40; ++test)
+                {
+                    bad = good;
+                    const auto field = [&](const char (&tag)[5], size_t occurrence = 0) {
+                        return fieldAt(bad, ESM::fourCC(tag), occurrence).mData;
+                    };
+                    bool preflightOnly = true;
+                    switch (test)
+                    {
+                        case 0:
+                            putNumber(bad, 4, 0xffffffff);
+                            break;
+                        case 1:
+                            putNumber(bad, 8, 1);
+                            break;
+                        case 2:
+                            putNumber(bad, field("FORM"), ESM::DefaultFormatVersion);
+                            break;
+                        case 3:
+                            putNumber(bad, field("HEDR") + 8, 0xffffffff);
+                            break;
+                        case 4:
+                            putNumber(bad, field("HEDR") + 16, 0);
+                            break;
+                        case 5:
+                            putNumber(bad, field("FVER"), EquipmentFormatVersion + 1);
+                            break;
+                        case 6:
+                            bad[field("RUNT")] ^= 1;
+                            break;
+                        case 7:
+                            bad[field("CONT")] ^= 1;
+                            break;
+                        case 8:
+                            putNumber(bad, field("ACTR"), output.mActor.mIndex);
+                            break;
+                        case 9:
+                            putNumber(bad, field("SIZE"), PlainEquipmentValues::MaxItems + 1);
+                            break;
+                        case 10:
+                            putNumber(bad, field("SHRT"), output.mActor.mIndex);
+                            break;
+                        case 11:
+                            putNumber(bad, field("SELE") + 4, 0);
+                            break;
+                        case 12:
+                            putNumber(bad, field("LGEN") + 4, 0);
+                            break;
+                        case 13:
+                            putNumber(bad, field("LGEN"), 1);
+                            break;
+                        case 14:
+                            putNumber(bad, field("FRMR"), saved.mActor.mIndex);
+                            break;
+                        case 15:
+                            putNumber(bad, field("FRMR", 1), saved.mObjects[0].mRef.mRefNum.mIndex);
+                            break;
+                        case 16:
+                            bad[field("NAME") + 1] = '!';
+                            break;
+                        case 17:
+                            bad[field("ANAM")] = static_cast<char>(ESM::RefIdType::SizedString);
+                            break;
+                        case 18:
+                            putNumber(bad, field("NAME") - 4, 0xffffffff);
+                            break;
+                        case 19:
+                            bad[field("BNAM")] = 0;
+                            break;
+                        case 20:
+                            bad[field("BNAM") + fieldAt(bad, ESM::fourCC("BNAM")).mSize - 1] = '!';
+                            break;
+                        case 21:
+                            putNumber(bad, field("NAM9"), 0x80000000);
+                            break;
+                        case 22:
+                            putNumber(bad, field("XSCL") - 8, ESM::fourCC("HLOC"));
+                            break;
+                        case 23:
+                            bad[field("HCUS")] = 1;
+                            break;
+                        case 24:
+                            bad[field("ABST")] = 2;
+                            break;
+                        case 25:
+                            bad[field("XSAV") + 8] = 2;
+                            break;
+                        case 26:
+                            putNumber(bad, field("COUN") - 4, 4);
+                            break;
+                        case 27:
+                            putNumber(bad, field("XTIM") - 8, ESM::fourCC("TIME"));
+                            break;
+                        case 28:
+                            putNumber(bad, field("DATA") - 4, 20);
+                            break;
+                        case 29:
+                            putNumber(bad, field("XSAV"), 0x7fc00000);
+                            preflightOnly = false;
+                            break;
+                        case 30:
+                            putNumber(bad, field("FLAG"), 8);
+                            preflightOnly = false;
+                            break;
+                        case 31:
+                            putNumber(bad, field("XPOS"), 0x7fc00000);
+                            preflightOnly = false;
+                            break;
+                        case 32:
+                            putNumber(bad, field("XTIM"), 0x7fc00000);
+                            preflightOnly = false;
+                            break;
+                        case 33:
+                            putNumber(bad, field("XSCL"), std::bit_cast<uint32_t>(1.75f));
+                            preflightOnly = false;
+                            break;
+                        case 34:
+                            putNumber(bad, field("TIME"), std::bit_cast<uint32_t>(1.5f));
+                            preflightOnly = false;
+                            break;
+                        case 35:
+                            replaceField(bad, ESM::fourCC("ANIS"), std::string(PlainEquipmentValues::MaxText + 1, 'x'));
+                            break;
+                        case 36:
+                            replaceField(bad, ESM::fourCC("XDST"), std::string(PlainEquipmentValues::MaxText + 1, 'x'));
+                            break;
+                        case 37:
+                            replaceField(bad, ESM::fourCC("FRMR"), {});
+                            break;
+                        case 38:
+                        {
+                            const auto value = fieldAt(bad, ESM::fourCC("XSCL"));
+                            const EquipmentBytes duplicate(
+                                bad.begin() + value.mData - 8, bad.begin() + value.mData + value.mSize);
+                            bad.insert(bad.begin() + value.mData + value.mSize, duplicate.begin(), duplicate.end());
+                            putNumber(bad, value.mRecord + 4,
+                                numberAt(bad, value.mRecord + 4) + static_cast<uint32_t>(duplicate.size()));
+                            break;
+                        }
+                        case 39:
+                        {
+                            const auto value = fieldAt(bad, ESM::fourCC("FRMR"));
+                            const auto oldSize = numberAt(bad, value.mRecord + 4);
+                            bad.insert(
+                                bad.begin() + value.mRecord + 16 + oldSize, MaxEquipmentObjectBytes + 1 - oldSize, 0);
+                            putNumber(bad, value.mRecord + 4, MaxEquipmentObjectBytes + 1);
+                            break;
+                        }
+                    }
+                    rejectBytes(bad, bindings, preflightOnly);
+                }
+                for (int test = 0; test < 9; ++test)
+                {
+                    auto foreign = e;
+                    auto foreignIds = ids;
+                    switch (test)
+                    {
+                        case 0:
+                            foreign.mRuntime += "other";
+                            break;
+                        case 1:
+                            foreign.mContent[0] ^= 1;
+                            break;
+                        case 2:
+                            foreign.mActor = output.mActor;
+                            break;
+                        case 3:
+                            foreign.mRuntime.clear();
+                            break;
+                        case 4:
+                            foreign.mRuntime.assign(129, 'x');
+                            break;
+                        case 5:
+                            foreign.mContent.fill(0);
+                            break;
+                        case 6:
+                            foreign.mActor = {};
+                            break;
+                        case 7:
+                            foreignIds.clear();
+                            break;
+                        case 8:
+                            foreignIds.resize(4097, ids[0]);
+                            break;
+                    }
+                    rejectBytes(good, { foreign, f.mStore, foreignIds });
+                }
+                ESMStore foreignContent;
+                rejectBytes(good, { e, foreignContent, ids });
+                auto* base = const_cast<ESM::Clothing*>(f.mItems[actor].get<ESM::Clothing>()->mBase);
+                base->mScript = ESM::RefId::stringRefId("unsupported_equipment_script");
+                rejectBytes(good, bindings);
+                base->mScript = {};
+                for (int test = 0; test < 6; ++test)
+                {
+                    auto invalid = saved;
+                    if (test == 0)
+                        invalid.mActor = output.mActor;
+                    if (test == 1)
+                        invalid.mObjects.resize(PlainEquipmentValues::MaxItems + 1);
+                    if (test == 2)
+                        invalid.mObjects[0].mAnimationState.mScriptedAnims.resize(257);
+                    if (test == 3)
+                        invalid.mObjects[0].mRef.mGlobalVariable.assign(4097, 'x');
+                    if (test == 4)
+                        invalid.mObjects[0].mActorIdConverter = reinterpret_cast<ESM::ActorIdConverter*>(&f);
+                    if (test == 5)
+                        invalid.mObjects[0].mRef.mOwner = ESM::RefId::stringRefId("unbound_equipment_owner");
+                    bool failed = false;
+                    try
+                    {
+                        encodeEquipment(invalid, bindings, byteOutput);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        failed = true;
+                    }
+                    require(failed, "equipment encoder accepted invalid values");
+                    unchanged();
+                    ++rejected;
+                }
+                // Rejection cannot poison a subsequent complete owned result.
+                decodeEquipment(good, bindings, output);
+                require(sameValues(output, saved), "equipment codec retry lost values");
+            }
+            std::cout << "equipment byte rejection guards=" << rejected << '\n';
+        }
+
+        static void checkCodecBounds()
+        {
+            size_t cases = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture f;
+                f.seedValues(actor);
+                PlainEquipmentValues values;
+                auto prepared = f.prepare(actor, true);
+                prepared.exportValues(f.preparationContext(actor), values);
+                const auto effects = prepared.result();
+                const auto before = f.snapshot();
+                auto& object = values.mObjects[0];
+                object.mRef.mGlobalVariable.assign(PlainEquipmentValues::MaxText, 'g');
+                object.mRef.mDestCell.assign(PlainEquipmentValues::MaxText, 'd');
+                auto animation = object.mAnimationState.mScriptedAnims[0];
+                animation.mGroup.assign(PlainEquipmentValues::MaxText, 'a');
+                animation.mTime = -2;
+                object.mAnimationState.mScriptedAnims.assign(PlainEquipmentValues::MaxAnimations, animation);
+                // Distinct clothing base and maximum trusted reference text.
+                auto shirt = *f.mItems[actor].get<ESM::Clothing>()->mBase;
+                shirt.mId = ESM::RefId::stringRefId(std::string(PlainEquipmentValues::MaxText, 's'));
+                f.mStore.insertStatic(shirt);
+                object.mRef.mRefID = shirt.mId;
+                object.mRef.mOwner = shirt.mId;
+                object.mRef.mSoul = shirt.mId;
+                object.mRef.mFaction = shirt.mId;
+                object.mRef.mKey = shirt.mId;
+                object.mRef.mTrap = shirt.mId;
+                auto ids = referenceIds(values);
+                const auto e = envelope(values.mActor);
+                const EquipmentBindings bindings{ e, f.mStore, ids };
+                EquipmentBytes bytes;
+                encodeEquipment(values, bindings, bytes);
+                PlainEquipmentValues decoded;
+                decodeEquipment(bytes, bindings, decoded);
+                require(sameValues(values, decoded), "equipment codec rejected/lost maximum supported text/animations");
+                auto restored = RestoredPlainEquipment::restore(decoded, f.mStore, e.mActor);
+                restored.exportValues(decoded);
+                require(sameValues(values, decoded), "maximum equipment values changed on detached restore");
+                ++cases;
+
+                // External animation count is implicit in repeated stock fields.
+                // Insert one complete group, updating its enclosing record size.
+                auto bad = bytes;
+                const auto first = fieldAt(bad, ESM::fourCC("ANIS"));
+                const auto second = fieldAt(bad, ESM::fourCC("ANIS"), 1);
+                const EquipmentBytes group(bad.begin() + first.mData - 8, bad.begin() + second.mData - 8);
+                bad.insert(bad.begin() + first.mData - 8, group.begin(), group.end());
+                putNumber(
+                    bad, first.mRecord + 4, numberAt(bad, first.mRecord + 4) + static_cast<uint32_t>(group.size()));
+                const auto* storage = decoded.mObjects.data();
+                Allocations::Trace trace;
+                bool rejected = false;
+                {
+                    Allocations::Observe observe(trace);
+                    try
+                    {
+                        decodeEquipment(bad, bindings, decoded);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        rejected = true;
+                    }
+                }
+                require(rejected && trace.mTotal <= 1 && trace.mOutstanding == 0 && decoded.mObjects.data() == storage
+                        && sameValues(values, decoded),
+                    "oversized equipment animation list allocated or changed output");
+                ++cases;
+
+                // Empty equipment remains a complete actor/counter-bound state.
+                values.mObjects.clear();
+                values.mShirt = {};
+                values.mSelected = {};
+                encodeEquipment(values, bindings, bytes);
+                decodeEquipment(bytes, bindings, decoded);
+                require(sameValues(values, decoded), "empty equipment lost exact metadata");
+                ++cases;
+                require(prepared.result() == effects, "equipment bound checks changed captured effects");
+                f.unchanged(before);
+            }
+            // Retain bytes after every source fixture and input value is gone.
+            EquipmentBytes bytes;
+            EquipmentEnvelope e;
+            std::vector<ESM::RefId> ids;
+            PlainEquipmentValues expected;
+            {
+                PlainEquipmentFixture source;
+                source.seedValues(0);
+                PlainEquipmentValues input;
+                source.prepare(0, true).exportValues(source.preparationContext(0), input);
+                expected = input;
+                ids = referenceIds(input);
+                e = envelope(input.mActor);
+                encodeEquipment(input, { e, source.mStore, ids }, bytes);
+            }
+            PlainEquipmentFixture replacement;
+            PlainEquipmentValues decoded;
+            decodeEquipment(bytes, { e, replacement.mStore, ids }, decoded);
+            auto restored = RestoredPlainEquipment::restore(decoded, replacement.mStore, e.mActor);
+            bytes.assign(1, '!');
+            decoded.mObjects.clear();
+            restored.exportValues(decoded);
+            require(sameValues(decoded, expected), "equipment decoded/restored values borrowed source storage");
+            std::cout << "equipment codec bounds/owned lifetime cases=" << cases + 1 << '\n';
+        }
+
+        static void checkCodecAllocations()
+        {
+            using namespace Allocations;
+            size_t failures = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    PlainEquipmentFixture f;
+                    f.seedValues(actor);
+                    auto& inventory = f.mInventories[actor];
+                    inventory.setInvListener(&f.mListener);
+                    inventory.setContListener(&f.mListener);
+                    inventory.setSelectedEnchantItem(inventory.begin());
+                    if (!equip)
+                        inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                    f.mEvents.clear();
+                    auto prepared = f.prepare(actor, equip);
+                    const auto effects = prepared.result();
+                    const auto* effectStorage = prepared.result().mEffects.data();
+                    PlainEquipmentValues saved, output;
+                    prepared.exportValues(f.preparationContext(actor), saved);
+                    f.prepare(1 - actor, true).exportValues(f.preparationContext(1 - actor), output);
+                    const auto outputValue = output;
+                    const auto* outputStorage = output.mObjects.data();
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                    EquipmentBytes bytes;
+                    encodeEquipment(saved, bindings, bytes);
+                    EquipmentBytes byteOutput{ 'o', 'l', 'd' };
+                    const auto byteValue = byteOutput;
+                    const auto* byteStorage = byteOutput.data();
+                    auto oldRestored = RestoredPlainEquipment::restore(output, f.mStore, output.mActor);
+                    const auto* restoredStorage = oldRestored.mState.get();
+                    const auto before = f.snapshot();
+                    auto malformed = bytes;
+                    putNumber(malformed, fieldAt(malformed, ESM::fourCC("SIZE")).mData, 66);
+                    auto semantic = bytes;
+                    putNumber(semantic, fieldAt(semantic, ESM::fourCC("FLAG")).mData, 8);
+                    auto noncanonical = bytes;
+                    putNumber(
+                        noncanonical, fieldAt(noncanonical, ESM::fourCC("XSCL")).mData, std::bit_cast<uint32_t>(1.75f));
+                    const auto chain = [&](auto& valueOutput, auto& bytesOutput, auto& restoredOutput) {
+                        PlainEquipmentValues staged;
+                        decodeEquipment(bytes, bindings, staged);
+                        auto restored = RestoredPlainEquipment::restore(staged, f.mStore, e.mActor);
+                        restored.exportValues(staged);
+                        EquipmentBytes stagedBytes;
+                        encodeEquipment(staged, bindings, stagedBytes);
+                        // Each publication is nonthrowing after all preparation.
+                        valueOutput.swap(staged);
+                        bytesOutput.swap(stagedBytes);
+                        restoredOutput = std::move(restored);
+                    };
+                    for (int operation = 0; operation < 6; ++operation)
+                    {
+                        const auto run = [&](auto& values, auto& encoded, auto& restored) {
+                            if (operation == 0)
+                                encodeEquipment(saved, bindings, encoded);
+                            if (operation == 1)
+                                decodeEquipment(bytes, bindings, values);
+                            if (operation == 2)
+                                chain(values, encoded, restored);
+                            if (operation == 3)
+                                decodeEquipment(malformed, bindings, values);
+                            if (operation == 4)
+                                decodeEquipment(semantic, bindings, values);
+                            if (operation == 5)
+                                decodeEquipment(noncanonical, bindings, values);
+                        };
+                        Trace count;
+                        // Warm library internals outside observation. All RefIds
+                        // already exist in caller content, including semantic IDs.
+                        {
+                            PlainEquipmentValues temporary;
+                            EquipmentBytes encoded;
+                            auto restored = RestoredPlainEquipment::restore(saved, f.mStore, e.mActor);
+                            try
+                            {
+                                run(temporary, encoded, restored);
+                            }
+                            catch (const std::invalid_argument&)
+                            {
+                                require(operation >= 3, "unexpected codec rejection");
+                            }
+                        }
+                        {
+                            Observe observe(count);
+                            PlainEquipmentValues temporary;
+                            EquipmentBytes encoded;
+                            std::optional<RestoredPlainEquipment> restored;
+                            // optional assignment still publishes a complete owned restore.
+                            try
+                            {
+                                run(temporary, encoded, restored);
+                            }
+                            catch (const std::invalid_argument&)
+                            {
+                                require(operation >= 3, "unexpected codec rejection");
+                            }
+                        }
+                        if ((count.mTotal == 0 && operation != 3) || count.mOutstanding != 0
+                            || count.mTrackingOverflow != 0)
+                            std::cerr << "equipment codec baseline operation=" << operation
+                                      << " allocations=" << count.mTotal << " outstanding=" << count.mOutstanding
+                                      << " overflow=" << count.mTrackingOverflow << '\n';
+                        // MSVC's exception diagnostic may use direct C allocation;
+                        // this malformed preflight then makes no observed C++ allocation.
+                        require((count.mTotal > 0 || operation == 3) && count.mOutstanding == 0
+                                && count.mTrackingOverflow == 0,
+                            "equipment codec allocation baseline leaked or missed work");
+                        for (size_t fail = 1; fail <= count.mTotal; ++fail)
+                        {
+                            Trace trace;
+                            bool failed = false;
+                            {
+                                Observe observe(trace, fail);
+                                try
+                                {
+                                    run(output, byteOutput, oldRestored);
+                                }
+                                catch (const std::exception&)
+                                {
+                                    failed = true;
+                                }
+                            }
+                            if (!failed || trace.mFailures != 1 || trace.mOutstanding != 0)
+                                std::cerr << "equipment codec allocation operation=" << operation << " fail=" << fail
+                                          << " rejected=" << failed << " injected=" << trace.mFailures
+                                          << " outstanding=" << trace.mOutstanding << '\n';
+                            require(failed && trace.mFailures == 1 && trace.mOutstanding == 0
+                                    && trace.mTrackingOverflow == 0 && output.mObjects.data() == outputStorage
+                                    && sameValues(output, outputValue) && byteOutput.data() == byteStorage
+                                    && byteOutput == byteValue && oldRestored.mState.get() == restoredStorage
+                                    && prepared.result() == effects
+                                    && prepared.result().mEffects.data() == effectStorage,
+                                "equipment codec allocation failure changed output storage/value or effects");
+                            PlainEquipmentValues retained;
+                            oldRestored.exportValues(retained);
+                            require(sameValues(retained, outputValue), "codec failure altered restored values");
+                            f.unchanged(before);
+                            ++failures;
+                        }
+                    }
+                    chain(output, byteOutput, oldRestored);
+                    require(sameValues(output, saved) && byteOutput == bytes, "equipment codec retry changed result");
+                    f.unchanged(before);
+                }
+            std::cout << "equipment codec allocation failures=" << failures << '\n';
         }
 
         static void checkValueGuards()
@@ -1313,6 +1994,31 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter)
     {
+        if (filter == "inventory-equipment-codec-bounds")
+        {
+            PlainEquipmentFixture::checkCodecBounds();
+            return;
+        }
+        if (filter == "inventory-equipment-codec-allocations")
+        {
+            PlainEquipmentFixture::checkCodecAllocations();
+            return;
+        }
+        if (filter == "inventory-equipment-codec-guards")
+        {
+            PlainEquipmentFixture::checkCodecGuards();
+            return;
+        }
+        if (filter == "inventory-equipment-codec")
+        {
+            PlainEquipmentFixture::checkRestore(true);
+            return;
+        }
+        if (filter == "inventory-equipment-codec-encode")
+        {
+            PlainEquipmentFixture::checkCodecEncode();
+            return;
+        }
         if (filter == "inventory-equipment-export")
         {
             PlainEquipmentFixture::checkExport();

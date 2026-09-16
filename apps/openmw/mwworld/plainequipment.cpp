@@ -159,6 +159,11 @@ namespace MWWorld
         }
     }
 
+    void PlainEquipmentValues::validate(const ESMStore& content, ESM::RefNum expectedActor) const
+    {
+        validateValues(*this, content, expectedActor);
+    }
+
     void PlainEquipmentValues::swap(PlainEquipmentValues& other) noexcept
     {
         static_assert(std::is_nothrow_swappable_v<ESM::RefNum>);
