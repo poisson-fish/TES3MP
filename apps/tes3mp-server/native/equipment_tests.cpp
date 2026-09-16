@@ -71,16 +71,21 @@ namespace MWWorld::Testing
     }
 
     // Test-owned actors and true stock InventoryStores; no NPC custom-data or
-    // Environment installation. Private access only constructs/corrupts fixtures.
+    // Environment installation. Private access stages/installs only these stores.
     class PlainEquipmentFixture
     {
     public:
-        struct Listener : InventoryStoreListener, ContainerStoreListener
+        struct Listener final : InventoryStoreListener, ContainerStoreListener
         {
             int mCalls = 0;
+            std::vector<std::pair<ESM::RefNum, int>> mRemovals;
             void equipmentChanged() override { ++mCalls; }
             void itemAdded(const ConstPtr&, int) override { ++mCalls; }
-            void itemRemoved(const ConstPtr&, int) override { ++mCalls; }
+            void itemRemoved(const ConstPtr& item, int count) override
+            {
+                mRemovals.emplace_back(item.getCellRef().getRefNum(), count);
+                ++mCalls;
+            }
         };
         ESMStore mStore;
         ESM::ReadersCache mReaders;
@@ -91,6 +96,785 @@ namespace MWWorld::Testing
         std::array<Ptr, 2> mItems;
         std::vector<std::string> mEvents;
         Listener mListener;
+
+        struct ActorEffects
+        {
+            static constexpr size_t MaxPending = 64;
+            Listener mListener;
+            size_t mInventoryUpdates = 0;
+            std::vector<ESM::RefNum> mNotifications;
+        };
+        std::array<ActorEffects, 2> mActorEffects;
+        bool mFailedClosed = false;
+
+        void bindEffects(size_t actor)
+        {
+            mInventories.at(actor).setInvListener(&mActorEffects.at(actor).mListener);
+            mInventories.at(actor).setContListener(&mActorEffects.at(actor).mListener);
+        }
+
+        // Private borrowed relocation data never leaves this test-owned fixture.
+        // Destruction order keeps candidate nodes alive until registry/views die.
+        struct Installation
+        {
+            PreparedPlainEquipment mPrepared;
+            PtrRegistry::Index mRegistry;
+            size_t mRevision = 0;
+            PlainEquipmentValues mSaved;
+            std::unique_ptr<const PlainEquipmentResult> mResult;
+            ActorEffects mEffects;
+            ContainerStoreIterator mShirt, mSelected;
+            Ptr mItem;
+
+            Installation(PreparedPlainEquipment prepared, InventoryStore& target)
+                : mPrepared(std::move(prepared))
+                , mShirt(target.end())
+                , mSelected(target.end())
+            {
+            }
+        };
+
+        void validateCaller(size_t actor, const Ptr& caller) const
+        {
+            if (actor >= mActors.size() || !mActors[actor] || !caller.hasLiveReference())
+                throw std::invalid_argument("Equipment trusted caller lifetime or actor changed");
+            const auto expected = mActors[actor]->getPtr();
+            if (caller != expected || caller.mCell != expected.mCell
+                || caller.mContainerStore != expected.mContainerStore
+                || caller.getReferenceLifetime() != expected.getReferenceLifetime())
+                throw std::invalid_argument("Equipment trusted caller does not match actor");
+        }
+
+        std::unique_ptr<Installation> stageInstallation(size_t actor, const Ptr& caller, PreparedPlainEquipment input)
+        {
+            using namespace Allocations;
+            InPhase phase(Phase::Validation);
+            validateCaller(actor, caller);
+            const auto context = preparationContext(actor);
+            auto& live = mInventories[actor];
+            const auto& effects = mActorEffects[actor];
+            if (mWorld.mPtrRegistry.mIndex.size() > 2 * PlainEquipmentValues::MaxItems + 2
+                || effects.mNotifications.size() > ActorEffects::MaxPending
+                || effects.mListener.mRemovals.size() > ActorEffects::MaxPending)
+                throw std::invalid_argument("Equipment fixture registry/effect bound exceeded");
+            auto& candidate = input.installationCandidate(context, live);
+            // Test listeners have fully owned, stageable semantics. Unknown
+            // callbacks (including real mechanics listeners) cannot be dropped
+            // or invoked after durable acceptance and are rejected visibly.
+            if (live.mInventoryListener != &effects.mListener || live.mListener != &effects.mListener)
+                throw std::invalid_argument("Unsupported equipment effect listener");
+            if (!mItems[actor].hasLiveReference() || mItems[actor].mContainerStore != &live)
+                throw std::invalid_argument("Equipment fixture item lifetime or binding changed");
+
+            phase.set(Phase::Setup);
+            auto staged = std::make_unique<Installation>(std::move(input), live);
+            staged->mPrepared.exportValues(context, staged->mSaved);
+            staged->mRegistry = mWorld.mPtrRegistry.mIndex;
+            staged->mRevision = mWorld.getPtrRegistryRevision();
+            staged->mEffects = effects;
+            staged->mShirt = staged->mSelected = live.end();
+            const auto& result = staged->mPrepared.result();
+            for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
+            {
+                Ptr node(&*it, nullptr); // Allocate lifetime witnesses before persistence.
+                node.mContainerStore = &live;
+                const auto id = it->mRef.getRefNum();
+                staged->mRegistry.insert_or_assign(id, node);
+                if (id == result.mShirt)
+                    staged->mShirt = ContainerStoreIterator(&live, it);
+                if (id == result.mSelected)
+                    staged->mSelected = ContainerStoreIterator(&live, it);
+                if (node.getCellRef().getRefNum() == mItems[actor].getCellRef().getRefNum())
+                    staged->mItem = node;
+            }
+            using Kind = PlainEquipmentResult::EffectKind;
+            for (const auto& effect : result.mEffects)
+            {
+                if (effect.mActor != result.mActor)
+                    throw std::invalid_argument("Equipment effect owner changed");
+                if (staged->mEffects.mListener.mCalls == std::numeric_limits<int>::max()
+                    || staged->mEffects.mInventoryUpdates == std::numeric_limits<size_t>::max())
+                    throw std::invalid_argument("Equipment test effect counter exhausted");
+                switch (effect.mKind)
+                {
+                    case Kind::RegisterSplit:
+                        ++staged->mRevision; // Exactly stock insert, including unsigned rollover.
+                        break;
+                    case Kind::InventoryUpdated:
+                        if (staged->mEffects.mNotifications.size() == ActorEffects::MaxPending)
+                            throw std::invalid_argument("Equipment inventory notification bound exceeded");
+                        staged->mEffects.mNotifications.push_back(effect.mActor);
+                        ++staged->mEffects.mInventoryUpdates;
+                        break;
+                    case Kind::ItemRemoved:
+                        if (staged->mEffects.mListener.mRemovals.size() == ActorEffects::MaxPending)
+                            throw std::invalid_argument("Equipment removal notification bound exceeded");
+                        staged->mEffects.mListener.itemRemoved(staged->mRegistry.at(effect.mItem), effect.mCount);
+                        break;
+                    case Kind::EquipmentChanged:
+                        staged->mEffects.mListener.equipmentChanged();
+                        break;
+                    case Kind::DeleteStackScript:
+                        // validate() proved every source/candidate is plain and
+                        // has no script registration. Stock cleanup is empty.
+                        break;
+                    default:
+                        throw std::invalid_argument("Unsupported equipment effect kind");
+                }
+            }
+            phase.set(Phase::Result);
+            staged->mResult = std::make_unique<const PlainEquipmentResult>(result);
+            phase.set(Phase::Revalidation);
+            validateCaller(actor, caller);
+            staged->mPrepared.validate(context);
+            return staged;
+        }
+
+        static void checkInstallationPreparation()
+        {
+            size_t cases = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    PlainEquipmentFixture f;
+                    if (!equip)
+                        f.mInventories[actor].equip(InventoryStore::Slot_Shirt,
+                            f.mInventories[actor].begin(), f.context(actor, actor));
+                    f.bindEffects(actor);
+                    const auto before = f.snapshot();
+                    const auto expected = f.prepare(actor, equip).result();
+                    const auto caller = f.mActors[actor]->getPtr();
+                    auto staged = f.stageInstallation(actor, caller, f.prepare(actor, equip));
+                    require(*staged->mResult == expected && staged->mEffects.mListener.mCalls == (equip ? 2 : 1)
+                            && staged->mEffects.mInventoryUpdates == (equip ? 2 : 0)
+                            && f.mActorEffects[actor].mListener.mCalls == 0
+                            && f.mActorEffects[actor].mInventoryUpdates == 0,
+                        "equipment installation preparation lost effects or mutated live consumers");
+                    require(staged->mRevision == before.mRegistry.mRevision + (equip ? 1 : 0)
+                            && staged->mSaved.mLastGenerated == expected.mLastGenerated,
+                        "equipment installation preparation inferred counters");
+                    for (const auto& item : expected.mItems)
+                    {
+                        const auto node = staged->mRegistry.at(item.mIdentity);
+                        require(node.getCellRef().getCount(false) == item.mCount
+                                && node.mContainerStore == &f.mInventories[actor] && !node.mRef->mWorldModel,
+                            "equipment staged registry lost membership or attached live service");
+                    }
+                    f.unchanged(before);
+                    ++cases;
+                }
+            std::cout << "equipment actor-local installation/effect preparations=" << cases << '\n';
+        }
+
+        // Test target only, serialized synchronous access; no arbitrary sink or
+        // callback may reenter between final validation and file acceptance.
+        // Uncertainty poisons this whole fixture, even with another file adapter.
+        TestPersistenceResult commitEquipment(size_t actor, const Ptr& caller, PreparedPlainEquipment input,
+            EquipmentFileSink& file, const EquipmentBindings& bindings,
+            std::unique_ptr<const PlainEquipmentResult>& output, EquipmentBytes& bytes, FileFaults& faults)
+        {
+            using namespace Allocations;
+            InPhase phase(Phase::Validation);
+            if (mFailedClosed || file.failedClosed())
+            {
+                mFailedClosed = true;
+                return TestPersistenceResult::Uncertain;
+            }
+            validateCaller(actor, caller);
+            const auto trusted = envelope(caller.getCellRef().getRefNum());
+            if (&bindings.mContent != &mStore || bindings.mEnvelope.mActor != trusted.mActor
+                || bindings.mEnvelope.mRuntime != trusted.mRuntime || bindings.mEnvelope.mContent != trusted.mContent)
+                throw std::invalid_argument("Equipment commit runtime/content/actor binding changed");
+            auto staged = stageInstallation(actor, caller, std::move(input));
+            phase.set(Phase::Revalidation);
+            auto& live = mInventories[actor];
+            auto& candidate = staged->mPrepared.installationCandidate(preparationContext(actor), live);
+            EquipmentBytes encoded;
+            phase.set(Phase::Persistence);
+            const auto outcome = file.write(staged->mSaved, bindings, encoded, faults);
+            if (outcome != TestPersistenceResult::Accepted)
+            {
+                mFailedClosed = outcome == TestPersistenceResult::Uncertain;
+                return outcome;
+            }
+
+            // Acceptance is the last fallible call. All Ptrs, iterators, map
+            // capacity, effects and owned publication storage already exist.
+            const auto install = [&]() noexcept {
+                phase.set(Phase::Installation);
+                auto& nodes = candidate.mLists.mClothes.mList;
+                for (auto& node : nodes)
+                    node.mWorldModel = &mWorld;
+                static_assert(noexcept(nodes.swap(live.mLists.mClothes.mList)));
+                nodes.swap(live.mLists.mClothes.mList);
+                live.mSlots[InventoryStore::Slot_Shirt] = staged->mShirt;
+                live.mSelectedEnchantItem = staged->mSelected;
+                live.mRechargingItems.clear();
+                live.mWeightUpToDate = live.mRechargingItemsUpToDate = false;
+                live.mModified = true;
+                auto& registry = mWorld.mPtrRegistry;
+                static_assert(noexcept(registry.mIndex.swap(staged->mRegistry)));
+                registry.mIndex.swap(staged->mRegistry);
+                registry.mRevision = staged->mRevision;
+                registry.mLastGenerated = staged->mSaved.mLastGenerated;
+                mItems[actor] = staged->mItem;
+                mActorEffects[actor].mListener.mCalls = staged->mEffects.mListener.mCalls;
+                mActorEffects[actor].mListener.mRemovals.swap(staged->mEffects.mListener.mRemovals);
+                mActorEffects[actor].mInventoryUpdates = staged->mEffects.mInventoryUpdates;
+                mActorEffects[actor].mNotifications.swap(staged->mEffects.mNotifications);
+                // Old nodes may not deregister their replacements on teardown.
+                for (auto& node : nodes)
+                    node.mWorldModel = nullptr;
+                phase.set(Phase::Publication);
+                output.swap(staged->mResult);
+                bytes.swap(encoded);
+                phase.set(Phase::Retirement);
+                staged.reset();
+            };
+            install();
+            return TestPersistenceResult::Accepted;
+        }
+
+        PlainEquipmentValues installedValues(size_t actor) const
+        {
+            const auto& inventory = mInventories[actor];
+            PlainEquipmentValues result;
+            result.mActor = mActors[actor]->getPtr().getCellRef().getRefNum();
+            result.mLastGenerated = mWorld.getLastGeneratedRefNum();
+            for (auto it = inventory.mLists.mClothes.mList.begin(); it != inventory.mLists.mClothes.mList.end(); ++it)
+            {
+                const auto position = ConstContainerStoreIterator(&inventory, it);
+                if (position == inventory.mSlots[InventoryStore::Slot_Shirt])
+                    result.mShirt = it->mRef.getRefNum();
+                if (position == inventory.mSelectedEnchantItem)
+                    result.mSelected = it->mRef.getRefNum();
+                auto& object = result.mObjects.emplace_back();
+                object.blank();
+                it->mRef.writeState(object);
+                it->mData.write(object, Compiler::Locals{});
+                object.mHasCustomState = false;
+            }
+            return result;
+        }
+
+        static void checkDurableSuccess(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t cases = 0;
+            std::unique_ptr<const PlainEquipmentResult> output;
+            EquipmentBytes bytes;
+            for (int variant = 0; variant < 9; ++variant)
+            {
+                PlainEquipmentFixture f;
+                for (size_t actor = 0; actor < 2; ++actor)
+                {
+                    auto& inventory = f.mInventories[actor];
+                    f.seedValues(actor);
+                    const bool equip = variant < 3 || variant >= 6;
+                    if (variant == 0 || variant == 3 || variant == 7)
+                        f.mItems[actor].getCellRef().setCount(actor == 0 ? 1 : -1);
+                    if (!equip || variant == 8)
+                        inventory.equip(InventoryStore::Slot_Shirt, inventory.begin(), f.context(actor, actor));
+                    if (variant == 5)
+                        std::next(inventory.begin())->getCellRef().setSoul(ESM::RefId::stringRefId("different_soul"));
+                    if (variant == 8)
+                    {
+                        auto shirt = *f.mItems[actor].get<ESM::Clothing>()->mBase;
+                        shirt.mId = ESM::RefId::stringRefId(
+                            actor == 0 ? "durable_replacement_shirt_a" : "durable_replacement_shirt_b");
+                        f.mStore.insertStatic(shirt);
+                        ManualRef replacement(f.mStore, shirt.mId);
+                        auto item = inventory.addNewStack(replacement.getPtr(), actor == 0 ? 2 : -2);
+                        f.mWorld.registerPtr(*item);
+                        f.mItems[actor] = *item;
+                    }
+                    if (variant == 2 || variant == 6)
+                    {
+                        const size_t nodes = variant == 6 ? PreparedPlainEquipment::MaxItems - 1 : 1;
+                        for (size_t i = 0; i < nodes; ++i)
+                        {
+                            auto dormant = inventory.addNewStack(f.mItems[actor], 1);
+                            dormant->getCellRef().unsetRefNum();
+                            f.mWorld.registerPtr(*dormant);
+                            dormant->getCellRef() = dormant->getCellRef().copyWithCount(0);
+                            inventory.mSelectedEnchantItem = dormant;
+                        }
+                    }
+                    else
+                        inventory.setSelectedEnchantItem(inventory.begin());
+                    // Keep every previously installed actor identity covered.
+                    if (variant == 6)
+                        f.mWorld.setLastGeneratedRefNum({ std::numeric_limits<uint32_t>::max(), -10 - int(actor) });
+                    else if (variant == 7)
+                        f.mWorld.setLastGeneratedRefNum(
+                            { std::numeric_limits<uint32_t>::max(), std::numeric_limits<int32_t>::min() });
+                    else
+                        f.mWorld.setLastGeneratedRefNum({ 900, -10 - int(actor) });
+                    f.mWorld.mPtrRegistry.mRevision = std::numeric_limits<size_t>::max();
+                    f.bindEffects(actor);
+                    const auto before = f.snapshot();
+                    const auto oldItem = f.mItems[actor];
+                    auto prepared = f.prepare(actor, equip);
+                    const auto expected = prepared.result();
+                    PlainEquipmentValues saved;
+                    prepared.exportValues(f.preparationContext(actor), saved);
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                    const auto path = scratch / (actor == 0 ? "actor-a.bin" : "actor-b.bin");
+                    EquipmentFileSink file(path);
+                    FileFaults faults{ FileFault::None, 17 };
+                    Allocations::Trace trace;
+                    TestPersistenceResult outcome;
+                    {
+                        Allocations::Observe observe(trace);
+                        outcome = f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                            file, bindings, output, bytes, faults);
+                    }
+                    require(outcome == TestPersistenceResult::Accepted && output && *output == expected
+                            && bytes == equipmentFileBytes(path) && !oldItem.hasLiveReference()
+                            && trace.allocations(Allocations::Phase::Installation) == 0
+                            && trace.allocations(Allocations::Phase::Publication) == 0
+                            && trace.allocations(Allocations::Phase::Retirement) == 0,
+                        "equipment durable success lost publication or allocated after acceptance");
+                    PlainEquipmentValues decoded;
+                    decodeEquipment(bytes, bindings, decoded);
+                    require(sameValues(saved, decoded) && sameValues(saved, f.installedValues(actor)),
+                        "equipment durable install differs from complete persisted values");
+                    size_t splits = 0, updates = 0;
+                    int calls = 0;
+                    std::vector<std::pair<ESM::RefNum, int>> removals;
+                    for (const auto& effect : expected.mEffects)
+                    {
+                        using Kind = PlainEquipmentResult::EffectKind;
+                        splits += effect.mKind == Kind::RegisterSplit;
+                        updates += effect.mKind == Kind::InventoryUpdated;
+                        calls += effect.mKind == Kind::EquipmentChanged || effect.mKind == Kind::ItemRemoved;
+                        if (effect.mKind == Kind::ItemRemoved)
+                            removals.emplace_back(effect.mItem, effect.mCount);
+                    }
+                    require(f.mWorld.getPtrRegistryRevision() == before.mRegistry.mRevision + splits
+                            && f.mWorld.getLastGeneratedRefNum() == expected.mLastGenerated
+                            && f.mActorEffects[actor].mListener.mCalls == calls
+                            && f.mActorEffects[actor].mInventoryUpdates == updates
+                            && f.mActorEffects[actor].mListener.mRemovals == removals
+                            && f.mActorEffects[actor].mNotifications == std::vector<ESM::RefNum>(updates, expected.mActor)
+                            && f.mScripts.snapshot() == before.mScripts && f.mEvents == before.mEvents,
+                        "equipment durable install lost exact counters or stock effects");
+                    for (const auto& node : inventory.mLists.mClothes.mList)
+                    {
+                        const auto registered = f.mWorld.getPtr(node.mRef.getRefNum());
+                        require(registered.hasLiveReference() && registered.mRef == &node
+                                && registered.mContainerStore == &inventory && node.mWorldModel == &f.mWorld,
+                            "equipment durable registry lost active/dormant membership");
+                    }
+                    f.unchangedActor(before, 1 - actor);
+                    const auto registry = f.mWorld.snapshotPtrRegistry();
+                    for (const auto& [id, binding] : before.mRegistry.mEntries)
+                        if (binding.getContainer() != &inventory)
+                            require(registry.mEntries.at(id) == binding, "equipment install changed unrelated mapping");
+                    ++cases;
+                }
+            }
+            require(output && !output->mItems.empty() && !bytes.empty(),
+                "equipment owned publication did not survive fixture destruction");
+            std::cout << "equipment durable two-actor successes=" << cases << '\n';
+        }
+
+        static void checkCommitGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int test = 0; test < 31; ++test)
+                {
+                    PlainEquipmentFixture f;
+                    f.bindEffects(actor);
+                    f.seedValues(actor);
+                    auto& inventory = f.mInventories[actor];
+                    if (test == 17)
+                        inventory.setInvListener(&f.mListener);
+                    if (test == 18)
+                        inventory.setContListener(&f.mListener);
+                    if (test == 19)
+                        inventory.setInvListener(nullptr);
+                    auto caller = f.mActors[actor]->getPtr();
+                    auto prepared = f.prepare(actor, true);
+                    auto prior = f.installedValues(actor);
+                    const auto ids = referenceIds(prior);
+                    auto e = envelope(prior.mActor);
+                    ESMStore foreignContent;
+                    const ESMStore* content = &f.mStore;
+                    const auto path = scratch / "guard.bin";
+                    EquipmentFileSink file(path);
+                    FileFaults faults;
+                    EquipmentBytes priorBytes;
+                    require(file.write(prior, { e, f.mStore, ids }, priorBytes, faults)
+                            == TestPersistenceResult::Accepted,
+                        "equipment commit guard prior file setup failed");
+                    std::unique_ptr<const PlainEquipmentResult> output
+                        = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                    const auto* outputStorage = output.get();
+                    const auto outputValue = *output;
+                    EquipmentBytes bytes{ 'o', 'l', 'd' };
+                    const auto bytesValue = bytes;
+                    const auto* bytesStorage = bytes.data();
+                    std::optional<InventoryStore> alternate;
+                    switch (test)
+                    {
+                        case 0:
+                            caller = f.mActors[1 - actor]->getPtr();
+                            break;
+                        case 1:
+                            caller.mContainerStore = &f.mInventories[1 - actor];
+                            break;
+                        case 2:
+                            f.mActors[actor].reset();
+                            break;
+                        case 3:
+                            f.mActors[actor] = std::make_unique<ManualRef>(f.mStore,
+                                ESM::RefId::stringRefId("equipment_actor"));
+                            f.mActors[actor]->getPtr().getCellRef().setRefNum(prior.mActor);
+                            f.mWorld.registerPtr(f.mActors[actor]->getPtr());
+                            break;
+                        case 4:
+                            f.mItems[actor].getCellRef().setCount(2);
+                            break;
+                        case 5:
+                            inventory.setSelectedEnchantItem(inventory.begin());
+                            break;
+                        case 6:
+                            inventory.mSlots[InventoryStore::Slot_Shirt] = inventory.begin();
+                            break;
+                        case 7:
+                            f.mWorld.registerPtr(f.mItems[actor]);
+                            break;
+                        case 8:
+                            f.mWorld.setLastGeneratedRefNum({ 99, -3 });
+                            break;
+                        case 9:
+                            inventory = InventoryStore();
+                            break;
+                        case 10:
+                        {
+                            auto& node = inventory.mLists.mClothes.mList.front();
+                            const auto base = node.mBase;
+                            const auto ref = node.mRef;
+                            std::destroy_at(&node);
+                            std::construct_at(&node, ESM::makeBlankCellRef(), base);
+                            node.mRef = ref;
+                            Ptr replacement(&node, nullptr);
+                            replacement.mContainerStore = &inventory;
+                            f.mWorld.registerPtr(replacement);
+                            break;
+                        }
+                        case 11:
+                            std::destroy_at(&f.mScripts);
+                            std::construct_at(&f.mScripts, f.mStore);
+                            break;
+                        case 12:
+                            content = &foreignContent;
+                            break;
+                        case 13:
+                            e.mRuntime += "_foreign";
+                            break;
+                        case 14:
+                            e.mContent[0] ^= 1;
+                            break;
+                        case 15:
+                            e.mActor = f.mActors[1 - actor]->getPtr().getCellRef().getRefNum();
+                            break;
+                        case 16:
+                            inventory.setInvListener(&f.mListener);
+                            break;
+                        case 20:
+                            inventory.mUpdatesEnabled = false;
+                            break;
+                        case 21:
+                            inventory.mSlots[InventoryStore::Slot_Robe] = inventory.begin();
+                            break;
+                        case 22:
+                            const_cast<ESM::Clothing*>(f.mItems[actor].get<ESM::Clothing>()->mBase)->mScript
+                                = ESM::RefId::stringRefId("unsupported_equipment_script");
+                            break;
+                        case 23:
+                            const_cast<ESM::Clothing*>(f.mItems[actor].get<ESM::Clothing>()->mBase)->mEnchant
+                                = ESM::RefId::stringRefId("unsupported_equipment_enchantment");
+                            break;
+                        case 24:
+                        case 25:
+                        {
+                            alternate.emplace();
+                            alternate->setPtr(caller, f.mWorld);
+                            Misc::Rng::Generator rng{ 0 };
+                            alternate->fill({}, {}, rng);
+                            auto item = *alternate->addNewStack(f.mItems[actor], 2);
+                            item.getCellRef().unsetRefNum();
+                            f.mWorld.registerPtr(item);
+                            prepared = PreparedPlainEquipment::prepare(ContainerStoreResolution(*alternate, caller),
+                                item, item.getCellRef().getRefNum(), f.mWorld.getPtrRegistryRevision(), true,
+                                f.preparationContext(actor));
+                            if (test == 25)
+                            {
+                                alternate.reset();
+                                alternate.emplace(); // Same address, new store lifetime.
+                            }
+                            break;
+                        }
+                        case 26:
+                            const_cast<PlainEquipmentResult&>(prepared.result()).mEffects.front().mKind
+                                = static_cast<PlainEquipmentResult::EffectKind>(999);
+                            break;
+                        case 27:
+                            f.mActorEffects[actor].mListener.mCalls = std::numeric_limits<int>::max();
+                            break;
+                        case 28:
+                            f.mActorEffects[actor].mNotifications.assign(ActorEffects::MaxPending, prior.mActor);
+                            break;
+                        case 29:
+                            f.mActorEffects[actor].mListener.mRemovals.assign(
+                                ActorEffects::MaxPending, { prior.mObjects.front().mRef.mRefNum, 1 });
+                            break;
+                        case 30:
+                            f.mActorEffects[actor].mNotifications.resize(ActorEffects::MaxPending + 1);
+                            break;
+                    }
+                    const auto before = f.snapshot();
+                    faults = {};
+                    bool failed = false;
+                    Allocations::Trace trace;
+                    {
+                        Allocations::Observe observe(trace);
+                        try
+                        {
+                            f.commitEquipment(actor, caller, std::move(prepared), file,
+                                { e, *content, ids }, output, bytes, faults);
+                        }
+                        catch (const std::invalid_argument& error)
+                        {
+                            failed = !std::string_view(error.what()).empty();
+                        }
+                    }
+                    if (!failed)
+                        std::cerr << "equipment commit guard actor=" << actor << " case=" << test << '\n';
+                    require(failed && output.get() == outputStorage && *output == outputValue
+                            && bytes == bytesValue && bytes.data() == bytesStorage && faults.mWrites == 0
+                            && trace.visits(Allocations::Phase::Persistence) == 0
+                            && trace.visits(Allocations::Phase::Installation) == 0
+                            && trace.visits(Allocations::Phase::Publication) == 0
+                            && !file.failedClosed() && !f.mFailedClosed && equipmentFileBytes(path) == priorBytes,
+                        "equipment commit stale/binding/effect rejection changed prior state or output");
+                    f.unchanged(before);
+                    ++rejected;
+                }
+            std::cout << "equipment commit stale/binding/lifetime/effect rejections=" << rejected << '\n';
+        }
+
+        static void checkCommitPersistence(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t safe = 0, uncertain = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                    for (auto failure : { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close,
+                             FileFault::Replace, FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier,
+                             FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof,
+                             FileFault::ReadClose })
+                    {
+                        PlainEquipmentFixture f;
+                        f.seedValues(actor);
+                        if (!equip)
+                            f.mInventories[actor].equip(InventoryStore::Slot_Shirt,
+                                f.mInventories[actor].begin(), f.context(actor, actor));
+                        f.bindEffects(actor);
+                        f.bindEffects(1 - actor);
+                        auto prepared = f.prepare(actor, equip);
+                        PlainEquipmentValues saved;
+                        prepared.exportValues(f.preparationContext(actor), saved);
+                        const auto prior = f.installedValues(actor);
+                        const auto ids = referenceIds(saved);
+                        const auto e = envelope(saved.mActor);
+                        const EquipmentBindings bindings{ e, f.mStore, ids };
+                        const auto path = scratch / "persistence.bin";
+                        EquipmentFileSink file(path);
+                        FileFaults faults;
+                        EquipmentBytes priorBytes, newBytes;
+                        require(file.write(prior, bindings, priorBytes, faults) == TestPersistenceResult::Accepted,
+                            "equipment commit persistence prior file setup failed");
+                        encodeEquipment(saved, bindings, newBytes);
+                        require(priorBytes != newBytes, "equipment commit persistence needs distinct complete files");
+                        EquipmentBytes bytes{ 'o', 'l', 'd' };
+                        const auto bytesValue = bytes;
+                        const auto* bytesStorage = bytes.data();
+                        auto output = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                        const auto* outputStorage = output.get();
+                        const auto outputValue = *output;
+                        const auto before = f.snapshot();
+                        const auto caller = f.mActors[actor]->getPtr();
+                        faults = { failure, 17 };
+                        Allocations::Trace trace;
+                        TestPersistenceResult outcome;
+                        {
+                            Allocations::Observe observe(trace);
+                            outcome = f.commitEquipment(actor, caller, std::move(prepared), file,
+                                bindings, output, bytes, faults);
+                        }
+                        const bool poisoned = failure >= FileFault::ReplaceError;
+                        const auto actual = equipmentFileBytes(path);
+                        const auto unchanged = [&] {
+                            require(output.get() == outputStorage && *output == outputValue
+                                    && bytes == bytesValue && bytes.data() == bytesStorage,
+                                "equipment commit persistence changed prior publication");
+                            f.unchanged(before);
+                        };
+                        require(outcome == (poisoned ? TestPersistenceResult::Uncertain : TestPersistenceResult::Rejected)
+                                && file.failedClosed() == poisoned && f.mFailedClosed == poisoned
+                                && trace.visits(Allocations::Phase::Installation) == 0
+                                && trace.visits(Allocations::Phase::Publication) == 0
+                                && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                                && actual == (failure > FileFault::ReplaceError ? newBytes : priorBytes)
+                                && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp")),
+                            "equipment commit persistence failure installed effects or left incomplete bytes");
+                        unchanged();
+                        if (poisoned)
+                        {
+                            // Both the used adapter and a fresh adapter are blocked;
+                            // another actor cannot bypass fixture-wide uncertainty.
+                            EquipmentFileSink fresh(path);
+                            for (bool freshAdapter : { false, true })
+                            {
+                                auto other = f.prepare(1 - actor, true);
+                                Allocations::Trace retry;
+                                faults = {};
+                                {
+                                    Allocations::Observe observe(retry, 1);
+                                    outcome = f.commitEquipment(1 - actor, f.mActors[1 - actor]->getPtr(),
+                                        std::move(other), freshAdapter ? fresh : file, bindings, output, bytes, faults);
+                                }
+                                require(outcome == TestPersistenceResult::Uncertain && retry.mTotal == 0
+                                        && faults.mWrites == 0 && equipmentFileBytes(path) == actual,
+                                    "equipment uncertain fixture allowed a retry through another actor/sink");
+                                unchanged();
+                            }
+                            std::unique_ptr<const RestoredPlainEquipment> restored;
+                            require(restartEquipmentFile(path, bindings, restored, faults) == FileReadResult::Read,
+                                "equipment uncertain file did not restore detached");
+                            PlainEquipmentValues values;
+                            restored->exportValues(values);
+                            require(sameValues(values, failure == FileFault::ReplaceError ? prior : saved),
+                                "equipment uncertain file did not contain complete prior/new values");
+                            ++uncertain;
+                        }
+                        else
+                        {
+                            faults = {};
+                            require(f.commitEquipment(actor, caller, f.prepare(actor, equip), file,
+                                        bindings, output, bytes, faults) == TestPersistenceResult::Accepted
+                                    && sameValues(saved, f.installedValues(actor)),
+                                "equipment safe persistence rejection prevented valid retry");
+                            ++safe;
+                        }
+                    }
+            std::cout << "equipment commit safe persistence failures=" << safe << " uncertain=" << uncertain << '\n';
+        }
+
+        static void checkCommitAllocations(const std::filesystem::path& scratch)
+        {
+            using namespace Allocations;
+            EquipmentScratch directory(scratch);
+            size_t failures = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    auto f = std::make_unique<PlainEquipmentFixture>();
+                    f->seedValues(actor);
+                    if (!equip)
+                        f->mInventories[actor].equip(InventoryStore::Slot_Shirt,
+                            f->mInventories[actor].begin(), f->context(actor, actor));
+                    f->bindEffects(actor);
+                    PlainEquipmentValues saved;
+                    f->prepare(actor, equip).exportValues(f->preparationContext(actor), saved);
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const EquipmentBindings bindings{ e, f->mStore, ids };
+                    const auto path = scratch / "allocations.bin";
+                    EquipmentFileSink file(path);
+                    EquipmentBytes priorBytes;
+                    FileFaults faults;
+                    require(file.write(f->installedValues(actor), bindings, priorBytes, faults)
+                            == TestPersistenceResult::Accepted,
+                        "equipment commit allocation prior file setup failed");
+                    auto output = std::make_unique<const PlainEquipmentResult>(f->prepare(1 - actor, true).result());
+                    const auto* outputStorage = output.get();
+                    const auto outputValue = *output;
+                    EquipmentBytes bytes{ 'o', 'l', 'd' };
+                    const auto* bytesStorage = bytes.data();
+                    const auto bytesValue = bytes;
+                    const auto caller = f->mActors[actor]->getPtr();
+                    const auto run = [&] {
+                        InPhase phase(Phase::Preparation);
+                        return f->commitEquipment(actor, caller, f->prepare(actor, equip),
+                            file, bindings, output, bytes, faults);
+                    };
+                    faults = { FileFault::Create };
+                    require(run() == TestPersistenceResult::Rejected, "equipment allocation warmup failed");
+                    const auto before = f->snapshot();
+                    Trace count;
+                    TestPersistenceResult outcome;
+                    {
+                        Observe observe(count);
+                        outcome = run();
+                    }
+                    require(outcome == TestPersistenceResult::Rejected && count.mTotal > 0 && count.mOutstanding == 0
+                            && count.mTrackingOverflow == 0, "equipment commit allocation baseline leaked");
+                    for (size_t fail = 1; fail <= count.mTotal; ++fail)
+                    {
+                        Trace trace;
+                        bool rejected = false;
+                        faults = {};
+                        {
+                            Observe observe(trace, fail);
+                            try
+                            {
+                                run();
+                            }
+                            catch (const std::exception&)
+                            {
+                                rejected = true;
+                            }
+                        }
+                        if (!rejected || trace.mFailures != 1 || trace.mOutstanding != 0)
+                            std::cerr << "equipment commit allocation actor=" << actor << " equip=" << equip
+                                      << " fail=" << fail << " injected=" << trace.mFailures
+                                      << " outstanding=" << trace.mOutstanding << '\n';
+                        require(rejected && trace.mFailures == 1 && trace.mOutstanding == 0
+                                && trace.mTrackingOverflow == 0 && trace.visits(Phase::Installation) == 0
+                                && trace.visits(Phase::Publication) == 0 && faults.mWrites == 0
+                                && !file.failedClosed() && !f->mFailedClosed
+                                && output.get() == outputStorage && *output == outputValue
+                                && bytes.data() == bytesStorage && bytes == bytesValue
+                                && equipmentFileBytes(path) == priorBytes,
+                            "equipment commit allocation failure changed prior state/output or leaked");
+                        f->unchanged(before);
+                        ++failures;
+                    }
+                    Trace success;
+                    faults = {};
+                    {
+                        Observe observe(success, count.mTotal + 1);
+                        outcome = run();
+                        output.reset();
+                        EquipmentBytes{}.swap(bytes);
+                        f.reset();
+                    }
+                    require(outcome == TestPersistenceResult::Accepted && success.mTotal == count.mTotal
+                            && success.mFailures == 0 && success.mOutstanding == 0 && success.mTrackingOverflow == 0
+                            && success.allocations(Phase::Installation) == 0
+                            && success.allocations(Phase::Publication) == 0 && success.allocations(Phase::Retirement) == 0,
+                        "equipment commit allocation retry grew, leaked or allocated after acceptance");
+                }
+            std::cout << "equipment commit allocation failures=" << failures << " remaining-after-cleanup=0\n";
+        }
 
         PlainEquipmentFixture()
         {
@@ -187,6 +971,7 @@ namespace MWWorld::Testing
             struct Node
             {
                 const LiveCellRefBase* mAddress;
+                ReferenceLifetime::Witness mLifetime;
                 std::string mCell;
                 RefData mData;
                 const SceneUtil::PositionAttitudeTransform* mScene;
@@ -199,6 +984,11 @@ namespace MWWorld::Testing
             std::vector<ContainerStoreIterator> mSelections;
             std::vector<std::string> mEvents;
             int mListenerCalls;
+            std::vector<std::pair<ESM::RefNum, int>> mListenerRemovals;
+            std::array<std::pair<int, size_t>, 2> mActorEffects;
+            std::array<std::vector<std::pair<ESM::RefNum, int>>, 2> mRemovals;
+            std::array<std::vector<ESM::RefNum>, 2> mNotifications;
+            std::array<std::pair<InventoryStoreListener*, ContainerStoreListener*>, 2> mListeners;
         };
 
         static std::string cellBytes(const CellRef& ref)
@@ -223,9 +1013,14 @@ namespace MWWorld::Testing
             result.mScripts = mScripts.snapshot();
             result.mEvents = mEvents;
             result.mListenerCalls = mListener.mCalls;
+            result.mListenerRemovals = mListener.mRemovals;
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto& store = mInventories[i];
+                result.mActorEffects[i] = { mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates };
+                result.mRemovals[i] = mActorEffects[i].mListener.mRemovals;
+                result.mNotifications[i] = mActorEffects[i].mNotifications;
+                result.mListeners[i] = { store.mInventoryListener, store.mListener };
                 result.mSlots[i] = store.mSlots;
                 result.mMetadata[i] = { store.mCachedWeight, store.mSeed, store.mWeightUpToDate, store.mModified,
                     store.mResolved, store.mRechargingItemsUpToDate, store.mUpdatesEnabled, store.mFirstAutoEquip };
@@ -234,8 +1029,8 @@ namespace MWWorld::Testing
                 // Keep snapshot nodes stable instead of copying on vector growth.
                 result.mNodes[i].reserve(store.mLists.mClothes.mList.size());
                 for (const auto& node : store.mLists.mClothes.mList)
-                    result.mNodes[i].push_back({ &node, cellBytes(node.mRef), node.mData.copyForContainerTransfer(),
-                        node.mData.getBaseNode() });
+                    result.mNodes[i].push_back({ &node, ConstPtr(&node, nullptr).getReferenceLifetime(),
+                        cellBytes(node.mRef), node.mData.copyForContainerTransfer(), node.mData.getBaseNode() });
             }
             return result;
         }
@@ -243,27 +1038,39 @@ namespace MWWorld::Testing
         void unchanged(const Snapshot& before) const
         {
             require(mWorld.snapshotPtrRegistry() == before.mRegistry && mScripts.snapshot() == before.mScripts
-                    && mEvents == before.mEvents && mListener.mCalls == before.mListenerCalls,
+                    && mEvents == before.mEvents && mListener.mCalls == before.mListenerCalls
+                    && mListener.mRemovals == before.mListenerRemovals,
                 "equipment rejection/preparation changed registry, exact counters, services or live effects");
             for (size_t i = 0; i < 2; ++i)
+                unchangedActor(before, i);
+        }
+
+        void unchangedActor(const Snapshot& before, size_t i) const
+        {
+            const auto& store = mInventories[i];
+            require(before.mActorEffects[i]
+                        == std::pair{ mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates }
+                    && before.mRemovals[i] == mActorEffects[i].mListener.mRemovals
+                    && before.mNotifications[i] == mActorEffects[i].mNotifications
+                    && before.mListeners[i] == std::pair{ store.mInventoryListener, store.mListener },
+                "equipment rejection/preparation changed actor-local effects");
+            require(store.mSlots == before.mSlots[i] && store.mSelectedEnchantItem == before.mSelections[i]
+                    && store.mLists.mClothes.mList.size() == before.mNodes[i].size()
+                    && std::tuple{ store.mCachedWeight, store.mSeed, store.mWeightUpToDate, store.mModified,
+                           store.mResolved, store.mRechargingItemsUpToDate, store.mUpdatesEnabled,
+                           store.mFirstAutoEquip }
+                        == before.mMetadata[i],
+                "equipment rejection/preparation changed slots, selection or storage");
+            size_t index = 0;
+            for (const auto& node : store.mLists.mClothes.mList)
             {
-                const auto& store = mInventories[i];
-                require(store.mSlots == before.mSlots[i] && store.mSelectedEnchantItem == before.mSelections[i]
-                        && store.mLists.mClothes.mList.size() == before.mNodes[i].size()
-                        && std::tuple{ store.mCachedWeight, store.mSeed, store.mWeightUpToDate, store.mModified,
-                               store.mResolved, store.mRechargingItemsUpToDate, store.mUpdatesEnabled,
-                               store.mFirstAutoEquip }
-                            == before.mMetadata[i],
-                    "equipment rejection/preparation changed slots, selection or storage");
-                size_t index = 0;
-                for (const auto& node : store.mLists.mClothes.mList)
-                {
-                    const auto& saved = before.mNodes[i][index++];
-                    require(&node == saved.mAddress && cellBytes(node.mRef) == saved.mCell
-                            && node.mData.matchesContainerTransferState(saved.mData)
-                            && node.mData.getBaseNode() == saved.mScene,
-                        "equipment rejection/preparation changed node lifetime, values or scene binding");
-                }
+                const auto& saved = before.mNodes[i][index++];
+                require(&node == saved.mAddress && saved.mLifetime.isLive(&node)
+                        && saved.mLifetime == ConstPtr(&node, nullptr).getReferenceLifetime()
+                        && cellBytes(node.mRef) == saved.mCell
+                        && node.mData.matchesContainerTransferState(saved.mData)
+                        && node.mData.getBaseNode() == saved.mScene,
+                    "equipment rejection/preparation changed node lifetime, values or scene binding");
             }
         }
 
@@ -2591,6 +3398,31 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-commit-guards")
+        {
+            PlainEquipmentFixture::checkCommitGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-commit-persistence")
+        {
+            PlainEquipmentFixture::checkCommitPersistence(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-commit-allocations")
+        {
+            PlainEquipmentFixture::checkCommitAllocations(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-commit")
+        {
+            PlainEquipmentFixture::checkDurableSuccess(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-installation")
+        {
+            PlainEquipmentFixture::checkInstallationPreparation();
+            return;
+        }
         if (filter == "inventory-equipment-file-bounds")
         {
             PlainEquipmentFixture::checkFileBounds(scratch);

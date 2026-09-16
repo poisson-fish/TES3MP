@@ -109,6 +109,7 @@ namespace MWWorld
 
     private:
         friend class Testing::DisposableTransferRehearsal;
+        friend class Testing::PlainEquipmentFixture;
         struct GetCellStoreCallback;
 
         PtrRegistry mPtrRegistry; // defined before mCells because during destruction it should be the last

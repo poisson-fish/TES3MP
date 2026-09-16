@@ -7,6 +7,8 @@
 
 namespace MWWorld
 {
+    class InventoryStore;
+
     struct PlainEquipmentContext
     {
         const ESMStore& mStore;
@@ -94,6 +96,9 @@ namespace MWWorld
         struct State;
         std::unique_ptr<State> mState;
         explicit PreparedPlainEquipment(std::unique_ptr<State> state);
+        // Only the test-owned fixture may stage installation. No public mutation
+        // or persistence API: revalidate and require the exact receiving store.
+        InventoryStore& installationCandidate(const PlainEquipmentContext& context, const InventoryStore& target);
 
     public:
         static constexpr size_t MaxItems = 64;

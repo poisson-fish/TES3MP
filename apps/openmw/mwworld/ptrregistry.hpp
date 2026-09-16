@@ -17,6 +17,7 @@ namespace MWWorld
     namespace Testing
     {
         class DisposableTransferRehearsal;
+        class PlainEquipmentFixture;
     }
     class PtrRegistry
     {
@@ -144,6 +145,7 @@ namespace MWWorld
     private:
         friend class ContainerStore;
         friend class Testing::DisposableTransferRehearsal;
+        friend class Testing::PlainEquipmentFixture;
         static std::unique_ptr<PreparedStorage> prepareStorage(
             const Snapshot& relocated, const std::vector<std::pair<ESM::RefNum, Ptr>>& nodes)
         {

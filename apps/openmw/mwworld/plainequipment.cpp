@@ -435,6 +435,15 @@ namespace MWWorld
         return mState->mResult;
     }
 
+    InventoryStore& PreparedPlainEquipment::installationCandidate(
+        const PlainEquipmentContext& context, const InventoryStore& target)
+    {
+        validate(context);
+        if (mState->mResolution.mStore != &target)
+            throw std::invalid_argument("Equipment installation target changed");
+        return mState->mCandidate;
+    }
+
     void PreparedPlainEquipment::exportValues(const PlainEquipmentContext& context, PlainEquipmentValues& output) const
     {
         validate(context);
