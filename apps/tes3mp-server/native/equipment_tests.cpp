@@ -2038,7 +2038,7 @@ namespace MWWorld::Testing
 
         void commitContinuation(size_t actor, bool equip, EquipmentFileSink& file,
             const std::filesystem::path& path, std::unique_ptr<const PlainEquipmentResult>& output,
-            EquipmentBytes& bytes)
+            EquipmentBytes& bytes, size_t failAt = 0)
         {
             auto prepared = prepareContinuation(actor, equip);
             const auto before = snapshot();
@@ -2100,7 +2100,7 @@ namespace MWWorld::Testing
             Allocations::Trace trace;
             TestPersistenceResult outcome;
             {
-                Allocations::Observe observe(trace);
+                Allocations::Observe observe(trace, failAt);
                 outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
                     file, bindings, output, bytes, faults);
             }
@@ -2118,7 +2118,9 @@ namespace MWWorld::Testing
                     && mScripts.snapshot() == before.mScripts && mEvents == before.mEvents
                     && trace.allocations(Allocations::Phase::Installation) == 0
                     && trace.allocations(Allocations::Phase::Publication) == 0
-                    && trace.allocations(Allocations::Phase::Retirement) == 0,
+                    && trace.allocations(Allocations::Phase::Retirement) == 0
+                    && (failAt == 0 || (trace.mFailures == 0 && trace.mTotal + 1 == failAt))
+                    && trace.mTrackingOverflow == 0,
                 "continuation lost durable values/counters or emitted effects beyond the new commit");
             checkInstalledMembership(actor, saved);
             unchangedActor(before, 1 - actor);
@@ -2166,6 +2168,166 @@ namespace MWWorld::Testing
                     }
             require(output && !output->mItems.empty() && !bytes.empty(), "continuation publication borrowed fixture");
             std::cout << "equipment post-restart isolated commits=" << commits << '\n';
+        }
+
+        size_t continuationAllocations(size_t actor, bool equip, const std::filesystem::path& path,
+            const std::filesystem::path& otherPath)
+        {
+            using namespace Allocations;
+            auto proposal = prepareContinuation(actor, equip);
+            const auto expected = proposal.result();
+            const auto* proposalStorage = &proposal.result();
+            PlainEquipmentValues saved;
+            proposal.exportValues(preparationContext(actor), saved);
+            const auto ids = referenceIds(saved);
+            const auto e = envelope(saved.mActor);
+            const EquipmentBindings bindings{ e, mStore, ids };
+            EquipmentBytes priorBytes;
+            FileFaults faults;
+            {
+                EquipmentFileSink initial(path);
+                require(initial.write(installedValues(actor), bindings, priorBytes, faults)
+                        == TestPersistenceResult::Accepted,
+                    "continuation allocation prior file setup failed");
+            }
+            const auto otherBytes = equipmentFileBytes(otherPath);
+            auto output = std::make_unique<const PlainEquipmentResult>(expected);
+            const auto* outputStorage = output.get();
+            EquipmentBytes bytes{ 'o', 'l', 'd' };
+            const auto bytesValue = bytes;
+            const auto* bytesStorage = bytes.data();
+            const auto before = snapshot();
+            const auto unchangedOutput = [&] {
+                unchanged(before);
+                require(&proposal.result() == proposalStorage && proposal.result() == expected
+                        && output.get() == outputStorage && *output == expected
+                        && bytes.data() == bytesStorage && bytes == bytesValue
+                        && equipmentFileBytes(path) == priorBytes && equipmentFileBytes(otherPath) == otherBytes
+                        && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp"))
+                        && !mFailedClosed,
+                    "continuation allocation changed state, output storage/value or actor files");
+            };
+            // Count a discarded preparation, then assign into an existing owned
+            // proposal under every failure. No failed assignment may consume it.
+            Trace preparation;
+            {
+                Observe observe(preparation);
+                InPhase phase(Phase::Preparation);
+                prepareContinuation(actor, equip);
+            }
+            require(preparation.mTotal > 0 && preparation.mOutstanding == 0 && preparation.mTrackingOverflow == 0,
+                "continuation preparation allocation baseline leaked");
+            unchangedOutput();
+            size_t failures = 0;
+            for (size_t fail = 1; fail <= preparation.mTotal; ++fail)
+            {
+                Trace trace;
+                bool rejected = false;
+                {
+                    Observe observe(trace, fail);
+                    InPhase phase(Phase::Preparation);
+                    try
+                    {
+                        proposal = prepareContinuation(actor, equip);
+                    }
+                    catch (const std::exception&)
+                    {
+                        rejected = true;
+                    }
+                }
+                require(rejected && trace.mFailures == 1 && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                    "continuation preparation allocation escaped rejection or leaked");
+                unchangedOutput();
+                ++failures;
+            }
+            proposal.validate(preparationContext(actor));
+            require(prepareContinuation(actor, equip).result() == expected,
+                "continuation preparation retry changed proposal");
+
+            // A creation fault counts the full fallible commit path without
+            // installing it. Every attempt uses a sink constructed after restart.
+            const auto attempt = [&](Trace& trace, size_t fail, FileFault fault) {
+                EquipmentFileSink fresh(path);
+                auto prepared = prepareContinuation(actor, equip);
+                faults = { fault, 17 };
+                TestPersistenceResult outcome = TestPersistenceResult::Rejected;
+                bool rejected = false;
+                {
+                    Observe observe(trace, fail);
+                    try
+                    {
+                        outcome = commitEquipment(actor, mActors[actor]->getPtr(), std::move(prepared),
+                            fresh, bindings, output, bytes, faults);
+                    }
+                    catch (const std::exception&)
+                    {
+                        rejected = true;
+                    }
+                }
+                require(!fresh.failedClosed() && outcome == TestPersistenceResult::Rejected
+                        && rejected == (fail != 0) && trace.mFailures == (fail != 0 ? 1 : 0)
+                        && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                        && trace.visits(Phase::Installation) == 0 && trace.visits(Phase::Publication) == 0
+                        && faults.mWrites == 0,
+                    "continuation commit allocation escaped rejection, installed or leaked");
+                unchangedOutput();
+            };
+            Trace count;
+            attempt(count, 0, FileFault::Create);
+            require(count.mTotal > 0 && count.allocations(Phase::Persistence) > 0,
+                "continuation commit allocation baseline missed persistence staging");
+            for (size_t fail = 1; fail <= count.mTotal; ++fail)
+            {
+                Trace trace;
+                attempt(trace, fail, FileFault::None);
+                ++failures;
+            }
+            EquipmentFileSink retry(path);
+            // The ledger verifies this retry's complete values and only its new
+            // effects. Arming the next allocation also covers the accepted tail.
+            commitContinuation(actor, equip, retry, path, output, bytes, count.mTotal + 1);
+            require(equipmentFileBytes(otherPath) == otherBytes,
+                "continuation allocation retry changed the other actor file");
+            return failures;
+        }
+
+        static void checkRestartContinuationAllocations(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t failures = 0, retries = 0;
+            for (size_t restoredActor = 0; restoredActor < 2; ++restoredActor)
+                for (size_t actor = 0; actor < 2; ++actor)
+                    for (bool equip : { true, false })
+                    {
+                        PlainEquipmentFixture f(restoredActor);
+                        const auto restoredPath = scratch / "restored.bin";
+                        const auto otherPath = scratch / "other.bin";
+                        f.startContinuation(restoredActor, continuationSave(restoredActor, false, true), restoredPath);
+                        {
+                            const auto other = f.installedValues(1 - restoredActor);
+                            const auto ids = referenceIds(other);
+                            const auto e = envelope(other.mActor);
+                            EquipmentFileSink initial(otherPath);
+                            EquipmentBytes bytes;
+                            FileFaults faults;
+                            require(initial.write(other, { e, f.mStore, ids }, bytes, faults)
+                                    == TestPersistenceResult::Accepted,
+                                "continuation allocation other actor file setup failed");
+                        }
+                        const auto& path = actor == restoredActor ? restoredPath : otherPath;
+                        if (!equip)
+                        {
+                            EquipmentFileSink initial(path);
+                            std::unique_ptr<const PlainEquipmentResult> output;
+                            EquipmentBytes bytes;
+                            f.commitContinuation(actor, true, initial, path, output, bytes);
+                        }
+                        failures += f.continuationAllocations(actor, equip, path,
+                            actor == restoredActor ? otherPath : restoredPath);
+                        ++retries;
+                    }
+            std::cout << "equipment post-restart allocation failures=" << failures
+                      << " remaining-after-failure=0 verified retries=" << retries << '\n';
         }
 
         static void checkRestartContinuationGuards(const std::filesystem::path& scratch)
@@ -2409,10 +2571,10 @@ namespace MWWorld::Testing
                       << " blocked actor/sink retries=" << blocked << '\n';
         }
 
-        static void checkRestartContinuationRecovery(const std::filesystem::path& scratch)
+        static void checkRestartContinuationRecovery(const std::filesystem::path& scratch, bool allocations = false)
         {
             EquipmentScratch directory(scratch);
-            size_t recoveredFiles = 0, commits = 0;
+            size_t recoveredFiles = 0, commits = 0, allocationFailures = 0;
             std::unique_ptr<const PlainEquipmentResult> output;
             EquipmentBytes bytes;
             for (size_t actor = 0; actor < 2; ++actor)
@@ -2420,6 +2582,11 @@ namespace MWWorld::Testing
                     for (auto failure : { FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier,
                              FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
                     {
+                        // Existing recovery coverage checks every uncertain I/O
+                        // boundary. Allocation sweeps need its two complete file
+                        // outcomes, not a duplicate sweep per equivalent fault.
+                        if (allocations && failure != FileFault::ReplaceError && failure != FileFault::AfterReplace)
+                            continue;
                         const auto path = scratch / "recovery.bin";
                         PlainEquipmentValues recovery;
                         EquipmentBytes acceptedFile;
@@ -2490,18 +2657,36 @@ namespace MWWorld::Testing
                                 && recovered.mActorEffects[actor].mNotifications.empty(),
                             "fresh recovery replayed previously committed or uncertain operation effects");
                         EquipmentFileSink freshSink(path);
+                        const auto otherPath = scratch / "recovery-other.bin";
+                        if (allocations)
+                        {
+                            const auto other = recovered.installedValues(1 - actor);
+                            const auto ids = referenceIds(other);
+                            const auto e = envelope(other.mActor);
+                            EquipmentFileSink initial(otherPath);
+                            EquipmentBytes priorBytes;
+                            FileFaults faults;
+                            require(initial.write(other, { e, recovered.mStore, ids }, priorBytes, faults)
+                                    == TestPersistenceResult::Accepted,
+                                "recovery allocation other actor file setup failed");
+                        }
                         const bool nextEquip = !recovery.mShirt.isSet();
                         for (bool next : { nextEquip, !nextEquip })
                         {
-                            recovered.commitContinuation(actor, next, freshSink, path, output, bytes);
+                            if (allocations)
+                                allocationFailures += recovered.continuationAllocations(actor, next, path, otherPath);
+                            else
+                                recovered.commitContinuation(actor, next, freshSink, path, output, bytes);
                             ++commits;
                         }
                         const auto actorBytes = equipmentFileBytes(path);
-                        const auto otherPath = scratch / "recovery-other.bin";
                         EquipmentFileSink otherSink(otherPath);
                         for (bool next : { true, false })
                         {
-                            recovered.commitContinuation(1 - actor, next, otherSink, otherPath, output, bytes);
+                            if (allocations)
+                                allocationFailures += recovered.continuationAllocations(1 - actor, next, otherPath, path);
+                            else
+                                recovered.commitContinuation(1 - actor, next, otherSink, otherPath, output, bytes);
                             require(equipmentFileBytes(path) == actorBytes, "recovery continuation crossed actor files");
                             ++commits;
                         }
@@ -2509,7 +2694,209 @@ namespace MWWorld::Testing
                     }
             require(output && !output->mItems.empty() && !bytes.empty(), "recovery publication borrowed destroyed owner");
             std::cout << "equipment subsequent uncertain fresh recoveries=" << recoveredFiles
-                      << " isolated continuation commits=" << commits << '\n';
+                      << " isolated continuation commits=" << commits
+                      << " allocation failures=" << allocationFailures << '\n';
+        }
+
+        void rejectContinuationBoundary(size_t actor, bool equip, std::string_view diagnostic,
+            const std::filesystem::path& path, const std::filesystem::path& otherPath)
+        {
+            const auto prior = installedValues(actor);
+            const auto ids = referenceIds(prior);
+            const auto e = envelope(prior.mActor);
+            auto output = std::make_unique<const PlainEquipmentResult>(PlainEquipmentResult{
+                prior.mActor, prior.mShirt, prior.mSelected, prior.mLastGenerated, {}, {} });
+            const auto* outputStorage = output.get();
+            const auto outputValue = *output;
+            auto bytes = equipmentFileBytes(path);
+            const auto bytesValue = bytes;
+            const auto* bytesStorage = bytes.data();
+            const auto otherBytes = equipmentFileBytes(otherPath);
+            const auto before = snapshot();
+            EquipmentFileSink fresh(path);
+            FileFaults faults;
+            Allocations::Trace trace;
+            bool rejected = false;
+            {
+                Allocations::Observe observe(trace);
+                try
+                {
+                    commitEquipment(actor, mActors[actor]->getPtr(), prepareContinuation(actor, equip),
+                        fresh, { e, mStore, ids }, output, bytes, faults);
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    rejected = std::string_view(error.what()).find(diagnostic) != std::string_view::npos;
+                }
+            }
+            require(rejected && !mFailedClosed && !fresh.failedClosed() && faults.mWrites == 0
+                    && trace.visits(Allocations::Phase::Persistence) == 0
+                    && trace.visits(Allocations::Phase::Installation) == 0
+                    && trace.visits(Allocations::Phase::Publication) == 0
+                    && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                    && output.get() == outputStorage && *output == outputValue
+                    && bytes.data() == bytesStorage && bytes == bytesValue
+                    && equipmentFileBytes(path) == bytesValue && equipmentFileBytes(otherPath) == otherBytes
+                    && !std::filesystem::exists(std::filesystem::path(path).concat(".tmp")),
+                "continuation boundary failed without a diagnostic or changed output/files");
+            unchanged(before); // Includes dormant members, exact IDs and both actors' effects.
+            checkInstalledMembership(actor, prior);
+        }
+
+        static void checkRestartContinuationBoundaries(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t restarts = 0, recoveries = 0, rejected = 0, commits = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool capacity : { true, false })
+                    for (bool split : { true, false })
+                        for (auto fault : { FileFault::None, FileFault::ReplaceError, FileFault::AfterReplace })
+                        {
+                            auto saved = continuationSave(actor, false, true);
+                            saved.mShirt = {};
+                            for (auto& object : saved.mObjects)
+                                object.mRef.mCount = 0;
+                            saved.mObjects.front().mRef.mCount = (actor == 0 ? 1 : -1) * (split ? 3 : 1);
+                            saved.mSelected = saved.mObjects.back().mRef.mRefNum;
+                            if (capacity)
+                            {
+                                while (saved.mObjects.size() < PreparedPlainEquipment::MaxItems)
+                                {
+                                    auto dormant = saved.mObjects.back();
+                                    dormant.mRef.mRefNum = { ++saved.mLastGenerated.mIndex, -1 };
+                                    saved.mObjects.push_back(std::move(dormant));
+                                }
+                            }
+                            else
+                                saved.mLastGenerated = { std::numeric_limits<uint32_t>::max() - (split ? 1u : 0u),
+                                    std::numeric_limits<int32_t>::min() };
+                            const auto path = scratch / "boundary.bin";
+                            const auto otherPath = scratch / "boundary-other.bin";
+                            EquipmentBytes accepted;
+                            PlainEquipmentValues recovery;
+                            {
+                                PlainEquipmentFixture f(actor);
+                                f.startContinuation(actor, saved, path);
+                                EquipmentFileSink file(path);
+                                std::unique_ptr<const PlainEquipmentResult> output;
+                                EquipmentBytes bytes;
+                                if (fault == FileFault::None)
+                                {
+                                    f.commitContinuation(actor, true, file, path, output, bytes);
+                                    recovery = f.installedValues(actor);
+                                    accepted = bytes;
+                                    ++commits;
+                                }
+                                else
+                                {
+                                    auto prepared = f.prepareContinuation(actor, true);
+                                    PlainEquipmentValues next;
+                                    prepared.exportValues(f.preparationContext(actor), next);
+                                    const auto ids = referenceIds(next);
+                                    const auto e = envelope(next.mActor);
+                                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                                    EquipmentBytes newBytes;
+                                    encodeEquipment(next, bindings, newBytes);
+                                    const auto priorBytes = equipmentFileBytes(path);
+                                    output = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                                    const auto* outputStorage = output.get();
+                                    const auto outputValue = *output;
+                                    bytes = priorBytes;
+                                    const auto* byteStorage = bytes.data();
+                                    const auto before = f.snapshot();
+                                    FileFaults faults{ fault, 17 };
+                                    require(f.commitEquipment(actor, f.mActors[actor]->getPtr(), std::move(prepared),
+                                                file, bindings, output, bytes, faults) == TestPersistenceResult::Uncertain
+                                            && f.mFailedClosed && file.failedClosed() && output.get() == outputStorage
+                                            && *output == outputValue && bytes.data() == byteStorage && bytes == priorBytes,
+                                        "boundary uncertain commit installed or published");
+                                    f.unchanged(before);
+                                    recovery = fault == FileFault::ReplaceError ? saved : next;
+                                    accepted = equipmentFileBytes(path);
+                                    require(accepted == (fault == FileFault::ReplaceError ? priorBytes : newBytes),
+                                        "boundary recovery did not retain a complete prior/new file");
+                                    ++recoveries;
+                                }
+                            } // Recover only owned values into another explicitly fresh fixture.
+                            PlainEquipmentFixture f(actor);
+                            f.seedValues(1 - actor);
+                            // Its unrelated actor needs no new ID, even when the
+                            // restored shared generation counter is exhausted.
+                            f.mItems[1 - actor].getCellRef().setCount(actor == 0 ? -1 : 1);
+                            f.installContinuationFile(actor, recovery, path, accepted);
+                            ++restarts;
+                            {
+                                const auto other = f.installedValues(1 - actor);
+                                const auto ids = referenceIds(other);
+                                const auto e = envelope(other.mActor);
+                                EquipmentFileSink initial(otherPath);
+                                EquipmentBytes bytes;
+                                FileFaults faults;
+                                require(initial.write(other, { e, f.mStore, ids }, bytes, faults)
+                                        == TestPersistenceResult::Accepted,
+                                    "boundary other actor file setup failed");
+                            }
+                            EquipmentFileSink fresh(path);
+                            std::unique_ptr<const PlainEquipmentResult> output;
+                            EquipmentBytes bytes;
+                            // Prior-file recovery still has the last permitted
+                            // split available; new-file recovery already used it.
+                            if (!recovery.mShirt.isSet())
+                            {
+                                f.commitContinuation(actor, true, fresh, path, output, bytes);
+                                ++commits;
+                            }
+                            if (capacity && split)
+                            {
+                                require(f.installedValues(actor).mObjects.size() == PlainEquipmentValues::MaxItems
+                                        && f.mWorld.mPtrRegistry.mIndex.size() == PlainEquipmentValues::MaxItems + 3,
+                                    "64-node split did not preserve the complete 65-node saved membership");
+                                // Even unequip without a split remains outside the
+                                // preparation bound. Do not prune dormant nodes.
+                                for (bool equip : { false, true })
+                                {
+                                    f.rejectContinuationBoundary(actor, equip, "bounded plain clothing", path, otherPath);
+                                    ++rejected;
+                                }
+                            }
+                            else
+                            {
+                                f.commitContinuation(actor, false, fresh, path, output, bytes);
+                                ++commits;
+                                if (!capacity && split)
+                                {
+                                    require(f.mWorld.getLastGeneratedRefNum()
+                                            == ESM::RefNum{ std::numeric_limits<uint32_t>::max(),
+                                                std::numeric_limits<int32_t>::min() },
+                                        "last split did not consume exactly the final generation");
+                                    f.rejectContinuationBoundary(actor, true, "counter exhausted", path, otherPath);
+                                    ++rejected;
+                                }
+                                else
+                                {
+                                    const auto counter = f.mWorld.getLastGeneratedRefNum();
+                                    const auto nodes = f.installedValues(actor).mObjects.size();
+                                    f.commitContinuation(actor, true, fresh, path, output, bytes);
+                                    f.commitContinuation(actor, false, fresh, path, output, bytes);
+                                    commits += 2;
+                                    require(f.mWorld.getLastGeneratedRefNum() == counter
+                                            && f.installedValues(actor).mObjects.size() == nodes
+                                            && (!capacity || nodes == PreparedPlainEquipment::MaxItems),
+                                        "no-split continuation consumed generation or changed raw membership");
+                                }
+                            }
+                            const auto actorFile = equipmentFileBytes(path);
+                            EquipmentFileSink other(otherPath);
+                            for (bool equip : { true, false })
+                            {
+                                f.commitContinuation(1 - actor, equip, other, otherPath, output, bytes);
+                                require(equipmentFileBytes(path) == actorFile,
+                                    "boundary continuation changed restored actor file");
+                                ++commits;
+                            }
+                        }
+            std::cout << "equipment boundary fresh restarts=" << restarts << " prior/new recoveries=" << recoveries
+                      << " visible rejections=" << rejected << " isolated commits=" << commits << '\n';
         }
 
         static void checkExport()
@@ -4767,6 +5154,21 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-restart-continuation-boundaries")
+        {
+            PlainEquipmentFixture::checkRestartContinuationBoundaries(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-continuation-allocations")
+        {
+            PlainEquipmentFixture::checkRestartContinuationAllocations(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-continuation-recovery-allocations")
+        {
+            PlainEquipmentFixture::checkRestartContinuationRecovery(scratch, true);
+            return;
+        }
         if (filter == "inventory-equipment-restart-continuation-recovery")
         {
             PlainEquipmentFixture::checkRestartContinuationRecovery(scratch);
