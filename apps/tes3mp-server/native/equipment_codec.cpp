@@ -163,7 +163,7 @@ namespace MWWorld::Testing
             valid(header.empty());
             auto equipment = file.record(ESM::fourCC("EQUP"));
             const auto version = equipment.field(ESM::fourCC("FVER"), 4).number();
-            valid(version == EquipmentFormatVersion || version == NpcEquipmentFormatVersion);
+            valid(version == EquipmentFormatVersion || version == NpcEquipmentFormatVersion || version == ScriptedEquipmentFormatVersion);
             valid(text(equipment.sub(ESM::fourCC("RUNT")).mBytes) == bindings.mEnvelope.mRuntime);
             const auto content = equipment.field(ESM::fourCC("CONT"), 32).mBytes;
             valid(std::equal(content.begin(), content.end(), bindings.mEnvelope.mContent.begin(),
@@ -174,7 +174,7 @@ namespace MWWorld::Testing
             result.mSelected = equipment.field(ESM::fourCC("SELE"), 8).identity();
             result.mCounter = equipment.field(ESM::fourCC("LGEN"), 8).identity();
             result.mCount = equipment.field(ESM::fourCC("SIZE"), 4).number();
-            if (version == NpcEquipmentFormatVersion)
+            if (version != EquipmentFormatVersion)
             {
                 auto& stats = result.mNpcStats.emplace();
                 stats.mBase = reference(equipment.sub(ESM::fourCC("NPID")), bindings);
@@ -215,8 +215,9 @@ namespace MWWorld::Testing
                 identities[i] = id;
                 const auto baseId = reference(object.sub(ESM::fourCC("NAME")), bindings);
                 const auto* base = bindings.mContent.get<ESM::Clothing>().search(baseId);
-                valid(base && base->mData.mType == ESM::Clothing::Shirt && base->mScript.empty()
-                    && (result.mNpcStats || base->mEnchant.empty()));
+                valid(base && base->mData.mType == ESM::Clothing::Shirt
+                    && (result.mNpcStats || base->mEnchant.empty())
+                    && (base->mScript.empty() || (version == ScriptedEquipmentFormatVersion && !base->mEnchant.empty())));
                 const auto magnitude = MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant);
                 if (id == result.mShirt)
                     luckMagnitude = magnitude;
@@ -233,7 +234,7 @@ namespace MWWorld::Testing
                     }
                 };
                 // Exact stock field order rejects duplicates, unknown fields,
-                // locals, Lua, custom state and misplaced animation fields.
+                // unbound locals, Lua, custom state and misplaced animation fields.
                 object.optional(ESM::fourCC("XSCL"), 4);
                 optionalId(ESM::fourCC("ANAM"));
                 optionalCString(ESM::fourCC("BNAM"));
@@ -245,7 +246,8 @@ namespace MWWorld::Testing
                 int32_t count = 1;
                 if (object.next(ESM::fourCC("NAM9")))
                     count = std::bit_cast<int32_t>(object.field(ESM::fourCC("NAM9"), 4).number());
-                valid(count != std::numeric_limits<int32_t>::min());
+                valid(count != std::numeric_limits<int32_t>::min()
+                    && (base->mScript.empty() || std::abs(static_cast<int64_t>(count)) <= 1));
                 total += std::abs(static_cast<int64_t>(count));
                 valid(total <= std::numeric_limits<int>::max());
                 if (id == result.mShirt)
@@ -261,6 +263,27 @@ namespace MWWorld::Testing
                 optionalId(ESM::fourCC("TNAM"));
                 object.optional(ESM::fourCC("UNAM"), 1);
                 object.field(ESM::fourCC("DATA"), 24);
+                if (!base->mScript.empty())
+                {
+                    const auto& declarations = equipmentDeclarations(bindings.mContent, base->mScript, bindings.mScriptLocals.get());
+                    valid(object.field(ESM::fourCC("HLOC"), 1).mBytes[0] == 1);
+                    // Canonical stock order; bounded trusted names, exact count/type,
+                    // numeric validation before ESMReader or any local allocation.
+                    for (char type : { 's', 'l', 'f' })
+                        for (const auto& name : declarations.get(type))
+                        {
+                            valid(text(object.sub(ESM::fourCC("LOCA")).mBytes) == name);
+                            const auto value = object.field(type == 'f' ? ESM::fourCC("FLTV") : ESM::fourCC("INTV"), 4).number();
+                            if (type == 's')
+                            {
+                                const auto integer = std::bit_cast<int32_t>(value);
+                                valid(integer >= std::numeric_limits<Interpreter::Type_Short>::min()
+                                    && integer <= std::numeric_limits<Interpreter::Type_Short>::max());
+                            }
+                            else if (type == 'f')
+                                valid(std::isfinite(std::bit_cast<float>(value)));
+                        }
+                }
                 object.boolean(ESM::fourCC("ENAB"));
                 object.optional(ESM::fourCC("POS_"), 24);
                 object.optional(ESM::fourCC("FLAG"), 4);
@@ -360,7 +383,7 @@ namespace MWWorld::Testing
     void encodeEquipment(const PlainEquipmentValues& input, const EquipmentBindings& bindings, EquipmentBytes& output)
     {
         validateBindings(bindings);
-        input.validate(bindings.mContent, bindings.mEnvelope.mActor);
+        input.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get());
         for (const auto& object : input.mObjects)
             for (const auto& id : { object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul, object.mRef.mFaction,
                      object.mRef.mKey, object.mRef.mTrap })
@@ -381,7 +404,10 @@ namespace MWWorld::Testing
         writer.setRecordCount(static_cast<int>(1 + input.mObjects.size()));
         writer.save(stream);
         writer.startRecord("EQUP");
-        writer.writeHNT("FVER", input.mNpcStats ? NpcEquipmentFormatVersion : EquipmentFormatVersion);
+        const bool scripted = std::any_of(input.mObjects.begin(), input.mObjects.end(),
+            [](const auto& object) { return object.mHasLocals != 0; });
+        writer.writeHNT("FVER", scripted ? ScriptedEquipmentFormatVersion
+            : input.mNpcStats ? NpcEquipmentFormatVersion : EquipmentFormatVersion);
         writer.writeHNString("RUNT", bindings.mEnvelope.mRuntime);
         writer.writeHNT("CONT", bindings.mEnvelope.mContent);
         writer.writeFormId(input.mActor, true, "ACTR");
@@ -449,7 +475,7 @@ namespace MWWorld::Testing
             valid(!reader.hasMoreSubs());
         }
         valid(!reader.hasMoreRecs());
-        staged.validate(bindings.mContent, bindings.mEnvelope.mActor);
+        staged.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get());
         // Reject redundant default fields and inconsistent stock/lossless fields.
         EquipmentBytes canonical;
         encodeEquipment(staged, bindings, canonical);

@@ -17,7 +17,7 @@ namespace MWWorld::Testing
         PlainEquipmentValues values;
         decodeEquipment(bytes, bindings, values);
         auto staged = std::make_unique<RestoredPlainEquipment>(
-            RestoredPlainEquipment::restore(values, bindings.mContent, bindings.mEnvelope.mActor));
+            RestoredPlainEquipment::restore(values, bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals));
         static_assert(noexcept(output = std::move(staged)));
         output = std::move(staged);
         if (accepted)

@@ -89,7 +89,11 @@ namespace MWScript
     {
         ensure(script);
 
-        const Compiler::Locals& locals = MWBase::Environment::get().getScriptManager()->getLocals(script);
+        return getVarAsDouble(MWBase::Environment::get().getScriptManager()->getLocals(script), var);
+    }
+
+    double Locals::getVarAsDouble(const Compiler::Locals& locals, std::string_view var) const
+    {
         int index = locals.getIndex(var);
         if (index == -1)
             return 0;

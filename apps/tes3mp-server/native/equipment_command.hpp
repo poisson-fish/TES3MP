@@ -42,6 +42,7 @@ namespace MWWorld::Testing
         InventoryInstanceId mShirt, mSelected, mLastGenerated;
         std::uint64_t mRevision = 0;
         std::optional<std::array<float, 3>> mLuck;
+        bool mSkipped = false; // PCSkipEquip committed locals, without an equipment change.
         bool operator==(const EquipmentSuccess&) const = default;
     };
 
@@ -53,7 +54,7 @@ namespace MWWorld::Testing
     // recovery into an explicitly fresh fixture. All failures preserve output
     // allocation/value and bytes. Owned success swaps only after durable install.
     // Preserve stock counters (including revision rollover), 64-node preparation
-    // and 65-node saves (plain format 1; bounded NPC stats/ability format 5).
+    // and 65-node saves (plain 1, NPC stats/ability 5, scripted NPC shirt 6).
     // Revision is not a request-deduplication token.
     TestPersistenceResult executeEquipment(PlainEquipmentFixture& fixture, EquipmentCaller caller,
         EquipmentCommand command, EquipmentFileSink& file, const EquipmentBindings& bindings,

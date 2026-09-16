@@ -1,4 +1,7 @@
 #include "equipment_tests.hpp"
+#include <apps/openmw/mwscript/itemlocals.hpp>
+#include <apps/openmw/mwscript/compilercontext.hpp>
+#include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include "equipment_codec.hpp"
 #include "equipment_command.hpp"
 #include "equipment_file.hpp"
@@ -29,6 +32,7 @@
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
@@ -103,6 +107,7 @@ namespace MWWorld::Testing
         // The fixture is the sole writer of each bound stock NPC stat context.
         // No NPC custom-data or global player is installed alongside it.
         std::array<std::shared_ptr<EquipmentNpcStats>, 2> mNpcStats;
+        std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
         std::vector<std::string> mEvents;
         Listener mListener;
 
@@ -169,6 +174,7 @@ namespace MWWorld::Testing
             ESM::RefNum mCounter, mSavedCounter;
             std::array<std::shared_ptr<const EquipmentNpcStats>, 2> mNpcStats;
             std::array<std::optional<EquipmentNpcStatsValues>, 2> mStatValues;
+            std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
         };
 
         RestartBindings restartBindings(ESM::RefNum savedCounter) const
@@ -181,7 +187,7 @@ namespace MWWorld::Testing
                 mScripts.lifetimeWitness(), mWorld.mPtrRegistry.mIndex, mWorld.getPtrRegistryRevision(),
                 mWorld.getLastGeneratedRefNum(), savedCounter, { mNpcStats[0], mNpcStats[1] },
                 { mNpcStats[0] ? std::optional{ mNpcStats[0]->values() } : std::nullopt,
-                    mNpcStats[1] ? std::optional{ mNpcStats[1]->values() } : std::nullopt } };
+                    mNpcStats[1] ? std::optional{ mNpcStats[1]->values() } : std::nullopt }, mScriptLocals };
         }
 
         static bool sameReference(const ConstPtr& a, const ConstPtr& b)
@@ -197,7 +203,8 @@ namespace MWWorld::Testing
                 if (!value)
                     throw std::invalid_argument("Equipment fresh restart binding, lifetime or registry changed");
             };
-            valid(!mFailedClosed && mRestartActor && *mRestartActor == actor && fresh.mFixture == this);
+            valid(!mFailedClosed && mRestartActor && *mRestartActor == actor && fresh.mFixture == this
+                && fresh.mScriptLocals == mScriptLocals && bindings.mScriptLocals == mScriptLocals);
             validateCaller(actor, caller);
             const auto trusted = envelope(caller.getCellRef().getRefNum());
             valid(&bindings.mContent == &mStore && bindings.mEnvelope.mRuntime == trusted.mRuntime
@@ -284,7 +291,7 @@ namespace MWWorld::Testing
             auto& candidate = input->installationCandidate(mStore, bindings.mEnvelope.mActor, fresh.mSavedCounter);
             PlainEquipmentValues saved;
             input->exportValues(saved);
-            saved.validate(mStore, bindings.mEnvelope.mActor);
+            saved.validate(mStore, bindings.mEnvelope.mActor, mScriptLocals.get());
             if (fresh.mRegistry.size() + saved.mObjects.size() > 132)
                 throw std::invalid_argument("Equipment restart registry bound exceeded");
             for (const auto& object : saved.mObjects)
@@ -1089,7 +1096,8 @@ namespace MWWorld::Testing
                 throw std::invalid_argument("Equipment fresh restart fixture is not installed");
             validateCaller(actor, caller);
             const auto trusted = envelope(caller.getCellRef().getRefNum());
-            if (&bindings.mContent != &mStore || bindings.mEnvelope.mActor != trusted.mActor
+            if (bindings.mScriptLocals != mScriptLocals
+                || &bindings.mContent != &mStore || bindings.mEnvelope.mActor != trusted.mActor
                 || bindings.mEnvelope.mRuntime != trusted.mRuntime || bindings.mEnvelope.mContent != trusted.mContent)
                 throw std::invalid_argument("Equipment commit runtime/content/actor binding changed");
             auto staged = stageInstallation(actor, caller, std::move(input));
@@ -1159,7 +1167,7 @@ namespace MWWorld::Testing
                 auto& object = result.mObjects.emplace_back();
                 object.blank();
                 it->mRef.writeState(object);
-                it->mData.write(object, Compiler::Locals{});
+                it->mData.write(object, equipmentDeclarations(mStore, it->mBase->mScript, mScriptLocals.get()));
                 object.mHasCustomState = false;
             }
             if (mNpcStats[actor])
@@ -1749,6 +1757,53 @@ namespace MWWorld::Testing
             }
         }
 
+        static void checkItemLocals()
+        {
+            PlainEquipmentFixture f;
+            Compiler::Locals declarations;
+            declarations.declare('s', "onpcequip");
+            declarations.declare('l', "pcskipequip");
+            declarations.declare('f', "untouched");
+            const auto script = ESM::RefId::stringRefId("equipment_script");
+            const_cast<ESM::Clothing*>(f.mItems[0].get<ESM::Clothing>()->mBase)->mScript = script;
+            ESM::Locals values;
+            values.mVariables = { { "onpcequip", ESM::Variant(3) }, { "pcskipequip", ESM::Variant(1) },
+                { "untouched", ESM::Variant(12.5f) } };
+            values.mVariables[0].second.setType(ESM::VT_Int);
+            values.mVariables[1].second.setType(ESM::VT_Int);
+            for (const auto& item : f.mItems)
+                item.getRefData().getLocals() = MWScript::Locals::restore(values, script, declarations);
+            const auto item = f.mItems[0];
+            auto& locals = item.getRefData().getLocals();
+            MWScript::ItemLocalsContext context{ f.mActors[0]->getPtr(), f.mActors[0]->getPtr(),
+                [&](const Ptr&, ESM::RefId id) -> const Compiler::Locals& {
+                    require(id == script, "Item local service lost script identity");
+                    return declarations;
+                } };
+            require(!MWScript::beginItemUse(item, context) && locals.mShorts[0] == 1 && locals.mLongs[0] == 1,
+                "PCSkipEquip did not preserve skip semantics");
+            locals.mLongs[0] = 2;
+            require(MWScript::beginItemUse(item, context) && locals.mShorts[0] == 0,
+                "Only PCSkipEquip 1 should skip; normal use must clear OnPCEquip first");
+            MWScript::finishItemUse(item, false, context);
+            require(locals.mShorts[0] == 0, "Failed use set OnPCEquip");
+            MWScript::finishItemUse(item, true, context);
+            require(locals.mShorts[0] == 1, "Successful use did not set OnPCEquip");
+            context.mPlayer = f.mActors[1]->getPtr();
+            MWScript::unequipItemLocals(item, context);
+            require(locals.mShorts[0] == 1, "Foreign player changed equipment locals");
+            context.mPlayer = context.mActor;
+            auto equipment = f.context(0, 0);
+            equipment.mUnsetOnPCEquip = [&](const Ptr& ptr, ESM::RefId) { MWScript::unequipItemLocals(ptr, context); };
+            f.mItems[0].getCellRef().setCount(1, f.mScripts);
+            f.mInventories[0].equip(InventoryStore::Slot_Shirt, f.mInventories[0].begin(), equipment);
+            f.mInventories[0].unequipSlot(InventoryStore::Slot_Shirt, equipment);
+            require(locals.mShorts[0] == 0 && locals.mFloats[0] == 12.5f
+                    && f.mItems[1].getRefData().getLocals().mShorts[0] == 3,
+                "Unequip changed unrelated or another actor's locals");
+            std::cout << "shared item locals: skip/use/failed use/actor isolation/stock unequip passed\n";
+        }
+
         ESM::NPC autoNpcContent()
         {
             ESM::Race race;
@@ -1984,6 +2039,45 @@ namespace MWWorld::Testing
             }
         }
 
+        void enableScript()
+        {
+            ESM::Script script;
+            script.blank();
+            script.mId = ESM::RefId::stringRefId("equipment_script");
+            script.mScriptText = "begin equipment_script\nshort OnPCEquip\nshort PCSkipEquip\nlong counter\nfloat fraction\nend";
+            mStore.insertStatic(script);
+            MWScript::CompilerContext compiler(MWScript::CompilerContext::Type_Full);
+            MWScript::ScriptManager scripts(mStore, compiler, 1);
+            mScriptLocals = std::make_shared<const EquipmentScriptLocals>(mStore, script.mId, scripts);
+            auto shirt = *mStore.get<ESM::Clothing>().find(ESM::RefId::stringRefId("equipment_shirt"));
+            shirt.mId = ESM::RefId::stringRefId("equipment_scripted_shirt");
+            shirt.mScript = script.mId;
+            mStore.insertStatic(shirt);
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (auto& node : mInventories[actor].mLists.mClothes.mList)
+                {
+                    node.mBase = mStore.get<ESM::Clothing>().find(shirt.mId);
+                    ESM::ObjectState state;
+                    node.mRef.writeState(state);
+                    state.mRef.mRefID = shirt.mId;
+                    state.mRef.mCount = actor == 0 ? 1 : -1;
+                    node.mRef = CellRef(state.mRef);
+                    node.mData.setLocals(script, scripts);
+                    auto& locals = node.mData.getLocals();
+                    locals.mLongs[0] = 123456 + static_cast<int>(actor);
+                    locals.mFloats[0] = 2.5f + actor;
+                }
+        }
+
+        void checkScriptLocals(size_t actor, int onEquip, int skip = 0) const
+        {
+            const auto& locals = mItems[actor].getRefData().getLocals();
+            require(locals.mShorts.size() == 2 && locals.mShorts[0] == onEquip && locals.mShorts[1] == skip
+                    && locals.mLongs.size() == 1 && locals.mLongs[0] == 123456 + static_cast<int>(actor)
+                    && locals.mFloats.size() == 1 && locals.mFloats[0] == 2.5f + actor,
+                "Equipment changed unrelated locals or lost equip/skip consequence");
+        }
+
         void checkLuck(size_t actor, bool equipped) const
         {
             const auto& stats = mNpcStats[actor]->mStats;
@@ -2016,7 +2110,7 @@ namespace MWWorld::Testing
                 else
                     require(equipped && spell.hasFlag(ESM::ActiveSpells::Flag_Equipment)
                             && !spell.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues)
-                            && spell.getSourceSpellId() == ESM::RefId::stringRefId("equipment_shirt")
+                            && spell.getSourceSpellId() == mInventories[actor].getSlot(InventoryStore::Slot_Shirt)->getCellRef().getRefId()
                             && spell.getItem() == mInventories[actor].getSlot(InventoryStore::Slot_Shirt)->getCellRef().getRefNum()
                             && spell.getEffects().front().mMagnitude == 9 && luck.getModifier() == 9,
                         "Constant effect ownership/item identity mismatch");
@@ -2024,11 +2118,13 @@ namespace MWWorld::Testing
             spells.validateConstantFortifyLuck(mActors[actor]->getPtr(), mInventories[actor], mStore, stats);
         }
 
-        static void checkEnchanted(const std::filesystem::path& scratch)
+        static void checkEnchanted(const std::filesystem::path& scratch, bool scripted = false)
         {
             EquipmentScratch directory(scratch);
             PlainEquipmentFixture f;
             f.enableLuck();
+            if (scripted)
+                f.enableScript();
             f.checkLuck(0, false);
             f.checkLuck(1, false);
             const auto& autoStats = f.mNpcStats[1]->stats();
@@ -2056,7 +2152,7 @@ namespace MWWorld::Testing
                     auto command = f.equipmentCommand(actor, equip);
                     const auto e = envelope(f.mActors[actor]->getPtr().getCellRef().getRefNum());
                     const auto ids = referenceIds(f.installedValues(actor));
-                    const EquipmentBindings bindings{ e, f.mStore, ids };
+                    const EquipmentBindings bindings{ e, f.mStore, ids, f.mScriptLocals };
                     std::unique_ptr<const EquipmentSuccess> output;
                     EquipmentBytes bytes;
                     FileFaults faults;
@@ -2064,6 +2160,8 @@ namespace MWWorld::Testing
                             == TestPersistenceResult::Accepted && output && output->mCommand == command,
                         "Enchanted equipment command failed");
                     f.checkLuck(actor, equip);
+                    if (scripted)
+                        f.checkScriptLocals(actor, equip ? 1 : 0);
                     require(f.mNpcStats[actor]->values() == expectedStats,
                         "NPC installation changed unrelated attributes or dynamic values");
                     require(output->mLuck == std::optional{ expectedStats.mAttributes[7] },
@@ -2078,6 +2176,66 @@ namespace MWWorld::Testing
                     require(sameValues(decoded, f.installedValues(actor)), "Enchanted save lost gameplay state");
                     ++commits;
                 }
+            if (scripted)
+                for (size_t actor = 0; actor < 2; ++actor)
+                {
+                    const auto saved = f.installedValues(actor);
+                    const auto path = scratch / (actor == 0 ? "a.bin" : "b.bin");
+                    PlainEquipmentFixture fresh(actor);
+                    fresh.enableLuck(false);
+                    fresh.enableScript();
+                    const auto e = envelope(saved.mActor);
+                    const auto ids = referenceIds(saved);
+                    const EquipmentBindings bindings{ e, fresh.mStore, ids, fresh.mScriptLocals };
+                    const auto witness = fresh.restartBindings(saved.mLastGenerated);
+                    std::unique_ptr<const PlainEquipmentValues> restored;
+                    EquipmentBytes bytes;
+                    FileFaults faults;
+                    require(fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), path, bindings, witness,
+                                restored, bytes, faults) == FileReadResult::Read
+                            && sameValues(*restored, saved) && sameValues(fresh.installedValues(actor), saved),
+                        "Scripted restart lost stats/locals");
+                    fresh.checkLuck(actor, true);
+                    fresh.checkScriptLocals(actor, 1);
+                    fresh.mItems[actor].getRefData().getLocals().mShorts[1] = 1;
+                    {
+                        const auto before = fresh.snapshot();
+                        auto skipped = fresh.prepareContinuation(actor, true);
+                        require(skipped.result().mSkipped && skipped.result().mShirt == saved.mShirt
+                                && skipped.result().mEffects.empty(), "Equipped skip lost its existing equipment");
+                        fresh.unchanged(before);
+                    }
+                    fresh.mItems[actor].getRefData().getLocals().mShorts[1] = 0;
+                    require(fresh.mActorEffects[actor].mListener.mCalls == 0
+                            && fresh.mActorEffects[actor].mNotifications.empty(), "Restart replayed effects");
+                    std::unique_ptr<const EquipmentSuccess> output;
+                    faults = {};
+                    require(fresh.luckCommand(actor, false, path, output, bytes, faults) == TestPersistenceResult::Accepted,
+                        "Scripted restart unequip failed");
+                    fresh.checkScriptLocals(actor, 0);
+                    // Seed the script's skip flag; this test does not run script instructions.
+                    fresh.mItems[actor].getRefData().getLocals().mShorts[1] = 1;
+                    const auto before = fresh.snapshot();
+                    const auto calls = fresh.mActorEffects[actor].mListener.mCalls;
+                    const auto stats = fresh.mNpcStats[actor]->values();
+                    auto prepared = fresh.prepareContinuation(actor, true);
+                    require(prepared.result().mSkipped && prepared.result().mEffects.empty(),
+                        "Skipped preparation claimed an equipment change");
+                    fresh.unchanged(before);
+                    faults = {};
+                    require(fresh.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted
+                            && output->mSkipped && output->mShirt == InventoryInstanceId{}
+                            && fresh.mActorEffects[actor].mListener.mCalls == calls
+                            && fresh.mNpcStats[actor]->values() == stats, "Skip claimed an equipment change");
+                    fresh.checkScriptLocals(actor, 1, 1);
+                    fresh.checkLuck(actor, false);
+                    fresh.unchangedActor(before, 1 - actor);
+                    PlainEquipmentValues decoded;
+                    decodeEquipment(bytes, bindings, decoded);
+                    require(sameValues(decoded, fresh.installedValues(actor)), "Skipped save lost locals");
+                }
+            if (scripted)
+                std::cout << "scripted actors restored=2; equipped and unequipped skips preserve equipment/effects/locals\n";
             std::cout << "constant Fortify Luck: explicit actor A 40->49->40->49, auto actor B ability 65+7=72->81->72->81; isolated commits="
                 << commits << '\n';
         }
@@ -2089,7 +2247,7 @@ namespace MWWorld::Testing
             const auto command = equipmentCommand(actor, equip);
             const auto e = envelope(mActors[actor]->getPtr().getCellRef().getRefNum());
             const auto ids = referenceIds(installedValues(actor));
-            return executeEquipment(*this, { command.mActor }, command, sink, { e, mStore, ids }, output, bytes, faults);
+            return executeEquipment(*this, { command.mActor }, command, sink, { e, mStore, ids, mScriptLocals }, output, bytes, faults);
         }
 
         static void checkEnchantedGuards(const std::filesystem::path& scratch)
@@ -2371,7 +2529,105 @@ namespace MWWorld::Testing
             std::cout << "enchanted preparation/content/actor/stat/save rejections=" << rejected << '\n';
         }
 
-        static void checkEnchantedDurability(const std::filesystem::path& scratch)
+        static void checkScriptedGuards(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            const auto path = scratch / "guards.bin";
+            size_t rejected = 0;
+            for (int test = 0; test < 8; ++test)
+            {
+                PlainEquipmentFixture f;
+                f.enableLuck();
+                f.enableScript();
+                auto prepared = f.prepareContinuation(1, true);
+                auto& locals = f.mItems[1].getRefData().getLocals();
+                switch (test)
+                {
+                    case 0: f.mScriptLocals.reset(); break;
+                    case 1: locals.mShorts.pop_back(); break;
+                    case 2: locals = MWScript::Locals{}; break;
+                    case 3: locals.mFloats[0] = std::numeric_limits<float>::infinity(); break;
+                    case 4: locals.mLongs[0] += 1; break; // stale isolated local value
+                    case 5:
+                        const_cast<ESM::Script*>(f.mStore.get<ESM::Script>().find(
+                            ESM::RefId::stringRefId("equipment_script")))->mScriptText += "\n; changed";
+                        break;
+                    case 6: f.mItems[1].getCellRef() = f.mItems[1].getCellRef().copyWithCount(-2); break;
+                    case 7:
+                        f.mItems[1].get<ESM::Clothing>()->mBase
+                            = f.mStore.get<ESM::Clothing>().find(ESM::RefId::stringRefId("equipment_shirt"));
+                        break;
+                }
+                const auto before = f.snapshot();
+                auto prior = std::make_unique<const PlainEquipmentResult>(prepared.result());
+                const auto* storage = prior.get();
+                EquipmentBytes bytes{ 'o', 'l', 'd' };
+                const auto* byteStorage = bytes.data();
+                const auto e = envelope(f.mActors[1]->getPtr().getCellRef().getRefNum());
+                // Empty known IDs are enough: revalidation must fail before encoding.
+                const EquipmentBindings bindings{ e, f.mStore, {}, f.mScriptLocals };
+                EquipmentFileSink sink(path);
+                FileFaults faults;
+                bool caught = false;
+                try { f.commitEquipment(1, f.mActors[1]->getPtr(), std::move(prepared), sink, bindings, prior, bytes, faults); }
+                catch (const std::invalid_argument&) { caught = true; }
+                require(caught && prior.get() == storage && bytes.data() == byteStorage && bytes == EquipmentBytes{ 'o', 'l', 'd' }
+                        && faults.mWrites == 0, "Script local revalidation published or persisted a rejected operation");
+                f.unchanged(before);
+                ++rejected;
+            }
+            PlainEquipmentFixture f;
+            f.enableLuck();
+            f.enableScript();
+            const auto good = f.installedValues(1);
+            const auto ids = referenceIds(good);
+            const auto e = envelope(good.mActor);
+            const EquipmentBindings bindings{ e, f.mStore, ids, f.mScriptLocals };
+            EquipmentBytes encoded;
+            encodeEquipment(good, bindings, encoded);
+            for (int test = 0; test < 8; ++test)
+            {
+                auto bad = encoded;
+                const auto tag = test == 0 ? ESM::fourCC("FVER") : test == 1 ? ESM::fourCC("HLOC")
+                    : test < 4 ? ESM::fourCC("LOCA") : test < 6 ? ESM::fourCC("INTV") : ESM::fourCC("FLTV");
+                const auto field = fieldAt(bad, tag);
+                switch (test)
+                {
+                    case 0: putNumber(bad, field.mData, NpcEquipmentFormatVersion); break;
+                    case 1: bad[field.mData] = 0; break;
+                    case 2: bad[field.mData] = '!'; break;
+                    case 3: putNumber(bad, field.mData - 4, 127); break;
+                    case 4: bad[field.mData - 8] = 'X'; break;
+                    case 5: putNumber(bad, field.mData, 65536); break;
+                    case 6: putNumber(bad, field.mData, std::bit_cast<uint32_t>(std::numeric_limits<float>::infinity())); break;
+                }
+                auto output = good;
+                const auto* storage = output.mObjects.data();
+                auto supplied = bindings;
+                if (test == 7) supplied.mScriptLocals.reset();
+                bool caught = false;
+                Allocations::Trace trace;
+                {
+                    Allocations::Observe observe(trace);
+                    try { decodeEquipment(bad, supplied, output); }
+                    catch (const std::invalid_argument&) { caught = true; }
+                }
+                require(caught && output.mObjects.data() == storage && sameValues(output, good)
+                        && trace.mTotal <= 1 && trace.mOutstanding == 0,
+                    "Scripted preflight allocated external data or changed retained output");
+                ++rejected;
+            }
+            auto bad = good;
+            std::swap(bad.mObjects[0].mLocals.mVariables[0], bad.mObjects[0].mLocals.mVariables[1]);
+            EquipmentBytes retained{ 'o', 'l', 'd' };
+            bool caught = false;
+            try { encodeEquipment(bad, bindings, retained); }
+            catch (const std::invalid_argument&) { caught = true; }
+            require(caught && retained == EquipmentBytes{ 'o', 'l', 'd' }, "Noncanonical locals encoded");
+            std::cout << "scripted local/binding/codec atomic rejections=" << rejected + 1 << '\n';
+        }
+
+        static void checkEnchantedDurability(const std::filesystem::path& scratch, bool scripted = false)
         {
             EquipmentScratch directory(scratch);
             const auto path = scratch / "durable.bin";
@@ -2386,6 +2642,8 @@ namespace MWWorld::Testing
                         {
                             PlainEquipmentFixture f;
                             f.enableLuck();
+                            if (scripted)
+                                f.enableScript();
                             std::unique_ptr<const EquipmentSuccess> output;
                             EquipmentBytes bytes;
                             FileFaults faults;
@@ -2401,6 +2659,18 @@ namespace MWWorld::Testing
                             else
                                 require(f.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
                                     "Enchanted durability setup failed");
+                            if (scripted && equip)
+                            {
+                                // Persist the script's preexisting skip flag before testing its use.
+                                f.mItems[actor].getRefData().getLocals().mShorts[1] = 1;
+                                const auto initial = f.installedValues(actor);
+                                const auto e = envelope(initial.mActor);
+                                const auto ids = referenceIds(initial);
+                                EquipmentFileSink seed(path);
+                                faults = {};
+                                require(seed.write(initial, { e, f.mStore, ids, f.mScriptLocals }, bytes, faults)
+                                        == TestPersistenceResult::Accepted, "Skip durability seed failed");
+                            }
                             prior = f.installedValues(actor);
                             const auto command = f.equipmentCommand(actor, equip);
                             const auto item = f.mWorld.getPtr({ command.mItem.mIndex, command.mItem.mContentFile });
@@ -2429,7 +2699,7 @@ namespace MWWorld::Testing
                                 faults = {};
                                 require(f.luckCommand(actor, equip, path, output, bytes, faults) == TestPersistenceResult::Accepted,
                                     "Safe enchanted retry failed");
-                                f.checkLuck(actor, equip);
+                                f.checkLuck(actor, equip && !scripted);
                             }
                             else
                             {
@@ -2441,22 +2711,24 @@ namespace MWWorld::Testing
                                     const auto ids = referenceIds(f.installedValues(blockedActor));
                                     faults = {};
                                     require(executeEquipment(f, { blocked.mActor }, blocked, freshSink,
-                                                { e, f.mStore, ids }, output, bytes, faults) == TestPersistenceResult::Uncertain
+                                                { e, f.mStore, ids, f.mScriptLocals }, output, bytes, faults) == TestPersistenceResult::Uncertain
                                             && faults.mWrites == 0, "Uncertain enchanted fixture accepted another command");
                                 }
                                 f.unchanged(before);
                             }
                             actual = equipmentFileBytes(path);
-                            restoredEquipped = failure == FileFault::ReplaceError ? !equip : equip;
+                            restoredEquipped = failure == FileFault::ReplaceError ? !equip : equip && !scripted;
                         } // Destroy all old actors, stats, preparations and sinks before recovery.
                         PlainEquipmentFixture fresh(actor);
                         fresh.enableLuck(false);
+                        if (scripted)
+                            fresh.enableScript();
                         const auto expected = failure == FileFault::ReplaceError ? prior : proposed;
                         require(fresh.mNpcStats[actor]->values() != *expected.mNpcStats,
                             "Restart fixture accidentally contains the saved runtime stats");
                         const auto e = envelope(expected.mActor);
                         const auto ids = referenceIds(expected);
-                        const EquipmentBindings bindings{ e, fresh.mStore, ids };
+                        const EquipmentBindings bindings{ e, fresh.mStore, ids, fresh.mScriptLocals };
                         const auto witness = fresh.restartBindings(expected.mLastGenerated);
                         std::unique_ptr<const PlainEquipmentValues> restored;
                         EquipmentBytes bytes;
@@ -2474,13 +2746,18 @@ namespace MWWorld::Testing
                         faults = {};
                         require(fresh.luckCommand(actor, !restoredEquipped, path, output, bytes, faults)
                                 == TestPersistenceResult::Accepted, "Enchanted recovery continuation failed");
-                        fresh.checkLuck(actor, !restoredEquipped);
+                        fresh.checkLuck(actor, !restoredEquipped && !(scripted && equip));
+                        if (scripted && equip)
+                        {
+                            require(output->mSkipped, "Recovered skip incorrectly claimed equip");
+                            fresh.checkScriptLocals(actor, 1, 1);
+                        }
                         ++recoveries;
                     }
             std::cout << "enchanted durability failures=" << failures << " fresh recoveries/continuations=" << recoveries << '\n';
         }
 
-        static void checkEnchantedAllocations(const std::filesystem::path& scratch)
+        static void checkEnchantedAllocations(const std::filesystem::path& scratch, bool scripted = false)
         {
             using namespace Allocations;
             EquipmentScratch directory(scratch);
@@ -2488,24 +2765,28 @@ namespace MWWorld::Testing
             size_t failures = 0, retries = 0;
             // Equip and unequip differ in effect insertion/removal; restart owns
             // a newly reconstructed stats object. Sweep each new path once.
-            for (int mode = 0; mode < 3; ++mode)
+            for (int mode = 0; mode < (scripted ? 4 : 3); ++mode)
             {
                 size_t allocations = 0;
                 for (size_t fail = 0; fail <= allocations + 1; ++fail)
                 {
                     auto f = std::make_unique<PlainEquipmentFixture>();
                     f->enableLuck();
+                    if (scripted)
+                        f->enableScript();
                     std::unique_ptr<const EquipmentSuccess> output;
                     EquipmentBytes bytes;
                     FileFaults faults;
                     require(f->luckCommand(1, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
                         "Allocation fixture initial equip failed");
-                    if (mode == 0)
+                    if (mode == 0 || mode == 3)
                     {
                         faults = {};
                         require(f->luckCommand(1, false, path, output, bytes, faults) == TestPersistenceResult::Accepted,
                             "Allocation fixture initial unequip failed");
                     }
+                    if (mode == 3)
+                        f->mItems[1].getRefData().getLocals().mShorts[1] = 1;
                     const auto saved = f->installedValues(1);
                     const auto persisted = equipmentFileBytes(path);
                     if (mode == 2)
@@ -2513,6 +2794,8 @@ namespace MWWorld::Testing
                         f.reset();
                         f = std::make_unique<PlainEquipmentFixture>(1);
                         f->enableLuck(false);
+                        if (scripted)
+                            f->enableScript();
                     }
                     const auto before = f->snapshot();
                     const auto* outputStorage = output.get();
@@ -2521,7 +2804,7 @@ namespace MWWorld::Testing
                     const auto* bytesStorage = bytes.data();
                     const auto e = envelope(saved.mActor);
                     const auto ids = referenceIds(saved);
-                    const EquipmentBindings bindings{ e, f->mStore, ids };
+                    const EquipmentBindings bindings{ e, f->mStore, ids, f->mScriptLocals };
                     const auto fresh = mode == 2 ? std::optional(f->restartBindings(saved.mLastGenerated)) : std::nullopt;
                     std::unique_ptr<const PlainEquipmentValues> restored;
                     faults = {};
@@ -2537,13 +2820,15 @@ namespace MWWorld::Testing
                                         restored, bytes, faults) != FileReadResult::Read)
                                     throw std::runtime_error("Allocation restart I/O failure");
                             }
-                            else if (f->luckCommand(1, mode == 0, path, output, bytes, faults) != TestPersistenceResult::Accepted)
+                            else if (f->luckCommand(1, mode != 1, path, output, bytes, faults) != TestPersistenceResult::Accepted)
                                 throw std::runtime_error("Allocation command I/O failure");
                         }
                         catch (const std::exception&) { caught = true; }
                         if (!caught)
                         {
-                            f->checkLuck(1, mode != 1);
+                            f->checkLuck(1, mode == 0 || mode == 2);
+                            if (scripted)
+                                f->checkScriptLocals(1, mode == 1 ? 0 : 1, mode == 3 ? 1 : 0);
                             if (mode == 2)
                                 require(f->mNpcStats[1]->values() == *saved.mNpcStats,
                                     "Allocation recovery lost saved NPC stats");
@@ -2634,7 +2919,7 @@ namespace MWWorld::Testing
 
         PlainEquipmentContext preparationContext(size_t actor) const
         {
-            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr(), mNpcStats[actor] };
+            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr(), mNpcStats[actor], mScriptLocals };
         }
 
         PreparedPlainEquipment prepare(size_t actor, bool equip)
@@ -2799,7 +3084,7 @@ namespace MWWorld::Testing
             return cellValues(a.mRef) == cellValues(b.mRef) && a.mPosition == b.mPosition && a.mFlags == b.mFlags
                 && a.mEnabled == b.mEnabled && a.mHasLocals == b.mHasLocals && a.mVersion == b.mVersion
                 && a.mActorIdConverter == b.mActorIdConverter && a.mHasCustomState == b.mHasCustomState
-                && a.mLocals.mVariables.empty() && b.mLocals.mVariables.empty() && a.mLuaScripts.mScripts.empty()
+                && a.mLocals.mVariables == b.mLocals.mVariables && a.mLuaScripts.mScripts.empty()
                 && b.mLuaScripts.mScripts.empty()
                 && std::equal(a.mAnimationState.mScriptedAnims.begin(), a.mAnimationState.mScriptedAnims.end(),
                     b.mAnimationState.mScriptedAnims.begin(), b.mAnimationState.mScriptedAnims.end(),
@@ -2928,7 +3213,7 @@ namespace MWWorld::Testing
                     ++revision; // Same stock counter semantics as commitEquipment.
             phase.set(Phase::Result);
             auto staged = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ command,
-                ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision, result.mLuck });
+                ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision, result.mLuck, result.mSkipped });
             std::unique_ptr<const PlainEquipmentResult> internal;
             const auto outcome = commitEquipment(actor, actorPtr, std::move(prepared), file, bindings, internal, bytes, faults);
             if (outcome == TestPersistenceResult::Accepted)
@@ -6393,6 +6678,31 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-scripted-guards")
+        {
+            PlainEquipmentFixture::checkScriptedGuards(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-scripted-durability")
+        {
+            PlainEquipmentFixture::checkEnchantedDurability(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-scripted-allocations")
+        {
+            PlainEquipmentFixture::checkEnchantedAllocations(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-scripted")
+        {
+            PlainEquipmentFixture::checkEnchanted(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-script-locals")
+        {
+            PlainEquipmentFixture::checkItemLocals();
+            return;
+        }
         if (filter == "inventory-equipment-npc-initialization")
         {
             PlainEquipmentFixture::checkAutoNpcInitialization();

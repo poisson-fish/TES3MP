@@ -332,7 +332,7 @@ namespace MWMechanics
             {
                 const auto* item = content.get<ESM::Clothing>().search(spell.mSourceSpellId);
                 if (hasItem || spell.mFlags != ESM::ActiveSpells::Flag_Equipment || !spell.mItem.isSet()
-                    || !item || item->mData.mType != ESM::Clothing::Shirt || !item->mScript.empty())
+                    || !item || item->mData.mType != ESM::Clothing::Shirt)
                     throw std::invalid_argument("Constant equipment effect ownership changed");
                 hasItem = true;
                 magnitude = itemMagnitude = constantFortifyLuckMagnitude(content, item->mEnchant);
@@ -426,9 +426,10 @@ namespace MWMechanics
             const auto item = inventory.getSlot(slot);
             if (item == inventory.end())
                 continue;
-            if (slot != MWWorld::InventoryStore::Slot_Shirt || item->getType() != ESM::Clothing::sRecordId
-                || !item->getClass().getScript(*item).empty())
-                throw std::invalid_argument("Constant effect context requires a non-scripted shirt");
+            // Item script locals belong to the equipment caller. Effect membership
+            // only owns the shirt's constant enchantment, never script execution.
+            if (slot != MWWorld::InventoryStore::Slot_Shirt || item->getType() != ESM::Clothing::sRecordId)
+                throw std::invalid_argument("Constant effect context requires a shirt");
             constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));
         }
         const EffectKey key(ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck);

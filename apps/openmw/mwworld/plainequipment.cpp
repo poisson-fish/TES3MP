@@ -13,10 +13,13 @@
 #include <components/compiler/locals.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/statstate.hpp>
 
 #include "../mwmechanics/autocalcspell.hpp"
+#include "../mwbase/scriptmanager.hpp"
+#include "../mwscript/itemlocals.hpp"
 
 namespace MWWorld
 {
@@ -126,9 +129,9 @@ namespace MWWorld
             return value;
         }
 
-        void serialize(const CellRefList<ESM::Clothing>::List& nodes, PlainEquipmentValues& output)
+        void serialize(const CellRefList<ESM::Clothing>::List& nodes, PlainEquipmentValues& output,
+            const ESMStore& content, const EquipmentScriptLocals* scripts)
         {
-            const Compiler::Locals declarations;
             output.mObjects.reserve(nodes.size());
             for (const auto& node : nodes)
             {
@@ -139,7 +142,7 @@ namespace MWWorld
                 auto& object = output.mObjects.emplace_back();
                 object.blank();
                 node.mRef.writeState(object);
-                node.mData.write(object, declarations);
+                node.mData.write(object, equipmentDeclarations(content, node.mData.getLocals().getScriptId(), scripts));
                 object.mHasCustomState = false;
             }
         }
@@ -170,13 +173,13 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment identity exceeds saved counter or is unset");
         }
 
-        void validateValues(const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor)
+        void validateValues(const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
+            const EquipmentScriptLocals* scripts)
         {
             if (input.mObjects.size() > PlainEquipmentValues::MaxItems || input.mActor != expectedActor
                 || !input.mActor.isSet() || input.mLastGenerated.mContentFile >= 0)
                 throw std::invalid_argument("Invalid equipment owner, membership or counter");
             counterCovers(input.mLastGenerated, input.mActor);
-            const Compiler::Locals declarations;
             int64_t total = 0;
             float magnitude = 0;
             bool shirtFound = input.mShirt == ESM::RefNum{};
@@ -193,8 +196,8 @@ namespace MWWorld
                         throw std::invalid_argument("Duplicate equipment identity");
                 recordId(ref.mRefID, true);
                 const auto* base = content.get<ESM::Clothing>().search(ref.mRefID);
-                if (!base || base->mData.mType != ESM::Clothing::Shirt || !base->mScript.empty()
-                    || (!input.mNpcStats && !base->mEnchant.empty()))
+                if (!base || base->mData.mType != ESM::Clothing::Shirt
+                    || (!input.mNpcStats && (!base->mEnchant.empty() || !base->mScript.empty())))
                     throw std::invalid_argument("Equipment values require supplied plain shirt content");
                 const auto effect = MWMechanics::constantFortifyLuckMagnitude(content, base->mEnchant);
                 if (ref.mRefNum == input.mShirt)
@@ -218,7 +221,17 @@ namespace MWWorld
                     throw std::invalid_argument("Oversized equipment animation state");
                 for (const auto& animation : object.mAnimationState.mScriptedAnims)
                     textValue(animation.mGroup, true);
-                RefData::validateRestore(object, {}, declarations);
+                if (!base->mScript.empty() && (std::abs(static_cast<int64_t>(ref.mCount)) > 1 || base->mEnchant.empty()))
+                    throw std::invalid_argument("Scripted equipment requires single constant shirts");
+                const auto& declarations = equipmentDeclarations(content, base->mScript, scripts);
+                RefData::validateRestore(object, base->mScript, declarations);
+                // The equipment format preserves the stock field writer's order.
+                // Reject noncanonical owned input as well as noncanonical bytes.
+                size_t localIndex = 0;
+                for (char type : { 's', 'l', 'f' })
+                    for (const auto& name : declarations.get(type))
+                        if (object.mLocals.mVariables[localIndex++].first != name)
+                            throw std::invalid_argument("Noncanonical equipment local order");
                 if (ref.mRefNum == input.mShirt)
                 {
                     if (std::abs(ref.mCount) != 1)
@@ -237,6 +250,59 @@ namespace MWWorld
             if (!shirtFound || !selectedFound)
                 throw std::invalid_argument("Foreign equipment shirt or selection identity");
         }
+    }
+
+    EquipmentScriptLocals::EquipmentScriptLocals(
+        const ESMStore& content, ESM::RefId script, MWBase::ScriptManager& scripts)
+        : mRecord(content.get<ESM::Script>().find(script))
+        , mId(script)
+        , mText(mRecord->mScriptText)
+        , mDeclarations(scripts.getLocals(script))
+    {
+        size_t total = 0;
+        for (char type : { 's', 'l', 'f' })
+        {
+            const auto& names = mDeclarations.get(type);
+            if (names.size() > MaxVariables - total)
+                throw std::invalid_argument("Equipment script declaration limit exceeded");
+            total += names.size();
+            for (size_t i = 0; i < names.size(); ++i)
+                if (names[i].empty() || names[i].size() > MaxName || names[i].find('\0') != std::string::npos
+                    || mDeclarations.getType(names[i]) != type || mDeclarations.getIndex(names[i]) != static_cast<int>(i))
+                    throw std::invalid_argument("Invalid equipment script declaration");
+        }
+        for (const auto name : { "onpcequip", "pcskipequip" })
+            if (mDeclarations.getType(name) != 's' && mDeclarations.getType(name) != 'l')
+                throw std::invalid_argument("Equipment script requires integer equip/skip locals");
+    }
+
+    const Compiler::Locals& EquipmentScriptLocals::declarations(const ESMStore& content, ESM::RefId script) const
+    {
+        if (script.empty() || script != mId || content.get<ESM::Script>().search(script) != mRecord
+            || mRecord->mScriptText != mText)
+            throw std::invalid_argument("Equipment script content/declaration binding changed");
+        return mDeclarations;
+    }
+
+    void EquipmentScriptLocals::validate(
+        const MWScript::Locals& locals, const ESMStore& content, ESM::RefId script) const
+    {
+        const auto& d = declarations(content, script);
+        if (locals.getScriptId() != script || locals.mShorts.size() != d.get('s').size()
+            || locals.mLongs.size() != d.get('l').size() || locals.mFloats.size() != d.get('f').size()
+            || std::any_of(locals.mFloats.begin(), locals.mFloats.end(), [](float v) { return !std::isfinite(v); }))
+            throw std::invalid_argument("Equipment script local identity/shape/value changed");
+    }
+
+    const Compiler::Locals& equipmentDeclarations(
+        const ESMStore& content, ESM::RefId script, const EquipmentScriptLocals* binding)
+    {
+        static const Compiler::Locals empty;
+        if (script.empty())
+            return empty;
+        if (!binding)
+            throw std::invalid_argument("Equipment script requires explicit declarations");
+        return binding->declarations(content, script);
     }
 
     void EquipmentNpcStatsValues::validate(const ESMStore& content) const
@@ -409,9 +475,10 @@ namespace MWWorld
             throw std::invalid_argument("Equipment NPC source stats disagree with equipment consequence");
     }
 
-    void PlainEquipmentValues::validate(const ESMStore& content, ESM::RefNum expectedActor) const
+    void PlainEquipmentValues::validate(const ESMStore& content, ESM::RefNum expectedActor,
+        const EquipmentScriptLocals* scripts) const
     {
-        validateValues(*this, content, expectedActor);
+        validateValues(*this, content, expectedActor, scripts);
     }
 
     void PlainEquipmentValues::swap(PlainEquipmentValues& other) noexcept
@@ -506,12 +573,24 @@ namespace MWWorld
             item.mContainerStore = &store;
             registered(item, context.mWorldModel);
             if (context.mStore.get<ESM::Clothing>().search(node.mRef.getRefId()) != node.mBase
-                || !node.mBase->mScript.empty() || (!context.mNpcStats && !node.mBase->mEnchant.empty())
-                || node.mBase->mData.mType != ESM::Clothing::Shirt || !node.mData.getLocals().getScriptId().empty()
-                || !node.mData.getLocals().isEmpty() || node.mData.getLuaScripts() || node.mData.getCustomData()
+                || (!context.mNpcStats && (!node.mBase->mScript.empty() || !node.mBase->mEnchant.empty()))
+                || node.mBase->mData.mType != ESM::Clothing::Shirt || node.mData.getLuaScripts() || node.mData.getCustomData()
                 || node.mData.isDeletedByContentFile() || node.mRef.getCount(false) == std::numeric_limits<int>::min()
                 || context.mLocalScripts.prepareRemove(&node.mRef).hasRegistration())
-                throw std::invalid_argument("Equipment preparation supports only plain non-scripted shirts");
+                throw std::invalid_argument("Equipment preparation supports only bounded shirts without executing scripts");
+            const auto script = node.mBase->mScript;
+            if (script.empty())
+            {
+                if (!node.mData.getLocals().getScriptId().empty() || !node.mData.getLocals().isEmpty())
+                    throw std::invalid_argument("Unexpected equipment locals");
+            }
+            else
+            {
+                equipmentDeclarations(context.mStore, script, context.mScriptLocals.get());
+                context.mScriptLocals->validate(node.mData.getLocals(), context.mStore, script);
+                if (std::abs(static_cast<int64_t>(node.mRef.getCount(false))) > 1 || node.mBase->mEnchant.empty())
+                    throw std::invalid_argument("Scripted equipment requires single constant shirts");
+            }
             MWMechanics::constantFortifyLuckMagnitude(context.mStore, node.mBase->mEnchant);
         }
 
@@ -565,6 +644,7 @@ namespace MWWorld
         {
             if (mScriptsLifetime.expired() || &context.mStore != &mContext.mStore
                 || &context.mWorldModel != &mContext.mWorldModel || &context.mLocalScripts != &mContext.mLocalScripts
+                || context.mScriptLocals != mContext.mScriptLocals
                 || context.mNpcStats != mContext.mNpcStats
                 || (context.mNpcStats && context.mNpcStats->values() != mBeforeStats)
                 || !sameReference(context.mActor, mContext.mActor) || !sameReference(context.mPlayer, mContext.mPlayer))
@@ -611,9 +691,15 @@ namespace MWWorld
             auto item = mCandidate.begin();
             while (item != mCandidate.end() && item->getCellRef().getRefNum() != identity)
                 ++item;
-            if (item == mCandidate.end() || (equip && mShirt == identity) || (!equip && mShirt != identity))
+            if (item == mCandidate.end() || (!equip && mShirt != identity))
                 throw std::invalid_argument("Equipment item is stale, dormant or already in requested state");
             using Kind = PlainEquipmentResult::EffectKind;
+            const MWScript::ItemLocalsContext scriptContext{ mContext.mActor, mContext.mPlayer,
+                [this](const Ptr& item, ESM::RefId script) -> const Compiler::Locals& {
+                    const auto& declarations = equipmentDeclarations(mContext.mStore, script, mContext.mScriptLocals.get());
+                    mContext.mScriptLocals->validate(item.getRefData().getLocals(), mContext.mStore, script);
+                    return declarations;
+                } };
             InventoryStoreEquipmentContext context{
                 { mContext.mStore,
                     [this](const Ptr& split) {
@@ -643,11 +729,20 @@ namespace MWWorld
                         effect(Kind::DeleteStackScript, original);
                     } },
                 mContext.mActor, mContext.mPlayer,
-                [](const Ptr&, const ESM::RefId&) { throw std::logic_error("Unexpected equipment script effect"); },
+                [&](const Ptr& item, const ESM::RefId&) { MWScript::unequipItemLocals(item, scriptContext); },
                 [this](const Ptr&) { effect(Kind::EquipmentChanged); }
             };
             if (equip)
-                mCandidate.equip(InventoryStore::Slot_Shirt, item, context);
+            {
+                mResult.mSkipped = !MWScript::beginItemUse(*item, scriptContext);
+                if (!mResult.mSkipped)
+                {
+                    if (mShirt == identity)
+                        throw std::invalid_argument("Equipment item already in requested state");
+                    MWScript::finishItemUse(*item, true, scriptContext);
+                    mCandidate.equip(InventoryStore::Slot_Shirt, item, context);
+                }
+            }
             else
                 mCandidate.unequipSlot(InventoryStore::Slot_Shirt, context);
             if (mNpcStats)
@@ -735,8 +830,8 @@ namespace MWWorld
         PlainEquipmentValues staged{ result.mActor, result.mShirt, result.mSelected, result.mLastGenerated, {} };
         if (mState->mNpcStats)
             staged.mNpcStats = mState->mNpcStats->values();
-        serialize(mState->mCandidate.mLists.mClothes.mList, staged);
-        validateValues(staged, context.mStore, result.mActor);
+        serialize(mState->mCandidate.mLists.mClothes.mList, staged, context.mStore, context.mScriptLocals.get());
+        validateValues(staged, context.mStore, result.mActor, context.mScriptLocals.get());
         validate(context);
         output.swap(staged);
     }
@@ -746,6 +841,7 @@ namespace MWWorld
         InventoryStore mInventory;
         ESM::RefNum mActor, mLastGenerated;
         const ESMStore* mContent = nullptr;
+        std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
         std::optional<EquipmentNpcStatsValues> mNpcStats;
     };
 
@@ -758,21 +854,23 @@ namespace MWWorld
     RestoredPlainEquipment::~RestoredPlainEquipment() = default;
 
     RestoredPlainEquipment RestoredPlainEquipment::restore(
-        const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor)
+        const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
+        std::shared_ptr<const EquipmentScriptLocals> scripts)
     {
-        validateValues(input, content, expectedActor);
+        validateValues(input, content, expectedActor, scripts.get());
         auto staged = std::make_unique<State>();
         staged->mActor = input.mActor;
         staged->mLastGenerated = input.mLastGenerated;
         staged->mContent = &content;
+        staged->mScriptLocals = std::move(scripts);
         staged->mNpcStats = input.mNpcStats;
         auto& inventory = staged->mInventory;
-        const Compiler::Locals declarations;
         for (const auto& object : input.mObjects)
         {
             auto& node = inventory.mLists.mClothes.mList.emplace_back(
                 object.mRef, content.get<ESM::Clothing>().search(object.mRef.mRefID));
-            node.mData = RefData::restore(object, {}, declarations);
+            node.mData = RefData::restore(object, node.mBase->mScript,
+                equipmentDeclarations(content, node.mBase->mScript, staged->mScriptLocals.get()));
             // Capture before publishing the detached owner. Later relocation
             // must not lazily mutate retained input on an allocation rejection.
             ConstPtr witness(&node, nullptr);
@@ -816,7 +914,7 @@ namespace MWWorld
         PlainEquipmentValues staged{ mState->mActor, identity(inventory.mSlots[InventoryStore::Slot_Shirt]),
             identity(inventory.mSelectedEnchantItem), mState->mLastGenerated, {} };
         staged.mNpcStats = mState->mNpcStats;
-        serialize(inventory.mLists.mClothes.mList, staged);
+        serialize(inventory.mLists.mClothes.mList, staged, *mState->mContent, mState->mScriptLocals.get());
         output.swap(staged);
     }
 }

@@ -4,98 +4,95 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). One explicit-NPDT actor and one
-  auto-NPDT actor share the constant Fortify Luck shirt operation. The auto actor
-  also retains one fixed self-targeted race ability through preparation, equip,
-  unequip, repeated refresh and fresh restart. M2/production integration remains
-  incomplete.
-- **Next action:** extract stock scripted-shirt `OnPCEquip`/`PCSkipEquip` local
-  handling from `InventoryWindow::useItem` and the unequip context into explicit
-  actor/script-local services for this same shirt; retain its constant effect
-  and the auto actor's passive ability.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). Explicit-NPDT and auto-NPDT actors now
+  share one scripted constant Fortify Luck shirt, including durable skip handling
+  and fresh restart. M2/production integration remains incomplete.
+- **Next action:** stage and relocate existing `LocalScripts` registrations for
+  this same shirt through equipment preparation, durable installation and fresh
+  restart, using the stock prepared-list/storage services already used by transfer.
+  Preserve unrelated registrations and cursor state without executing scripts.
 - **Session scope:** complete 2–3 closely related bounded slices sequentially;
-  one slice at a time limits concurrent scope, not slices per session. Review
-  and commit, summarize capability, limitations, verification and commit, then
-  provide a ready-to-paste next-session prompt carrying workspace, reading,
-  concrete scope, verification, commit and these session-scope requirements.
+  one slice at a time limits concurrent scope, not slices per session. Review and
+  commit, then summarize capability, limitations, verification and commit and
+  provide a ready-to-paste next 2–3-slice prompt carrying these requirements.
 - **Checkpoint:** 8850e745c298c6de629ef9a5a26bbdddf6aa56e3 preserves the working
   implementation before the engine-backed pivot.
 
 ## Implemented behavior
 
-[ActiveSpells](../../apps/openmw/mwmechanics/activespells.cpp) shares stock passive
-membership discovery and active-spell insertion with the detached actor/content
-path. [Fortify Attribute](../../apps/openmw/mwmechanics/spelleffects.cpp) application
-and removal share base/modifier mutation. The bounded ability uses stock
-SpellStore/AffectsBaseValues ownership and resistance flags; the shirt retains
-its separate item identity and modifier. Neither passive initialization nor
-repeated equipment refresh casts initialized spells or consumes RNG.
+[Item-local services](../../apps/openmw/mwscript/itemlocals.cpp) share stock
+`InventoryWindow::useItem` and `InventoryStore` unequip handling with explicit
+actor/player and declaration contexts. Stock local reads/writes share existing
+conversions and missing-variable behavior. Normal use clears then sets
+`OnPCEquip`; unequip resets it. `PCSkipEquip == 1` sets `OnPCEquip` and skips the
+action, including when the shirt is already equipped. Stock book/ingredient/repair
+exceptions remain in the shared mechanics.
 
-[EquipmentNpcStats](../../apps/openmw/mwworld/plainequipment.cpp) initializes base
-spells, generated instance spells and race powers in stock order, then activates
-at most one supported race ability. Generated selection still uses startup stats
-before activation; runtime Intelligence deliberately excludes the generated
-fixture spell if selection is incorrectly repeated. Explicit/auto-NPDT formulas,
-skills, dynamic initialization and immutable membership remain unchanged. Missing
-content, other passive types, non-race abilities and competing NPC custom-data
-writers reject explicitly.
+[Equipment preparation](../../apps/openmw/mwworld/plainequipment.cpp) binds one
+script through immutable stock-parsed declarations, copies locals into owned
+candidate nodes, and validates current local identity, shape, values, content and
+service binding before durability. The bounded scripted shirt requires single
+items and integer equip/skip flags; executing item-script registrations reject
+explicitly. No script instructions run. Unrelated short/long/float values remain
+actor-local through staging, installation and restart.
 
-Synthetic actor A retains **40 → 49 → 40 → 49** Luck. Actor B starts with
-**65 + 7 ability = 72**, then **72 → 81 → 72 → 81**. The ability changes base
-Luck; only the shirt changes its modifier. All unrelated attribute
-base/modifier/damage and dynamic base/modifier/current triples survive preparation,
-installation and restart. Refresh preserves both owners without accumulating
-magnitudes.
+The synthetic scripted variant retains actor A **40 → 49 → 40 → 49** Luck and
+auto actor B **65 + 7 ability = 72 → 81 → 72 → 81**. The passive ability owns its
+base contribution separately from the shirt modifier. Ordered initialized spells,
+unrelated attribute and dynamic triples, signed counts and stable item identities
+survive preparation and fresh recovery. Repeated refresh does not accumulate
+effects. Skipped commands persist their local consequence and publish owned
+`mSkipped` results with unchanged equipment/stats and no equipment-change event.
 
-[NPC equipment format 5](../../apps/tes3mp-server/native/equipment_codec.hpp)
-requires `ABMG`, the already-applied ability magnitude, alongside ordered
-initialized spell IDs and the existing NPC stat arrays. Its source is the single
-race ability in membership. Fixed-storage preflight checks the witness against
-content before engine allocations. Saved base Luck already includes that
-contribution: fresh reconstruction retains the validated ability owner while
-restoring saved bases, then reconstructs the shirt modifier. Formats 2/3/4 reject
-explicitly; no guessed activation/default migration. Plain format 1 and independent
-transfer format 4 retain their behavior.
+[Scripted equipment format 6](../../apps/tes3mp-server/native/equipment_codec.hpp)
+adds stock `HLOC`/`LOCA` and typed local fields to the NPC stats/ability save.
+Explicit declaration bindings allow at most 32 variables with 64-byte names.
+Preflight validates exact names/order/counts/types and numeric ranges before
+engine allocations. Restoration reuses strict `RefData`/`Locals` field readers.
+Plain format 1, unscripted NPC format 5 and independent transfer format 4 retain
+their layouts; incomplete NPC formats 2/3/4 still reject. No inferred migration.
 
-Trusted caller matching, actor/content/registry validation and stale state checks
-precede persistence. Durability precedes nonallocating installation and owned
-success publication. Safe file failure permits retry; uncertainty preserves live
-state and blocks both actors until fresh recovery. Restart emits no command
-success or presentation replay.
+Trusted caller matching, actor/content/registry checks and one canonical writer
+remain intact. Durability precedes nonallocating installation and owned
+publication. Safe failure permits retry; uncertainty preserves live state and
+blocks both actors until fresh recovery. Restart replays no command success or
+presentation event.
 
 ## Verification
 
 Windows MSVC, `scripts/setup_msvc_env.ps1 -PreferLatest`, RelWithDebInfo,
-`build/vnext-product`, 2026-09-16. `tes3mp_native_loadout_tests` build exit **0**,
-`build/logs/native-ability-final-build.log`. Individual filters all exit **0**;
-logs below are under `build/logs`, prefixed `native-ability-`:
+`build/vnext-product`, 2026-09-16. Target `tes3mp_native_loadout_tests` final build
+exit **0**: `build/logs/native-script-reviewed-build.log`. Individual filters below
+all exit **0**; log names are relative to `build/logs`.
 
-| Filter | Evidence | Log suffix |
+| Filter suffix (inventory-) | Evidence | Log |
 |---|---|---|
-| inventory-equipment-npc-initialization | stock initialization, passive refresh | initialization.log |
-| inventory-equipment-enchanted | 6 isolated commits, combined Luck | enchanted.log |
-| inventory-equipment-enchanted-guards | 70 atomic rejections | guards.log |
-| inventory-equipment-enchanted-durability | 12 failures/recoveries/continuations | durability.log |
-| inventory-equipment-enchanted-allocations | 671 failures, 6 successes, zero leftovers | allocations.log |
-| inventory-equipment-command | 8 plain commits | plain-command.log |
-| inventory-equipment-codec-guards | 3,350 rejections | plain-codec-guards.log |
-| inventory-transfer-command | 48 cases plus existing failure checks | transfer-command.log |
+| equipment-script-locals | shared stock local semantics | native-script-locals.log |
+| equipment-scripted | 6 commits, 2 restarts, equipped/unequipped skips | native-scripted.log |
+| equipment-scripted-guards | 17 atomic rejections, bounded preflight | native-scripted-guards.log |
+| equipment-scripted-durability | 12 failures/recoveries/continuations | native-scripted-durability.log |
+| equipment-scripted-allocations | 863 failures, 8 successes, zero leftovers | native-scripted-allocations.log |
+| equipment-enchanted | 6 preserved commits | native-script-regression-enchanted.log |
+| equipment-enchanted-guards | 70 rejections | native-script-regression-enchanted-guards.log |
+| equipment-command | 8 plain commits | native-script-regression-plain.log |
+| equipment-codec-guards | 3,350 rejections | native-script-regression-codec.log |
+| transfer-command | 48 cases plus existing failure checks | native-script-regression-transfer.log |
 
-No build/test failures occurred. Valid verification was reused after adding
-focused guard cases. Individual documentation budget/local-link checks exit **0**:
-`build/logs/docs-budget.log`, `build/logs/docs-links.log`.
+Initial compile errors (exit 2) and test failures (exit 1: fixture types, old
+script restriction, allocating assertions and retained plain export) were fixed
+and rerun successfully. Valid prior verification was reused. Individual budget
+and local-link checks exit **0**: `docs-budget.log`, `docs-links.log`.
 No complete suites, expensive gates or upstream baseline tests ran.
 
 ## Limits
 
-This supports one fixed self Fortify Luck race ability and shirt, not general
-passive activation or full NPC startup/saves. Other abilities, diseases/curses,
-casting, mutable skills/known spells, used-power time, factions, actor scripts,
-AI/death, other equipment categories, production networking and complete world
-saves remain outside scope. No real-loadout enchanted operation or live clients ran.
+Declaration/local handling only: existing executing registrations, script
+instructions, broader passive effects, other equipment categories, production
+networking and complete world saves remain outside this operation. No real-loadout
+scripted operation or live clients ran. Full NPC startup/saves remain unfinished.
 
-Inherited limits: 64-node preparation/65-node saves, actor-scoped active-spell IDs,
-no durable request/notification deduplication, serialized writer, stable immutable
-content/WorldModel lifetimes, private scratch files, rejected postponed physics,
-broad headless linking/provenance debt and calling-thread C++ allocation tracking.
-Earlier M1/TR/networking evidence is unchanged.
+Inherited limits include 64-node preparation/65-node saves, actor-scoped active
+spell IDs, no durable request/notification deduplication, serialized writers,
+stable immutable content/WorldModel lifetimes, private scratch files, rejected
+postponed physics, broad headless linking/provenance debt and calling-thread C++
+allocation tracking. Earlier M1/TR/networking evidence is unchanged.

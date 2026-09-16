@@ -8,11 +8,33 @@
 #include <array>
 #include <optional>
 
+#include <components/compiler/locals.hpp>
 #include <components/esm3/objectstate.hpp>
 
 namespace MWWorld
 {
     class InventoryStore;
+
+    // Trusted, immutable declaration binding for one shirt script. Uses the
+    // stock declaration parser; scripts must belong to content, which outlives
+    // this binding. No script instructions or registration run.
+    class EquipmentScriptLocals
+    {
+        const ESM::Script* mRecord;
+        ESM::RefId mId;
+        std::string mText;
+        const Compiler::Locals mDeclarations;
+
+    public:
+        static constexpr size_t MaxVariables = 32, MaxName = 64;
+        EquipmentScriptLocals(const ESMStore& content, ESM::RefId script, MWBase::ScriptManager& scripts);
+        const Compiler::Locals& declarations(const ESMStore& content, ESM::RefId script) const;
+        void validate(const MWScript::Locals& locals, const ESMStore& content, ESM::RefId script) const;
+    };
+
+    // Empty script needs no service; nonempty script requires the exact binding.
+    const Compiler::Locals& equipmentDeclarations(
+        const ESMStore& content, ESM::RefId script, const EquipmentScriptLocals* binding);
 
     // Bounded equipment save fields, not a complete NPC save. Each triple is
     // base/modifier/damage for attributes, base/modifier/current for dynamics.
@@ -66,6 +88,7 @@ namespace MWWorld
         Ptr mActor;
         Ptr mPlayer;
         std::shared_ptr<const EquipmentNpcStats> mNpcStats;
+        std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
     };
 
     struct PlainEquipmentResult
@@ -97,6 +120,7 @@ namespace MWWorld
         std::vector<Item> mItems; // Includes dormant nodes; owned IDs/values only.
         std::optional<std::array<float, 3>> mLuck;
         std::vector<Effect> mEffects;
+        bool mSkipped = false;
         bool operator==(const PlainEquipmentResult&) const = default;
     };
 
@@ -114,7 +138,8 @@ namespace MWWorld
         // NPC state is outside this context, not part of this save.
         std::optional<EquipmentNpcStatsValues> mNpcStats;
 
-        void validate(const ESMStore& content, ESM::RefNum expectedActor) const;
+        void validate(const ESMStore& content, ESM::RefNum expectedActor,
+            const EquipmentScriptLocals* scripts = nullptr) const;
         void swap(PlainEquipmentValues& other) noexcept;
     };
 
@@ -136,7 +161,8 @@ namespace MWWorld
 
     public:
         static RestoredPlainEquipment restore(
-            const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor);
+            const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
+            std::shared_ptr<const EquipmentScriptLocals> scripts = {});
         RestoredPlainEquipment(RestoredPlainEquipment&&) noexcept;
         RestoredPlainEquipment& operator=(RestoredPlainEquipment&&) noexcept;
         ~RestoredPlainEquipment();
@@ -147,7 +173,9 @@ namespace MWWorld
     // Only resolved, <=64-node shirt inventories and one slot are supported.
     // Actor/player must match; callers still provide authentication/serialization.
     // Plain by default; bound NPC stats opt into one fixed constant effect.
-    // Reject scripts, other enchantments, Lua/custom state and other slots/types.
+    // An explicit declaration binding permits one scripted constant shirt with
+    // isolated initialized locals (single items, no executing registrations).
+    // Reject other enchantments, Lua/custom state and other slots/types.
     // Content/WorldModel must outlive validation; store/reference/service lifetimes
     // are witnessed. Revalidation checks current state, not mutation history.
     // Failure leaves live storage, services, effects and prior caller output intact.

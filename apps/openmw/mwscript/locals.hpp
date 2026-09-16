@@ -33,7 +33,6 @@ namespace MWScript
         ESM::RefId mScriptId;
 
         void ensure(const ESM::RefId& scriptName);
-        bool setVar(const Compiler::Locals& declarations, std::string_view var, double val);
         void readValidated(const ESM::Locals& locals, const Compiler::Locals& declarations);
 
     public:
@@ -42,6 +41,11 @@ namespace MWScript
         std::vector<Interpreter::Type_Float> mFloats;
 
         Locals();
+
+        // Explicit declarations for already configured locals. Same stock access
+        // and conversion rules; no Environment lookup or script execution.
+        bool setVar(const Compiler::Locals& declarations, std::string_view var, double val);
+        double getVarAsDouble(const Compiler::Locals& declarations, std::string_view var) const;
 
         const ESM::RefId& getScriptId() const { return mScriptId; }
 

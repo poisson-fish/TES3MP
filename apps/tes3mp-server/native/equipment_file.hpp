@@ -20,7 +20,7 @@ namespace MWWorld::Testing
     FileReadResult restartEquipmentFile(const std::filesystem::path& path, const EquipmentBindings& bindings,
         std::unique_ptr<const RestoredPlainEquipment>& output, FileFaults& faults, EquipmentBytes* accepted = nullptr);
 
-    // Test-target-only equipment format 1. The caller supplies trusted runtime,
+    // Test-target-only equipment formats. The caller supplies trusted runtime,
     // content and actor bindings on every write; no borrowed bindings are kept.
     // One serialized writer and an existing private scratch directory are required.
     class EquipmentFileSink

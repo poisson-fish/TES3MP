@@ -1,5 +1,7 @@
 #include "inventorywindow.hpp"
 
+#include "../mwscript/itemlocals.hpp"
+
 #include <cmath>
 #include <stdexcept>
 
@@ -615,19 +617,11 @@ namespace MWGui
     {
         if (sUseItemInterceptor && sUseItemInterceptor(ptr))
             return;
-        const ESM::RefId& script = ptr.getClass().getScript(ptr);
-        if (!script.empty())
-        {
-            // Don't try to equip the item if PCSkipEquip is set to 1
-            if (ptr.getRefData().getLocals().getIntVar(script, "pcskipequip") == 1)
-            {
-                ptr.getRefData().getLocals().setVarByInt(script, "onpcequip", 1);
-                return;
-            }
-            ptr.getRefData().getLocals().setVarByInt(script, "onpcequip", 0);
-        }
-
         MWWorld::Ptr player = MWMechanics::getPlayer();
+        const auto scriptContext = MWScript::stockItemLocalsContext(player, player);
+        if (!MWScript::beginItemUse(ptr, scriptContext))
+            return;
+
         auto type = ptr.getType();
         bool isWeaponOrArmor = type == ESM::Weapon::sRecordId || type == ESM::Armor::sRecordId;
         bool isBroken = ptr.getClass().hasItemHealth(ptr) && ptr.getCellRef().getCharge() == 0;
@@ -646,17 +640,7 @@ namespace MWGui
 
         const bool willEquip = canEquipResult != 0 || force;
 
-        // If the item has a script, set OnPCEquip or PCSkipEquip to 1
-        if (!script.empty() && willEquip)
-        {
-            // Ingredients, books and repair hammers must not have OnPCEquip set to 1 here
-            bool isBook = type == ESM::Book::sRecordId;
-            if (!isBook && type != ESM::Ingredient::sRecordId && type != ESM::Repair::sRecordId)
-                ptr.getRefData().getLocals().setVarByInt(script, "onpcequip", 1);
-            // Books must have PCSkipEquip set to 1 instead
-            else if (isBook)
-                ptr.getRefData().getLocals().setVarByInt(script, "pcskipequip", 1);
-        }
+        MWScript::finishItemUse(ptr, willEquip, scriptContext);
 
         std::unique_ptr<MWWorld::Action> action = ptr.getClass().use(ptr, force);
 

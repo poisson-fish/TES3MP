@@ -24,6 +24,7 @@ namespace MWWorld::Testing
         // Already interned TES3 IDs, including semantic owner/soul/key fields.
         // Decode must never intern an unknown name from external bytes.
         std::span<const ESM::RefId> mReferenceIds;
+        std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
     };
 
     inline constexpr uint32_t EquipmentFormatVersion = 1;
@@ -31,6 +32,9 @@ namespace MWWorld::Testing
     // magnitude: saved base Luck includes it. Formats 2/3/4 reject explicitly;
     // no inferred activation/default-value migration. Transfer v4 is independent.
     inline constexpr uint32_t NpcEquipmentFormatVersion = 5;
+    // Version 6 adds required stock named locals for explicitly bound scripted
+    // shirts. Plain 1 and unscripted NPC 5 retain their exact field layouts.
+    inline constexpr uint32_t ScriptedEquipmentFormatVersion = 6;
     // Accommodate every supported combination of 65 items, 256 animations and
     // 4096-byte strings. These limits include stock fields and lossless fields.
     inline constexpr size_t MaxEquipmentBytes = 80 * 1024 * 1024;

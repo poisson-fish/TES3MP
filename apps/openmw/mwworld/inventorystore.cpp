@@ -1,5 +1,7 @@
 #include "inventorystore.hpp"
 
+#include "../mwscript/itemlocals.hpp"
+
 #include <algorithm>
 #include <iterator>
 
@@ -167,8 +169,8 @@ void MWWorld::InventoryStore::equip(int slot, const ContainerStoreIterator& iter
 MWWorld::InventoryStoreEquipmentContext MWWorld::InventoryStore::stockEquipmentContext()
 {
     return { stockStackContext(), getPtr(), MWMechanics::getPlayer(),
-        [](const Ptr& item, const ESM::RefId& script) {
-            item.getRefData().getLocals().setVarByInt(script, "onpcequip", 0);
+        [this](const Ptr& item, const ESM::RefId&) {
+            MWScript::unequipItemLocals(item, MWScript::stockItemLocalsContext(getPtr(), MWMechanics::getPlayer()));
         },
         [this](const Ptr&) { fireEquipmentChangedEvent(); } };
 }
