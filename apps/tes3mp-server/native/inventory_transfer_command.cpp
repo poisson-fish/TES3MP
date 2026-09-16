@@ -4,6 +4,8 @@
 #include "transfer_file_sink.hpp"
 
 #include <limits>
+#include <type_traits>
+#include <utility>
 
 namespace MWWorld::Testing
 {
@@ -65,9 +67,26 @@ namespace MWWorld::Testing
         phase.set(Allocations::Phase::Result);
         // Stage all fallible result storage while the pair is detached. Result
         // values contain no engine objects, iterators or borrowed lifetimes.
+        const auto destinationItem = ownedId(pair.getDestinationIdentity());
+        const auto revision = pair.getRelocation().mRegistry.mRevision;
+        const auto intent = [&](InventoryNotificationKind kind, InventoryInstanceId owner, InventoryInstanceId itemId) {
+            return InventoryNotificationIntent{ kind, owner, command.mInitiator, itemId,
+                pair.getRemoval().getCount(), revision };
+        };
+        const auto sourceItem = ownedId(pair.getRemoval().getItemIdentity());
+        InventoryNotificationBatch notifications;
+        if (pair.hasRemovalNotification())
+            notifications[0] = intent(InventoryNotificationKind::ItemRemoved, command.mSourceOwner, sourceItem);
+        // validateTransfer requires both prepared inventory-updated consumers.
+        notifications[1] = intent(InventoryNotificationKind::InventoryUpdated, command.mSourceOwner, sourceItem);
+        if (pair.hasAdditionNotification())
+            notifications[2] = intent(InventoryNotificationKind::ItemAdded, command.mDestinationOwner, destinationItem);
+        notifications[3]
+            = intent(InventoryNotificationKind::InventoryUpdated, command.mDestinationOwner, destinationItem);
+        static_assert(std::is_trivially_copyable_v<InventoryNotificationBatch>);
         auto staged = std::make_unique<const InventoryTransferSuccess>(InventoryTransferSuccess{ command,
-            ownedId(pair.getDestinationIdentity()), pair.getSourceItem().getCellRef().getCount(false),
-            pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision });
+            destinationItem, pair.getSourceItem().getCellRef().getCount(false),
+            pair.getDestinationItem().getCellRef().getCount(false), revision, notifications });
         phase.set(Allocations::Phase::Setup);
         const bool installed = fixture.commitDurably(
             std::move(pair), bindings.mContent.mDeclarations, [&](const SerializedPair& saved) {
@@ -81,5 +100,29 @@ namespace MWWorld::Testing
         static_assert(noexcept(output.swap(staged)));
         output.swap(staged);
         return true;
+    }
+
+    InventoryNotificationDelivery consumeInventoryNotifications(
+        std::unique_ptr<const InventoryTransferSuccess>& pending, InventoryNotificationConsumer& consumer) noexcept
+    {
+        Allocations::InPhase phase(Allocations::Phase::Delivery);
+        auto committed = std::move(pending);
+        if (!committed)
+            return {};
+        InventoryNotificationDelivery result{ InventoryNotificationDeliveryStatus::Delivered, committed->mRevision, 0 };
+        try
+        {
+            for (const auto& intent : committed->mNotifications)
+                if (intent)
+                {
+                    consumer.receive(*intent);
+                    ++result.mConfirmed;
+                }
+        }
+        catch (...)
+        {
+            result.mStatus = InventoryNotificationDeliveryStatus::FailedAfterCommit;
+        }
+        return result;
     }
 }

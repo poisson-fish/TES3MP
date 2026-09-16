@@ -2118,7 +2118,167 @@ namespace MWWorld::Testing
         {
             size_t mRejected = 0, mUncertain = 0, mAllocations = 0, mResultFailures = 0, mRepeated = 0;
             size_t mRecovered = 0;
+            size_t mDelivered = 0, mDeliveryFailed = 0;
+            unsigned mDeliveryModes = 0, mBatchShapes = 0;
         };
+
+        InventoryNotificationBatch expectedNotifications(const InventoryTransferSuccess& success,
+            bool removed = true, bool added = true)
+        {
+            const auto& command = success.mCommand;
+            const auto intent = [&](InventoryNotificationKind kind, bool destination) {
+                return InventoryNotificationIntent{ kind,
+                    destination ? command.mDestinationOwner : command.mSourceOwner, command.mInitiator,
+                    destination ? success.mDestinationItem : command.mItem, command.mQuantity, success.mRevision };
+            };
+            InventoryNotificationBatch expected;
+            if (removed)
+                expected[0] = intent(InventoryNotificationKind::ItemRemoved, false);
+            expected[1] = intent(InventoryNotificationKind::InventoryUpdated, false);
+            if (added)
+                expected[2] = intent(InventoryNotificationKind::ItemAdded, true);
+            expected[3] = intent(InventoryNotificationKind::InventoryUpdated, true);
+            return expected;
+        }
+
+        void checkStockNotificationOrdering(ESMStore& store, ESM::ReadersCache& readers,
+            MWBase::ScriptManager& scripts, ESM::RefId ownerId, const Ptr& item)
+        {
+            using Kind = InventoryNotificationKind;
+            DisposableTransferRehearsal stock(store, readers, scripts, ownerId, false);
+            const auto source = *stock.mSource.add(item, 4, stock.mSourceAdd);
+            std::array<std::pair<Kind, InventoryInstanceId>, 4> order{};
+            size_t position = 0;
+            const auto owner = [](const Ptr& ptr) {
+                const auto id = ptr.getCellRef().getRefNum();
+                return InventoryInstanceId{ id.mIndex, id.mContentFile };
+            };
+            const auto sourceOwner = owner(stock.mSourceOwner.getPtr());
+            const auto destinationOwner = owner(stock.mDestinationOwner.getPtr());
+            const auto record = [&](Kind kind, InventoryInstanceId id) {
+                require(position < order.size(), "stock emitted extra inventory notification");
+                order[position++] = { kind, id };
+            };
+            struct StockListener final : ContainerStoreListener
+            {
+                const decltype(record)& mRecord;
+                InventoryInstanceId mOwner;
+                StockListener(const decltype(record)& record, InventoryInstanceId owner)
+                    : mRecord(record), mOwner(owner)
+                {
+                }
+                void itemAdded(const ConstPtr&, int) override { mRecord(Kind::ItemAdded, mOwner); }
+                void itemRemoved(const ConstPtr&, int) override { mRecord(Kind::ItemRemoved, mOwner); }
+            } sourceListener(record, sourceOwner), destinationListener(record, destinationOwner);
+            stock.mSource.setContListener(&sourceListener);
+            stock.mDestination.setContListener(&destinationListener);
+            stock.mRemoval.mInventoryUpdated = stock.mDestinationAdd.mInventoryUpdated
+                = [&](const Ptr& ptr) { record(Kind::InventoryUpdated, owner(ptr)); };
+            // Only an ordering oracle in an independent disposable fixture; this
+            // sequential stock remove/add is not a live atomic transfer claim.
+            stock.mSource.remove(source, 1, stock.mRemoval);
+            stock.mDestination.add(source, 1, stock.mDestinationAdd);
+            const decltype(order) expected{ std::pair{ Kind::ItemRemoved, sourceOwner },
+                std::pair{ Kind::InventoryUpdated, sourceOwner }, std::pair{ Kind::ItemAdded, destinationOwner },
+                std::pair{ Kind::InventoryUpdated, destinationOwner } };
+            require(position == 4 && order == expected, "owned notification order differs from stock callbacks");
+        }
+
+        // Modes: healthy, then failure at each of four intents before receipt,
+        // after receipt, and in a receiver allocation. All use actual committed
+        // outputs; only the disposable fixture is recreated between commands.
+        template <class Committed>
+        void checkNotificationConsumption(std::unique_ptr<const InventoryTransferSuccess>& output,
+            const InventoryTransferSuccess& expected, Committed committed, unsigned mode, CommandEvidence& evidence)
+        {
+            using Status = InventoryNotificationDeliveryStatus;
+            require(output && *output == expected, "delivery did not receive the prepared owned success");
+            struct Receiver final : InventoryNotificationConsumer
+            {
+                std::unique_ptr<const InventoryTransferSuccess>& mPending;
+                const InventoryTransferSuccess& mExpected;
+                Committed& mCommitted;
+                unsigned mMode;
+                bool mValid = true;
+                size_t mAttempts = 0, mReceived = 0;
+                InventoryNotificationBatch mOrder;
+                std::array<InventoryNotificationBatch, 2> mMailboxes;
+                std::array<size_t, 2> mCounts{};
+
+                Receiver(std::unique_ptr<const InventoryTransferSuccess>& pending,
+                    const InventoryTransferSuccess& expected, Committed& committed, unsigned mode)
+                    : mPending(pending), mExpected(expected), mCommitted(committed), mMode(mode)
+                {
+                }
+
+                void receive(InventoryNotificationIntent intent) override
+                {
+                    ++mAttempts;
+                    mValid &= !mPending && mCommitted();
+                    // The same slot cannot redeliver even during a callback.
+                    mValid &= consumeInventoryNotifications(mPending, *this).mStatus == Status::NoPendingSuccess;
+                    const bool fail = mMode && mAttempts == (mMode - 1) % 4 + 1;
+                    if (fail && mMode <= 4)
+                        throw Failure{};
+                    if (fail && mMode >= 9)
+                    {
+                        void* block = ::operator new(8); // Fails under the delivery-only observation.
+                        ::operator delete(block);
+                        mValid = false;
+                    }
+                    size_t owner = 2;
+                    if (intent.mOwner == mExpected.mCommand.mSourceOwner)
+                        owner = 0;
+                    if (intent.mOwner == mExpected.mCommand.mDestinationOwner)
+                        owner = 1;
+                    if (owner == 2 || mReceived == mOrder.size() || mCounts[owner] == mMailboxes[owner].size())
+                    {
+                        mValid = false;
+                        return;
+                    }
+                    mMailboxes[owner][mCounts[owner]++] = intent;
+                    mOrder[mReceived++] = intent;
+                    if (fail)
+                        throw Failure{};
+                }
+            } receiver(output, expected, committed, mode);
+            Allocations::Trace trace;
+            InventoryNotificationDelivery result;
+            {
+                Allocations::Observe observe(trace, 1);
+                result = consumeInventoryNotifications(output, receiver);
+            }
+            const size_t total = std::count_if(expected.mNotifications.begin(), expected.mNotifications.end(),
+                [](const auto& intent) { return intent.has_value(); });
+            const size_t prefix = mode ? (mode - 1) % 4 : total;
+            const size_t received = prefix + (mode >= 5 && mode <= 8 ? 1 : 0);
+            require(receiver.mValid && committed() && !output && result.mRevision == expected.mRevision
+                    && result.mStatus == (mode ? Status::FailedAfterCommit : Status::Delivered)
+                    && result.mConfirmed == prefix && receiver.mReceived == received
+                    && receiver.mAttempts == (mode ? prefix + 1 : total)
+                    && trace.mTotal == (mode >= 9 ? 1u : 0u) && trace.mFailures == (mode >= 9 ? 1u : 0u)
+                    && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                "notification routing/consumption lost committed state or confused delivery failure with rejection");
+            size_t position = 0;
+            std::array<size_t, 2> counts{};
+            for (const auto& intent : expected.mNotifications)
+                if (intent && position < received)
+                {
+                    const size_t owner = intent->mOwner == expected.mCommand.mSourceOwner ? 0 : 1;
+                    require(receiver.mOrder[position++] == intent
+                            && receiver.mMailboxes[owner][counts[owner]++] == intent,
+                        "notification order, owner/initiator, item, quantity or revision changed");
+                }
+            require(receiver.mCounts == counts
+                    && consumeInventoryNotifications(output, receiver).mStatus == Status::NoPendingSuccess
+                    && receiver.mAttempts == (mode ? prefix + 1 : total),
+                "consumed notification batch was retried");
+            evidence.mDelivered += mode == 0;
+            evidence.mDeliveryFailed += mode != 0;
+            evidence.mDeliveryModes |= 1u << mode;
+            const unsigned shape = (expected.mNotifications[0] ? 1u : 0u) | (expected.mNotifications[2] ? 2u : 0u);
+            evidence.mBatchShapes |= 1u << shape;
+        }
 
         template <class Make, class Verify, class Unrelated>
         size_t checkCommandCase(std::unique_ptr<DisposableTransferRehearsal>& owner, Make make,
@@ -2159,6 +2319,7 @@ namespace MWWorld::Testing
                 expectedResult = { command, ownedId(pair.getDestinationIdentity()),
                     pair.getSourceItem().getCellRef().getCount(false),
                     pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
+                expectedResult.mNotifications = expectedNotifications(expectedResult);
             }
             TransferSaveBytes priorBytes, expectedBytes;
             encodeTransferSave(prior, bindings, priorBytes);
@@ -2298,6 +2459,7 @@ namespace MWWorld::Testing
                     expectedResult = { command, ownedId(pair.getDestinationIdentity()),
                         pair.getSourceItem().getCellRef().getCount(false),
                         pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
+                    expectedResult.mNotifications = expectedNotifications(expectedResult);
                     serializePair(fixture, pair, content.mDeclarations, expectedSave);
                     encodeTransferSave(expectedSave, bindings, expectedBytes);
                 }
@@ -2403,6 +2565,7 @@ namespace MWWorld::Testing
                 {
                     Observe observe(retry, allocationCount + 1);
                     committed = execute();
+                    require(committed && *output == expectedResult, "healthy retry lost prepared notification batch");
                     output.reset();
                     owner.reset();
                 }
@@ -2464,8 +2627,18 @@ namespace MWWorld::Testing
                         "repeated/stale command changed installed state/result or wrote again");
                     ++evidence.mRepeated;
                 }
+                require(fileBytes(path) == expectedBytes, "delivery preceded exact accepted persistence");
+                checkNotificationConsumption(output, expectedResult,
+                    [&] {
+                        return fixture.mModel.getPtrRegistryRevision() == expectedResult.mRevision
+                            && destination.getContainerStore() == &fixture.mDestination
+                            && destination.getCellRef().getCount(false) == expectedResult.mDestinationCount
+                            && !fixture.failedClosed() && !file.failedClosed();
+                    },
+                    static_cast<unsigned>((evidence.mRepeated / 2 - 1) % 13), evidence);
+                require(snapshot(fixture) == installedBefore && fileBytes(path) == expectedBytes,
+                    "notification delivery failure replayed gameplay or changed accepted save");
                 owner.reset();
-                require(*output == expectedResult, "success result borrowed disposed fixture state");
             }
             verifyUnrelated();
             require(contentState(content) == contentBefore && !std::filesystem::exists(temporary),
@@ -4588,6 +4761,7 @@ namespace MWWorld::Testing
             const auto envelopeBefore = bindings.mEnvelope;
             const auto savedBefore = pairOutputState(saved);
             const auto acceptedBefore = std::tuple{ accepted, accepted.data(), accepted.capacity() };
+            Listener restartListener;
             const auto unchangedInputs = [&] {
                 require(contentState(bindings.mContent) == contentBefore && bindings.mEnvelope == envelopeBefore
                         && pairOutputState(saved) == savedBefore
@@ -4597,6 +4771,9 @@ namespace MWWorld::Testing
             const auto installed = [&](const TransferSaveBytes& bytes) {
                 auto fixture = makeFresh();
                 fixture->mDestinationAdd.mPlayer = fixture->mModel.getPtr(bindings.mEnvelope.mInitiator);
+                fixture->mSource.setContListener(&restartListener);
+                fixture->mDestination.setContListener(&restartListener);
+                const int notifications = fixture->mNotifications;
                 SerializedPair decoded;
                 decodeTransferSave(bytes, bindings, decoded);
                 std::unique_ptr<const RestoredPair> nodes;
@@ -4616,6 +4793,8 @@ namespace MWWorld::Testing
                 require(!nodes && !registry && !scripts && trace.allocations(Phase::Installation) == 0
                         && trace.allocations(Phase::Retirement) == 0 && trace.allocations(Phase::Publication) == 0,
                     "continuation restart did not consume candidates or allocated after validation");
+                require(restartListener.mCalls == 0 && fixture->mNotifications == notifications,
+                    "restart replayed inventory notifications");
                 checkSavedValues(*output, decoded);
                 SerializedPair actual;
                 saveFixture(*fixture, bindings.mContent.mDeclarations, actual);
@@ -4637,7 +4816,7 @@ namespace MWWorld::Testing
                     "post-restart command allocated after acceptance or overflowed tracking");
             };
             const auto run = [&](const SerializedPair& prior, const TransferSaveBytes& priorBytes, size_t failAt,
-                                 size_t allocationCount, FileFault fault, bool negatives) {
+                                 size_t allocationCount, FileFault fault, bool negatives, unsigned listenerMask = 3) {
                 TransferFileSink file(path);
                 FileFaults faults;
                 require(file.write(priorBytes, faults) == TestPersistenceResult::Accepted,
@@ -4650,8 +4829,8 @@ namespace MWWorld::Testing
                         && fixture->mModel.getPtrRegistryRevision() == command.mExpectedRevision,
                     "continuation did not resolve the saved command in the fresh fixture");
                 Listener listener;
-                fixture->mSource.setContListener(&listener);
-                fixture->mDestination.setContListener(&listener);
+                fixture->mSource.setContListener(listenerMask & 1 ? &listener : nullptr);
+                fixture->mDestination.setContListener(listenerMask & 2 ? &listener : nullptr);
                 const auto before = snapshot(*fixture);
                 const auto otherBefore = nodeState(ConstPtr(&fixture->otherStorage().front()));
                 const auto otherCache = fixture->cacheState(fixture->mOther);
@@ -4725,6 +4904,8 @@ namespace MWWorld::Testing
                     expectedResult = { command, owned(pair.getDestinationIdentity()),
                         pair.getSourceItem().getCellRef().getCount(false),
                         pair.getDestinationItem().getCellRef().getCount(false), expected.mRestart.mRevision };
+                    expectedResult.mNotifications
+                        = expectedNotifications(expectedResult, listenerMask & 1, listenerMask & 2);
                     const auto oldTarget = fixture->mModel.getPtr(pair.getDestinationIdentity());
                     const auto oldCount = oldTarget.isEmpty() ? 0 : oldTarget.getCellRef().getCount(false);
                     const auto sign = [](int count) { return count < 0 ? -1 : 1; };
@@ -4896,6 +5077,15 @@ namespace MWWorld::Testing
                         TransferSaveBytes wire;
                         encodeTransferSave(actual, bindings, wire);
                         require(wire == fileBytes(path), "uncertainty recovery installed before exact persistence");
+                        const auto recoveredResult = *output;
+                        const auto recoveredState = snapshot(*recovered);
+                        require(recoveredResult.mNotifications == expectedNotifications(recoveredResult),
+                            "fresh uncertainty recovery lost prepared notifications");
+                        checkNotificationConsumption(output, recoveredResult,
+                            [&] { return recovered->mModel.getPtrRegistryRevision() == recoveredResult.mRevision; },
+                            0, evidence);
+                        require(snapshot(*recovered) == recoveredState && fileBytes(path) == wire,
+                            "uncertainty recovery delivery changed committed state");
                         recovered.reset();
                         auto second = installed(wire);
                         ++evidence.mRecovered;
@@ -4966,14 +5156,54 @@ namespace MWWorld::Testing
                                 && *output == expectedResult && faults.mReached == FileFault::None,
                             "repeated post-restart intent mutated, persisted or published");
                         ++evidence.mRepeated;
+                        checkNotificationConsumption(output, expectedResult,
+                            [&] {
+                                return fixture->mModel.getPtrRegistryRevision() == expectedResult.mRevision
+                                    && fixture->mModel.getPtr(sourceId).getCellRef().getCount(false)
+                                        == expectedResult.mSourceCount
+                                    && fixture->mModel.getPtr(engine(expectedResult.mDestinationItem))
+                                            .getCellRef().getCount(false) == expectedResult.mDestinationCount
+                                    && !fixture->failedClosed() && !file.failedClosed();
+                            },
+                            listenerMask == 3 ? static_cast<unsigned>((evidence.mRepeated - 1) % 13) : 0, evidence);
+                        require(snapshot(*fixture) == committed && fileBytes(path) == expectedBytes,
+                            "post-restart delivery replayed mutation or changed committed persistence");
                         fixture.reset();
-                        require(*output == expectedResult, "continuation result borrowed destroyed fixture");
                         auto second = installed(fileBytes(path));
                         require(
                             second->mModel.getPtr(sourceId).getCellRef().getCount(false) == expectedResult.mSourceCount
-                                && second->mModel.getPtr(engine(output->mDestinationItem)).getCellRef().getCount(false)
-                                    == expectedResult.mDestinationCount,
+                                && second->mModel.getPtr(engine(expectedResult.mDestinationItem))
+                                        .getCellRef().getCount(false) == expectedResult.mDestinationCount,
                             "second fresh restart lost continuation gameplay counts");
+                        // Delivery failure never authorizes mutation replay. A new
+                        // command uses the next installed revision after another
+                        // fresh restart, and gets only its own notification batch.
+                        if (expectedResult.mSourceCount != 0
+                            && second->mModel.getPtrRegistryRevision() != std::numeric_limits<size_t>::max()
+                            && second->mModel.getLastGeneratedRefNum().mIndex != UINT32_MAX)
+                        {
+                            auto next = command;
+                            next.mExpectedRevision = second->mModel.getPtrRegistryRevision();
+                            next.mQuantity = 1;
+                            faults = {};
+                            require(executeInventoryTransfer(*second, next, bindings, file, faults, output),
+                                "notification path could not continue after second fresh restart");
+                            const auto nextResult = *output;
+                            require(nextResult.mCommand == next && nextResult.mRevision == next.mExpectedRevision + 1
+                                    && nextResult.mSourceCount == expectedResult.mSourceCount
+                                        + (expectedResult.mSourceCount < 0 ? 1 : -1)
+                                    && nextResult.mNotifications == expectedNotifications(nextResult),
+                                "subsequent command reused old revision, mutation or notification batch");
+                            const auto nextState = snapshot(*second);
+                            const auto nextBytes = fileBytes(path);
+                            checkNotificationConsumption(output, nextResult,
+                                [&] { return second->mModel.getPtrRegistryRevision() == nextResult.mRevision; },
+                                0, evidence);
+                            require(snapshot(*second) == nextState && fileBytes(path) == nextBytes,
+                                "subsequent notification consumption changed installed state/save");
+                            second.reset();
+                            auto third = installed(nextBytes);
+                        }
                     }
                 }
                 unchangedInputs();
@@ -4982,6 +5212,8 @@ namespace MWWorld::Testing
                 return trace.mTotal;
             };
             const size_t allocations = run(saved, accepted, 0, 0, FileFault::None, true);
+            for (unsigned listeners = 0; listeners < 3; ++listeners)
+                run(saved, accepted, 0, 0, FileFault::None, false, listeners);
             for (auto fault :
                 { FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier, FileFault::ReadOpen,
                     FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
@@ -5029,9 +5261,22 @@ namespace MWWorld::Testing
                 = rebuildScripts ? original->restartScriptBindings() : Fixture::RestartScriptBindings{};
             const auto otherId = oldBindings.mOther.at(0).first;
             const auto otherBase = oldBindings.mOther.at(0).second.getCellRef().getRefId();
+            InventoryTransferSuccess initialResult;
+            std::unique_ptr<const InventoryTransferSuccess> initialOutput;
             {
                 const auto prepared = make();
                 MWWorld::Testing::serializePair(*original, prepared, content.mDeclarations, saved);
+                if (continuation)
+                {
+                    const auto owned = [](ESM::RefNum id) { return InventoryInstanceId{ id.mIndex, id.mContentFile }; };
+                    initialResult = { { owned(envelope.mSourceOwner), owned(envelope.mDestinationOwner),
+                                          owned(envelope.mInitiator), owned(sourceId), prepared.getRemoval().getCount(),
+                                          original->mModel.getPtrRegistryRevision() },
+                        owned(prepared.getDestinationIdentity()), prepared.getSourceItem().getCellRef().getCount(false),
+                        prepared.getDestinationItem().getCellRef().getCount(false), saved.mRestart.mRevision };
+                    initialResult.mNotifications = expectedNotifications(
+                        initialResult, prepared.hasRemovalNotification(), prepared.hasAdditionNotification());
+                }
             }
             TransferSaveBytes bytes;
             encodeTransferSave(saved, bindings, bytes);
@@ -5040,13 +5285,8 @@ namespace MWWorld::Testing
             {
                 TransferFileSink file(scratch / "inventory.bin");
                 FileFaults faults;
-                require(original->commitDurably(make(), content.mDeclarations,
-                            [&](const SerializedPair& committed) {
-                                TransferSaveBytes actual;
-                                encodeTransferSave(committed, bindings, actual);
-                                require(actual == bytes, "initial transfer save differs from prepared values");
-                                return file.write(actual, faults);
-                            }),
+                require(executeInventoryTransfer(*original, initialResult.mCommand, bindings, file, faults, initialOutput)
+                        && *initialOutput == initialResult,
                     "initial transfer file save was not accepted");
                 require(fileBytes(scratch / "inventory.bin") == bytes, "initial accepted file differs from save");
                 checkSelections(*original, saved);
@@ -5063,6 +5303,11 @@ namespace MWWorld::Testing
             original.reset();
             for (const auto& owner : oldBindings.mOwners)
                 require(!owner.hasLiveReference(), "restart test retained the original fixture");
+            if (continuation)
+            {
+                require(*initialOutput == initialResult, "notification batch borrowed the destroyed original fixture");
+                checkNotificationConsumption(initialOutput, initialResult, [] { return true; }, 0, *continuation);
+            }
             SerializedPair decoded;
             decodeTransferSave(bytes, bindings, decoded);
             checkSavedValues(decoded, saved);
@@ -5493,6 +5738,8 @@ namespace MWWorld::Testing
         live.mSource.add(scripted.getPtr(), 9, live.mSourceAdd);
         live.mDestination.add(plain.getPtr(), 11, live.mDestinationAdd);
         const auto liveBefore = snapshot(live);
+        if (command)
+            checkStockNotificationOrdering(store, readers, scripts, ownerId, plain.getPtr());
         for (bool shared : { false, true })
             for (bool scriptedItem : { false, true })
                 for (bool stack : { false, true })
@@ -6120,6 +6367,10 @@ namespace MWWorld::Testing
                 require(commandEvidence.mResultFailures == 2, "command result allocation failure coverage missing");
                 require(!restartCommand || commandEvidence.mRecovered == 192,
                     "post-restart uncertainty recovery coverage missing");
+                require(commandEvidence.mDeliveryModes == 0x1fff,
+                    "notification consumer missed a failure boundary");
+                require(!restartCommand || commandEvidence.mBatchShapes == 15,
+                    "notification consumer missed a listener-presence combination");
                 std::cout << (restartCommand ? "Post-restart inventory command: cases=" : "Inventory command: cases=")
                           << cases << " safe-rejections=" << commandEvidence.mRejected
                           << " stale/repeated=" << commandEvidence.mRepeated
@@ -6127,6 +6378,8 @@ namespace MWWorld::Testing
                           << " allocation-failures=" << commandEvidence.mAllocations
                           << " result-allocation-failures=" << commandEvidence.mResultFailures
                           << " fresh-composition-recoveries=" << commandEvidence.mRecovered
+                          << " notification-delivered=" << commandEvidence.mDelivered
+                          << " delivery-failed-after-commit=" << commandEvidence.mDeliveryFailed
                           << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";
                 return;
             }

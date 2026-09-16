@@ -23,6 +23,7 @@ namespace MWWorld::Testing::Allocations
         Installation,
         Retirement,
         Publication,
+        Delivery,
         Count
     };
     struct Trace
