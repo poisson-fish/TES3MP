@@ -324,7 +324,7 @@ namespace MWWorld::Testing
     void checkTransferRestartInstallation(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
-    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);
+    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart = false);
     void checkTransferCommit(const ESMStore& content);
 }
 

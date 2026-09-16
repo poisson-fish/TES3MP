@@ -2063,6 +2063,7 @@ namespace MWWorld::Testing
         struct CommandEvidence
         {
             size_t mRejected = 0, mUncertain = 0, mAllocations = 0, mResultFailures = 0, mRepeated = 0;
+            size_t mRecovered = 0;
         };
 
         template <class Make, class Verify, class Unrelated>
@@ -4492,11 +4493,432 @@ namespace MWWorld::Testing
             return allocations;
         }
 
+        template <class Fresh>
+        size_t checkRestartCommand(Fresh makeFresh, const SerializedPair& saved, const SaveBindings& bindings,
+            const TransferSaveBytes& accepted, ESM::RefNum sourceId, int quantity, const std::filesystem::path& scratch,
+            bool exhaustive, CommandEvidence& evidence)
+        {
+            using namespace Allocations;
+            using Fixture = DisposableTransferRehearsal;
+            const auto path = scratch / "inventory.bin";
+            const auto temporary = scratch / "inventory.bin.tmp";
+            const auto owned = [](ESM::RefNum id) { return InventoryInstanceId{ id.mIndex, id.mContentFile }; };
+            const auto engine = [](InventoryInstanceId id) { return ESM::RefNum{ id.mIndex, id.mContentFile }; };
+            const auto contentBefore = contentState(bindings.mContent);
+            const auto envelopeBefore = bindings.mEnvelope;
+            const auto savedBefore = pairOutputState(saved);
+            const auto acceptedBefore = std::tuple{ accepted, accepted.data(), accepted.capacity() };
+            const auto unchangedInputs = [&] {
+                require(contentState(bindings.mContent) == contentBefore && bindings.mEnvelope == envelopeBefore
+                        && pairOutputState(saved) == savedBefore
+                        && std::tuple{ accepted, accepted.data(), accepted.capacity() } == acceptedBefore,
+                    "restart command changed borrowed content/save/bindings");
+            };
+            const auto installed = [&](const TransferSaveBytes& bytes) {
+                auto fixture = makeFresh();
+                fixture->mDestinationAdd.mPlayer = fixture->mModel.getPtr(bindings.mEnvelope.mInitiator);
+                SerializedPair decoded;
+                decodeTransferSave(bytes, bindings, decoded);
+                std::unique_ptr<const RestoredPair> nodes;
+                restorePair(decoded, bindings.mContent, nodes);
+                std::unique_ptr<const Fixture::RestartRegistry> registry;
+                std::unique_ptr<const Fixture::RestartScripts> scripts;
+                std::unique_ptr<const SerializedPair> output;
+                const auto fresh = fixture->restartScriptBindings();
+                fixture->prepareRestartRegistry(decoded, *nodes, bindings.mEnvelope, fresh.mRegistry, registry);
+                fixture->prepareRestartScripts(
+                    decoded, *nodes, bindings.mContent, bindings.mEnvelope, *registry, fresh, scripts);
+                Trace trace;
+                {
+                    Observe observe(trace);
+                    fixture->installRestart(bytes, decoded, bindings, nodes, registry, scripts, output);
+                }
+                require(!nodes && !registry && !scripts && trace.allocations(Phase::Installation) == 0
+                        && trace.allocations(Phase::Retirement) == 0 && trace.allocations(Phase::Publication) == 0,
+                    "continuation restart did not consume candidates or allocated after validation");
+                checkSavedValues(*output, decoded);
+                SerializedPair actual;
+                saveFixture(*fixture, bindings.mContent.mDeclarations, actual);
+                TransferSaveBytes again;
+                encodeTransferSave(actual, bindings, again);
+                require(again == bytes && actual.mRestart == decoded.mRestart,
+                    "continuation fresh install rebuilt counters or changed accepted engine bytes");
+                require(fixture->mSource.getSelectedEnchantItem() == fixture->mSource.end()
+                        && fixture->mDestination.getSelectedEnchantItem() == fixture->mDestination.end(),
+                    "continuation restart restored deferred selections");
+                return fixture;
+            };
+            const auto commandFor = [&](const SerializedPair& prior) {
+                return InventoryTransferCommand{ owned(bindings.mEnvelope.mSourceOwner),
+                    owned(bindings.mEnvelope.mDestinationOwner), owned(bindings.mEnvelope.mInitiator), owned(sourceId),
+                    quantity, prior.mRestart.mRevision };
+            };
+            const auto noLateAllocations = [](const Trace& trace) {
+                require(trace.mTrackingOverflow == 0 && trace.allocations(Phase::Installation) == 0
+                        && trace.allocations(Phase::Retirement) == 0 && trace.allocations(Phase::Publication) == 0,
+                    "post-restart command allocated after acceptance or overflowed tracking");
+            };
+            const auto run = [&](const SerializedPair& prior, const TransferSaveBytes& priorBytes, size_t failAt,
+                                 size_t allocationCount, FileFault fault, bool negatives) {
+                TransferFileSink file(path);
+                FileFaults faults;
+                require(file.write(priorBytes, faults) == TestPersistenceResult::Accepted,
+                    "continuation seed save not accepted");
+                auto fixture = installed(fileBytes(path));
+                const auto command = commandFor(prior);
+                const auto commandBefore = command;
+                const auto item = fixture->mModel.getPtr(sourceId);
+                require(item.hasLiveReference() && item.getContainerStore() == &fixture->mSource
+                        && fixture->mModel.getPtrRegistryRevision() == command.mExpectedRevision,
+                    "continuation did not resolve the saved command in the fresh fixture");
+                Listener listener;
+                fixture->mSource.setContListener(&listener);
+                fixture->mDestination.setContListener(&listener);
+                const auto before = snapshot(*fixture);
+                const auto otherBefore = nodeState(ConstPtr(&fixture->otherStorage().front()));
+                const auto otherCache = fixture->cacheState(fixture->mOther);
+                const auto notifications = fixture->mNotifications;
+                auto output = std::make_unique<const InventoryTransferSuccess>(InventoryTransferSuccess{});
+                const auto* sentinel = output.get();
+                const auto sentinelValue = *output;
+                const auto preserved = [&] {
+                    require(snapshot(*fixture) == before && output.get() == sentinel && *output == sentinelValue
+                            && listener.mCalls == 0 && command == commandBefore,
+                        "failed continuation changed engine state, command or caller output storage/value");
+                    unchangedInputs();
+                };
+                const auto execute
+                    = [&] { return executeInventoryTransfer(*fixture, command, bindings, file, faults, output); };
+                const auto reject = [&](InventoryTransferCommand bad, bool preflight = true) {
+                    const auto supplied = bad;
+                    const auto state = snapshot(*fixture);
+                    // Also fail diagnostic allocation; no preparation or I/O may precede it.
+                    for (size_t ordinal : { size_t{ 0 }, size_t{ 1 } })
+                    {
+                        bool rejected = false;
+                        faults = {};
+                        Trace trace;
+                        {
+                            Observe observe(trace, ordinal);
+                            try
+                            {
+                                executeInventoryTransfer(*fixture, bad, bindings, file, faults, output);
+                            }
+                            catch (const std::invalid_argument&)
+                            {
+                                rejected = true;
+                            }
+                            catch (const std::bad_alloc&)
+                            {
+                                rejected = ordinal == 1;
+                            }
+                        }
+                        require(rejected && bad == supplied && trace.mOutstanding == 0
+                                && (!preflight || trace.visits(Phase::Preparation) == 0)
+                                && trace.visits(Phase::Installation) == 0 && trace.visits(Phase::Publication) == 0
+                                && faults.mReached == FileFault::None && faults.mWrites == 0 && faults.mReads == 0
+                                && snapshot(*fixture) == state && output.get() == sentinel && *output == sentinelValue
+                                && !file.failedClosed() && !fixture->failedClosed() && fileBytes(path) == priorBytes,
+                            "rejected continuation prepared, persisted, mutated or published");
+                        ++evidence.mRejected;
+                    }
+                };
+                if (prior.mRestart.mRevision == std::numeric_limits<size_t>::max()
+                    || prior.mRestart.mLastGenerated.mIndex == UINT32_MAX)
+                {
+                    reject(command);
+                    preserved();
+                    return size_t{ 0 };
+                }
+                SerializedPair expected;
+                InventoryTransferSuccess expectedResult;
+                {
+                    const std::array resolved{ ContainerStoreResolution(
+                        fixture->mOther, fixture->mOtherOwner.getPtr()) };
+                    auto pair = fixture->mSource.prepareTransfer(
+                        item, quantity, fixture->mDestination, fixture->mRemoval, fixture->mDestinationAdd, resolved);
+                    serializePair(*fixture, pair, bindings.mContent.mDeclarations, expected);
+                    expectedResult = { command, owned(pair.getDestinationIdentity()),
+                        pair.getSourceItem().getCellRef().getCount(false),
+                        pair.getDestinationItem().getCellRef().getCount(false), expected.mRestart.mRevision };
+                    const auto oldTarget = fixture->mModel.getPtr(pair.getDestinationIdentity());
+                    const auto oldCount = oldTarget.isEmpty() ? 0 : oldTarget.getCellRef().getCount(false);
+                    const auto sign = [](int count) { return count < 0 ? -1 : 1; };
+                    require(expectedResult.mSourceCount
+                                == item.getCellRef().getCount(false)
+                                    - sign(item.getCellRef().getCount(false)) * quantity
+                            && expectedResult.mDestinationCount == oldCount + sign(oldCount) * quantity
+                            && expected.mRestart.mRevision == prior.mRestart.mRevision + 1
+                            && expected.mRestart.mLastGenerated
+                                == ESM::RefNum{ prior.mRestart.mLastGenerated.mIndex + (oldTarget.isEmpty() ? 1u : 0u),
+                                    -1 },
+                        "continuation rebuilt counters or prepared wrong transfer counts");
+                }
+                TransferSaveBytes expectedBytes;
+                encodeTransferSave(expected, bindings, expectedBytes);
+                if (negatives)
+                {
+                    for (auto member :
+                        { &InventoryTransferCommand::mSourceOwner, &InventoryTransferCommand::mDestinationOwner,
+                            &InventoryTransferCommand::mInitiator, &InventoryTransferCommand::mItem })
+                        for (auto id : { InventoryInstanceId{}, InventoryInstanceId{ 1, -2 },
+                                 owned(fixture->mOtherOwner.getPtr().getCellRef().getRefNum()) })
+                        {
+                            auto bad = command;
+                            bad.*member = id;
+                            reject(bad);
+                        }
+                    for (auto revision : { command.mExpectedRevision - 1, command.mExpectedRevision + 1 })
+                    {
+                        auto bad = command;
+                        bad.mExpectedRevision = revision;
+                        reject(bad);
+                    }
+                    for (int count : { 0, -1, 4, INT32_MAX })
+                    {
+                        auto bad = command;
+                        bad.mQuantity = count;
+                        reject(bad, count <= 0);
+                    }
+                    for (const auto* store : { &fixture->destinationStorage(), &fixture->otherStorage() })
+                    {
+                        auto bad = command;
+                        bad.mItem = owned(store->front().mRef.getRefNum());
+                        reject(bad);
+                    }
+                    const auto player = fixture->mDestinationAdd.mPlayer;
+                    {
+                        ManualRef expired(fixture->mSourceAdd.mStore, player.getCellRef().getRefId());
+                        fixture->mDestinationAdd.mPlayer = expired.getPtr();
+                    }
+                    reject(command);
+                    fixture->mDestinationAdd.mPlayer = player;
+                    auto* service = fixture->mDestinationAdd.mLocalScripts;
+                    fixture->mDestinationAdd.mLocalScripts = nullptr;
+                    reject(command, false);
+                    fixture->mDestinationAdd.mLocalScripts = service;
+                    for (auto safe :
+                        { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close, FileFault::Replace })
+                    {
+                        faults = { safe, 17 };
+                        Trace trace;
+                        bool result;
+                        {
+                            Observe observe(trace);
+                            result = execute();
+                        }
+                        require(!result && faults.mReached == (safe == FileFault::Replace ? FileFault::Close : safe)
+                                && !file.failedClosed() && !fixture->failedClosed() && trace.mOutstanding == 0
+                                && trace.visits(Phase::Installation) == 0 && trace.visits(Phase::Publication) == 0
+                                && fileBytes(path) == priorBytes && !std::filesystem::exists(temporary),
+                            "post-restart safe file failure installed, published or replaced accepted bytes");
+                        preserved();
+                        ++evidence.mRejected;
+                    }
+                }
+                faults = { fault, 17 };
+                Trace trace;
+                bool result = false, failed = false, uncertain = false;
+                {
+                    Observe observe(trace, failAt);
+                    try
+                    {
+                        result = execute();
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        failed = true;
+                    }
+                    catch (const TestDurabilityUncertain&)
+                    {
+                        uncertain = true;
+                    }
+                    if (result && failAt)
+                    {
+                        require(*output == expectedResult, "continuation retry published wrong result");
+                        output.reset();
+                        fixture.reset();
+                    }
+                }
+                noLateAllocations(trace);
+                if (fault != FileFault::None)
+                {
+                    require(uncertain && !result && !failed && fixture->failedClosed() && file.failedClosed()
+                            && trace.mOutstanding == 0 && trace.visits(Phase::Installation) == 0
+                            && trace.visits(Phase::Publication) == 0,
+                        "uncertain continuation installed or published success");
+                    preserved();
+                    const auto coherent = fileBytes(path);
+                    require(coherent == (fault == FileFault::ReplaceError ? priorBytes : expectedBytes),
+                        "uncertain continuation lost a coherent accepted save");
+                    TransferFileSink freshSink(path);
+                    for (auto* sink : { &file, &freshSink })
+                    {
+                        faults = {};
+                        Trace closed;
+                        bool blocked = false;
+                        {
+                            Observe observe(closed, 1);
+                            try
+                            {
+                                executeInventoryTransfer(*fixture, command, bindings, *sink, faults, output);
+                            }
+                            catch (const TestDurabilityUncertain&)
+                            {
+                                blocked = true;
+                            }
+                        }
+                        require(blocked && closed.mTotal == 0 && faults.mReached == FileFault::None,
+                            "uncertain continuation retried through old/new sink");
+                        preserved();
+                    }
+                    fixture.reset();
+                    auto recovered = installed(coherent);
+                    faults = {};
+                    bool blocked = false;
+                    try
+                    {
+                        executeInventoryTransfer(*recovered, command, bindings, file, faults, output);
+                    }
+                    catch (const TestDurabilityUncertain&)
+                    {
+                        blocked = true;
+                    }
+                    require(blocked && faults.mReached == FileFault::None && output.get() == sentinel,
+                        "fresh restart cleared old sink uncertainty");
+                    if (quantity == 1)
+                    {
+                        // Partial removals leave this same source ID available in
+                        // either coherent file outcome. Only a fresh composition
+                        // with its installed revision may resume; this is no durable
+                        // request deduplication or permission to retry the old fixture.
+                        auto next = command;
+                        next.mExpectedRevision = recovered->mModel.getPtrRegistryRevision();
+                        faults = {};
+                        require(executeInventoryTransfer(*recovered, next, bindings, freshSink, faults, output)
+                                && output->mCommand == next && output->mRevision == next.mExpectedRevision + 1,
+                            "validated fresh composition could not continue after uncertainty");
+                        SerializedPair actual;
+                        saveFixture(*recovered, bindings.mContent.mDeclarations, actual);
+                        TransferSaveBytes wire;
+                        encodeTransferSave(actual, bindings, wire);
+                        require(wire == fileBytes(path), "uncertainty recovery installed before exact persistence");
+                        recovered.reset();
+                        auto second = installed(wire);
+                        ++evidence.mRecovered;
+                    }
+                    ++evidence.mUncertain;
+                }
+                else if (failed)
+                {
+                    require(failAt && failAt <= allocationCount && trace.mFailures == 1 && trace.mTotal == failAt
+                            && trace.mOutstanding == 0 && trace.visits(Phase::Installation) == 0
+                            && trace.visits(Phase::Publication) == 0 && faults.mReached == FileFault::None
+                            && fileBytes(path) == priorBytes && !std::filesystem::exists(temporary),
+                        "continuation allocation failure reached persistence or leaked");
+                    evidence.mResultFailures += trace.mFailedPhase == Phase::Result;
+                    ++evidence.mAllocations;
+                    preserved();
+                    Trace retry;
+                    faults = { FileFault::None, 17 };
+                    {
+                        Observe observe(retry, allocationCount + 1);
+                        result = execute();
+                        require(result && *output == expectedResult, "continuation healthy allocation retry failed");
+                        output.reset();
+                        fixture.reset();
+                    }
+                    noLateAllocations(retry);
+                    require(retry.mOutstanding == 0 && retry.mFailures == 0 && retry.visits(Phase::Publication) == 1
+                            && fileBytes(path) == expectedBytes,
+                        "continuation retry cleanup/publication/persistence failed");
+                }
+                else
+                {
+                    require(result && !uncertain && trace.mFailures == 0 && trace.allocations(Phase::Result) == 1
+                            && trace.visits(Phase::Installation) == 1 && trace.visits(Phase::Retirement) == 1
+                            && trace.visits(Phase::Publication) == 1 && faults.mWrites > 1 && faults.mReads > 1
+                            && fileBytes(path) == expectedBytes,
+                        "continuation missed preallocated result, installation, publication or exact persisted bytes");
+                    if (failAt)
+                        require(trace.mTotal == allocationCount && trace.mOutstanding == 0,
+                            "successful continuation cleanup leaked or allocated past boundary");
+                    else
+                    {
+                        require(*output == expectedResult && output.get() != sentinel
+                                && fixture->mModel.getPtrRegistryRevision() == output->mRevision
+                                && fixture->mModel.getPtr(engine(output->mDestinationItem)).getContainerStore()
+                                    == &fixture->mDestination
+                                && nodeState(ConstPtr(&fixture->otherStorage().front())) == otherBefore
+                                && fixture->cacheState(fixture->mOther) == otherCache
+                                && fixture->mNotifications == notifications && listener.mCalls == 0
+                                && fixture->mSource.getSelectedEnchantItem() == fixture->mSource.end()
+                                && fixture->mDestination.getSelectedEnchantItem() == fixture->mDestination.end(),
+                            "continuation result lost fresh ownership or changed unrelated state/effects");
+                        SerializedPair actual;
+                        saveFixture(*fixture, bindings.mContent.mDeclarations, actual);
+                        checkSavedValues(actual, expected);
+                        const auto committed = snapshot(*fixture);
+                        const auto* success = output.get();
+                        faults = {};
+                        bool stale = false;
+                        try
+                        {
+                            execute();
+                        }
+                        catch (const std::invalid_argument&)
+                        {
+                            stale = true;
+                        }
+                        require(stale && snapshot(*fixture) == committed && output.get() == success
+                                && *output == expectedResult && faults.mReached == FileFault::None,
+                            "repeated post-restart intent mutated, persisted or published");
+                        ++evidence.mRepeated;
+                        fixture.reset();
+                        require(*output == expectedResult, "continuation result borrowed destroyed fixture");
+                        auto second = installed(fileBytes(path));
+                        require(
+                            second->mModel.getPtr(sourceId).getCellRef().getCount(false) == expectedResult.mSourceCount
+                                && second->mModel.getPtr(engine(output->mDestinationItem)).getCellRef().getCount(false)
+                                    == expectedResult.mDestinationCount,
+                            "second fresh restart lost continuation gameplay counts");
+                    }
+                }
+                unchangedInputs();
+                require(listener.mCalls == 0 && !std::filesystem::exists(temporary),
+                    "continuation notified listeners or left staging");
+                return trace.mTotal;
+            };
+            const size_t allocations = run(saved, accepted, 0, 0, FileFault::None, true);
+            for (auto fault :
+                { FileFault::ReplaceError, FileFault::AfterReplace, FileFault::Barrier, FileFault::ReadOpen,
+                    FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
+                run(saved, accepted, 0, 0, fault, false);
+            for (size_t ordinal = exhaustive ? 1 : allocations + 1; ordinal <= allocations + 1; ++ordinal)
+                run(saved, accepted, ordinal, allocations, FileFault::None, false);
+            // Synthetic accepted saves deliberately retain gaps and terminal counters;
+            // neither fixture construction nor continuation may infer them from nodes.
+            for (auto metadata : { TransferRestartMetadata{ saved.mRestart.mRevision + 100, { 100000, -1 } },
+                     TransferRestartMetadata{ std::numeric_limits<size_t>::max() - 1, { UINT32_MAX - 1, -1 } },
+                     TransferRestartMetadata{ std::numeric_limits<size_t>::max(), saved.mRestart.mLastGenerated },
+                     TransferRestartMetadata{ saved.mRestart.mRevision, { UINT32_MAX, -1 } } })
+            {
+                auto prior = saved;
+                prior.mRestart = metadata;
+                TransferSaveBytes bytes;
+                encodeTransferSave(prior, bindings, bytes);
+                run(prior, bytes, 0, 0, FileFault::None, false);
+            }
+            return allocations;
+        }
+
         template <class Make, class Verify>
         size_t checkRestartRegistryCase(std::unique_ptr<DisposableTransferRehearsal>& original, Make make,
             Verify verifyOriginal, ESMStore& store, ESM::ReadersCache& readers, MWBase::ScriptManager& scripts,
             ESM::RefId ownerId, bool shared, const RestoreContent& content, size_t& rejections,
-            bool rebuildScripts = false, bool install = false)
+            bool rebuildScripts = false, bool install = false, CommandEvidence* continuation = nullptr,
+            const std::filesystem::path& scratch = {}, ESM::RefNum sourceId = {}, int quantity = 0,
+            bool exhaustive = false)
         {
             using Fixture = DisposableTransferRehearsal;
             using Candidate = Fixture::RestartRegistry;
@@ -4504,7 +4926,7 @@ namespace MWWorld::Testing
             SaveEnvelope envelope{ "OpenMW-0.51.0-test-inventory-runtime-1", { 1, 7, 19 },
                 original->mSourceOwner.getPtr().getCellRef().getRefNum(),
                 original->mDestinationOwner.getPtr().getCellRef().getRefNum(),
-                original->mDestinationOwner.getPtr().getCellRef().getRefNum() };
+                original->mDestinationAdd.mPlayer.getCellRef().getRefNum() };
             const std::array referenceIds{ content.mBases[0]->mId, content.mBases[1]->mId,
                 ESM::RefId::stringRefId("serialization_owner"), ESM::RefId::stringRefId("serialization_soul"),
                 ESM::RefId::stringRefId("serialization_faction"), ESM::RefId::stringRefId("serialization_key"),
@@ -4522,7 +4944,7 @@ namespace MWWorld::Testing
             TransferSaveBytes bytes;
             encodeTransferSave(saved, bindings, bytes);
             verifyOriginal();
-            if (install)
+            if (install || continuation)
                 require(original->commit(make(), content.mDeclarations,
                             [&](const SerializedPair& committed) {
                                 TransferSaveBytes actual;
@@ -4553,6 +4975,9 @@ namespace MWWorld::Testing
             };
             if (install)
                 return checkRestartInstallation(makeFresh, decoded, bindings, bytes, rejections);
+            if (continuation)
+                return checkRestartCommand(
+                    makeFresh, decoded, bindings, bytes, sourceId, quantity, scratch, exhaustive, *continuation);
             auto fixture = makeFresh();
             const auto other = fixture->mModel.getPtr(otherId);
             ManualRef otherTemplate(store, otherBase);
@@ -4883,6 +5308,7 @@ namespace MWWorld::Testing
         RestartRegistry,
         RestartScripts,
         RestartInstallation,
+        RestartCommand,
         ScriptMetadata,
         Codec,
         FileSink,
@@ -4903,7 +5329,9 @@ namespace MWWorld::Testing
         const bool commit = allocationCheck == AllocationCheck::Commit || codec;
         const bool restartRegistry = allocationCheck == AllocationCheck::RestartRegistry;
         const bool restartInstallation = allocationCheck == AllocationCheck::RestartInstallation;
-        const bool restartScripts = allocationCheck == AllocationCheck::RestartScripts || restartInstallation;
+        const bool restartCommand = allocationCheck == AllocationCheck::RestartCommand;
+        const bool restartScripts
+            = allocationCheck == AllocationCheck::RestartScripts || restartInstallation || restartCommand;
         const bool scriptMetadata = allocationCheck == AllocationCheck::ScriptMetadata;
         const bool inventoryRestore
             = allocationCheck == AllocationCheck::Restore || restartRegistry || restartScripts || scriptMetadata || commit;
@@ -4969,7 +5397,7 @@ namespace MWWorld::Testing
                                 auto fixtureOwner
                                     = std::make_unique<Rehearsal>(store, readers, scripts, ownerId, shared);
                                 auto& fixture = *fixtureOwner;
-                                if (command && cursorPosition == 1)
+                                if ((command || restartCommand) && cursorPosition == 1)
                                     fixture.mDestinationAdd.mPlayer = fixture.mSourceOwner.getPtr();
                                 if (allocationCheck == AllocationCheck::Preparation)
                                     fixture.mRemoval.mInventoryUpdated
@@ -5131,8 +5559,8 @@ namespace MWWorld::Testing
                                 const std::array supplied{ ContainerStoreResolution(
                                     fixture.mOther, fixture.mOtherOwner.getPtr()) };
                                 const auto make = [&] {
-                                    return source.prepareTransfer(item, quantity, destination, fixture.mRemoval,
-                                        fixture.mDestinationAdd, supplied);
+                                    return source.prepareTransfer(item, restartCommand ? 1 : quantity, destination,
+                                        fixture.mRemoval, fixture.mDestinationAdd, supplied);
                                 };
                                 const auto before = snapshot(fixture);
                                 const auto unrelated = nodeState(*other);
@@ -5157,9 +5585,12 @@ namespace MWWorld::Testing
                                 {
                                     const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
                                         store.get<ESM::Miscellaneous>().find(scriptedId) };
-                                    totals.mTotal += checkRestartRegistryCase(fixtureOwner, make, verifyOriginal,
-                                        store, readers, scripts, ownerId, shared,
-                                        { bases, script, scripts.getLocals(scriptId) }, localRejections, restartScripts, restartInstallation);
+                                    totals.mTotal += checkRestartRegistryCase(fixtureOwner, make, verifyOriginal, store,
+                                        readers, scripts, ownerId, shared,
+                                        { bases, script, scripts.getLocals(scriptId) }, localRejections, restartScripts,
+                                        restartInstallation, restartCommand ? &commandEvidence : nullptr, scratch,
+                                        item.getCellRef().getRefNum(), quantity == 4 ? 3 : 1,
+                                        !shared && !stack && quantity == 1 && cursorPosition == 0);
                                     require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
                                         "restart registry affected independent fixture/listener/scripts");
                                     ++cases;
@@ -5577,14 +6008,18 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
-            if (command)
+            if (command || restartCommand)
             {
                 require(commandEvidence.mResultFailures == 2, "command result allocation failure coverage missing");
-                std::cout << "Inventory command: cases=" << cases << " safe-rejections=" << commandEvidence.mRejected
+                require(!restartCommand || commandEvidence.mRecovered == 192,
+                    "post-restart uncertainty recovery coverage missing");
+                std::cout << (restartCommand ? "Post-restart inventory command: cases=" : "Inventory command: cases=")
+                          << cases << " safe-rejections=" << commandEvidence.mRejected
                           << " stale/repeated=" << commandEvidence.mRepeated
                           << " fail-closed-outcomes=" << commandEvidence.mUncertain
                           << " allocation-failures=" << commandEvidence.mAllocations
                           << " result-allocation-failures=" << commandEvidence.mResultFailures
+                          << " fresh-composition-recoveries=" << commandEvidence.mRecovered
                           << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";
                 return;
             }
@@ -5746,7 +6181,7 @@ namespace MWWorld::Testing
             "file sink test left unowned staging files");
     }
 
-    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch)
+    void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart)
     {
         require(std::filesystem::create_directory(scratch), "command scratch directory already exists");
         struct Cleanup
@@ -5758,7 +6193,8 @@ namespace MWWorld::Testing
                 std::filesystem::remove_all(mPath, ignored);
             }
         } cleanup{ scratch };
-        checkTransferRehearsalCases(content, AllocationCheck::Command, scratch);
+        checkTransferRehearsalCases(
+            content, afterRestart ? AllocationCheck::RestartCommand : AllocationCheck::Command, scratch);
         require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
             "command test left staging files");
     }

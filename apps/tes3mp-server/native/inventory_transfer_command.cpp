@@ -3,6 +3,8 @@
 #include "test_allocations.hpp"
 #include "transfer_file_sink.hpp"
 
+#include <limits>
+
 namespace MWWorld::Testing
 {
     bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCommand command,
@@ -22,6 +24,13 @@ namespace MWWorld::Testing
         if (command.mQuantity <= 0 || command.mSourceOwner == command.mDestinationOwner
             || command.mExpectedRevision != fixture.mModel.getPtrRegistryRevision())
             throw std::invalid_argument("Inventory command quantity, owners or revision invalid");
+        // Version 3 preserves only the first generated-ID namespace. Close this
+        // bounded command at either saved counter's limit, including stacking:
+        // never wrap the revision or let stock generation enter content slot -2.
+        const auto counter = fixture.mModel.getLastGeneratedRefNum();
+        if (command.mExpectedRevision == std::numeric_limits<size_t>::max() || counter.mContentFile != -1
+            || counter.mIndex == std::numeric_limits<uint32_t>::max())
+            throw std::invalid_argument("Inventory command saved counter exhausted or unsupported");
         const auto& envelope = bindings.mEnvelope;
         if (id(command.mSourceOwner) != envelope.mSourceOwner
             || id(command.mDestinationOwner) != envelope.mDestinationOwner
