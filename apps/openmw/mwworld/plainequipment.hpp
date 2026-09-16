@@ -73,6 +73,10 @@ namespace MWWorld
         struct State;
         std::unique_ptr<State> mState;
         explicit RestoredPlainEquipment(std::unique_ptr<State> state);
+        // Only fresh test-owned restart composition may relocate this storage.
+        // Content must still be the exact store used to construct the nodes.
+        InventoryStore& installationCandidate(
+            const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const;
 
     public:
         static RestoredPlainEquipment restore(

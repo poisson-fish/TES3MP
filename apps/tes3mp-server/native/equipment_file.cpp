@@ -8,7 +8,7 @@ namespace MWWorld::Testing
     }
 
     FileReadResult restartEquipmentFile(const std::filesystem::path& path, const EquipmentBindings& bindings,
-        std::unique_ptr<const RestoredPlainEquipment>& output, FileFaults& faults)
+        std::unique_ptr<const RestoredPlainEquipment>& output, FileFaults& faults, EquipmentBytes* accepted)
     {
         EquipmentBytes bytes;
         const auto result = readEquipmentFile(path, bytes, faults);
@@ -20,6 +20,8 @@ namespace MWWorld::Testing
             RestoredPlainEquipment::restore(values, bindings.mContent, bindings.mEnvelope.mActor));
         static_assert(noexcept(output = std::move(staged)));
         output = std::move(staged);
+        if (accepted)
+            accepted->swap(bytes);
         return FileReadResult::Read;
     }
 

@@ -459,6 +459,7 @@ namespace MWWorld
     {
         InventoryStore mInventory;
         ESM::RefNum mActor, mLastGenerated;
+        const ESMStore* mContent = nullptr;
     };
 
     RestoredPlainEquipment::RestoredPlainEquipment(std::unique_ptr<State> state)
@@ -476,6 +477,7 @@ namespace MWWorld
         auto staged = std::make_unique<State>();
         staged->mActor = input.mActor;
         staged->mLastGenerated = input.mLastGenerated;
+        staged->mContent = &content;
         auto& inventory = staged->mInventory;
         const Compiler::Locals declarations;
         for (const auto& object : input.mObjects)
@@ -483,6 +485,9 @@ namespace MWWorld
             auto& node = inventory.mLists.mClothes.mList.emplace_back(
                 object.mRef, content.get<ESM::Clothing>().search(object.mRef.mRefID));
             node.mData = RefData::restore(object, {}, declarations);
+            // Capture before publishing the detached owner. Later relocation
+            // must not lazily mutate retained input on an allocation rejection.
+            ConstPtr witness(&node, nullptr);
             const auto it = ContainerStoreIterator(&inventory, std::prev(inventory.mLists.mClothes.mList.end()));
             if (object.mRef.mRefNum == input.mShirt)
                 inventory.mSlots[InventoryStore::Slot_Shirt] = it;
@@ -491,6 +496,17 @@ namespace MWWorld
         }
         inventory.mResolved = true;
         return RestoredPlainEquipment(std::move(staged));
+    }
+
+    InventoryStore& RestoredPlainEquipment::installationCandidate(
+        const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const
+    {
+        if (!mState || mState->mContent != &content || mState->mActor != actor || mState->mLastGenerated != counter)
+            throw std::invalid_argument("Restored equipment content, actor or saved counter binding changed");
+        for (const auto& node : mState->mInventory.mLists.mClothes.mList)
+            if (content.get<ESM::Clothing>().search(node.mRef.getRefId()) != node.mBase)
+                throw std::invalid_argument("Restored equipment base record binding changed");
+        return mState->mInventory;
     }
 
     void RestoredPlainEquipment::exportValues(PlainEquipmentValues& output) const

@@ -15,8 +15,10 @@ namespace MWWorld::Testing
     // and all its storage/value. Only a complete detached result is published.
     // Caller content must outlive it. No owner, services, listeners or effects
     // are installed, and saved generation counters are never inferred.
+    // When requested, the exact bytes from the same read are published with the
+    // detached owner, avoiding a second read for validated installation.
     FileReadResult restartEquipmentFile(const std::filesystem::path& path, const EquipmentBindings& bindings,
-        std::unique_ptr<const RestoredPlainEquipment>& output, FileFaults& faults);
+        std::unique_ptr<const RestoredPlainEquipment>& output, FileFaults& faults, EquipmentBytes* accepted = nullptr);
 
     // Test-target-only equipment format 1. The caller supplies trusted runtime,
     // content and actor bindings on every write; no borrowed bindings are kept.

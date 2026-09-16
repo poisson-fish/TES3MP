@@ -106,6 +106,9 @@ namespace MWWorld::Testing
         };
         std::array<ActorEffects, 2> mActorEffects;
         bool mFailedClosed = false;
+        // Only construction can authorize restart. Consumption closes this mode;
+        // an ordinary or uncertain fixture can never opt back into it.
+        std::optional<size_t> mRestartActor;
 
         void bindEffects(size_t actor)
         {
@@ -143,6 +146,769 @@ namespace MWWorld::Testing
                 || caller.mContainerStore != expected.mContainerStore
                 || caller.getReferenceLifetime() != expected.getReferenceLifetime())
                 throw std::invalid_argument("Equipment trusted caller does not match actor");
+        }
+
+        struct RestartBindings
+        {
+            const PlainEquipmentFixture* mFixture;
+            std::array<const InventoryStore*, 2> mStores;
+            std::array<std::weak_ptr<const void>, 2> mLifetimes;
+            std::array<std::shared_ptr<const void>, 2> mStorage;
+            std::weak_ptr<const void> mScripts;
+            PtrRegistry::Index mRegistry;
+            size_t mRevision;
+            ESM::RefNum mCounter, mSavedCounter;
+        };
+
+        RestartBindings restartBindings(ESM::RefNum savedCounter) const
+        {
+            if (mFailedClosed || !mRestartActor || mWorld.mPtrRegistry.mIndex.size() > 132)
+                throw std::invalid_argument("Equipment restart requires an explicit fresh bounded fixture");
+            return { this, { &mInventories[0], &mInventories[1] },
+                { mInventories[0].mResolutionLifetime, mInventories[1].mResolutionLifetime },
+                { mInventories[0].mStorageIdentity, mInventories[1].mStorageIdentity },
+                mScripts.lifetimeWitness(), mWorld.mPtrRegistry.mIndex, mWorld.getPtrRegistryRevision(),
+                mWorld.getLastGeneratedRefNum(), savedCounter };
+        }
+
+        static bool sameReference(const ConstPtr& a, const ConstPtr& b)
+        {
+            return a == b && a.mCell == b.mCell && a.mContainerStore == b.mContainerStore
+                && a.getReferenceLifetime() == b.getReferenceLifetime();
+        }
+
+        void validateRestart(size_t actor, const Ptr& caller, const EquipmentBindings& bindings,
+            const RestartBindings& fresh) const
+        {
+            const auto valid = [](bool value) {
+                if (!value)
+                    throw std::invalid_argument("Equipment fresh restart binding, lifetime or registry changed");
+            };
+            valid(!mFailedClosed && mRestartActor && *mRestartActor == actor && fresh.mFixture == this);
+            validateCaller(actor, caller);
+            const auto trusted = envelope(caller.getCellRef().getRefNum());
+            valid(&bindings.mContent == &mStore && bindings.mEnvelope.mRuntime == trusted.mRuntime
+                && bindings.mEnvelope.mContent == trusted.mContent && bindings.mEnvelope.mActor == trusted.mActor);
+            valid(!fresh.mScripts.expired() && fresh.mScripts.lock() == mScripts.lifetimeWitness().lock()
+                && mScripts.usesStore(mStore) && mScripts.snapshot().mEntries.empty());
+            for (size_t i = 0; i < 2; ++i)
+            {
+                const auto& store = mInventories[i];
+                valid(fresh.mStores[i] == &store && !fresh.mLifetimes[i].expired()
+                    && fresh.mLifetimes[i].lock() == store.mResolutionLifetime
+                    && fresh.mStorage[i] == store.mStorageIdentity && store.mResolved && store.mUpdatesEnabled);
+                valid(mActors[i] && mActors[i]->getPtr().hasLiveReference()
+                    && sameReference(store.getPtr(mWorld), mActors[i]->getPtr()));
+            }
+            const auto& target = mInventories[actor];
+            const auto& lists = target.mLists;
+            valid(lists.mClothes.mList.empty() && lists.mPotions.mList.empty() && lists.mAppas.mList.empty()
+                && lists.mArmors.mList.empty() && lists.mBooks.mList.empty() && lists.mIngreds.mList.empty()
+                && lists.mLights.mList.empty() && lists.mLockpicks.mList.empty() && lists.mMiscItems.mList.empty()
+                && lists.mProbes.mList.empty() && lists.mRepairs.mList.empty() && lists.mWeapons.mList.empty()
+                && target.mSelectedEnchantItem == target.end() && target.mRechargingItems.empty());
+            for (const auto& slot : target.mSlots)
+                valid(slot == target.end());
+            valid(target.mInventoryListener == &mActorEffects[actor].mListener
+                && target.mListener == &mActorEffects[actor].mListener && mItems[actor].isEmpty());
+            const auto& registry = mWorld.mPtrRegistry;
+            valid(registry.mIndex.size() <= 132 && registry.mIndex.size() == fresh.mRegistry.size()
+                && registry.mRevision == fresh.mRevision && registry.mLastGenerated == fresh.mCounter
+                && fresh.mSavedCounter.mContentFile < 0);
+            for (const auto& [id, ptr] : registry.mIndex)
+            {
+                const auto old = fresh.mRegistry.find(id);
+                valid(old != fresh.mRegistry.end() && old->second.hasLiveReference() && ptr.hasLiveReference()
+                    && sameReference(ptr, old->second));
+                // Follow only a current, lifetime-checked mapping. No saved Ptr
+                // or iterator is used to recover a missing node.
+                valid(ptr.getCellRef().getRefNum() == id && ptr.mRef->mWorldModel == &mWorld
+                    && ptr.mContainerStore != &target);
+                valid(id.mContentFile >= 0 || id.mContentFile > fresh.mSavedCounter.mContentFile
+                    || (id.mContentFile == fresh.mSavedCounter.mContentFile && id.mIndex <= fresh.mSavedCounter.mIndex));
+            }
+            for (const auto& owner : mActors)
+            {
+                const auto ptr = owner->getPtr();
+                valid(sameReference(ptr, mWorld.getPtr(ptr.getCellRef().getRefNum())));
+            }
+        }
+
+        struct RestartInstallation
+        {
+            // Registry/iterators die before the owned detached nodes.
+            std::unique_ptr<const RestoredPlainEquipment> mRestored;
+            RestartBindings mFresh;
+            PtrRegistry::Index mRegistry;
+            std::unique_ptr<const PlainEquipmentValues> mValues;
+            ContainerStoreIterator mShirt, mSelected;
+            Ptr mItem;
+
+            RestartInstallation(const RestartBindings& fresh, InventoryStore& target)
+                : mFresh(fresh)
+                , mShirt(target.end())
+                , mSelected(target.end())
+            {
+            }
+        };
+
+        std::unique_ptr<RestartInstallation> stageRestart(size_t actor, const Ptr& caller,
+            const EquipmentBindings& bindings, const RestartBindings& fresh,
+            std::unique_ptr<const RestoredPlainEquipment>& input)
+        {
+            using namespace Allocations;
+            InPhase phase(Phase::Validation);
+            validateRestart(actor, caller, bindings, fresh);
+            if (!input)
+                throw std::invalid_argument("Equipment restart requires detached storage");
+            auto& candidate = input->installationCandidate(mStore, bindings.mEnvelope.mActor, fresh.mSavedCounter);
+            PlainEquipmentValues saved;
+            input->exportValues(saved);
+            saved.validate(mStore, bindings.mEnvelope.mActor);
+            if (fresh.mRegistry.size() + saved.mObjects.size() > 132)
+                throw std::invalid_argument("Equipment restart registry bound exceeded");
+            for (const auto& object : saved.mObjects)
+                if (fresh.mRegistry.contains(object.mRef.mRefNum))
+                    throw std::invalid_argument("Equipment restart identity collides with fresh fixture");
+
+            phase.set(Phase::Setup);
+            auto& live = mInventories[actor];
+            auto staged = std::make_unique<RestartInstallation>(fresh, live);
+            staged->mRegistry = fresh.mRegistry;
+            for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
+            {
+                Ptr node(&*it, nullptr);
+                node.mContainerStore = &live;
+                const auto id = it->mRef.getRefNum();
+                staged->mRegistry.emplace(id, node);
+                if (id == saved.mShirt)
+                    staged->mShirt = ContainerStoreIterator(&live, it);
+                if (id == saved.mSelected)
+                    staged->mSelected = ContainerStoreIterator(&live, it);
+                if (staged->mItem.isEmpty() && it->mRef.getCount(false) != 0)
+                    staged->mItem = node;
+            }
+            phase.set(Phase::Result);
+            staged->mValues = std::make_unique<const PlainEquipmentValues>(std::move(saved));
+            phase.set(Phase::Revalidation);
+            validateRestart(actor, caller, bindings, fresh);
+            staged->mRestored.swap(input); // Only complete staging consumes input.
+            return staged;
+        }
+
+        static void checkRestartStaging()
+        {
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture source;
+                source.seedValues(actor);
+                PlainEquipmentValues saved;
+                source.prepare(actor, true).exportValues(source.preparationContext(actor), saved);
+                PlainEquipmentFixture fresh(actor);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                const EquipmentBindings bindings{ e, fresh.mStore, ids };
+                const auto witnesses = fresh.restartBindings(saved.mLastGenerated);
+                auto input = std::make_unique<const RestoredPlainEquipment>(
+                    RestoredPlainEquipment::restore(saved, fresh.mStore, saved.mActor));
+                const auto before = fresh.snapshot();
+                auto staged = fresh.stageRestart(actor, fresh.mActors[actor]->getPtr(), bindings, witnesses, input);
+                require(!input && sameValues(*staged->mValues, saved), "restart staging lost owned values");
+                for (const auto& object : saved.mObjects)
+                {
+                    const auto node = staged->mRegistry.at(object.mRef.mRefNum);
+                    require(node.hasLiveReference() && !node.mRef->mWorldModel
+                            && node.mContainerStore == &fresh.mInventories[actor]
+                            && node.getCellRef().getCount(false) == object.mRef.mCount,
+                        "restart staging lost exact detached identities/counts");
+                }
+                fresh.unchanged(before);
+            }
+            std::cout << "equipment fresh two-actor restart staging=2\n";
+        }
+
+        void installRestart(size_t actor, const Ptr& caller, const EquipmentBindings& bindings,
+            std::unique_ptr<RestartInstallation>& staged, EquipmentBytes& accepted,
+            std::unique_ptr<const PlainEquipmentValues>& output, EquipmentBytes& bytes)
+        {
+            using namespace Allocations;
+            InPhase phase(Phase::Revalidation);
+            if (!staged || !staged->mRestored || !staged->mValues)
+                throw std::invalid_argument("Equipment restart installation is incomplete or consumed");
+            validateRestart(actor, caller, bindings, staged->mFresh);
+            auto& candidate = staged->mRestored->installationCandidate(
+                mStore, bindings.mEnvelope.mActor, staged->mFresh.mSavedCounter);
+            PlainEquipmentValues restored;
+            staged->mRestored->exportValues(restored);
+            EquipmentBytes encoded;
+            encodeEquipment(restored, bindings, encoded);
+            if (encoded != accepted || !sameValues(restored, *staged->mValues))
+                throw std::invalid_argument("Equipment restart values differ from accepted file");
+            auto& live = mInventories[actor];
+            if (staged->mRegistry.size() != staged->mFresh.mRegistry.size() + restored.mObjects.size())
+                throw std::invalid_argument("Equipment restart relocation membership changed");
+            for (const auto& [id, node] : staged->mFresh.mRegistry)
+                if (!sameReference(node, staged->mRegistry.at(id)))
+                    throw std::invalid_argument("Equipment restart changed unrelated registry binding");
+            auto shirt = live.end(), selected = live.end();
+            Ptr first;
+            for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
+            {
+                Ptr node(&*it, nullptr);
+                node.mContainerStore = &live;
+                const auto id = it->mRef.getRefNum();
+                if (!sameReference(node, staged->mRegistry.at(id)))
+                    throw std::invalid_argument("Equipment restart node relocation changed");
+                if (id == restored.mShirt)
+                    shirt = ContainerStoreIterator(&live, it);
+                if (id == restored.mSelected)
+                    selected = ContainerStoreIterator(&live, it);
+                if (first.isEmpty() && it->mRef.getCount(false) != 0)
+                    first = node;
+            }
+            if (shirt != staged->mShirt || selected != staged->mSelected || !sameReference(first, staged->mItem))
+                throw std::invalid_argument("Equipment restart slot, selection or item relocation changed");
+            validateRestart(actor, caller, bindings, staged->mFresh);
+
+            // All reading, decoding, allocation, validation and relocation is
+            // complete. No equip/removal callbacks are replayed on restart.
+            const auto install = [&]() noexcept {
+                phase.set(Phase::Installation);
+                auto& nodes = candidate.mLists.mClothes.mList;
+                for (auto& node : nodes)
+                    node.mWorldModel = &mWorld;
+                nodes.swap(live.mLists.mClothes.mList);
+                live.mStorageIdentity.swap(candidate.mStorageIdentity);
+                live.mSlots[InventoryStore::Slot_Shirt] = staged->mShirt;
+                live.mSelectedEnchantItem = staged->mSelected;
+                live.mWeightUpToDate = live.mRechargingItemsUpToDate = false;
+                live.mModified = true;
+                auto& registry = mWorld.mPtrRegistry;
+                registry.mIndex.swap(staged->mRegistry);
+                // Format 1 saves the generation counter, not a registry epoch.
+                // Invalidate old fresh-fixture preparations with one revision.
+                registry.mRevision = staged->mFresh.mRevision + 1;
+                registry.mLastGenerated = restored.mLastGenerated;
+                mItems[actor] = staged->mItem;
+                mRestartActor.reset();
+                phase.set(Phase::Publication);
+                output.swap(staged->mValues);
+                bytes.swap(accepted);
+                phase.set(Phase::Retirement);
+                staged.reset();
+            };
+            install();
+        }
+
+        FileReadResult restartEquipment(size_t actor, const Ptr& caller, const std::filesystem::path& path,
+            const EquipmentBindings& bindings, const RestartBindings& fresh,
+            std::unique_ptr<const PlainEquipmentValues>& output, EquipmentBytes& bytes, FileFaults& faults)
+        {
+            Allocations::InPhase phase(Allocations::Phase::Validation);
+            validateRestart(actor, caller, bindings, fresh);
+            phase.set(Allocations::Phase::Preparation);
+            std::unique_ptr<const RestoredPlainEquipment> restored;
+            EquipmentBytes accepted;
+            const auto result = restartEquipmentFile(path, bindings, restored, faults, &accepted);
+            if (result != FileReadResult::Read)
+                return result;
+            auto staged = stageRestart(actor, caller, bindings, fresh, restored);
+            installRestart(actor, caller, bindings, staged, accepted, output, bytes);
+            return FileReadResult::Read;
+        }
+
+        static void checkRestartSuccess(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t cases = 0;
+            std::unique_ptr<const PlainEquipmentValues> output;
+            EquipmentBytes bytes;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int variant = 0; variant < 7; ++variant)
+                {
+                    PlainEquipmentValues saved;
+                    {
+                        PlainEquipmentFixture source;
+                        source.seedValues(actor);
+                        if (variant == 1)
+                        {
+                            source.mInventories[actor].equip(InventoryStore::Slot_Shirt,
+                                source.mInventories[actor].begin(), source.context(actor, actor));
+                            source.mInventories[actor].mSelectedEnchantItem = source.mInventories[actor].begin();
+                        }
+                        source.prepare(actor, variant != 1).exportValues(source.preparationContext(actor), saved);
+                    } // No source actors, store, services or nodes survive.
+                    if (variant == 2)
+                    {
+                        saved.mObjects.clear();
+                        saved.mShirt = saved.mSelected = {};
+                    }
+                    if (variant == 3)
+                    {
+                        saved.mObjects.resize(1);
+                        saved.mObjects.front().mRef.mCount = 0;
+                        saved.mShirt = {};
+                        saved.mSelected = saved.mObjects.front().mRef.mRefNum;
+                    }
+                    if (variant == 4)
+                    {
+                        while (saved.mObjects.size() < PlainEquipmentValues::MaxItems)
+                        {
+                            auto object = saved.mObjects.front();
+                            object.mRef.mRefNum = { static_cast<uint32_t>(20 + saved.mObjects.size()), -1 };
+                            object.mRef.mCount = 0;
+                            saved.mObjects.push_back(std::move(object));
+                        }
+                        saved.mLastGenerated = { 1000, -1 }; // Beyond all surviving IDs.
+                        saved.mSelected = saved.mObjects.back().mRef.mRefNum;
+                    }
+                    if (variant == 5)
+                        saved.mLastGenerated = { std::numeric_limits<uint32_t>::max(),
+                            std::numeric_limits<int32_t>::min() };
+                    if (variant == 6)
+                        saved.mLastGenerated = { 0, -2 }; // Exact stock rollover, not a surviving-node maximum.
+                    PlainEquipmentFixture fresh(actor);
+                    fresh.seedValues(1 - actor);
+                    if (variant == 5)
+                        fresh.mWorld.mPtrRegistry.mRevision = std::numeric_limits<size_t>::max();
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const EquipmentBindings bindings{ e, fresh.mStore, ids };
+                    const auto witnesses = fresh.restartBindings(saved.mLastGenerated);
+                    const auto before = fresh.snapshot();
+                    EquipmentFileSink file(scratch / "restart.bin");
+                    FileFaults faults;
+                    EquipmentBytes persisted;
+                    require(file.write(saved, bindings, persisted, faults) == TestPersistenceResult::Accepted,
+                        "equipment restart success file setup failed");
+                    Allocations::Trace trace;
+                    FileReadResult outcome;
+                    {
+                        Allocations::Observe observe(trace);
+                        outcome = fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), scratch / "restart.bin",
+                            bindings, witnesses, output, bytes, faults);
+                    }
+                    require(outcome == FileReadResult::Read && output && sameValues(*output, saved)
+                            && sameValues(fresh.installedValues(actor), saved) && bytes == persisted
+                            && fresh.mWorld.getLastGeneratedRefNum() == saved.mLastGenerated
+                            && fresh.mWorld.getPtrRegistryRevision() == before.mRegistry.mRevision + 1
+                            && trace.allocations(Allocations::Phase::Installation) == 0
+                            && trace.allocations(Allocations::Phase::Publication) == 0
+                            && trace.allocations(Allocations::Phase::Retirement) == 0,
+                        "equipment restart lost exact values/counters or allocated during installation/publication");
+                    for (const auto& node : fresh.mInventories[actor].mLists.mClothes.mList)
+                    {
+                        const auto ptr = fresh.mWorld.getPtr(node.mRef.getRefNum());
+                        require(ptr.hasLiveReference() && ptr.mRef == &node && node.mWorldModel == &fresh.mWorld
+                                && ptr.mContainerStore == &fresh.mInventories[actor],
+                            "equipment restart lost active/dormant registry binding");
+                    }
+                    require(fresh.mActorEffects[actor].mListener.mCalls == 0
+                            && fresh.mActorEffects[actor].mListener.mRemovals.empty()
+                            && fresh.mActorEffects[actor].mNotifications.empty()
+                            && fresh.mActorEffects[actor].mInventoryUpdates == 0
+                            && fresh.mScripts.snapshot() == before.mScripts && fresh.mEvents == before.mEvents,
+                        "equipment restart replayed operation effects");
+                    fresh.unchangedActor(before, 1 - actor);
+                    for (const auto& [id, binding] : before.mRegistry.mEntries)
+                        require(fresh.mWorld.snapshotPtrRegistry().mEntries.at(id) == binding,
+                            "equipment restart changed retained registry mapping");
+                    const auto installed = fresh.snapshot();
+                    const auto* outputStorage = output.get();
+                    const auto* byteStorage = bytes.data();
+                    faults = {};
+                    bool blocked = false;
+                    try
+                    {
+                        fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), scratch / "restart.bin",
+                            bindings, witnesses, output, bytes, faults);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        blocked = true;
+                    }
+                    require(blocked && faults.mReads == 0 && output.get() == outputStorage
+                            && sameValues(*output, saved) && bytes.data() == byteStorage && bytes == persisted,
+                        "equipment restart reused consumed fresh authorization");
+                    fresh.unchanged(installed);
+                    ++cases;
+                }
+            require(output && !bytes.empty(), "equipment restart publication borrowed fixture storage");
+            std::cout << "equipment fresh two-actor restart successes=" << cases << '\n';
+        }
+
+        static void checkRestartGuards()
+        {
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int test = 0; test < 38; ++test)
+                {
+                    PlainEquipmentFixture source;
+                    source.seedValues(actor);
+                    PlainEquipmentValues saved;
+                    source.prepare(actor, true).exportValues(source.preparationContext(actor), saved);
+                    PlainEquipmentFixture fresh(actor);
+                    const auto ids = referenceIds(saved);
+                    auto e = envelope(saved.mActor);
+                    const ESMStore* content = &fresh.mStore;
+                    auto caller = fresh.mActors[actor]->getPtr();
+                    auto witnesses = fresh.restartBindings(saved.mLastGenerated);
+                    auto input = std::make_unique<const RestoredPlainEquipment>(
+                        RestoredPlainEquipment::restore(saved, fresh.mStore, saved.mActor));
+                    EquipmentBytes accepted;
+                    encodeEquipment(saved, { e, fresh.mStore, ids }, accepted);
+                    auto staged = fresh.stageRestart(actor, caller, { e, fresh.mStore, ids }, witnesses, input);
+                    // Reject after staging as well as before it: none of these
+                    // witnesses authorize following a retired owner/store/node.
+                    switch (test)
+                    {
+                        case 0: caller = fresh.mActors[1 - actor]->getPtr(); break;
+                        case 1: caller.mContainerStore = &fresh.mInventories[actor]; break;
+                        case 2: e.mRuntime += "-foreign"; break;
+                        case 3: ++e.mContent[0]; break;
+                        case 4: e.mActor = fresh.mActors[1 - actor]->getPtr().getCellRef().getRefNum(); break;
+                        case 5: content = &source.mStore; break;
+                        case 6: fresh.mFailedClosed = true; break;
+                        case 7: fresh.mRestartActor.reset(); break;
+                        case 8: fresh.mRestartActor = 1 - actor; break;
+                        case 9: staged->mFresh.mFixture = &source; break;
+                        case 10: staged->mFresh.mStores[actor] = &source.mInventories[actor]; break;
+                        case 11: staged->mFresh.mLifetimes[actor].reset(); break;
+                        case 12: staged->mFresh.mStorage[actor].reset(); break;
+                        case 13: staged->mFresh.mScripts.reset(); break;
+                        case 14: ++fresh.mWorld.mPtrRegistry.mRevision; break;
+                        case 15: ++fresh.mWorld.mPtrRegistry.mLastGenerated.mIndex; break;
+                        case 16: ++staged->mFresh.mSavedCounter.mIndex; break;
+                        case 17: fresh.mInventories[actor].setInvListener(nullptr); break;
+                        case 18: fresh.mInventories[actor].setContListener(&fresh.mListener); break;
+                        case 19: fresh.mInventories[actor].mUpdatesEnabled = false; break;
+                        case 20: fresh.mInventories[actor].mResolved = false; break;
+                        case 21:
+                            fresh.mInventories[actor].mSlots[InventoryStore::Slot_Shirt]
+                                = fresh.mInventories[1 - actor].begin();
+                            break;
+                        case 22:
+                            fresh.mInventories[actor].mSelectedEnchantItem = fresh.mInventories[1 - actor].begin();
+                            break;
+                        case 23: fresh.mActors[actor].reset(); break;
+                        case 24:
+                            fresh.mInventories[actor].~InventoryStore();
+                            new (&fresh.mInventories[actor]) InventoryStore;
+                            break;
+                        case 25:
+                            fresh.mScripts.~LocalScripts();
+                            new (&fresh.mScripts) LocalScripts(fresh.mStore);
+                            break;
+                        case 26:
+                        {
+                            auto& nodes = fresh.mInventories[1 - actor].mLists.mClothes.mList;
+                            nodes.front().mWorldModel = nullptr; // Leave a stale registry Ptr deliberately.
+                            nodes.clear();
+                            break;
+                        }
+                        case 27: staged->mShirt = fresh.mInventories[1 - actor].begin(); break;
+                        case 28: staged->mSelected = fresh.mInventories[1 - actor].begin(); break;
+                        case 29: staged->mRegistry.begin()->second = source.mItems[actor]; break;
+                        case 30: accepted.back() ^= 1; break;
+                        case 31: staged->mRestored.reset(); break;
+                        case 32:
+                            const_cast<ESM::Clothing*>(fresh.mStore.get<ESM::Clothing>().search(
+                                saved.mObjects.front().mRef.mRefID))->mScript = ESM::RefId::stringRefId("unsupported");
+                            break;
+                        case 33:
+                            const_cast<ESM::Clothing*>(fresh.mStore.get<ESM::Clothing>().search(
+                                saved.mObjects.front().mRef.mRefID))->mEnchant = ESM::RefId::stringRefId("unsupported");
+                            break;
+                        case 34:
+                            fresh.mInventories[actor].mSlots[InventoryStore::Slot_Helmet]
+                                = fresh.mInventories[1 - actor].begin();
+                            break;
+                        case 35:
+                            fresh.mInventories[actor].setPtr(fresh.mActors[1 - actor]->getPtr(), fresh.mWorld);
+                            break;
+                        case 36:
+                            while (fresh.mWorld.mPtrRegistry.mIndex.size() <= 132)
+                                fresh.mWorld.mPtrRegistry.mIndex.emplace(
+                                    ESM::RefNum{ static_cast<uint32_t>(100 + fresh.mWorld.mPtrRegistry.mIndex.size()), -1 },
+                                    fresh.mItems[1 - actor]);
+                            break;
+                        case 37:
+                            staged->mRestored->installationCandidate(fresh.mStore, saved.mActor,
+                                saved.mLastGenerated).mLists.mClothes.mList.front().mBase
+                                = source.mStore.get<ESM::Clothing>().search(saved.mObjects.front().mRef.mRefID);
+                            break;
+                    }
+                    const auto before = fresh.snapshot();
+                    const auto* stagedStorage = staged.get();
+                    const auto acceptedValue = accepted;
+                    const auto* acceptedStorage = accepted.data();
+                    auto output = std::make_unique<const PlainEquipmentValues>(saved);
+                    const auto* outputStorage = output.get();
+                    EquipmentBytes bytes{ 'o', 'l', 'd' };
+                    const auto* bytesStorage = bytes.data();
+                    bool caught = false;
+                    try
+                    {
+                        fresh.installRestart(actor, caller, { e, *content, ids }, staged, accepted, output, bytes);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                    require(caught && staged.get() == stagedStorage && accepted == acceptedValue
+                            && accepted.data() == acceptedStorage && output.get() == outputStorage
+                            && sameValues(*output, saved) && bytes == EquipmentBytes{ 'o', 'l', 'd' }
+                            && bytes.data() == bytesStorage,
+                        "equipment restart stale installation changed prior state/output");
+                    fresh.unchanged(before);
+                    ++rejected;
+                }
+
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (int test = 0; test < 9; ++test)
+                {
+                    PlainEquipmentFixture source;
+                    PlainEquipmentValues saved;
+                    source.prepare(actor, true).exportValues(source.preparationContext(actor), saved);
+                    PlainEquipmentFixture fresh(actor);
+                    auto e = envelope(saved.mActor);
+                    const auto ids = referenceIds(saved);
+                    auto witnesses = fresh.restartBindings(saved.mLastGenerated);
+                    const ESMStore* restoredContent = &fresh.mStore;
+                    if (test == 0)
+                    {
+                        saved.mObjects.front().mRef.mRefNum = fresh.mItems[1 - actor].getCellRef().getRefNum();
+                        saved.mShirt = saved.mObjects.front().mRef.mRefNum;
+                    }
+                    if (test == 1)
+                        ++witnesses.mSavedCounter.mIndex;
+                    if (test == 2)
+                        restoredContent = &source.mStore;
+                    if (test == 3)
+                        saved.mActor = fresh.mActors[1 - actor]->getPtr().getCellRef().getRefNum();
+                    auto input = std::make_unique<const RestoredPlainEquipment>(
+                        RestoredPlainEquipment::restore(saved, *restoredContent, saved.mActor));
+                    if (test == 4)
+                        input.reset();
+                    if (test == 5)
+                        fresh.mRestartActor.reset();
+                    if (test == 6)
+                    {
+                        PlainEquipmentFixture expired(actor);
+                        witnesses = expired.restartBindings(saved.mLastGenerated);
+                    }
+                    if (test == 7)
+                    {
+                        saved.mObjects.clear();
+                        saved.mShirt = saved.mSelected = {};
+                        auto other = fresh.mItems[1 - actor];
+                        fresh.mWorld.mPtrRegistry.mIndex.erase(other.getCellRef().getRefNum());
+                        other.getCellRef().setRefNum({ 100, -1 });
+                        fresh.mWorld.registerPtr(other);
+                        // Covers this actor, but not the unrelated retained item.
+                        saved.mLastGenerated = saved.mActor;
+                        witnesses = fresh.restartBindings(saved.mLastGenerated);
+                        input = std::make_unique<const RestoredPlainEquipment>(
+                            RestoredPlainEquipment::restore(saved, fresh.mStore, saved.mActor));
+                    }
+                    if (test == 8)
+                    {
+                        ManualRef item(fresh.mStore, ESM::RefId::stringRefId("equipment_shirt"));
+                        fresh.mInventories[actor].addNewStack(item.getPtr(), 1);
+                    }
+                    const auto before = fresh.snapshot();
+                    const auto* inputStorage = input.get();
+                    bool caught = false;
+                    try
+                    {
+                        fresh.stageRestart(actor, fresh.mActors[actor]->getPtr(), { e, fresh.mStore, ids }, witnesses, input);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                    require(caught && input.get() == inputStorage, "equipment restart staging accepted invalid input");
+                    if (input)
+                    {
+                        PlainEquipmentValues retained;
+                        input->exportValues(retained);
+                        require(sameValues(retained, saved), "restart rejection changed detached input values");
+                    }
+                    fresh.unchanged(before);
+                    ++rejected;
+                }
+            std::cout << "equipment restart stale/binding/lifetime rejections=" << rejected << '\n';
+        }
+
+        static void checkRestartReadFailures(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            size_t rejected = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+            {
+                PlainEquipmentFixture source;
+                source.seedValues(actor);
+                PlainEquipmentValues saved;
+                source.prepare(actor, true).exportValues(source.preparationContext(actor), saved);
+                PlainEquipmentFixture fresh(actor);
+                const auto ids = referenceIds(saved);
+                const auto e = envelope(saved.mActor);
+                const EquipmentBindings bindings{ e, fresh.mStore, ids };
+                const auto witnesses = fresh.restartBindings(saved.mLastGenerated);
+                EquipmentBytes persisted;
+                encodeEquipment(saved, bindings, persisted);
+                const auto path = scratch / "read.bin";
+                auto output = std::make_unique<const PlainEquipmentValues>(fresh.installedValues(actor));
+                const auto* outputStorage = output.get();
+                const auto outputValue = *output;
+                EquipmentBytes bytes{ 'o', 'l', 'd' };
+                const auto* bytesStorage = bytes.data();
+                const auto before = fresh.snapshot();
+                for (int test = 0; test < 12; ++test)
+                {
+                    auto input = persisted;
+                    FileFaults faults;
+                    const std::array failures{ FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read,
+                        FileFault::ReadEof, FileFault::ReadClose };
+                    if (test < 5)
+                        faults = { failures[test], 17 };
+                    if (test == 5)
+                        input.resize(input.size() - 1);
+                    if (test == 6)
+                        input.front() ^= 1;
+                    if (test == 7)
+                        input.push_back('x');
+                    if (test == 8)
+                        input.clear();
+                    if (test == 9)
+                    {
+                        auto bad = saved;
+                        bad.mActor = fresh.mActors[1 - actor]->getPtr().getCellRef().getRefNum();
+                        const auto foreign = envelope(bad.mActor);
+                        encodeEquipment(bad, { foreign, fresh.mStore, ids }, input);
+                    }
+                    if (test == 10)
+                    {
+                        auto bad = e;
+                        bad.mRuntime += "-foreign";
+                        encodeEquipment(saved, { bad, fresh.mStore, ids }, input);
+                    }
+                    if (test == 11)
+                    {
+                        auto bad = e;
+                        ++bad.mContent[0];
+                        encodeEquipment(saved, { bad, fresh.mStore, ids }, input);
+                    }
+                    writeEquipmentInput(path, input);
+                    bool caught = false;
+                    try
+                    {
+                        caught = fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), path,
+                            bindings, witnesses, output, bytes, faults) != FileReadResult::Read;
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                    require(caught && output.get() == outputStorage && sameValues(*output, outputValue)
+                            && bytes.data() == bytesStorage && bytes == EquipmentBytes{ 'o', 'l', 'd' }
+                            && equipmentFileBytes(path) == input && fresh.mRestartActor == actor,
+                        "equipment restart read/decode failure changed prior state/output");
+                    fresh.unchanged(before);
+                    ++rejected;
+                }
+                writeEquipmentInput(path, persisted);
+                FileFaults faults;
+                require(fresh.restartEquipment(actor, fresh.mActors[actor]->getPtr(), path, bindings, witnesses,
+                            output, bytes, faults) == FileReadResult::Read && sameValues(*output, saved),
+                    "equipment restart read/decode failure prevented safe retry");
+            }
+            std::cout << "equipment restart read/decode rejections=" << rejected << '\n';
+        }
+
+        static void checkRestartAllocations(const std::filesystem::path& scratch)
+        {
+            using namespace Allocations;
+            EquipmentScratch directory(scratch);
+            size_t failures = 0;
+            for (size_t actor = 0; actor < 2; ++actor)
+                for (bool equip : { true, false })
+                {
+                    PlainEquipmentFixture source;
+                    source.seedValues(actor);
+                    if (!equip)
+                        source.mInventories[actor].equip(InventoryStore::Slot_Shirt,
+                            source.mInventories[actor].begin(), source.context(actor, actor));
+                    PlainEquipmentValues saved;
+                    source.prepare(actor, equip).exportValues(source.preparationContext(actor), saved);
+                    const auto ids = referenceIds(saved);
+                    const auto e = envelope(saved.mActor);
+                    const auto path = scratch / "allocations.bin";
+                    EquipmentBytes persisted;
+                    encodeEquipment(saved, { e, source.mStore, ids }, persisted);
+                    writeEquipmentInput(path, persisted);
+                    size_t allocations = 0;
+                    // A successful run measures every fallible step. Each failure
+                    // then gets its own explicit fresh fixture and prior outputs.
+                    for (size_t fail = 0; fail <= allocations + 1; ++fail)
+                    {
+                        auto fresh = std::make_unique<PlainEquipmentFixture>(actor);
+                        const EquipmentBindings bindings{ e, fresh->mStore, ids };
+                        const auto witnesses = fresh->restartBindings(saved.mLastGenerated);
+                        const auto before = fresh->snapshot();
+                        auto output = std::make_unique<const PlainEquipmentValues>(fresh->installedValues(actor));
+                        const auto* outputStorage = output.get();
+                        const auto outputValue = *output;
+                        EquipmentBytes bytes{ 'o', 'l', 'd' };
+                        const auto* bytesStorage = bytes.data();
+                        FileFaults faults;
+                        Trace trace;
+                        bool caught = false;
+                        FileReadResult outcome = FileReadResult::Unavailable;
+                        {
+                            Observe observe(trace, fail);
+                            try
+                            {
+                                outcome = fresh->restartEquipment(actor, fresh->mActors[actor]->getPtr(), path,
+                                    bindings, witnesses, output, bytes, faults);
+                            }
+                            catch (const std::exception&)
+                            {
+                                caught = true;
+                            }
+                            if (!caught)
+                            {
+                                // Include cleanup of installed storage/publication
+                                // in tracking; successful ownership is not a leak.
+                                output.reset();
+                                EquipmentBytes{}.swap(bytes);
+                                fresh.reset();
+                            }
+                        }
+                        if (fail == 0)
+                            allocations = trace.mTotal;
+                        require(trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                            "equipment restart allocation failure or cleanup leaked");
+                        if (fail > 0 && fail <= allocations)
+                        {
+                            require(caught && trace.mFailures == 1 && output.get() == outputStorage
+                                    && sameValues(*output, outputValue) && bytes.data() == bytesStorage
+                                    && bytes == EquipmentBytes{ 'o', 'l', 'd' } && fresh->mRestartActor == actor
+                                    && trace.visits(Phase::Installation) == 0 && trace.visits(Phase::Publication) == 0,
+                                "equipment restart allocation rejection changed prior state/output");
+                            fresh->unchanged(before);
+                            ++failures;
+                        }
+                        else
+                            require(!caught && outcome == FileReadResult::Read && trace.mTotal == allocations
+                                    && trace.mFailures == 0 && trace.allocations(Phase::Installation) == 0
+                                    && trace.allocations(Phase::Publication) == 0 && trace.allocations(Phase::Retirement) == 0,
+                                "equipment restart failed after final allocation or allocated during installation");
+                        require(equipmentFileBytes(path) == persisted, "equipment restart allocation changed file");
+                    }
+                    require(allocations > 0, "equipment restart allocation coverage missing");
+                }
+            std::cout << "equipment restart individually-failed allocations=" << failures << '\n';
         }
 
         std::unique_ptr<Installation> stageInstallation(size_t actor, const Ptr& caller, PreparedPlainEquipment input)
@@ -280,6 +1046,8 @@ namespace MWWorld::Testing
                 mFailedClosed = true;
                 return TestPersistenceResult::Uncertain;
             }
+            if (mRestartActor)
+                throw std::invalid_argument("Equipment fresh restart fixture is not installed");
             validateCaller(actor, caller);
             const auto trusted = envelope(caller.getCellRef().getRefNum());
             if (&bindings.mContent != &mStore || bindings.mEnvelope.mActor != trusted.mActor
@@ -763,6 +1531,32 @@ namespace MWWorld::Testing
                             restored->exportValues(values);
                             require(sameValues(values, failure == FileFault::ReplaceError ? prior : saved),
                                 "equipment uncertain file did not contain complete prior/new values");
+                            PlainEquipmentFixture recovered(actor);
+                            const EquipmentBindings rebound{ e, recovered.mStore, ids };
+                            const auto witnesses = recovered.restartBindings(values.mLastGenerated);
+                            std::unique_ptr<const PlainEquipmentValues> recoveredOutput;
+                            EquipmentBytes recoveredBytes;
+                            const auto recoveredBefore = recovered.snapshot();
+                            require(recovered.restartEquipment(actor, recovered.mActors[actor]->getPtr(), path,
+                                        rebound, witnesses, recoveredOutput, recoveredBytes, faults) == FileReadResult::Read
+                                    && sameValues(recovered.installedValues(actor), values)
+                                    && sameValues(*recoveredOutput, values) && recoveredBytes == actual
+                                    && recovered.mActorEffects[actor].mListener.mCalls == 0
+                                    && recovered.mActorEffects[actor].mInventoryUpdates == 0,
+                                "uncertain equipment commit did not install complete prior/new file in fresh fixture");
+                            recovered.unchangedActor(recoveredBefore, 1 - actor);
+                            bool blocked = false;
+                            try
+                            {
+                                f.restartEquipment(actor, caller, path, bindings, witnesses, recoveredOutput,
+                                    recoveredBytes, faults);
+                            }
+                            catch (const std::invalid_argument&)
+                            {
+                                blocked = true;
+                            }
+                            require(blocked && f.mFailedClosed, "equipment restart resumed uncertain old fixture");
+                            unchanged();
                             ++uncertain;
                         }
                         else
@@ -876,7 +1670,7 @@ namespace MWWorld::Testing
             std::cout << "equipment commit allocation failures=" << failures << " remaining-after-cleanup=0\n";
         }
 
-        PlainEquipmentFixture()
+        explicit PlainEquipmentFixture(std::optional<size_t> restartActor = {})
         {
             MWClass::registerClasses();
             ESM::NPC npc;
@@ -900,6 +1694,16 @@ namespace MWWorld::Testing
                 ManualRef item(mStore, shirt.mId);
                 mItems[i] = *inventory.addNewStack(item.getPtr(), i == 0 ? 3 : -5);
                 mWorld.registerPtr(mItems[i]);
+                ContainerStoreResolution witness(inventory, actor);
+            }
+            if (restartActor)
+            {
+                auto& target = mInventories.at(*restartActor);
+                mItems[*restartActor] = Ptr();
+                target.mLists.mClothes.mList.clear();
+                mRestartActor = restartActor;
+                bindEffects(0);
+                bindEffects(1);
             }
         }
 
@@ -3398,6 +4202,31 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-restart-staging")
+        {
+            PlainEquipmentFixture::checkRestartStaging();
+            return;
+        }
+        if (filter == "inventory-equipment-restart")
+        {
+            PlainEquipmentFixture::checkRestartSuccess(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-guards")
+        {
+            PlainEquipmentFixture::checkRestartGuards();
+            return;
+        }
+        if (filter == "inventory-equipment-restart-read")
+        {
+            PlainEquipmentFixture::checkRestartReadFailures(scratch);
+            return;
+        }
+        if (filter == "inventory-equipment-restart-allocations")
+        {
+            PlainEquipmentFixture::checkRestartAllocations(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-commit-guards")
         {
             PlainEquipmentFixture::checkCommitGuards(scratch);
