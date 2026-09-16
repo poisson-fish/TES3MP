@@ -135,6 +135,17 @@ namespace MWMechanics
 
     void CreatureStats::setAttribute(ESM::RefId id, const AttributeValue& value)
     {
+        if (id == ESM::Attribute::Intelligence && value != getAttribute(id))
+        {
+            mAttributes.at(id) = value;
+            recalculateMagicka();
+        }
+        else
+            setAttribute(id, value, 0.f); // Multiplier is used only for changed Intelligence.
+    }
+
+    void CreatureStats::setAttribute(ESM::RefId id, const AttributeValue& value, float baseMagickaMultiplier)
+    {
         const AttributeValue& currentValue = mAttributes.at(id);
 
         if (value != currentValue)
@@ -142,7 +153,7 @@ namespace MWMechanics
             mAttributes[id] = value;
 
             if (id == ESM::Attribute::Intelligence)
-                recalculateMagicka();
+                recalculateMagicka(baseMagickaMultiplier);
             else if (id == ESM::Attribute::Strength || id == ESM::Attribute::Willpower || id == ESM::Attribute::Agility
                 || id == ESM::Attribute::Endurance)
             {
@@ -402,14 +413,19 @@ namespace MWMechanics
     void CreatureStats::recalculateMagicka()
     {
         auto world = MWBase::Environment::get().getWorld();
-        float intelligence = getAttribute(ESM::Attribute::Intelligence).getModified();
-
         float base = 1.f;
         const auto& player = world->getPlayerPtr();
         if (this == &player.getClass().getCreatureStats(player))
             base = world->getStore().get<ESM::GameSetting>().find("fPCbaseMagickaMult")->mValue.getFloat();
         else
             base = world->getStore().get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat();
+
+        recalculateMagicka(base);
+    }
+
+    void CreatureStats::recalculateMagicka(float base)
+    {
+        const float intelligence = getAttribute(ESM::Attribute::Intelligence).getModified();
 
         float magickaFactor = base
             + mMagicEffects.getOrDefault(EffectKey(ESM::MagicEffect::FortifyMaximumMagicka)).getMagnitude() * 0.1f;

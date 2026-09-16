@@ -335,21 +335,7 @@ namespace MWClass
             {
                 gold = ref->mBase->mNpdt.mGold;
 
-                for (size_t i = 0; i < ref->mBase->mNpdt.mSkills.size(); ++i)
-                    data->mNpcStats.getSkill(ESM::Skill::indexToRefId(static_cast<int>(i)))
-                        .setBase(ref->mBase->mNpdt.mSkills[i]);
-
-                for (size_t i = 0; i < ref->mBase->mNpdt.mAttributes.size(); ++i)
-                    data->mNpcStats.setAttribute(
-                        ESM::Attribute::indexToRefId(static_cast<int>(i)), ref->mBase->mNpdt.mAttributes[i]);
-
-                data->mNpcStats.setHealth(ref->mBase->mNpdt.mHealth);
-                data->mNpcStats.setMagicka(ref->mBase->mNpdt.mMana);
-                data->mNpcStats.setFatigue(ref->mBase->mNpdt.mFatigue);
-
-                data->mNpcStats.setLevel(ref->mBase->mNpdt.mLevel);
-                data->mNpcStats.setBaseDisposition(ref->mBase->mNpdt.mDisposition);
-                data->mNpcStats.setReputation(ref->mBase->mNpdt.mReputation);
+                data->mNpcStats.initializeExplicitStats(*ref->mBase);
             }
             else
             {

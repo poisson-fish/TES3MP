@@ -106,6 +106,7 @@ namespace MWMechanics
         void setDrawState(DrawState state);
 
         void recalculateMagicka();
+        void recalculateMagicka(float baseMultiplier);
 
         float getFallHeight() const;
         void addToFallHeight(float height);
@@ -142,6 +143,7 @@ namespace MWMechanics
         MagicEffects& getMagicEffects();
 
         void setAttribute(ESM::RefId id, const AttributeValue& value);
+        void setAttribute(ESM::RefId id, const AttributeValue& value, float baseMagickaMultiplier);
         // Shortcut to set only the base
         void setAttribute(ESM::RefId id, float base);
 

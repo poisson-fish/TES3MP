@@ -6,6 +6,7 @@
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadskil.hpp>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,6 +15,7 @@ namespace ESM
 {
     struct Class;
     struct NpcStats;
+    struct NPC;
 }
 
 namespace MWMechanics
@@ -52,6 +54,12 @@ namespace MWMechanics
 
     public:
         NpcStats();
+        explicit NpcStats(const MWWorld::ESMStore& store);
+
+        // Shared explicit-NPDT initialization. Autocalculation, spells, AI and
+        // inventory services remain with the NPC caller. The optional multiplier
+        // supplies the actor's magicka policy without consulting global player state.
+        void initializeExplicitStats(const ESM::NPC& npc, std::optional<float> baseMagickaMultiplier = {});
 
         int getBaseDisposition() const;
         void setBaseDisposition(int disposition);

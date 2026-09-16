@@ -7,6 +7,7 @@
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadfact.hpp>
 #include <components/esm3/loadgmst.hpp>
+#include <components/esm3/loadnpc.hpp>
 #include <components/esm3/npcstats.hpp>
 
 #include <components/misc/strings/format.hpp>
@@ -19,7 +20,13 @@
 #include "../mwbase/windowmanager.hpp"
 
 MWMechanics::NpcStats::NpcStats()
-    : mDisposition(0)
+    : NpcStats(*MWBase::Environment::get().getESMStore())
+{
+}
+
+MWMechanics::NpcStats::NpcStats(const MWWorld::ESMStore& store)
+    : CreatureStats(store)
+    , mDisposition(0)
     , mCrimeDispositionModifier(0)
     , mReputation(0)
     , mCrimeId(-1)
@@ -30,8 +37,32 @@ MWMechanics::NpcStats::NpcStats()
     , mIsWerewolf(false)
 {
     mSpecIncreases.resize(3, 0);
-    for (const ESM::Skill& skill : MWBase::Environment::get().getESMStore()->get<ESM::Skill>())
+    for (const ESM::Skill& skill : store.get<ESM::Skill>())
         mSkills.emplace(skill.mId, SkillValue{});
+}
+
+void MWMechanics::NpcStats::initializeExplicitStats(const ESM::NPC& npc, std::optional<float> baseMagickaMultiplier)
+{
+    if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+        throw std::invalid_argument("Explicit NPC stats require NPDT values");
+    for (size_t i = 0; i < npc.mNpdt.mSkills.size(); ++i)
+        getSkill(ESM::Skill::indexToRefId(static_cast<int>(i))).setBase(npc.mNpdt.mSkills[i]);
+    for (size_t i = 0; i < npc.mNpdt.mAttributes.size(); ++i)
+    {
+        const auto id = ESM::Attribute::indexToRefId(static_cast<int>(i));
+        auto value = getAttribute(id);
+        value.setBase(npc.mNpdt.mAttributes[i]);
+        if (baseMagickaMultiplier)
+            setAttribute(id, value, *baseMagickaMultiplier);
+        else
+            setAttribute(id, value);
+    }
+    setHealth(npc.mNpdt.mHealth);
+    setMagicka(npc.mNpdt.mMana);
+    setFatigue(npc.mNpdt.mFatigue);
+    setLevel(npc.mNpdt.mLevel);
+    setBaseDisposition(npc.mNpdt.mDisposition);
+    setReputation(npc.mNpdt.mReputation);
 }
 
 int MWMechanics::NpcStats::getBaseDisposition() const

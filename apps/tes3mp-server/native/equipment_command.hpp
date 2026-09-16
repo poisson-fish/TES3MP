@@ -53,7 +53,8 @@ namespace MWWorld::Testing
     // recovery into an explicitly fresh fixture. All failures preserve output
     // allocation/value and bytes. Owned success swaps only after durable install.
     // Preserve stock counters (including revision rollover), 64-node preparation
-    // and 65-node saves (plain format 1; bounded Luck format 2). Revision is not a request-deduplication token.
+    // and 65-node saves (plain format 1; bounded NPC stats format 3).
+    // Revision is not a request-deduplication token.
     TestPersistenceResult executeEquipment(PlainEquipmentFixture& fixture, EquipmentCaller caller,
         EquipmentCommand command, EquipmentFileSink& file, const EquipmentBindings& bindings,
         std::unique_ptr<const EquipmentSuccess>& output, std::vector<char>& bytes, FileFaults& faults);

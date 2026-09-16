@@ -13,7 +13,7 @@
 #include <stdexcept>
 
 #include <apps/openmw/mwclass/classes.hpp>
-#include <apps/openmw/mwmechanics/creaturestats.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/customdata.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -97,9 +97,9 @@ namespace MWWorld::Testing
         std::array<std::unique_ptr<ManualRef>, 2> mActors;
         std::array<InventoryStore, 2> mInventories;
         std::array<Ptr, 2> mItems;
-        // This harness owns only the supported Luck slice of each actor's stats.
-        // No NPC custom-data or second writer is installed alongside it.
-        std::array<std::shared_ptr<MWMechanics::CreatureStats>, 2> mLuckStats;
+        // The fixture is the sole writer of each bound stock NPC stat context.
+        // No NPC custom-data or global player is installed alongside it.
+        std::array<std::shared_ptr<EquipmentNpcStats>, 2> mNpcStats;
         std::vector<std::string> mEvents;
         Listener mListener;
 
@@ -164,6 +164,8 @@ namespace MWWorld::Testing
             PtrRegistry::Index mRegistry;
             size_t mRevision;
             ESM::RefNum mCounter, mSavedCounter;
+            std::array<std::shared_ptr<const EquipmentNpcStats>, 2> mNpcStats;
+            std::array<std::optional<EquipmentNpcStatsValues>, 2> mStatValues;
         };
 
         RestartBindings restartBindings(ESM::RefNum savedCounter) const
@@ -174,7 +176,9 @@ namespace MWWorld::Testing
                 { mInventories[0].mResolutionLifetime, mInventories[1].mResolutionLifetime },
                 { mInventories[0].mStorageIdentity, mInventories[1].mStorageIdentity },
                 mScripts.lifetimeWitness(), mWorld.mPtrRegistry.mIndex, mWorld.getPtrRegistryRevision(),
-                mWorld.getLastGeneratedRefNum(), savedCounter };
+                mWorld.getLastGeneratedRefNum(), savedCounter, { mNpcStats[0], mNpcStats[1] },
+                { mNpcStats[0] ? std::optional{ mNpcStats[0]->values() } : std::nullopt,
+                    mNpcStats[1] ? std::optional{ mNpcStats[1]->values() } : std::nullopt } };
         }
 
         static bool sameReference(const ConstPtr& a, const ConstPtr& b)
@@ -205,6 +209,12 @@ namespace MWWorld::Testing
                     && fresh.mStorage[i] == store.mStorageIdentity && store.mResolved && store.mUpdatesEnabled);
                 valid(mActors[i] && mActors[i]->getPtr().hasLiveReference()
                     && sameReference(store.getPtr(mWorld), mActors[i]->getPtr()));
+                valid(fresh.mNpcStats[i] == mNpcStats[i]);
+                if (mNpcStats[i])
+                {
+                    mNpcStats[i]->validate(mActors[i]->getPtr(), mStore);
+                    valid(fresh.mStatValues[i] == mNpcStats[i]->values());
+                }
             }
             const auto& target = mInventories[actor];
             const auto& lists = target.mLists;
@@ -249,7 +259,7 @@ namespace MWWorld::Testing
             std::unique_ptr<const PlainEquipmentValues> mValues;
             ContainerStoreIterator mShirt, mSelected;
             Ptr mItem;
-            std::shared_ptr<MWMechanics::CreatureStats> mLuckStats;
+            std::shared_ptr<EquipmentNpcStats> mNpcStats;
 
             RestartInstallation(const RestartBindings& fresh, InventoryStore& target)
                 : mFresh(fresh)
@@ -296,19 +306,13 @@ namespace MWWorld::Testing
                     staged->mItem = node;
             }
             phase.set(Phase::Result);
-            if (saved.mLuck)
+            if (saved.mNpcStats.has_value() != static_cast<bool>(mNpcStats[actor]))
+                throw std::invalid_argument("Equipment restart stat context/save mode mismatch");
+            if (saved.mNpcStats)
             {
-                staged->mLuckStats = std::make_shared<MWMechanics::CreatureStats>(mStore);
-                MWMechanics::AttributeValue luck;
-                luck.setBase((*saved.mLuck)[0]);
-                // Restore the supported stat after deriving the active effect.
-                staged->mLuckStats->setAttribute(ESM::Attribute::Luck, luck);
-                staged->mLuckStats->getActiveSpells().updateConstantFortifyLuck(caller, candidate, mStore, *staged->mLuckStats);
-                luck = staged->mLuckStats->getAttribute(ESM::Attribute::Luck);
-                luck.damage((*saved.mLuck)[2]);
-                staged->mLuckStats->setAttribute(ESM::Attribute::Luck, luck);
-                require(luck.getModifier() == (*saved.mLuck)[1] && luck.getDamage() == (*saved.mLuck)[2],
-                    "Restart Luck differs from accepted values");
+                mNpcStats[actor]->validate(caller, mStore);
+                staged->mNpcStats = std::make_shared<EquipmentNpcStats>(caller, mStore);
+                staged->mNpcStats->restore(*saved.mNpcStats, candidate);
             }
             staged->mValues = std::make_unique<const PlainEquipmentValues>(std::move(saved));
             phase.set(Phase::Revalidation);
@@ -365,6 +369,16 @@ namespace MWWorld::Testing
             encodeEquipment(restored, bindings, encoded);
             if (encoded != accepted || !sameValues(restored, *staged->mValues))
                 throw std::invalid_argument("Equipment restart values differ from accepted file");
+            if (static_cast<bool>(staged->mNpcStats) != restored.mNpcStats.has_value())
+                throw std::invalid_argument("Equipment restart candidate stat mode changed");
+            if (staged->mNpcStats)
+            {
+                staged->mNpcStats->validate(caller, mStore);
+                if (staged->mNpcStats->values() != *restored.mNpcStats)
+                    throw std::invalid_argument("Equipment restart candidate stats differ from saved values");
+                const auto& stats = staged->mNpcStats->stats();
+                stats.getActiveSpells().validateConstantFortifyLuck(caller, candidate, mStore, stats);
+            }
             auto& live = mInventories[actor];
             if (staged->mRegistry.size() != staged->mFresh.mRegistry.size() + restored.mObjects.size())
                 throw std::invalid_argument("Equipment restart relocation membership changed");
@@ -411,7 +425,7 @@ namespace MWWorld::Testing
                 registry.mRevision = staged->mFresh.mRevision + 1;
                 registry.mLastGenerated = restored.mLastGenerated;
                 mItems[actor] = staged->mItem;
-                mLuckStats[actor].swap(staged->mLuckStats);
+                mNpcStats[actor].swap(staged->mNpcStats);
                 mRestartActor.reset();
                 phase.set(Phase::Publication);
                 output.swap(staged->mValues);
@@ -1108,7 +1122,7 @@ namespace MWWorld::Testing
                 registry.mRevision = staged->mRevision;
                 registry.mLastGenerated = staged->mSaved.mLastGenerated;
                 mItems[actor] = staged->mItem;
-                mLuckStats[actor].swap(staged->mPrepared.installationLuckStats());
+                mNpcStats[actor].swap(staged->mPrepared.installationNpcStats());
                 mActorEffects[actor].mListener.mCalls = staged->mEffects.mListener.mCalls;
                 mActorEffects[actor].mListener.mRemovals.swap(staged->mEffects.mListener.mRemovals);
                 mActorEffects[actor].mInventoryUpdates = staged->mEffects.mInventoryUpdates;
@@ -1145,11 +1159,8 @@ namespace MWWorld::Testing
                 it->mData.write(object, Compiler::Locals{});
                 object.mHasCustomState = false;
             }
-            if (mLuckStats[actor])
-            {
-                const auto& luck = mLuckStats[actor]->getAttribute(ESM::Attribute::Luck);
-                result.mLuck = { luck.getBase(), luck.getModifier(), luck.getDamage() };
-            }
+            if (mNpcStats[actor])
+                result.mNpcStats = mNpcStats[actor]->values();
             return result;
         }
 
@@ -1735,11 +1746,37 @@ namespace MWWorld::Testing
             }
         }
 
-        void enableLuck()
+        void enableLuck(bool seedRuntimeStats = true)
         {
-            ESM::Attribute attribute;
-            attribute.mId = ESM::Attribute::Luck;
-            mStore.insertStatic(attribute);
+            for (int i = 0; i < ESM::Attribute::Length; ++i)
+            {
+                ESM::Attribute attribute;
+                attribute.mId = *ESM::Attribute::indexToRefId(i).getIf<ESM::StringRefId>();
+                mStore.insertStatic(attribute);
+            }
+            for (int i = 0; i < ESM::Skill::Length; ++i)
+            {
+                ESM::Skill skill;
+                skill.blank();
+                skill.mId = *ESM::Skill::indexToRefId(i).getIf<ESM::StringRefId>();
+                mStore.insertStatic(skill);
+            }
+            ESM::GameSetting multiplier;
+            multiplier.mId = ESM::RefId::stringRefId("fNPCbaseMagickaMult");
+            multiplier.mValue = ESM::Variant(2.f);
+            mStore.insertStatic(multiplier);
+            auto* npc = const_cast<ESM::NPC*>(mActors[0]->getPtr().get<ESM::NPC>()->mBase);
+            npc->mNpdtType = ESM::NPC::NPC_DEFAULT;
+            for (size_t i = 0; i < npc->mNpdt.mAttributes.size(); ++i)
+                npc->mNpdt.mAttributes[i] = static_cast<unsigned char>(33 + i);
+            for (size_t i = 0; i < npc->mNpdt.mSkills.size(); ++i)
+                npc->mNpdt.mSkills[i] = static_cast<unsigned char>(10 + i);
+            npc->mNpdt.mHealth = 120;
+            npc->mNpdt.mMana = 71;
+            npc->mNpdt.mFatigue = 155;
+            npc->mNpdt.mLevel = 7;
+            npc->mNpdt.mDisposition = 48;
+            npc->mNpdt.mReputation = 12;
             ESM::MagicEffect magic;
             magic.blank();
             magic.mId = ESM::MagicEffect::FortifyAttribute;
@@ -1756,15 +1793,43 @@ namespace MWWorld::Testing
             shirt->mEnchant = enchantment.mId;
             for (size_t actor = 0; actor < 2; ++actor)
             {
-                mLuckStats[actor] = std::make_shared<MWMechanics::CreatureStats>(mStore);
-                mLuckStats[actor]->setAttribute(ESM::Attribute::Luck, actor == 0 ? 40.f : 65.f);
+                mNpcStats[actor] = std::make_shared<EquipmentNpcStats>(mActors[actor]->getPtr(), mStore);
+                const auto& initialized = mNpcStats[actor]->stats();
+                require(initialized.getMagicka().getBase() == 71 && initialized.getFatigue().getCurrent() == 155
+                        && initialized.getHealth().getCurrent() == 120 && initialized.getLevel() == 7
+                        && initialized.getBaseDisposition() == 48 && initialized.getReputation() == 12,
+                    "Explicit NPC initialization lost NPDT dynamic or NPC-specific stats");
+                for (int i = 0; i < ESM::Skill::Length; ++i)
+                    require(initialized.getSkill(ESM::Skill::indexToRefId(i)).getBase() == 10 + i,
+                        "Explicit NPC initialization lost stock skills");
+                mNpcStats[actor]->mStats.setAttribute(ESM::Attribute::Luck, actor == 0 ? 40.f : 65.f);
+                if (seedRuntimeStats)
+                {
+                    auto& stats = mNpcStats[actor]->mStats;
+                    for (int i = 0; i < ESM::Attribute::Length; ++i)
+                    {
+                        const auto id = ESM::Attribute::indexToRefId(i);
+                        if (id == ESM::Attribute::Luck)
+                            continue;
+                        auto attribute = stats.getAttribute(id);
+                        attribute.setBase(50.f + 13.f * actor + i + 0.25f);
+                        attribute.setModifier(1.5f + i);
+                        attribute.damage(0.5f + actor);
+                        stats.setAttribute(id, attribute, 2.f);
+                    }
+                    // Include above-maximum magicka and negative fatigue; these
+                    // are valid stock dynamic values and must not be clamped.
+                    stats.setHealth({ 120.f + actor, -7.f, 88.25f + actor });
+                    stats.setMagicka({ 71.f + actor, 5.f, 220.5f + actor });
+                    stats.setFatigue({ 155.f + actor, -3.f, -12.5f - actor });
+                }
                 bindEffects(actor);
             }
         }
 
         void checkLuck(size_t actor, bool equipped) const
         {
-            const auto& stats = *mLuckStats[actor];
+            const auto& stats = mNpcStats[actor]->mStats;
             const auto& luck = stats.getAttribute(ESM::Attribute::Luck);
             const auto expected = equipped ? 9.f : 0.f;
             require(luck.getModified() == (actor == 0 ? 40.f : 65.f) + expected
@@ -1791,6 +1856,16 @@ namespace MWWorld::Testing
                 for (size_t actor = 0; actor < 2; ++actor)
                 {
                     const auto before = f.snapshot();
+                    auto expectedStats = f.mNpcStats[actor]->values();
+                    expectedStats.mAttributes[7][1] = equip ? 9.f : 0.f;
+                    {
+                        auto prepared = f.prepareContinuation(actor, equip);
+                        PlainEquipmentValues staged;
+                        prepared.exportValues(f.preparationContext(actor), staged);
+                        require(staged.mNpcStats == expectedStats,
+                            "NPC preparation changed unrelated attributes or dynamic values");
+                        f.unchanged(before);
+                    }
                     const auto path = scratch / (actor == 0 ? "a.bin" : "b.bin");
                     EquipmentFileSink sink(path);
                     auto command = f.equipmentCommand(actor, equip);
@@ -1804,11 +1879,14 @@ namespace MWWorld::Testing
                             == TestPersistenceResult::Accepted && output && output->mCommand == command,
                         "Enchanted equipment command failed");
                     f.checkLuck(actor, equip);
-                    require(output->mLuck == f.installedValues(actor).mLuck, "Owned success lost Luck values");
+                    require(f.mNpcStats[actor]->values() == expectedStats,
+                        "NPC installation changed unrelated attributes or dynamic values");
+                    require(output->mLuck == std::optional{ expectedStats.mAttributes[7] },
+                        "Owned success lost Luck values");
                     f.unchangedActor(before, 1 - actor);
                     // A mechanics refresh on the same equipped item must not add its modifier again.
-                    f.mLuckStats[actor]->getActiveSpells().updateConstantFortifyLuck(
-                        f.mActors[actor]->getPtr(), f.mInventories[actor], f.mStore, *f.mLuckStats[actor]);
+                    f.mNpcStats[actor]->mStats.getActiveSpells().updateConstantFortifyLuck(
+                        f.mActors[actor]->getPtr(), f.mInventories[actor], f.mStore, f.mNpcStats[actor]->mStats);
                     f.checkLuck(actor, equip);
                     PlainEquipmentValues decoded;
                     decodeEquipment(bytes, bindings, decoded);
@@ -1835,7 +1913,7 @@ namespace MWWorld::Testing
             const auto path = scratch / "guards.bin";
             size_t rejected = 0;
             for (size_t actor = 0; actor < 2; ++actor)
-                for (int test = 0; test < 9; ++test)
+                for (int test = 0; test < 11; ++test)
                 {
                     PlainEquipmentFixture f;
                     f.enableLuck();
@@ -1863,11 +1941,13 @@ namespace MWWorld::Testing
                         case 2: enchantment->mEffects.mList.front().mData.mMagnMax = 10; break;
                         case 3: enchantment->mEffects.mList.front().mData.mRange = ESM::RT_Target; break;
                         case 4: enchantment->mEffects.mList.front().mData.mAttribute = ESM::Attribute::Strength; break;
-                        case 5: f.mLuckStats[actor]->setAttribute(ESM::Attribute::Luck, 80.f); break;
-                        case 6: f.mLuckStats[actor]->getActiveSpells() = MWMechanics::ActiveSpells{}; break;
-                        case 7: f.mLuckStats[actor]->getMagicEffects().add(
+                        case 5: f.mNpcStats[actor]->mStats.setAttribute(ESM::Attribute::Luck, 80.f); break;
+                        case 6: f.mNpcStats[actor]->mStats.getActiveSpells() = MWMechanics::ActiveSpells{}; break;
+                        case 7: f.mNpcStats[actor]->mStats.getMagicEffects().add(
                             { ESM::MagicEffect::FortifyAttribute, ESM::Attribute::Luck }, MWMechanics::EffectParam(1)); break;
-                        case 8: f.mLuckStats[actor] = f.mLuckStats[1 - actor]; break;
+                        case 8: f.mNpcStats[actor] = f.mNpcStats[1 - actor]; break;
+                        case 9: f.mNpcStats[actor]->mStats.setAttribute(ESM::Attribute::Speed, 83.f); break;
+                        case 10: f.mNpcStats[actor]->mStats.setMagicka({ 79.f, 2.f, 11.f }); break;
                     }
                     const auto before = f.snapshot();
                     faults = {};
@@ -1892,7 +1972,7 @@ namespace MWWorld::Testing
                     f.unchanged(before);
                     ++rejected;
                 }
-            // Version 1 cannot acquire enchantment semantics; v2 cannot lie about the consequence.
+            // Version 1 stays plain; the NPC format cannot lie about the consequence.
             PlainEquipmentFixture f;
             f.enableLuck();
             const auto good = f.installedValues(0);
@@ -1900,33 +1980,38 @@ namespace MWWorld::Testing
             const auto ids = referenceIds(good);
             EquipmentBytes encoded;
             encodeEquipment(good, { e, f.mStore, ids }, encoded);
-            for (int test = 0; test < 3; ++test)
+            for (int test = 0; test < 6; ++test)
             {
                 auto bad = good;
-                if (test == 0) bad.mLuck.reset();
-                if (test == 1) (*bad.mLuck)[1] = 9;
-                if (test == 2) (*bad.mLuck)[0] = std::numeric_limits<float>::quiet_NaN();
+                if (test == 0) bad.mNpcStats.reset();
+                if (test == 1) bad.mNpcStats->mAttributes[7][1] = 9;
+                if (test == 2) bad.mNpcStats->mAttributes[7][0] = std::numeric_limits<float>::quiet_NaN();
+                if (test == 3) bad.mNpcStats->mAttributes[0][2] = -1;
+                if (test == 4) bad.mNpcStats->mDynamic[1][2] = std::numeric_limits<float>::infinity();
+                if (test == 5) bad.mNpcStats->mDynamic[0][2] = 0;
                 auto output = encoded;
                 bool caught = false;
                 try { encodeEquipment(bad, { e, f.mStore, ids }, output); }
                 catch (const std::invalid_argument&) { caught = true; }
-                require(caught && output == encoded, "Invalid Luck save was encoded");
+                require(caught && output == encoded, "Invalid NPC stat save was encoded");
                 ++rejected;
             }
-            for (int test = 0; test < 2; ++test)
+            for (int test = 0; test < 5; ++test)
             {
                 auto bad = encoded;
-                const std::string tag = test == 0 ? "FVER" : "LUCK";
+                const std::string tag = test < 2 ? "FVER" : test == 2 ? "ATTR" : "DYNA";
                 const auto it = std::search(bad.begin(), bad.end(), tag.begin(), tag.end());
                 require(it != bad.end(), "Missing enchanted codec fixture field");
                 const auto offset = static_cast<size_t>(it - bad.begin()) + 8;
-                if (test == 0)
-                    bad[offset] = 1; // v1 must reject the v2 extension, not reinterpret it.
+                if (test < 2)
+                    bad[offset] = test == 0 ? 1 : 2; // Reject both reinterpretation and retired Luck-only format.
                 else
                 {
-                    const auto number = std::bit_cast<uint32_t>(9.f);
+                    const auto number = std::bit_cast<uint32_t>(test == 2 ? 9.f
+                        : test == 3 ? std::numeric_limits<float>::infinity() : 0.f);
+                    const auto fieldOffset = test == 2 ? 7 * 12 + 4 : test == 3 ? 12 + 8 : 8;
                     for (size_t byte = 0; byte < 4; ++byte)
-                        bad[offset + 4 + byte] = static_cast<char>(number >> (8 * byte));
+                        bad[offset + fieldOffset + byte] = static_cast<char>(number >> (8 * byte));
                 }
                 auto output = good;
                 const auto* storage = output.mObjects.data();
@@ -1935,6 +2020,85 @@ namespace MWWorld::Testing
                 catch (const std::invalid_argument&) { caught = true; }
                 require(caught && sameValues(output, good) && output.mObjects.data() == storage,
                     "Enchanted version/consequence byte rejection changed output");
+                ++rejected;
+            }
+            // With no equipped effect, ownership must come from the stat
+            // context itself, never from an ActiveSpells caster as a proxy.
+            for (int test = 0; test < 4; ++test)
+            {
+                PlainEquipmentFixture owner;
+                owner.enableLuck();
+                const auto actor = owner.mActors[0]->getPtr();
+                if (test == 0)
+                    owner.mNpcStats[0] = owner.mNpcStats[1];
+                if (test == 1)
+                    actor.getCellRef().setRefNum({ 900, -1 });
+                if (test == 2)
+                    const_cast<ESM::NPC*>(actor.get<ESM::NPC>()->mBase)->mNpdtType
+                        = ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS;
+                if (test == 3)
+                    const_cast<ESM::GameSetting*>(owner.mStore.get<ESM::GameSetting>().find("fNPCbaseMagickaMult"))
+                        ->mValue.setFloat(3.f);
+                const auto before = owner.snapshot();
+                bool caught = false;
+                try { owner.mNpcStats[0]->validate(actor, owner.mStore); }
+                catch (const std::invalid_argument&) { caught = true; }
+                require(caught, "Unequipped NPC stat context accepted changed owner/content");
+                owner.unchanged(before);
+                ++rejected;
+            }
+            // Reuse restart staging/installation: no new recovery fixture or
+            // rollback path for saved-base mismatch and stale dynamic stats.
+            for (int test = 0; test < 3; ++test)
+            {
+                const bool wrongBase = test == 0;
+                PlainEquipmentFixture fresh(0);
+                fresh.enableLuck(false);
+                auto saved = good;
+                if (wrongBase)
+                {
+                    auto npc = *fresh.mActors[0]->getPtr().get<ESM::NPC>()->mBase;
+                    npc.mId = ESM::RefId::stringRefId("other_equipment_npc");
+                    fresh.mStore.insertStatic(npc);
+                    saved.mNpcStats->mBase = npc.mId;
+                }
+                const auto savedIds = referenceIds(saved);
+                const EquipmentBindings bindings{ e, fresh.mStore, savedIds };
+                auto detached = std::make_unique<const RestoredPlainEquipment>(
+                    RestoredPlainEquipment::restore(saved, fresh.mStore, saved.mActor));
+                const auto witness = fresh.restartBindings(saved.mLastGenerated);
+                std::unique_ptr<RestartInstallation> staged;
+                auto output = std::make_unique<const PlainEquipmentValues>(good);
+                const auto* outputStorage = output.get();
+                EquipmentBytes accepted, bytes{ 'o', 'l', 'd' };
+                encodeEquipment(saved, bindings, accepted);
+                const auto acceptedValue = accepted;
+                const auto* acceptedStorage = accepted.data();
+                const auto* bytesStorage = bytes.data();
+                if (!wrongBase)
+                {
+                    staged = fresh.stageRestart(0, fresh.mActors[0]->getPtr(), bindings, witness, detached);
+                    if (test == 1)
+                        fresh.mNpcStats[0]->mStats.setFatigue({ 100.f, 3.f, -4.f });
+                    else
+                        staged->mNpcStats = fresh.mNpcStats[1];
+                }
+                const auto before = fresh.snapshot();
+                bool caught = false;
+                try
+                {
+                    if (wrongBase)
+                        fresh.stageRestart(0, fresh.mActors[0]->getPtr(), bindings, witness, detached);
+                    else
+                        fresh.installRestart(0, fresh.mActors[0]->getPtr(), bindings, staged, accepted, output, bytes);
+                }
+                catch (const std::invalid_argument&) { caught = true; }
+                require(caught && (wrongBase ? static_cast<bool>(detached) : static_cast<bool>(staged))
+                        && output.get() == outputStorage && sameValues(*output, good)
+                        && accepted == acceptedValue && accepted.data() == acceptedStorage
+                        && bytes == EquipmentBytes{ 'o', 'l', 'd' } && bytes.data() == bytesStorage,
+                    "NPC restart rejection consumed input or changed publication");
+                fresh.unchanged(before);
                 ++rejected;
             }
             std::cout << "enchanted preparation/content/actor/stat/save rejections=" << rejected << '\n';
@@ -1958,7 +2122,7 @@ namespace MWWorld::Testing
                             std::unique_ptr<const EquipmentSuccess> output;
                             EquipmentBytes bytes;
                             FileFaults faults;
-                            // Ensure both possible recovered files are complete v2 states.
+                            // Ensure both possible recovered files are complete NPC stat states.
                             if (equip)
                             {
                                 require(f.luckCommand(actor, true, path, output, bytes, faults) == TestPersistenceResult::Accepted,
@@ -2019,8 +2183,10 @@ namespace MWWorld::Testing
                             restoredEquipped = failure == FileFault::ReplaceError ? !equip : equip;
                         } // Destroy all old actors, stats, preparations and sinks before recovery.
                         PlainEquipmentFixture fresh(actor);
-                        fresh.enableLuck();
+                        fresh.enableLuck(false);
                         const auto expected = failure == FileFault::ReplaceError ? prior : proposed;
+                        require(fresh.mNpcStats[actor]->values() != *expected.mNpcStats,
+                            "Restart fixture accidentally contains the saved runtime stats");
                         const auto e = envelope(expected.mActor);
                         const auto ids = referenceIds(expected);
                         const EquipmentBindings bindings{ e, fresh.mStore, ids };
@@ -2079,7 +2245,7 @@ namespace MWWorld::Testing
                     {
                         f.reset();
                         f = std::make_unique<PlainEquipmentFixture>(0);
-                        f->enableLuck();
+                        f->enableLuck(false);
                     }
                     const auto before = f->snapshot();
                     const auto* outputStorage = output.get();
@@ -2111,6 +2277,9 @@ namespace MWWorld::Testing
                         if (!caught)
                         {
                             f->checkLuck(0, mode != 1);
+                            if (mode == 2)
+                                require(f->mNpcStats[0]->values() == *saved.mNpcStats,
+                                    "Allocation recovery lost saved NPC stats");
                             output.reset();
                             restored.reset();
                             EquipmentBytes{}.swap(bytes);
@@ -2198,7 +2367,7 @@ namespace MWWorld::Testing
 
         PlainEquipmentContext preparationContext(size_t actor) const
         {
-            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr(), mLuckStats[actor] };
+            return { mStore, mWorld, mScripts, mActors[actor]->getPtr(), mActors[actor]->getPtr(), mNpcStats[actor] };
         }
 
         PreparedPlainEquipment prepare(size_t actor, bool equip)
@@ -2211,16 +2380,16 @@ namespace MWWorld::Testing
 
         std::string luckState(size_t actor) const
         {
-            if (!mLuckStats[actor])
+            if (!mNpcStats[actor])
                 return {};
             std::ostringstream stream(std::ios::binary);
             ESM::ESMWriter writer;
             writer.save(stream);
             writer.startRecord("LUCK");
             ESM::ActiveSpells active;
-            mLuckStats[actor]->getActiveSpells().writeState(active);
+            mNpcStats[actor]->mStats.getActiveSpells().writeState(active);
             active.save(writer);
-            for (const auto& [key, value] : mLuckStats[actor]->getMagicEffects())
+            for (const auto& [key, value] : mNpcStats[actor]->mStats.getMagicEffects())
             {
                 writer.writeHNRefId("EFID", key.mId);
                 writer.writeHNRefId("ARG_", key.mArg);
@@ -2242,8 +2411,8 @@ namespace MWWorld::Testing
                 RefData mData;
                 const SceneUtil::PositionAttitudeTransform* mScene;
             };
-            std::array<const MWMechanics::CreatureStats*, 2> mLuckStorage{};
-            std::array<MWMechanics::AttributeValue, 2> mLuck;
+            std::array<const EquipmentNpcStats*, 2> mNpcStorage{};
+            std::array<EquipmentNpcStatsValues, 2> mNpcValues;
             std::array<std::string, 2> mLuckEffects;
             PtrRegistry::Snapshot mRegistry;
             LocalScripts::List mScripts;
@@ -2286,10 +2455,10 @@ namespace MWWorld::Testing
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto& store = mInventories[i];
-                result.mLuckStorage[i] = mLuckStats[i].get();
+                result.mNpcStorage[i] = mNpcStats[i].get();
                 result.mLuckEffects[i] = luckState(i);
-                if (mLuckStats[i])
-                    result.mLuck[i] = mLuckStats[i]->getAttribute(ESM::Attribute::Luck);
+                if (mNpcStats[i])
+                    result.mNpcValues[i] = mNpcStats[i]->values();
                 result.mActorEffects[i] = { mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates };
                 result.mRemovals[i] = mActorEffects[i].mListener.mRemovals;
                 result.mNotifications[i] = mActorEffects[i].mNotifications;
@@ -2321,9 +2490,9 @@ namespace MWWorld::Testing
         void unchangedActor(const Snapshot& before, size_t i) const
         {
             const auto& store = mInventories[i];
-            require(before.mLuckStorage[i] == mLuckStats[i].get() && before.mLuckEffects[i] == luckState(i)
-                    && (!mLuckStats[i] || before.mLuck[i] == mLuckStats[i]->getAttribute(ESM::Attribute::Luck)),
-                "Equipment rejection changed canonical Luck state");
+            require(before.mNpcStorage[i] == mNpcStats[i].get() && before.mLuckEffects[i] == luckState(i)
+                    && (!mNpcStats[i] || before.mNpcValues[i] == mNpcStats[i]->values()),
+                "Equipment rejection changed canonical NPC stats or effects");
             require(before.mActorEffects[i]
                         == std::pair{ mActorEffects[i].mListener.mCalls, mActorEffects[i].mInventoryUpdates }
                     && before.mRemovals[i] == mActorEffects[i].mListener.mRemovals
@@ -2377,7 +2546,7 @@ namespace MWWorld::Testing
         {
             return std::tie(a.mActor, a.mShirt, a.mSelected, a.mLastGenerated)
                 == std::tie(b.mActor, b.mShirt, b.mSelected, b.mLastGenerated)
-                && a.mLuck == b.mLuck
+                && a.mNpcStats == b.mNpcStats
                 && std::equal(a.mObjects.begin(), a.mObjects.end(), b.mObjects.begin(), b.mObjects.end(), sameObject);
         }
 
@@ -3734,6 +3903,8 @@ namespace MWWorld::Testing
         static std::vector<ESM::RefId> referenceIds(const PlainEquipmentValues& values)
         {
             std::vector<ESM::RefId> ids;
+            if (values.mNpcStats)
+                ids.push_back(values.mNpcStats->mBase);
             for (const auto& object : values.mObjects)
                 for (const auto& id : { object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul, object.mRef.mFaction,
                          object.mRef.mKey, object.mRef.mTrap })

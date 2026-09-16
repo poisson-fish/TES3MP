@@ -3,16 +3,51 @@
 
 #include "containerstore.hpp"
 
+#include "../mwmechanics/npcstats.hpp"
+
 #include <array>
 #include <optional>
 
 #include <components/esm3/objectstate.hpp>
 
-namespace MWMechanics { class CreatureStats; }
-
 namespace MWWorld
 {
     class InventoryStore;
+
+    // Bounded equipment save fields, not a complete NPC save. Each triple is
+    // base/modifier/damage for attributes, base/modifier/current for dynamics.
+    struct EquipmentNpcStatsValues
+    {
+        ESM::RefId mBase;
+        std::array<std::array<float, 3>, ESM::Attribute::Length> mAttributes{};
+        std::array<std::array<float, 3>, 3> mDynamic{};
+        void validate(const ESMStore& content) const;
+        bool operator==(const EquipmentNpcStatsValues&) const = default;
+    };
+
+    // One explicit actor's stock stats. This bounded context initializes NPDT
+    // stats only; it does not install NPC custom data, AI, spells or inventory.
+    // No public mutable stats access: the equipment writer replaces a prepared
+    // context only after durability. Content and actor must outlive validation.
+    class EquipmentNpcStats
+    {
+        friend class PreparedPlainEquipment;
+        friend class Testing::PlainEquipmentFixture;
+        const Ptr mActor;
+        const ESM::RefNum mIdentity;
+        const ESMStore& mContent;
+        const ESM::NPC* mBase;
+        float mMagickaMultiplier;
+        MWMechanics::NpcStats mStats;
+        void restore(const EquipmentNpcStatsValues& values, const InventoryStore& inventory);
+
+    public:
+        EquipmentNpcStats(const Ptr& actor, const ESMStore& content);
+        EquipmentNpcStats(const EquipmentNpcStats&) = delete;
+        void validate(const Ptr& actor, const ESMStore& content) const;
+        EquipmentNpcStatsValues values() const;
+        const MWMechanics::NpcStats& stats() const { return mStats; }
+    };
 
     struct PlainEquipmentContext
     {
@@ -21,9 +56,7 @@ namespace MWWorld
         const LocalScripts& mLocalScripts;
         Ptr mActor;
         Ptr mPlayer;
-        // Opt-in test-owned Luck state; keeps its source alive through revalidation.
-        std::shared_ptr<const MWMechanics::CreatureStats> mLuckStats;
-
+        std::shared_ptr<const EquipmentNpcStats> mNpcStats;
     };
 
     struct PlainEquipmentResult
@@ -67,10 +100,10 @@ namespace MWWorld
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
         ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
         std::vector<ESM::ObjectState> mObjects;
-        // Format-2 extension: Luck base, modifier, damage. Other actor stats are
-        // outside this bounded equipment save. Active equipment is derived from
-        // the shirt and fixed content; modifier must agree with that consequence.
-        std::optional<std::array<float, 3>> mLuck;
+        // Format 3 stores the actor's complete bounded attribute/dynamic slice.
+        // Skills, level, disposition and reputation stay at NPDT values; other
+        // NPC state is outside this context, not part of this save.
+        std::optional<EquipmentNpcStatsValues> mNpcStats;
 
         void validate(const ESMStore& content, ESM::RefNum expectedActor) const;
         void swap(PlainEquipmentValues& other) noexcept;
@@ -104,7 +137,7 @@ namespace MWWorld
     // Bounded engine preparation, NOT a command/installation/persistence API.
     // Only resolved, <=64-node shirt inventories and one slot are supported.
     // Actor/player must match; callers still provide authentication/serialization.
-    // Plain by default; explicit Luck stats opt into one fixed constant effect.
+    // Plain by default; bound NPC stats opt into one fixed constant effect.
     // Reject scripts, other enchantments, Lua/custom state and other slots/types.
     // Content/WorldModel must outlive validation; store/reference/service lifetimes
     // are witnessed. Revalidation checks current state, not mutation history.
@@ -118,7 +151,7 @@ namespace MWWorld
         // Only the test-owned fixture may stage installation. No public mutation
         // or persistence API: revalidate and require the exact receiving store.
         InventoryStore& installationCandidate(const PlainEquipmentContext& context, const InventoryStore& target);
-        std::shared_ptr<MWMechanics::CreatureStats>& installationLuckStats();
+        std::shared_ptr<EquipmentNpcStats>& installationNpcStats();
 
     public:
         static constexpr size_t MaxItems = 64;
