@@ -30,6 +30,14 @@ namespace MWWorld::Testing
         bool operator==(const InventoryTransferCommand&) const = default;
     };
 
+    // Trusted per-call authorization supplied by the server composition, never
+    // derived from command input. This test boundary supports either fixed owner
+    // as caller; it does not implement authentication or persist authorization.
+    struct InventoryTransferCaller
+    {
+        InventoryInstanceId mInitiator;
+    };
+
     enum class InventoryNotificationKind
     {
         ItemRemoved,
@@ -65,8 +73,9 @@ namespace MWWorld::Testing
     };
 
     // Test-target-only, synchronous, serialized access. The fixture fixes the
-    // two owner stores and authorized initiator. Commands choose either direction;
-    // save owner/service roles stay fixed and commands cannot redirect services.
+    // two owner stores and save-envelope initiator. The separately authorized
+    // caller may alternate; commands must match it and may choose either direction.
+    // Save owner/service roles stay fixed and commands cannot redirect services.
     // Borrowed fixture/content/bindings/sink must outlive the call;
     // their consumers may not mutate or reenter. No production callers or dispatch.
     // Invalid input/preparation/encoding throws; safe file rejection returns false.
@@ -75,8 +84,8 @@ namespace MWWorld::Testing
     // by noexcept swap only after persistence acceptance AND fixture installation.
     // The bounded version-4 command rejects exhausted revision/generated counters,
     // even when a stack would not require another generated identity.
-    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCommand command,
-        const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
+    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCaller caller,
+        InventoryTransferCommand command, const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
         std::unique_ptr<const InventoryTransferSuccess>& output);
 
     class InventoryNotificationConsumer

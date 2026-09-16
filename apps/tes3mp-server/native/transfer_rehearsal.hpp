@@ -206,17 +206,19 @@ namespace MWWorld::Testing
         using TestDurableSink = std::function<TestPersistenceResult(const SerializedPair&)>;
         bool commitDurably(
             PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink,
-            bool reverse = false);
+            bool reverse = false, const Ptr& initiator = {});
         bool failedClosed() const noexcept { return mFailedClosed; }
 
         // Operation roles may reverse; fixture/save owner and script-service roles
         // stay fixed. Copies of stock contexts borrow only this fixture's services.
+        // Commands pass their resolved trusted caller explicitly. Lower-level
+        // rehearsals default to the fixed save-envelope context's player.
         struct TransferContexts
         {
             ContainerStoreRemoveContext mRemoval;
             ContainerStoreAddContext mAddition;
         };
-        TransferContexts transferContexts(bool reverse) const;
+        TransferContexts transferContexts(bool reverse, const Ptr& initiator = {}) const;
 
         // Serialized, read-only projection of current owned fixture storage.
         // Validate all bounds/owner/registry/selection bindings before allocating;
@@ -332,7 +334,7 @@ namespace MWWorld::Testing
     };
 
     void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
-        const Compiler::Locals& declarations, SerializedPair& output, bool reverse = false);
+        const Compiler::Locals& declarations, SerializedPair& output, bool reverse = false, const Ptr& initiator = {});
 
     void checkTransferRehearsal(const ESMStore& content);
     void checkTransferRehearsalAllocations(const ESMStore& content);

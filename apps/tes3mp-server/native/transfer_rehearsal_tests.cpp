@@ -2256,6 +2256,8 @@ namespace MWWorld::Testing
             size_t mViewResyncs = 0, mViewAllocationFailures = 0;
             unsigned mDeliveryModes = 0, mBatchShapes = 0;
             size_t mReturns = 0;
+            size_t mAlternations = 0;
+            std::array<unsigned, 2> mAlternatingDeliveryModes{};
         };
 
         InventoryNotificationBatch expectedNotifications(const InventoryTransferSuccess& success,
@@ -2491,16 +2493,24 @@ namespace MWWorld::Testing
             ++evidence.mViewResyncs;
         }
 
-        void checkReturnCommand(DisposableTransferRehearsal& fixture, const SaveBindings& bindings,
+        InventoryTransferSuccess checkAlternatingCommand(DisposableTransferRehearsal& fixture, const SaveBindings& bindings,
             TransferFileSink& file, const std::filesystem::path& path, const InventoryTransferSuccess& outward,
             SerializedPair& expected, TransferSaveBytes& expectedBytes, CommandEvidence& evidence,
-            InventoryViewSnapshot& views)
+            InventoryViewSnapshot& views, bool recoverViews = true)
         {
             using namespace Allocations;
             const auto owned = [](ESM::RefNum id) { return InventoryInstanceId{ id.mIndex, id.mContentFile }; };
             const auto engine = [](InventoryInstanceId id) { return ESM::RefNum{ id.mIndex, id.mContentFile }; };
             InventoryTransferCommand command{ outward.mCommand.mDestinationOwner, outward.mCommand.mSourceOwner,
                 outward.mCommand.mInitiator, outward.mDestinationItem, outward.mCommand.mQuantity, outward.mRevision };
+            const InventoryTransferCaller caller{ outward.mCommand.mInitiator == command.mSourceOwner
+                    ? command.mDestinationOwner : command.mSourceOwner };
+            command.mInitiator = caller.mInitiator;
+            const bool reverse = command.mSourceOwner == owned(bindings.mEnvelope.mDestinationOwner);
+            auto& source = reverse ? fixture.mDestination : fixture.mSource;
+            auto& destination = reverse ? fixture.mSource : fixture.mDestination;
+            const auto envelopeBefore = bindings.mEnvelope;
+            const auto fixedPlayer = fixture.mDestinationAdd.mPlayer;
             const auto item = fixture.mModel.getPtr(engine(command.mItem));
             const auto counter = fixture.mModel.getLastGeneratedRefNum();
             const auto other = nodeState(ConstPtr(&fixture.otherStorage().front()));
@@ -2509,14 +2519,21 @@ namespace MWWorld::Testing
             InventoryTransferSuccess result;
             {
                 // Construct the stock oracle independently of command routing.
-                const ContainerStoreRemoveContext removal{ fixture.mModel, fixture.mDestinationOwner.getPtr(),
-                    *fixture.mDestinationAdd.mLocalScripts, fixture.mDestinationAdd.mInventoryUpdated };
-                auto addition = fixture.mSourceAdd;
-                addition.mPlayer = fixture.mDestinationAdd.mPlayer;
+                const auto removal = reverse
+                    ? ContainerStoreRemoveContext{ fixture.mModel, fixture.mDestinationOwner.getPtr(),
+                        *fixture.mDestinationAdd.mLocalScripts, fixture.mDestinationAdd.mInventoryUpdated }
+                    : fixture.mRemoval;
+                auto addition = reverse ? fixture.mSourceAdd : fixture.mDestinationAdd;
+                addition.mPlayer = fixture.mModel.getPtr(engine(caller.mInitiator));
                 const std::array resolved{ ContainerStoreResolution(fixture.mOther, fixture.mOtherOwner.getPtr()) };
-                const auto pair = fixture.mDestination.prepareTransfer(
-                    item, command.mQuantity, fixture.mSource, removal, addition, resolved);
-                serializePair(fixture, pair, bindings.mContent.mDeclarations, expected, true);
+                const auto pair = source.prepareTransfer(
+                    item, command.mQuantity, destination, removal, addition, resolved);
+                serializePair(fixture, pair, bindings.mContent.mDeclarations, expected, reverse, addition.mPlayer);
+                if (!item.getRefData().getLocals().getScriptId().empty())
+                    require(pair.getDestinationItem().getRefData().getLocals().mShorts.front()
+                            == (caller.mInitiator == command.mDestinationOwner
+                                    ? 1 : item.getRefData().getLocals().mShorts.front()),
+                        "alternating initiator did not control stock OnPCAdd");
                 result = { command, owned(pair.getDestinationIdentity()),
                     pair.getSourceItem().getCellRef().getCount(false),
                     pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
@@ -2539,17 +2556,22 @@ namespace MWWorld::Testing
             const auto before = snapshot(fixture);
             const auto priorBytes = fileBytes(path);
             FileFaults faults;
-            for (bool stale : { false, true })
+            for (int invalid = 0; invalid < 4; ++invalid)
             {
                 auto bad = command;
-                if (stale)
+                auto suppliedCaller = caller;
+                if (invalid == 0)
                     --bad.mExpectedRevision;
-                else
+                else if (invalid == 1)
                     bad.mItem = outward.mCommand.mItem; // Belongs to the other owner, even if dormant.
+                else if (invalid == 2)
+                    bad.mInitiator = outward.mCommand.mInitiator;
+                else
+                    suppliedCaller.mInitiator = outward.mCommand.mInitiator;
                 bool rejected = false;
                 try
                 {
-                    executeInventoryTransfer(fixture, bad, bindings, file, faults, output);
+                    executeInventoryTransfer(fixture, suppliedCaller, bad, bindings, file, faults, output);
                 }
                 catch (const std::invalid_argument&)
                 {
@@ -2563,7 +2585,7 @@ namespace MWWorld::Testing
             Trace trace;
             {
                 Observe observe(trace);
-                require(executeInventoryTransfer(fixture, command, bindings, file, faults, output),
+                require(executeInventoryTransfer(fixture, caller, command, bindings, file, faults, output),
                     "return command was not accepted");
             }
             require(*output == result && trace.allocations(Phase::Result) == 1
@@ -2579,13 +2601,20 @@ namespace MWWorld::Testing
             checkSelections(fixture, expected);
             const auto committed = snapshot(fixture);
             const auto acceptedViews = savedViews(expected, bindings.mEnvelope);
+            const auto mode = static_cast<unsigned>((evidence.mAlternations / 2) % 15);
             checkNotificationConsumption(output, result,
                 [&] { return fixture.mModel.getPtrRegistryRevision() == result.mRevision; },
-                static_cast<unsigned>(evidence.mReturns % 15), evidence, &views, &acceptedViews);
-            checkViewResynchronization(fixture, views, acceptedViews, evidence);
-            require(snapshot(fixture) == committed && fileBytes(path) == expectedBytes,
+                mode, evidence, &views, &acceptedViews);
+            if (recoverViews)
+                checkViewResynchronization(fixture, views, acceptedViews, evidence);
+            require(snapshot(fixture) == committed && fileBytes(path) == expectedBytes
+                    && bindings.mEnvelope == envelopeBefore && fixture.mDestinationAdd.mPlayer == fixedPlayer
+                    && result.mCommand.mInitiator != outward.mCommand.mInitiator,
                 "return delivery recovery replayed gameplay or changed committed save");
-            ++evidence.mReturns;
+            evidence.mReturns += reverse;
+            ++evidence.mAlternations;
+            evidence.mAlternatingDeliveryModes[reverse] |= 1u << mode;
+            return result;
         }
 
         template <class Make, class Verify, class Unrelated>
@@ -2648,16 +2677,19 @@ namespace MWWorld::Testing
                         && !std::filesystem::exists(temporary),
                     "command safe rejection changed content/file or leaked staging");
             };
-            const auto execute = [&] { return executeInventoryTransfer(fixture, command, bindings, file, faults, output); };
+            const InventoryTransferCaller caller{ ownedId(envelope.mInitiator) };
+            const auto execute
+                = [&] { return executeInventoryTransfer(fixture, caller, command, bindings, file, faults, output); };
             if (!failAt && fault == FileFault::None)
             {
-                const auto reject = [&](InventoryTransferCommand bad, const SaveBindings& supplied) {
+                const auto reject = [&](InventoryTransferCommand bad, const SaveBindings& supplied,
+                                        std::optional<InventoryTransferCaller> trusted = std::nullopt) {
                     const auto before = snapshot(fixture);
                     faults = {};
                     bool rejected = false;
                     try
                     {
-                        executeInventoryTransfer(fixture, bad, supplied, file, faults, output);
+                        executeInventoryTransfer(fixture, trusted.value_or(caller), bad, supplied, file, faults, output);
                     }
                     catch (const std::invalid_argument&)
                     {
@@ -2693,6 +2725,19 @@ namespace MWWorld::Testing
                     reject(bad, bindings);
                 }
                 auto bad = command;
+                const InventoryTransferCaller alternate{ command.mInitiator == command.mSourceOwner
+                        ? command.mDestinationOwner : command.mSourceOwner };
+                reject(command, bindings, alternate); // Trusted caller differs from the claimed initiator.
+                bad.mInitiator = alternate.mInitiator;
+                reject(bad, bindings); // Command cannot authorize the other valid owner.
+                for (auto id : { InventoryInstanceId{}, InventoryInstanceId{ 1, -2 },
+                         InventoryInstanceId{ 999999, -1 }, command.mItem,
+                         ownedId(fixture.mOtherOwner.getPtr().getCellRef().getRefNum()) })
+                {
+                    bad.mInitiator = id;
+                    reject(bad, bindings, InventoryTransferCaller{ id });
+                }
+                bad = command;
                 bad.mDestinationOwner = bad.mSourceOwner;
                 reject(bad, bindings);
                 bad = command;
@@ -2712,6 +2757,9 @@ namespace MWWorld::Testing
                     reject(command, { wrong, content, referenceIds });
                 }
                 auto wrong = envelope;
+                wrong.mInitiator = engineId(alternate.mInitiator);
+                reject(command, { wrong, content, referenceIds });
+                wrong = envelope;
                 wrong.mRuntime.clear();
                 reject(command, { wrong, content, referenceIds });
                 wrong = envelope;
@@ -2850,7 +2898,7 @@ namespace MWWorld::Testing
                         Observe observe(closed, 1);
                         try
                         {
-                            executeInventoryTransfer(fixture, command, bindings, *nextSink, faults, output);
+                            executeInventoryTransfer(fixture, caller, command, bindings, *nextSink, faults, output);
                         }
                         catch (const TestDurabilityUncertain&)
                         {
@@ -2930,7 +2978,7 @@ namespace MWWorld::Testing
                     faults = {};
                     try
                     {
-                        executeInventoryTransfer(fixture, repeated, bindings, file, faults, output);
+                        executeInventoryTransfer(fixture, caller, repeated, bindings, file, faults, output);
                     }
                     catch (const std::invalid_argument&)
                     {
@@ -2954,8 +3002,10 @@ namespace MWWorld::Testing
                 checkViewResynchronization(fixture, views, acceptedViews, evidence);
                 require(snapshot(fixture) == installedBefore && fileBytes(path) == expectedBytes,
                     "notification delivery failure replayed gameplay or changed accepted save");
-                checkReturnCommand(
+                const auto returned = checkAlternatingCommand(
                     fixture, bindings, file, path, expectedResult, expectedSave, expectedBytes, evidence, views);
+                checkAlternatingCommand(
+                    fixture, bindings, file, path, returned, expectedSave, expectedBytes, evidence, views);
                 owner.reset();
             }
             verifyUnrelated();
@@ -5129,10 +5179,15 @@ namespace MWWorld::Testing
                     bootstrap.swap(*receiving);
                 return fixture;
             };
+            const auto& envelope = bindings.mEnvelope;
+            // Restart keeps the format-4 envelope identity fixed. The next
+            // server-authorized caller is the other owner, independently of direction.
+            const InventoryTransferCaller caller{ owned(envelope.mInitiator == envelope.mSourceOwner
+                    ? envelope.mDestinationOwner : envelope.mSourceOwner) };
+            const InventoryTransferCaller alternate{ owned(envelope.mInitiator) };
             const auto commandFor = [&](const SerializedPair& prior) {
-                const auto& envelope = bindings.mEnvelope;
                 return InventoryTransferCommand{ owned(reverse ? envelope.mDestinationOwner : envelope.mSourceOwner),
-                    owned(reverse ? envelope.mSourceOwner : envelope.mDestinationOwner), owned(envelope.mInitiator),
+                    owned(reverse ? envelope.mSourceOwner : envelope.mDestinationOwner), caller.mInitiator,
                     owned(sourceId), quantity, prior.mRestart.mRevision };
             };
             const auto noLateAllocations = [](const Trace& trace) {
@@ -5173,8 +5228,9 @@ namespace MWWorld::Testing
                     unchangedInputs();
                 };
                 const auto execute
-                    = [&] { return executeInventoryTransfer(*fixture, command, bindings, file, faults, output); };
-                const auto reject = [&](InventoryTransferCommand bad, bool preflight = true) {
+                    = [&] { return executeInventoryTransfer(*fixture, caller, command, bindings, file, faults, output); };
+                const auto reject = [&](InventoryTransferCommand bad, bool preflight = true,
+                                        std::optional<InventoryTransferCaller> trusted = std::nullopt) {
                     const auto supplied = bad;
                     const auto state = snapshot(*fixture);
                     // Also fail diagnostic allocation; no preparation or I/O may precede it.
@@ -5187,7 +5243,8 @@ namespace MWWorld::Testing
                             Observe observe(trace, ordinal);
                             try
                             {
-                                executeInventoryTransfer(*fixture, bad, bindings, file, faults, output);
+                                executeInventoryTransfer(
+                                    *fixture, trusted.value_or(caller), bad, bindings, file, faults, output);
                             }
                             catch (const std::invalid_argument&)
                             {
@@ -5226,9 +5283,14 @@ namespace MWWorld::Testing
                             *fixture->mDestinationAdd.mLocalScripts, fixture->mDestinationAdd.mInventoryUpdated }
                         : fixture->mRemoval;
                     auto addition = reverse ? fixture->mSourceAdd : fixture->mDestinationAdd;
-                    addition.mPlayer = fixture->mDestinationAdd.mPlayer;
+                    addition.mPlayer = fixture->mModel.getPtr(engine(caller.mInitiator));
                     auto pair = source.prepareTransfer(item, quantity, destination, removal, addition, resolved);
-                    serializePair(*fixture, pair, bindings.mContent.mDeclarations, expected, reverse);
+                    serializePair(*fixture, pair, bindings.mContent.mDeclarations, expected, reverse, addition.mPlayer);
+                    if (!item.getRefData().getLocals().getScriptId().empty())
+                        require(pair.getDestinationItem().getRefData().getLocals().mShorts.front()
+                                == (caller.mInitiator == command.mDestinationOwner
+                                        ? 1 : item.getRefData().getLocals().mShorts.front()),
+                            "post-restart trusted caller did not control stock OnPCAdd");
                     const auto& priorSource = reverse ? prior.mDestination : prior.mSource;
                     const auto& priorDestination = reverse ? prior.mSource : prior.mDestination;
                     const auto& savedSource = reverse ? expected.mDestination : expected.mSource;
@@ -5264,6 +5326,17 @@ namespace MWWorld::Testing
                 encodeTransferSave(expected, bindings, expectedBytes);
                 if (negatives)
                 {
+                    reject(command, true, alternate);
+                    auto claimed = command;
+                    claimed.mInitiator = alternate.mInitiator;
+                    reject(claimed); // Both owners are valid, but only this call's trusted caller is authorized.
+                    for (auto id : { InventoryInstanceId{}, InventoryInstanceId{ 1, -2 },
+                             InventoryInstanceId{ 999999, -1 }, command.mItem,
+                             owned(fixture->mOtherOwner.getPtr().getCellRef().getRefNum()) })
+                    {
+                        claimed.mInitiator = id;
+                        reject(claimed, true, InventoryTransferCaller{ id });
+                    }
                     for (auto member :
                         { &InventoryTransferCommand::mSourceOwner, &InventoryTransferCommand::mDestinationOwner,
                             &InventoryTransferCommand::mInitiator, &InventoryTransferCommand::mItem })
@@ -5396,7 +5469,7 @@ namespace MWWorld::Testing
                             Observe observe(closed, 1);
                             try
                             {
-                                executeInventoryTransfer(*fixture, command, bindings, *sink, faults, output);
+                                executeInventoryTransfer(*fixture, caller, command, bindings, *sink, faults, output);
                             }
                             catch (const TestDurabilityUncertain&)
                             {
@@ -5413,7 +5486,7 @@ namespace MWWorld::Testing
                     bool blocked = false;
                     try
                     {
-                        executeInventoryTransfer(*recovered, command, bindings, file, faults, output);
+                        executeInventoryTransfer(*recovered, caller, command, bindings, file, faults, output);
                     }
                     catch (const TestDurabilityUncertain&)
                     {
@@ -5428,10 +5501,11 @@ namespace MWWorld::Testing
                         // with its installed revision may resume; this is no durable
                         // request deduplication or permission to retry the old fixture.
                         auto next = command;
+                        next.mInitiator = alternate.mInitiator;
                         next.mExpectedRevision = recovered->mModel.getPtrRegistryRevision();
                         recovered->snapshotInventoryViews(views);
                         faults = {};
-                        require(executeInventoryTransfer(*recovered, next, bindings, freshSink, faults, output)
+                        require(executeInventoryTransfer(*recovered, alternate, next, bindings, freshSink, faults, output)
                                 && output->mCommand == next && output->mRevision == next.mExpectedRevision + 1,
                             "validated fresh composition could not continue after uncertainty");
                         SerializedPair actual;
@@ -5548,41 +5622,44 @@ namespace MWWorld::Testing
                         // Delivery failure never authorizes mutation replay. A new
                         // command uses the next installed revision after another
                         // fresh restart, and gets only its own notification batch.
-                        if ((reverse || expectedResult.mSourceCount != 0)
-                            && second->mModel.getPtrRegistryRevision() != std::numeric_limits<size_t>::max()
+                        if (second->mModel.getPtrRegistryRevision() != std::numeric_limits<size_t>::max()
                             && second->mModel.getLastGeneratedRefNum().mIndex != UINT32_MAX)
                         {
                             auto next = command;
-                            if (reverse)
-                            {
-                                std::swap(next.mSourceOwner, next.mDestinationOwner);
-                                next.mItem = expectedResult.mDestinationItem;
-                            }
+                            next.mInitiator = alternate.mInitiator;
+                            std::swap(next.mSourceOwner, next.mDestinationOwner);
+                            next.mItem = expectedResult.mDestinationItem;
                             next.mExpectedRevision = second->mModel.getPtrRegistryRevision();
                             next.mQuantity = 1;
                             faults = {};
-                            require(executeInventoryTransfer(*second, next, bindings, file, faults, output),
+                            require(executeInventoryTransfer(*second, alternate, next, bindings, file, faults, output),
                                 "notification path could not continue after second fresh restart");
                             const auto nextResult = *output;
-                            const int previousCount = reverse ? expectedResult.mDestinationCount : expectedResult.mSourceCount;
+                            evidence.mReturns += !reverse;
+                            const int previousCount = expectedResult.mDestinationCount;
                             require(nextResult.mCommand == next && nextResult.mRevision == next.mExpectedRevision + 1
                                     && nextResult.mSourceCount == previousCount + (previousCount < 0 ? 1 : -1)
                                     && nextResult.mNotifications == expectedNotifications(nextResult),
                                 "subsequent command reused old revision, mutation or notification batch");
                             const auto nextState = snapshot(*second);
-                            const auto nextBytes = fileBytes(path);
+                            auto nextBytes = fileBytes(path);
                             SerializedPair nextSaved;
                             decodeTransferSave(nextBytes, bindings, nextSaved);
-                            const auto nextViews = savedViews(nextSaved, bindings.mEnvelope);
+                            auto nextViews = savedViews(nextSaved, bindings.mEnvelope);
                             checkNotificationConsumption(output, nextResult,
                                 [&] { return second->mModel.getPtrRegistryRevision() == nextResult.mRevision; },
                                 14, evidence, &views, &nextViews);
                             require(snapshot(*second) == nextState && fileBytes(path) == nextBytes,
                                 "subsequent notification consumption changed installed state/save");
+                            // Recover the failed delivery, then alternate again
+                            // in this same installed fixture before a fresh restart.
+                            checkViewResynchronization(*second, views, nextViews, evidence);
+                            checkAlternatingCommand(*second, bindings, file, path, nextResult,
+                                nextSaved, nextBytes, evidence, views, false);
+                            nextViews = savedViews(nextSaved, bindings.mEnvelope);
                             second.reset();
-                            // Delivery failed after commitment. Destroy that
-                            // fixture, then recover the partially updated views
-                            // from accepted bytes in a fresh installation.
+                            // Recover that command's partially delivered views
+                            // through a fresh authoritative snapshot, never replay.
                             auto third = installed(nextBytes, &views);
                             require(views == nextViews, "fresh restart did not recover partially delivered views");
                         }
@@ -5671,7 +5748,9 @@ namespace MWWorld::Testing
                 TransferFileSink file(scratch / "inventory.bin");
                 FileFaults faults;
                 original->snapshotInventoryViews(initialViews);
-                require(executeInventoryTransfer(*original, initialResult.mCommand, bindings, file, faults, initialOutput)
+                const InventoryTransferCaller caller{ { envelope.mInitiator.mIndex, envelope.mInitiator.mContentFile } };
+                require(executeInventoryTransfer(
+                            *original, caller, initialResult.mCommand, bindings, file, faults, initialOutput)
                         && *initialOutput == initialResult,
                     "initial transfer file save was not accepted");
                 require(fileBytes(scratch / "inventory.bin") == bytes, "initial accepted file differs from save");
@@ -6275,6 +6354,10 @@ namespace MWWorld::Testing
                                     if (!destinationDormant.isEmpty())
                                         decorate(destinationDormant);
                                 }
+                                // A non-default value makes a wrong initiator's
+                                // stock OnPCAdd behavior observable without script execution.
+                                if ((command || restartCommand) && scriptedItem)
+                                    item.getRefData().getLocals().mShorts.front() = -7;
                                 for (auto* service : { &fixture.mSourceScripts, &fixture.mDestinationScripts })
                                 {
                                     service->startIteration();
@@ -6762,8 +6845,13 @@ namespace MWWorld::Testing
             if (command || restartCommand)
             {
                 require(commandEvidence.mResultFailures == 2, "command result allocation failure coverage missing");
-                require(commandEvidence.mReturns == (command ? cases : returnTransfers ? 6 * cases : 0),
+                require(commandEvidence.mReturns == (command ? cases : returnTransfers ? 11 * cases : 5 * cases),
                     "return command coverage missing");
+                require(!restartCommand || commandEvidence.mAlternations == 5 * cases,
+                    "fresh-restart alternating continuation coverage missing");
+                require(!command || (commandEvidence.mAlternations == 2 * cases
+                            && commandEvidence.mAlternatingDeliveryModes == std::array<unsigned, 2>{ 0x7fff, 0x7fff }),
+                    "same-fixture alternating initiation/delivery coverage missing");
                 require(!restartCommand || commandEvidence.mRecovered == 192,
                     "post-restart uncertainty recovery coverage missing");
                 require(commandEvidence.mDeliveryModes == 0x7fff && commandEvidence.mViewAllocationFailures > 0
@@ -6777,6 +6865,7 @@ namespace MWWorld::Testing
                           << " fail-closed-outcomes=" << commandEvidence.mUncertain
                           << " allocation-failures=" << commandEvidence.mAllocations
                           << " return-commands=" << commandEvidence.mReturns
+                          << " same-fixture-alternations=" << commandEvidence.mAlternations
                           << " result-allocation-failures=" << commandEvidence.mResultFailures
                           << " fresh-composition-recoveries=" << commandEvidence.mRecovered
                           << " notification-delivered=" << commandEvidence.mDelivered
@@ -7022,6 +7111,8 @@ namespace MWWorld::Testing
                         unrelated.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId("dormant_soul"));
                         const auto item = fixture->mSource.add(
                             itemTemplate.getPtr(), returnTransfers && quantity == 3 ? 3 : 4, fixture->mSourceAdd);
+                        if (scripted)
+                            item->getRefData().getLocals().mShorts.front() = -7;
                         const auto sourceOther = fixture->mSource.add(unrelated.getPtr(), 2, fixture->mSourceAdd);
                         const auto destination = fixture->mDestination.add(
                             selection == 3 ? unrelated.getPtr() : itemTemplate.getPtr(), 7, fixture->mDestinationAdd);
@@ -7087,7 +7178,7 @@ namespace MWWorld::Testing
             return;
         }
         require(cases == 32 && evidence.mResultFailures == 2 && evidence.mRecovered == 128
-                && evidence.mReturns == (returnTransfers ? 192u : 0u),
+                && evidence.mReturns == (returnTransfers ? 352u : 160u) && evidence.mAlternations == 160,
             "focused selection failure/recovery coverage incomplete");
         require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
             "selection test left staging files");
@@ -7096,6 +7187,7 @@ namespace MWWorld::Testing
                   << " allocation-failures=" << evidence.mAllocations
                   << " fresh-composition-recoveries=" << evidence.mRecovered
                   << " return-commands=" << evidence.mReturns
+                  << " same-fixture-alternations=" << evidence.mAlternations
                   << " delivery-failed-after-commit=" << evidence.mDeliveryFailed
                   << " view-resynchronizations=" << evidence.mViewResyncs
                   << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";

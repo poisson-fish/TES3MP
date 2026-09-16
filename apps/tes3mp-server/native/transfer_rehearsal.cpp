@@ -214,30 +214,33 @@ namespace MWWorld::Testing
         });
     }
 
-    DisposableTransferRehearsal::TransferContexts DisposableTransferRehearsal::transferContexts(bool reverse) const
+    DisposableTransferRehearsal::TransferContexts DisposableTransferRehearsal::transferContexts(
+        bool reverse, const Ptr& initiator) const
     {
         if (&mRemoval.mWorldModel != &mModel || &mDestinationAdd.mWorldModel != &mModel
             || &mRemoval.mLocalScripts != &mSourceScripts
             || (mDestinationAdd.mLocalScripts != &mSourceScripts
                 && mDestinationAdd.mLocalScripts != &mDestinationScripts))
             throw std::invalid_argument("Disposable transfer service mismatch");
-        if (!reverse)
-            return { mRemoval, mDestinationAdd };
-        if (&mSourceAdd.mWorldModel != &mModel || mSourceAdd.mLocalScripts != &mSourceScripts
-            || &mSourceAdd.mStore != &mDestinationAdd.mStore
-            || mSourceAdd.mScriptManager != mDestinationAdd.mScriptManager
-            || !mSourceAdd.mContainer.hasLiveReference() || !mRemoval.mContainer.hasLiveReference()
-            || mSourceAdd.mContainer != mRemoval.mContainer
-            || mSourceAdd.mContainer.getReferenceLifetime() != mRemoval.mContainer.getReferenceLifetime())
+        if (reverse
+            && (&mSourceAdd.mWorldModel != &mModel || mSourceAdd.mLocalScripts != &mSourceScripts
+                || &mSourceAdd.mStore != &mDestinationAdd.mStore
+                || mSourceAdd.mScriptManager != mDestinationAdd.mScriptManager
+                || !mSourceAdd.mContainer.hasLiveReference() || !mRemoval.mContainer.hasLiveReference()
+                || mSourceAdd.mContainer != mRemoval.mContainer
+                || mSourceAdd.mContainer.getReferenceLifetime() != mRemoval.mContainer.getReferenceLifetime()))
             throw std::invalid_argument("Disposable reverse transfer context mismatch");
-        auto addition = mSourceAdd;
-        addition.mPlayer = mDestinationAdd.mPlayer; // Authorized initiator, independent of direction.
+        auto addition = reverse ? mSourceAdd : mDestinationAdd;
+        addition.mPlayer = initiator.isEmpty() ? mDestinationAdd.mPlayer : initiator;
+        if (!reverse)
+            return { mRemoval, std::move(addition) };
         return { { mModel, mDestinationAdd.mContainer, *mDestinationAdd.mLocalScripts,
                      mDestinationAdd.mInventoryUpdated }, std::move(addition) };
     }
 
     bool DisposableTransferRehearsal::commitDurably(
-        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestDurableSink& sink, bool reverse)
+        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestDurableSink& sink, bool reverse,
+        const Ptr& initiator)
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
         if (mFailedClosed)
@@ -246,7 +249,7 @@ namespace MWWorld::Testing
             throw std::invalid_argument("Disposable rehearsal already active");
         if (!sink)
             throw std::invalid_argument("Disposable commit requires a sink");
-        const auto contexts = transferContexts(reverse);
+        const auto contexts = transferContexts(reverse, initiator);
         auto& sourceStore = reverse ? mDestination : mSource;
         auto& destinationStore = reverse ? mSource : mDestination;
         auto& sourceService = contexts.mRemoval.mLocalScripts;
@@ -260,7 +263,7 @@ namespace MWWorld::Testing
         // guard, including its private iterators, services and old inventory nodes.
         auto pair = std::move(input);
         SerializedPair saved;
-        serializePair(*this, pair, declarations, saved, reverse); // Full validation before storage reads.
+        serializePair(*this, pair, declarations, saved, reverse, initiator); // Full validation before storage reads.
 
         phase.set(Allocations::Phase::Setup);
         auto& source = const_cast<PreparedContainerTransfer::MiscList&>(pair.getSourceStorage());
@@ -362,9 +365,9 @@ namespace MWWorld::Testing
     }
 
     void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
-        const Compiler::Locals& declarations, SerializedPair& output, bool reverse)
+        const Compiler::Locals& declarations, SerializedPair& output, bool reverse, const Ptr& initiator)
     {
-        const auto contexts = fixture.transferContexts(reverse);
+        const auto contexts = fixture.transferContexts(reverse, initiator);
         const auto& source = reverse ? fixture.mDestination : fixture.mSource;
         const auto& destination = reverse ? fixture.mSource : fixture.mDestination;
         if (!source.validateTransfer(pair, destination, contexts.mRemoval, contexts.mAddition).isComplete())

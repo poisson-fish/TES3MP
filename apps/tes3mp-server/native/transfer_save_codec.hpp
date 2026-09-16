@@ -28,6 +28,8 @@ namespace MWWorld::Testing
         std::string mRuntime;
         std::array<unsigned char, 32> mContent{};
         ESM::RefNum mSourceOwner, mDestinationOwner, mInitiator;
+        // mInitiator is a fixed version-4 envelope binding, not the latest
+        // command caller. Per-command authorization is supplied separately.
         bool operator==(const SaveEnvelope&) const = default;
     };
 

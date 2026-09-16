@@ -9,8 +9,8 @@
 
 namespace MWWorld::Testing
 {
-    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCommand command,
-        const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
+    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCaller caller,
+        InventoryTransferCommand command, const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
         std::unique_ptr<const InventoryTransferSuccess>& output)
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
@@ -23,7 +23,8 @@ namespace MWWorld::Testing
         for (auto value : { command.mSourceOwner, command.mDestinationOwner, command.mInitiator, command.mItem })
             if (!id(value).isSet() || value.mContentFile < -1)
                 throw std::invalid_argument("Inventory command requires valid instance IDs");
-        if (command.mQuantity <= 0 || command.mSourceOwner == command.mDestinationOwner
+        if (command.mInitiator != caller.mInitiator
+            || command.mQuantity <= 0 || command.mSourceOwner == command.mDestinationOwner
             || command.mExpectedRevision != fixture.mModel.getPtrRegistryRevision())
             throw std::invalid_argument("Inventory command quantity, owners or revision invalid");
         // Version 4 preserves only the first generated-ID namespace. Close this
@@ -37,7 +38,8 @@ namespace MWWorld::Testing
         const bool reverse = id(command.mSourceOwner) == envelope.mDestinationOwner;
         if (id(command.mSourceOwner) != (reverse ? envelope.mDestinationOwner : envelope.mSourceOwner)
             || id(command.mDestinationOwner) != (reverse ? envelope.mSourceOwner : envelope.mDestinationOwner)
-            || id(command.mInitiator) != envelope.mInitiator)
+            || (id(caller.mInitiator) != envelope.mSourceOwner
+                && id(caller.mInitiator) != envelope.mDestinationOwner))
             throw std::invalid_argument("Inventory command save owner/initiator mismatch");
 
         // Resolve afresh. Never follow a caller-supplied pointer or an old context
@@ -53,8 +55,12 @@ namespace MWWorld::Testing
             || !matches(sourceOwner, fixture.mRemoval.mContainer)
             || !matches(destinationOwner, fixture.mDestinationOwner.getPtr())
             || !matches(destinationOwner, fixture.mDestinationAdd.mContainer)
-            || !matches(command.mInitiator, fixture.mDestinationAdd.mPlayer))
+            || !matches(ownedId(envelope.mInitiator), fixture.mDestinationAdd.mPlayer))
             throw std::invalid_argument("Inventory command current context mismatch");
+        // Both eligible owners were checked against the current registry and
+        // their lifetime witnesses. Authorization comes from caller, not the
+        // fixed format-4 envelope or the command's claimed identity.
+        const auto initiator = fixture.mModel.getPtr(id(caller.mInitiator));
         const auto item = fixture.mModel.getPtr(id(command.mItem));
         auto& source = reverse ? fixture.mDestination : fixture.mSource;
         auto& destination = reverse ? fixture.mSource : fixture.mDestination;
@@ -62,7 +68,7 @@ namespace MWWorld::Testing
             throw std::invalid_argument("Inventory command item ownership mismatch");
 
         phase.set(Allocations::Phase::Preparation);
-        const auto contexts = fixture.transferContexts(reverse);
+        const auto contexts = fixture.transferContexts(reverse, initiator);
         const std::array resolved{ ContainerStoreResolution(fixture.mOther, fixture.mOtherOwner.getPtr()) };
         auto pair = source.prepareTransfer(
             item, command.mQuantity, destination, contexts.mRemoval, contexts.mAddition, resolved);
@@ -100,7 +106,7 @@ namespace MWWorld::Testing
                 encodeTransferSave(saved, bindings, bytes);
                 return sink.write(bytes, faults); // No fallible work after possible replacement.
             },
-            reverse);
+            reverse, initiator);
         if (!installed)
             return false;
         phase.set(Allocations::Phase::Publication);
