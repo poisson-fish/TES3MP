@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/compiler/locals.hpp>
@@ -78,7 +79,7 @@ namespace MWWorld::Testing
         Allocations::InPhase phase(Allocations::Phase::Validation);
         if (mFailedClosed)
             throw TestDurabilityUncertain{};
-        if (mActive)
+        if (mActive || mRestartInstalled)
             throw std::invalid_argument("Restart fixture already active");
         const auto valid = [](bool condition) {
             if (!condition)
@@ -273,9 +274,9 @@ namespace MWWorld::Testing
         return mShared ? source : *mStorage[1];
     }
 
-    void DisposableTransferRehearsal::prepareRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
+    void DisposableTransferRehearsal::validateRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
         const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
-        const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const
+        const RestartScriptBindings& fresh) const
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
         // Reuse the complete registry input checks without constructing another
@@ -368,7 +369,19 @@ namespace MWWorld::Testing
             itemState(item, found->mBase, found->mConfigured);
         }
 
-        phase.set(Allocations::Phase::Preparation);
+    }
+
+    void DisposableTransferRehearsal::prepareRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
+        const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
+        const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const
+    {
+        validateRestartScripts(decoded, restored, content, envelope, registry, fresh);
+        Allocations::InPhase phase(Allocations::Phase::Preparation);
+        const auto& scripts = decoded.mScripts;
+        const auto& supplied = fresh.mRegistry;
+        const auto& services = fresh.mServices;
+        const std::array inventories{ &restored.mSource, &restored.mDestination };
+        const auto count = 3 + supplied.mOther.size() + restored.mSource.mNodes.size() + restored.mDestination.mNodes.size();
         auto candidate = std::make_unique<RestartScripts>();
         candidate->mFresh = fresh;
         candidate->mRestart = decoded.mRestart;
@@ -399,10 +412,187 @@ namespace MWWorld::Testing
             }
             list.mResult.mCursor = savedService.mCursor;
             candidate->mStorage[side] = service->prepareStorage(list.mResult, list.mResult, {}, items);
+            candidate->mLists[side] = std::move(list.mResult);
         }
         phase.set(Allocations::Phase::Publication);
         std::unique_ptr<const RestartScripts> ready = std::move(candidate);
         static_assert(noexcept(output.swap(ready)));
         output.swap(ready);
+    }
+
+    void DisposableTransferRehearsal::validateRestartInstallation(const SerializedPair& decoded,
+        const RestoredPair& restored, const SaveBindings& bindings, const RestartRegistry& registry,
+        const RestartScripts& scripts) const
+    {
+        validateRestartScripts(decoded, restored, bindings.mContent, bindings.mEnvelope, registry, scripts.mFresh);
+        const auto valid = [](bool condition) {
+            if (!condition)
+                throw std::invalid_argument("Invalid restart installation storage or binding");
+        };
+        valid(scripts.mRestart == decoded.mRestart && scripts.mShared == decoded.mScripts.mShared);
+        valid(scripts.mItems.size()
+            == restored.mSource.mViews.size() + restored.mDestination.mViews.size()
+                + scripts.mFresh.mRegistry.mOther.size());
+        size_t index = 0;
+        const auto exact = [&](const ConstPtr& expected) {
+            const auto& item = scripts.mItems[index++];
+            valid(item.hasLiveReference() && item.mRef == expected.mRef && item.mCell == expected.mCell
+                && item.mContainerStore == expected.mContainerStore
+                && item.getReferenceLifetime() == expected.getReferenceLifetime());
+        };
+        for (const auto* inventory : { &restored.mSource, &restored.mDestination })
+            for (const auto& item : inventory->mViews)
+            {
+                exact(item); // Includes configured but unregistered nodes.
+                const auto& data = item.getRefData();
+                valid(!data.getCustomData() && !data.getLuaScripts() && !data.getBaseNode() && !data.mPhysicsPostponed
+                    && !data.isDeletedByContentFile());
+            }
+        for (const auto& [id, item] : scripts.mFresh.mRegistry.mOther)
+            exact(item);
+        for (size_t side = 0; side < 2; ++side)
+        {
+            if (side == 1 && scripts.mShared)
+            {
+                valid(!scripts.mStorage[side] && scripts.mLists[side].mEntries.empty()
+                    && scripts.mLists[side].mCursor == 0);
+                continue;
+            }
+            const auto& list = scripts.mLists[side];
+            const auto& saved = decoded.mScripts.mServices[side];
+            valid(scripts.mStorage[side] && list.mCursor == saved.mCursor
+                && list.mEntries.size() == saved.mEntries.size());
+            for (size_t i = 0; i < saved.mEntries.size(); ++i)
+            {
+                const auto item = registry.getItem(saved.mEntries[i].mIdentity);
+                const auto& entry = list.mEntries[i];
+                valid(entry.hasRegistration() && entry.references(&item.getCellRef())
+                    && entry.getScript() == saved.mEntries[i].mScript && entry.getCell() == item.mCell
+                    && entry.getContainer() == item.mContainerStore);
+            }
+            // Validates immutable registration identities, exact list nodes and
+            // cursor address without following a saved iterator or stale pointer.
+            scripts.mFresh.mServices[side]->validateStorage(*scripts.mStorage[side], list, list, {}, scripts.mItems);
+        }
+    }
+
+    void DisposableTransferRehearsal::installRestart(std::span<const char> accepted, const SerializedPair& decoded,
+        const SaveBindings& bindings, std::unique_ptr<const RestoredPair>& restored,
+        std::unique_ptr<const RestartRegistry>& registry, std::unique_ptr<const RestartScripts>& scripts,
+        std::unique_ptr<const SerializedPair>& output)
+    {
+        Allocations::InPhase phase(Allocations::Phase::Validation);
+        if (mFailedClosed)
+            throw TestDurabilityUncertain{};
+        if (!restored || !registry || !scripts || accepted.empty() || accepted.size() > MaxTransferSaveBytes)
+            throw std::invalid_argument("Restart installation requires complete owned inputs and accepted bytes");
+        validateRestartInstallation(decoded, *restored, bindings, *registry, *scripts);
+
+        phase.set(Allocations::Phase::Result);
+        auto staged = std::make_unique<SerializedPair>();
+        staged->mRestart = restored->mRestart;
+        staged->mScripts = restored->mScripts;
+        const auto save = [&](const RestoredInventory& inventory, SerializedInventory& result) {
+            serializeInventory(
+                inventory.mNodes, [&](size_t i) { return inventory.mProposedIdentities[i]; },
+                bindings.mContent.mDeclarations, result);
+        };
+        save(restored->mSource, staged->mSource);
+        save(restored->mDestination, staged->mDestination);
+        TransferSaveBytes encoded;
+        encodeTransferSave(*staged, bindings, encoded);
+        if (!std::equal(encoded.begin(), encoded.end(), accepted.begin(), accepted.end()))
+            throw std::invalid_argument("Restored engine values differ from accepted restart save");
+        encodeTransferSave(decoded, bindings, encoded);
+        if (!std::equal(encoded.begin(), encoded.end(), accepted.begin(), accepted.end()))
+            throw std::invalid_argument("Decoded values differ from accepted restart save");
+        std::unique_ptr<const SerializedPair> ready = std::move(staged);
+
+        phase.set(Allocations::Phase::Setup);
+        // Only preparation-produced objects may be consumed. They were allocated
+        // mutable and published const; mutation starts after all fallible work.
+        auto& nodes = const_cast<RestoredPair&>(*restored);
+        const std::array inventories{ &nodes.mSource, &nodes.mDestination };
+        const std::array stores{ &mSource, &mDestination };
+        std::array<std::vector<CellRef>, 2> references;
+        std::array<std::shared_ptr<const ContainerStore::StorageIdentity>, 2> storageIdentities;
+        std::array<std::optional<LocalScripts::PreparedStorage::Entries::iterator>, 2> cursors;
+        const std::array selections{ mSource.end(), mDestination.end() };
+        for (size_t side = 0; side < 2; ++side)
+        {
+            storageIdentities[side] = std::make_shared<const ContainerStore::StorageIdentity>();
+            const auto& inventory = *inventories[side];
+            auto& refs = references[side];
+            refs.reserve(inventory.mNodes.size());
+            for (const auto& node : inventory.mNodes)
+            {
+                refs.push_back(node.mRef);
+                refs.back().setRefNum(inventory.mProposedIdentities[refs.size() - 1]);
+            }
+            if (side == 1 && scripts->mShared)
+                continue;
+            auto& list = scripts->mStorage[side]->mEntries;
+            const auto cursor = scripts->mLists[side].mCursor;
+            if (cursor < list.size())
+                cursors[side] = std::next(list.begin(), cursor);
+        }
+        phase.set(Allocations::Phase::Revalidation);
+        validateRestartInstallation(decoded, *restored, bindings, *registry, *scripts);
+
+        // Serialized access; no callback, validation, allocation or throwing
+        // setter remains after the first write. Saved counters are assigned once.
+        const auto install = [&]() noexcept {
+            phase.set(Allocations::Phase::Installation);
+            for (size_t side = 0; side < 2; ++side)
+            {
+                auto& inventory = *inventories[side];
+                size_t i = 0;
+                for (auto& node : inventory.mNodes)
+                {
+                    static_assert(std::is_nothrow_swappable_v<CellRef>);
+                    std::swap(node.mRef, references[side][i++]);
+                    node.mWorldModel = &mModel;
+                }
+                auto& store = *stores[side];
+                static_assert(noexcept(store.mLists.mMiscItems.mList.swap(inventory.mNodes)));
+                store.mLists.mMiscItems.mList.swap(inventory.mNodes);
+                store.mStorageIdentity.swap(storageIdentities[side]);
+                store.mSelectedEnchantItem = selections[side]; // No selection persisted by version 3.
+                store.mRechargingItems.clear();
+                store.mWeightUpToDate = store.mRechargingItemsUpToDate = false;
+                store.mModified = true;
+            }
+            for (size_t side = 0; side < (scripts->mShared ? 1u : 2u); ++side)
+            {
+                auto& service = side == 0 ? mSourceScripts : mDestinationScripts;
+                static_assert(noexcept(service.mScripts.swap(scripts->mStorage[side]->mEntries)));
+                service.mScripts.swap(scripts->mStorage[side]->mEntries);
+                // End iterators do not survive list swap; materialize receiving end.
+                service.mIter = cursors[side] ? *cursors[side] : service.mScripts.end();
+            }
+            auto& live = mModel.mPtrRegistry;
+            static_assert(noexcept(live.mIndex.swap(registry->mStorage->mIndex)));
+            live.mIndex.swap(registry->mStorage->mIndex);
+            live.mRevision = static_cast<size_t>(decoded.mRestart.mRevision);
+            live.mLastGenerated = decoded.mRestart.mLastGenerated;
+            mRestartInstalled = true;
+
+            phase.set(Allocations::Phase::Retirement);
+            // Old registry/script nodes only reference retained owners/other items;
+            // original source/destination storage was validated empty. Release all
+            // borrowed iterators before destroying consumed list owners.
+            cursors = {};
+            scripts.reset();
+            registry.reset();
+            restored.reset();
+            references = {};
+            storageIdentities = {};
+            encoded.clear();
+            phase.set(Allocations::Phase::Publication);
+            static_assert(noexcept(output.swap(ready)));
+            output.swap(ready);
+            ready.reset();
+        };
+        install();
     }
 }

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <type_traits>
 
 namespace MWWorld::Testing
@@ -122,6 +123,7 @@ namespace MWWorld::Testing
 
     struct RestoreContent;
     struct SaveEnvelope;
+    struct SaveBindings;
     void restorePair(
         const SerializedPair& input, const RestoreContent& content, std::unique_ptr<const RestoredPair>& output);
 
@@ -152,6 +154,7 @@ namespace MWWorld::Testing
     {
         bool mActive = false;
         bool mFailedClosed = false;
+        bool mRestartInstalled = false;
 
     public:
         WorldModel mModel;
@@ -251,6 +254,7 @@ namespace MWWorld::Testing
             TransferRestartMetadata mRestart;
             bool mShared = true;
             std::vector<ConstPtr> mItems;
+            std::array<LocalScripts::List, 2> mLists;
             std::array<std::unique_ptr<LocalScripts::PreparedStorage>, 2> mStorage;
 
         public:
@@ -268,10 +272,24 @@ namespace MWWorld::Testing
             const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
             const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const;
 
+        // Fresh-fixture-only consumption of candidates from the preparation APIs.
+        // accepted is the caller's previously accepted version-3 save, not proof
+        // of production durability. Serialized access and content lifetimes remain
+        // required. Failure retains every input/output; success consumes all three
+        // candidates and publishes an owned coherent save. No selections/effects.
+        void installRestart(std::span<const char> accepted, const SerializedPair& decoded, const SaveBindings& bindings,
+            std::unique_ptr<const RestoredPair>& restored, std::unique_ptr<const RestartRegistry>& registry,
+            std::unique_ptr<const RestartScripts>& scripts, std::unique_ptr<const SerializedPair>& output);
+
     private:
         void validateRestartRegistry(const SerializedPair& decoded, const RestoredPair& restored,
             const SaveEnvelope& envelope, const RestartBindings& fresh) const;
         static void validateRestartScriptLifetimes(const RestartScriptBindings& fresh);
+        void validateRestartScripts(const SerializedPair& decoded, const RestoredPair& restored,
+            const RestoreContent& content, const SaveEnvelope& envelope, const RestartRegistry& registry,
+            const RestartScriptBindings& fresh) const;
+        void validateRestartInstallation(const SerializedPair& decoded, const RestoredPair& restored,
+            const SaveBindings& bindings, const RestartRegistry& registry, const RestartScripts& scripts) const;
 
     public:
 
@@ -303,6 +321,7 @@ namespace MWWorld::Testing
     void checkTransferRestartRegistry(const ESMStore& content);
     void checkTransferScriptMetadata(const ESMStore& content);
     void checkTransferRestartScripts(const ESMStore& content);
+    void checkTransferRestartInstallation(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch);

@@ -5724,6 +5724,11 @@ namespace
             MWWorld::Testing::checkTransferScriptMetadata(loadout.store());
             return;
         }
+        if (filter == "inventory-transfer-restart-installation")
+        {
+            MWWorld::Testing::checkTransferRestartInstallation(loadout.store());
+            return;
+        }
         if (filter == "inventory-transfer-restart-scripts")
         {
             MWWorld::Testing::checkTransferRestartScripts(loadout.store());
