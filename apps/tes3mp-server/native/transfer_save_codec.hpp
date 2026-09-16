@@ -17,8 +17,9 @@ namespace MWWorld::Testing
 
     const ESM::Miscellaneous& suppliedBase(const ESM::RefId& id, const RestoreContent& content);
     void validateRestore(const SerializedPair& input, const RestoreContent& content);
+    void validateTransferSelection(ESM::RefNum selection, std::span<const ESM::RefNum> identities);
 
-    // Test-target-only, little-endian, development format (version 3 only).
+    // Test-target-only, little-endian, development format (version 4 only).
     // Persists owned restart metadata, not a live registry. The caller supplies
     // the trusted runtime/content identity and already interned content IDs.
     // These synthetic identities are not a production loadout fingerprint.
@@ -46,7 +47,7 @@ namespace MWWorld::Testing
 
     // All bounds/relationships are checked before publishing either output.
     // Only semantic script-service values enter the format; no live services,
-    // pointers, registry mappings, selections or iterators are persisted.
+    // pointers, registry mappings or iterators are persisted. Selections are IDs.
     void encodeTransferSave(const SerializedPair& input, const SaveBindings& bindings, TransferSaveBytes& output);
     void decodeTransferSave(std::span<const char> bytes, const SaveBindings& bindings, SerializedPair& output);
 }

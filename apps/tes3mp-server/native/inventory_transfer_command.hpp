@@ -44,7 +44,7 @@ namespace MWWorld::Testing
     // Uncertainty throws TestDurabilityUncertain and forbids retry of that composition.
     // Every failure preserves output (including its allocation). Success publishes
     // by noexcept swap only after persistence acceptance AND fixture installation.
-    // The bounded version-3 command rejects exhausted revision/generated counters,
+    // The bounded version-4 command rejects exhausted revision/generated counters,
     // even when a stack would not require another generated identity.
     bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCommand command,
         const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,

@@ -157,6 +157,17 @@ namespace MWWorld::Testing
         }
     }
 
+    void validateTransferSelection(ESM::RefNum selection, std::span<const ESM::RefNum> identities)
+    {
+        // Never normalize malformed unset values or drop a foreign selection.
+        // Count-zero members are valid stock selections; iteration skips them.
+        if (selection == ESM::RefNum{})
+            return;
+        if (!selection.isSet() || selection.mContentFile < -1
+            || std::count(identities.begin(), identities.end(), selection) != 1)
+            throw std::invalid_argument("Invalid detached inventory selection");
+    }
+
     void validateRestore(const SerializedPair& input, const RestoreContent& content)
     {
         validateRestart(input.mRestart);
@@ -170,6 +181,8 @@ namespace MWWorld::Testing
                 || inventory->mObjects.size() != inventory->mProposedIdentities.size())
                 throw std::invalid_argument("Invalid detached inventory membership");
         for (const auto* inventory : inventories)
+        {
+            validateTransferSelection(inventory->mSelection, inventory->mProposedIdentities);
             for (size_t i = 0; i < inventory->mObjects.size(); ++i)
             {
                 const auto& state = inventory->mObjects[i];
@@ -208,6 +221,7 @@ namespace MWWorld::Testing
                 RefData::validateRestore(state, base.mScript, content.mDeclarations);
                 scriptItems[inventory == inventories[0] ? 0 : 1][i] = { id, base.mId, state.mHasLocals != 0 };
             }
+        }
         const auto& scripts = input.mScripts;
         validateScripts(input.mRestart,
             { std::span(scriptItems[0]).first(input.mSource.mObjects.size()),
@@ -220,7 +234,7 @@ namespace MWWorld::Testing
     {
         static_assert(std::endian::native == std::endian::little);
         constexpr size_t MaxObjects = 1024;
-        constexpr uint32_t CodecVersion = 3;
+        constexpr uint32_t CodecVersion = 4;
 
         [[noreturn]] void invalid()
         {
@@ -316,6 +330,7 @@ namespace MWWorld::Testing
         struct SavePreflight
         {
             std::array<uint32_t, 2> mCounts;
+            std::array<ESM::RefNum, 2> mSelections;
             TransferRestartMetadata mRestart;
             bool mShared = true;
             uint32_t mOtherCount = 0;
@@ -393,6 +408,13 @@ namespace MWWorld::Testing
             valid(revision.empty() && counter.empty());
             validateRestart(restart);
             validateRestartOwners(restart, e);
+            size_t selectionSide = 0;
+            for (const auto tag : { ESM::fourCC("SSEL"), ESM::fourCC("DSEL") })
+            {
+                auto field = pair.sub(tag);
+                result.mSelections[selectionSide++] = field.identity();
+                valid(field.empty());
+            }
             auto sizes = pair.sub(ESM::fourCC("SIZE"));
             const std::array counts{ sizes.number(), sizes.number() };
             valid(sizes.empty() && pair.empty() && counts[0] <= MaxObjects && counts[1] <= MaxObjects);
@@ -507,6 +529,8 @@ namespace MWWorld::Testing
                     }
                     valid(times == animations);
                 }
+            validateTransferSelection(result.mSelections[0], std::span(identities).first(counts[0]));
+            validateTransferSelection(result.mSelections[1], std::span(identities).subspan(counts[0], counts[1]));
             auto scripts = file.record(ESM::fourCC("SCRP"));
             auto map = scripts.sub(ESM::fourCC("SMAP"));
             const auto destination = map.number();
@@ -647,6 +671,8 @@ namespace MWWorld::Testing
         writer.writeFormId(e.mInitiator, true, "INIT");
         writer.writeHNT("RREV", input.mRestart.mRevision);
         writer.writeFormId(input.mRestart.mLastGenerated, true, "LGEN");
+        writer.writeFormId(input.mSource.mSelection, true, "SSEL");
+        writer.writeFormId(input.mDestination.mSelection, true, "DSEL");
         writer.startSubRecord("SIZE");
         writer.writeT(static_cast<uint32_t>(input.mSource.mObjects.size()));
         writer.writeT(static_cast<uint32_t>(input.mDestination.mObjects.size()));
@@ -726,6 +752,7 @@ namespace MWWorld::Testing
         size_t side = 0;
         for (auto* inventory : { &staged.mSource, &staged.mDestination })
         {
+            inventory->mSelection = checked.mSelections[side];
             inventory->mObjects.reserve(counts[side]);
             inventory->mProposedIdentities.reserve(counts[side]);
             for (size_t i = 0; i < counts[side]; ++i)

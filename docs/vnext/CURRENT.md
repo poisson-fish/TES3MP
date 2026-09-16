@@ -4,91 +4,95 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). The test-only inventory command now
-  continues an installed accepted version-3 save and persists a transfer that
-  decodes/restores/installs into another fresh fixture. Production durability
-  and live atomic transfer remain unproven.
-- **Next action:** implement test-only persistence of source/destination selected
-  enchantment-item identities for the existing non-gold MISC transfer. Introduce
-  an explicit version-4 test save with owned identity-or-unset metadata; reject
-  unsupported versions rather than silently dropping selections. Validate each
-  selection against its inventory, including supported dormant nodes, and stage
-  receiving iterators before installation. Preserve stock prepared-transfer
-  selection semantics through accepted file save, fresh restart installation and
-  `executeInventoryTransfer` continuation. Prove rejection/allocation/file failures
-  preserve inputs, fixture and caller outputs, with allocation-free successful
-  installation/retirement/publication. Production callers, notifications, script
-  execution and durable request deduplication remain deferred. This closes one
-  remaining state gap toward M2's end-to-end authoritative inventory operation.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). The test-only non-gold MISC inventory
+  command preserves selected enchantment-item identities through accepted
+  version-4 file saves, fresh installation and command continuation. Production
+  durability and live atomic transfer remain unproven.
+- **Next action:** add a test-only owned inventory notification-intent batch to
+  `InventoryTransferSuccess` for the existing non-gold MISC transfer. Project
+  stock prepared removal/addition and inventory-updated intents into bounded
+  values containing owner/initiator/item IDs, quantity and committed revision;
+  preallocate the complete success before persistence and publish it only after
+  accepted installation. Cover both initiators, partial/full transfers, stacking,
+  scripted items and continuation from version-4 saves. Prove rejection,
+  allocation/file failure and sticky uncertainty publish no intents, healthy
+  retries publish exactly the prepared batch, and installation/retirement/
+  publication allocate nothing. Keep callback dispatch, script execution,
+  production callers and durable request deduplication deferred. This separates
+  presentation effects for M2's end-to-end authoritative inventory operation.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[executeInventoryTransfer](../../apps/tes3mp-server/native/inventory_transfer_command.cpp)
-rejects exhausted saved registry revisions and the version-3 generated-ID namespace
-before preparation or I/O, including stacking commands. The bounded format supports
-content-file slot -1; commands cannot advance it to -2 or wrap the revision.
-Restoration still preserves exhausted counters verbatim. No counters are rebuilt
-from surviving identities.
+The [test save codec](../../apps/tes3mp-server/native/transfer_save_codec.cpp)
+accepts version 4 only. Each inventory carries an owned selected identity or
+canonical unset value; no pointers or iterators enter the format. Both encoding
+and decoding validate membership, including supported dormant nodes. Unsupported
+versions (including the actual version-3 layout), missing/duplicate/malformed
+fields, foreign inventory/owner/other-store IDs and invalid namespaces reject
+without changing inputs or caller output value/storage.
 
-The [focused continuation test](../../apps/tes3mp-server/native/transfer_rehearsal_tests.cpp)
-starts with an accepted save after destroying the original fixture. It installs
-fresh stock inventory/registry/LocalScripts storage, resolves owned command IDs
-and the exact saved revision there, then performs another partial/full transfer
-through the existing file sink. After fixture destruction, accepted bytes decode,
-restore and install into a second fresh fixture whose engine save matches exactly.
-The 48 cases cover shared/distinct services, plain/scripted items, existing/new
-stacks, both initiators, begin/middle/end cursors, configured unregistered items,
-dormant membership and signed counts. Explicit counter gaps, last usable values
-and exhausted saves are exercised without generation or revision reconstruction.
+[Restart installation](../../apps/tes3mp-server/native/transfer_restart.cpp)
+validates carried selections against decoded inventory identities, retains the
+existing ownership/storage/lifetime/iterator guards, and rejects foreign selections
+on empty receiving stores. It stages receiving iterators over raw detached nodes
+before installation, including nodes skipped by public inventory iteration.
+Selections survive list swaps; saved revision/generation counters remain exact.
 
-Wrong-owner/stale commands, expired contexts, missing services, safe file failures
-and every observed command allocation ordinal in representative plain/scripted
-cases preserve fixture state and caller output value/storage. Each allocation
-failure retries successfully. Post-replacement uncertainty preserves the old
-fixture and output, blocks old/new sinks on that fixture, and keeps the old sink
-closed even after a fresh restart. Partial transfers resume successfully only
-through a fresh validated fixture and healthy sink. Repeated old revisions reject;
-this is not durable request deduplication.
+The [focused selection test](../../apps/tes3mp-server/native/transfer_rehearsal_tests.cpp)
+uses accepted file saves, destroys the original fixture, installs a fresh fixture,
+continues through `executeInventoryTransfer`, then restores its accepted save into
+another fresh fixture. Its 32 cases cover shared/distinct services, plain/scripted
+items, both initiators, unset selections, the transferred source item, unrelated
+live source selections and dormant selections. Partial removal retains selection;
+full removal clears only a selected source item. Destination selection stays on
+its original identity, including dormant nodes when stock addition creates a
+separate stack. The existing 48-case matrices also retain signed counts,
+configured/unregistered items, script cursors and exhausted/gapped counters.
 
-Protected ownership/storage/lifetime/iterator validation, persistence-before-install
-and preallocated owned success remain intact. Successful installation, retirement
-and publication allocate nothing. Independent state, listeners and script-run
-counters remain unchanged. Source/destination selections remain unset after restart.
+Malformed/stale selections and bindings, every measured allocation ordinal in the
+selected paths, safe file failures and sticky uncertainty preserve fixture and
+caller state. Healthy retries succeed; uncertain compositions remain closed and
+recovery requires a fresh validated fixture/sink. Persistence precedes installation,
+and success is preallocated. Successful installation, retirement and publication
+allocate nothing. Independent state, listeners and script-run counters stay exact.
 All composition remains test-target-only; production callers are unchanged.
 
 ## Fresh verification
 
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
-`build/vnext-product`, 2026-09-15; final checks individually, exit **0**:
+`build/vnext-product`, 2026-09-15. Target build and filters ran individually;
+final exits **0**:
 
-- `tes3mp_native_loadout_tests` build.
-- `inventory-transfer-restart-command`: **48** cases, **2,544** safe rejections,
-  **144** stale/repeated commands, **384** uncertain outcomes, **2,779** individual
-  allocation failures, **192** fresh-composition recoveries.
-- `inventory-transfer-command`: **48** cases, **2,208** safe rejections,
-  **384** uncertain outcomes, **1,595** individual allocation failures.
-- `inventory-transfer-restart-installation`: **48** cases, **35,488** individual
-  allocation failures, **37,192** rejected attempts including allocation failures.
+| Filter suffix (`inventory-transfer-`) | Evidence |
+|---|---|
+| `selections` | 32 cases; 1,406 allocation failures; 256 uncertain outcomes; 128 fresh recoveries |
+| `codec` | 48 cases; 18,834 codec allocation failures; 3,742 malformed rejections |
+| `restore` | 48 cases; 3,040 allocation failures; 236 malformed rejections |
+| `restart-installation` | 48 cases; 35,680 allocation failures; 37,720 rejected attempts |
+| `restart-command` | 48 cases; 2,783 allocation failures; 384 uncertain outcomes; 192 fresh recoveries |
+| `command` | 48 cases; 1,599 allocation failures; 384 uncertain outcomes |
+| `restart-registry` | 48 cases; 1,432 allocation failures; 3,951 rejections |
+| `restart-scripts` | 48 cases; 768 allocation failures; 3,920 rejections |
 
-Successful installation/retirement/publication allocations and tracked blocks
-remaining after measured cleanup are **0**. Logs use
-`build/logs/native-restart-command-` plus `build`, `focused`, `command` or
-`installation`, then `.log`. Initial focused exit **1** reported
-`post-restart safe file failure installed, published or replaced accepted bytes`:
-the test expected the Replace fault at replacement, but this safe seam rejects at
-Close. The assertion was fixed and that filter rerun successfully before proceeding.
-No complete suites, expensive gates or upstream baseline tests ran.
-Documentation budget and local links passed individually, exit **0**; logs use
-the same prefix with `docs-budget.log` and `docs-links.log`.
+Logs: `build/logs/native-selection-` plus `build`, `focused`, `codec`, `restore`,
+`installation`, `restart-command`, `command`, `registry` or `scripts`, then `.log`.
+Tracked blocks remaining after measured cleanup: **0**. Initial focused exit **1**
+reported `selected dormant destination was not revived in place`. Source inspection
+confirmed stock iteration skips zero-count nodes; the assertion was corrected to
+require retained dormant selection and a different receiving stack, then rebuilt
+and rerun successfully before continuing. Documentation budget and local-link
+checks passed individually, exit **0**, with the same log prefix and suffixes
+`docs-budget.log` and `docs-links.log`. No complete suites, expensive gates or
+upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Selections, production callers, notifications, script execution and durable request
-deduplication remain deferred. Other-store metadata validates identity/base/configured
-state, not full saved values. Borrowed content/inputs must outlive serialized use.
-The format retains one supplied script/declaration set and non-gold MISC scope.
+Notifications, script execution, production callers and durable request deduplication
+remain deferred. Other-store metadata validates identity/base/configured state,
+not full saved values. Borrowed content/inputs must outlive serialized use. The
+format retains one supplied script/declaration set and non-gold MISC scope.
 
 File evidence is synthetic single-writer Windows I/O, not crash/power-loss or
 production durability. POSIX/32-bit bounds, equipment, gold/other types, Lua/custom

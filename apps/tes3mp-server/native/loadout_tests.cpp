@@ -5700,6 +5700,11 @@ namespace
                 loadout.store(), root / "inventory-command", filter == "inventory-transfer-restart-command");
             return;
         }
+        if (filter == "inventory-transfer-selections")
+        {
+            MWWorld::Testing::checkTransferSelections(loadout.store(), root / "inventory-selections");
+            return;
+        }
         if (filter == "inventory-transfer-file-sink")
         {
             MWWorld::Testing::checkTransferFileSink(loadout.store(), root / "inventory-file-sink");

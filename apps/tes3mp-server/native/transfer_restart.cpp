@@ -20,6 +20,7 @@ namespace MWWorld::Testing
         staged->mScripts = input.mScripts;
         const auto restore = [&](const SerializedInventory& saved, RestoredInventory& inventory) {
             inventory.mProposedIdentities = saved.mProposedIdentities;
+            inventory.mSelection = saved.mSelection;
             inventory.mViews.reserve(saved.mObjects.size());
             for (const auto& object : saved.mObjects)
             {
@@ -104,6 +105,8 @@ namespace MWWorld::Testing
             valid(saved[side]->mObjects.size() <= 1024
                 && saved[side]->mObjects.size() == saved[side]->mProposedIdentities.size()
                 && inventory->mProposedIdentities == saved[side]->mProposedIdentities);
+            valid(inventory->mSelection == saved[side]->mSelection);
+            validateTransferSelection(inventory->mSelection, inventory->mProposedIdentities);
         }
         valid(fresh.mOther.size() <= 1024 && fresh.mOther.size() == otherStorage().size());
         const std::array owners{ mSourceOwner.getPtr(), mDestinationOwner.getPtr(), mOtherOwner.getPtr() };
@@ -122,6 +125,10 @@ namespace MWWorld::Testing
             identity(id);
             valid(owner.mRef->mWorldModel == &mModel && same(mModel.getPtr(id), owner)
                 && same(stores[i]->getPtr(mModel), owner));
+            // Empty receiving inventories cannot own a selection. Compare only;
+            // never follow a possibly foreign or stale saved iterator.
+            if (i != 2)
+                valid(stores[i]->mSelectedEnchantItem == stores[i]->end());
             const auto& lists = stores[i]->mLists;
             valid(lists.mPotions.mList.empty() && lists.mAppas.mList.empty() && lists.mArmors.mList.empty()
                 && lists.mBooks.mList.empty() && lists.mClothes.mList.empty() && lists.mIngreds.mList.empty()
@@ -493,6 +500,7 @@ namespace MWWorld::Testing
         staged->mRestart = restored->mRestart;
         staged->mScripts = restored->mScripts;
         const auto save = [&](const RestoredInventory& inventory, SerializedInventory& result) {
+            result.mSelection = inventory.mSelection;
             serializeInventory(
                 inventory.mNodes, [&](size_t i) { return inventory.mProposedIdentities[i]; },
                 bindings.mContent.mDeclarations, result);
@@ -517,17 +525,21 @@ namespace MWWorld::Testing
         std::array<std::vector<CellRef>, 2> references;
         std::array<std::shared_ptr<const ContainerStore::StorageIdentity>, 2> storageIdentities;
         std::array<std::optional<LocalScripts::PreparedStorage::Entries::iterator>, 2> cursors;
-        const std::array selections{ mSource.end(), mDestination.end() };
+        // Stage the receiving owner with a raw node iterator that survives swap.
+        // Public begin/++ would skip valid dormant selections.
+        std::array selections{ mSource.end(), mDestination.end() };
         for (size_t side = 0; side < 2; ++side)
         {
             storageIdentities[side] = std::make_shared<const ContainerStore::StorageIdentity>();
-            const auto& inventory = *inventories[side];
+            auto& inventory = *inventories[side];
             auto& refs = references[side];
             refs.reserve(inventory.mNodes.size());
-            for (const auto& node : inventory.mNodes)
+            for (auto it = inventory.mNodes.begin(); it != inventory.mNodes.end(); ++it)
             {
-                refs.push_back(node.mRef);
+                refs.push_back(it->mRef);
                 refs.back().setRefNum(inventory.mProposedIdentities[refs.size() - 1]);
+                if (inventory.mSelection.isSet() && refs.back().getRefNum() == inventory.mSelection)
+                    selections[side] = ContainerStoreIterator(stores[side], it);
             }
             if (side == 1 && scripts->mShared)
                 continue;
@@ -557,7 +569,7 @@ namespace MWWorld::Testing
                 static_assert(noexcept(store.mLists.mMiscItems.mList.swap(inventory.mNodes)));
                 store.mLists.mMiscItems.mList.swap(inventory.mNodes);
                 store.mStorageIdentity.swap(storageIdentities[side]);
-                store.mSelectedEnchantItem = selections[side]; // No selection persisted by version 3.
+                store.mSelectedEnchantItem = selections[side];
                 store.mRechargingItems.clear();
                 store.mWeightUpToDate = store.mRechargingItemsUpToDate = false;
                 store.mModified = true;
@@ -582,6 +594,7 @@ namespace MWWorld::Testing
             // original source/destination storage was validated empty. Release all
             // borrowed iterators before destroying consumed list owners.
             cursors = {};
+            selections = { mSource.end(), mDestination.end() };
             scripts.reset();
             registry.reset();
             restored.reset();

@@ -374,6 +374,8 @@ namespace MWWorld::Testing
         };
         serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
         serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
+        staged.mSource.mSelection = pair.getSourceSelection();
+        staged.mDestination.mSelection = pair.getDestinationSelection();
         auto& metadata = staged.mScripts;
         metadata.mShared = shared;
         metadata.mOther.reserve(otherCount);

@@ -24,7 +24,7 @@ namespace MWWorld::Testing
         if (command.mQuantity <= 0 || command.mSourceOwner == command.mDestinationOwner
             || command.mExpectedRevision != fixture.mModel.getPtrRegistryRevision())
             throw std::invalid_argument("Inventory command quantity, owners or revision invalid");
-        // Version 3 preserves only the first generated-ID namespace. Close this
+        // Version 4 preserves only the first generated-ID namespace. Close this
         // bounded command at either saved counter's limit, including stacking:
         // never wrap the revision or let stock generation enter content slot -2.
         const auto counter = fixture.mModel.getLastGeneratedRefNum();

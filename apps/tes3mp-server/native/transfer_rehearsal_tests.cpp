@@ -355,6 +355,8 @@ namespace MWWorld::Testing
             SerializedPair staged;
             staged.mRestart = pair.mRestart;
             staged.mScripts = pair.mScripts;
+            staged.mSource.mSelection = pair.mSource.mSelection;
+            staged.mDestination.mSelection = pair.mDestination.mSelection;
             serializeInventory(
                 pair.mSource.mNodes, [&](size_t i) { return pair.mSource.mProposedIdentities.at(i); }, declarations,
                 staged.mSource);
@@ -375,7 +377,7 @@ namespace MWWorld::Testing
         {
             const auto inventory = [](const SerializedInventory& value) {
                 return std::tuple{ pairOutputState(value.mObjects), value.mProposedIdentities,
-                    value.mProposedIdentities.data(), value.mProposedIdentities.capacity() };
+                    value.mProposedIdentities.data(), value.mProposedIdentities.capacity(), value.mSelection };
             };
             return std::tuple{ inventory(output.mSource), inventory(output.mDestination), output.mRestart,
                 scriptOutputState(output.mScripts) };
@@ -394,6 +396,8 @@ namespace MWWorld::Testing
                 result.mScripts.mOther.push_back({ { 888, -1 }, ESM::RefId{}, true });
                 result.mSource.mObjects.push_back(outputSentinel());
                 result.mDestination.mObjects = { outputSentinel(), outputSentinel() };
+                result.mSource.mSelection = { 701, -1 };
+                result.mDestination.mSelection = { 703, -1 };
                 result.mSource.mProposedIdentities.push_back({ 701, -1 });
                 result.mDestination.mProposedIdentities = { { 702, -1 }, { 703, -1 } };
                 return result;
@@ -814,7 +818,8 @@ namespace MWWorld::Testing
                         strings.emplace_back(animation.mGroup.data(), animation.mGroup.capacity());
                 }
                 return std::tuple{ nodes, bases, strings, value.mProposedIdentities, value.mProposedIdentities.data(),
-                    value.mProposedIdentities.capacity(), views, value.mViews.data(), value.mViews.capacity() };
+                    value.mProposedIdentities.capacity(), views, value.mViews.data(), value.mViews.capacity(),
+                    value.mSelection };
             };
             return std::tuple{ pair.get(), inventory(pair->mSource), inventory(pair->mDestination), pair->mRestart,
                 scriptOutputState(pair->mScripts) };
@@ -841,6 +846,8 @@ namespace MWWorld::Testing
             };
             copy(pair.getSourceStorage(), pair.getRelocation().mSource, result.mSource);
             copy(pair.getDestinationStorage(), pair.getRelocation().mDestination, result.mDestination);
+            result.mSource.mSelection = pair.getSourceSelection();
+            result.mDestination.mSelection = pair.getDestinationSelection();
             return result;
         }
 
@@ -898,7 +905,8 @@ namespace MWWorld::Testing
         {
             require(restored.mRestart == expected.mRestart, "restoration lost accepted revision/generation counter");
             const auto check = [](const RestoredInventory& actual, const RestoredInventory& wanted) {
-                require(actual.mProposedIdentities == wanted.mProposedIdentities
+                require(actual.mSelection == wanted.mSelection
+                        && actual.mProposedIdentities == wanted.mProposedIdentities
                         && actual.mNodes.size() == wanted.mNodes.size(),
                     "restoration lost membership/associations");
                 auto next = wanted.mNodes.begin();
@@ -935,7 +943,8 @@ namespace MWWorld::Testing
             require(actual.mRestart == expected.mRestart, "save/restore/save changed restart metadata");
             require(actual.mScripts == expected.mScripts, "save/restore/save changed script metadata");
             const auto check = [](const SerializedInventory& a, const SerializedInventory& b) {
-                require(a.mProposedIdentities == b.mProposedIdentities && a.mObjects.size() == b.mObjects.size(),
+                require(a.mSelection == b.mSelection && a.mProposedIdentities == b.mProposedIdentities
+                        && a.mObjects.size() == b.mObjects.size(),
                     "save/restore/save lost membership or identities");
                 for (size_t i = 0; i < a.mObjects.size(); ++i)
                 {
@@ -1126,6 +1135,13 @@ namespace MWWorld::Testing
             // Exercise errors on both sides, including the final destination node.
             for (bool destination : { false, true })
             {
+                for (auto selection : { ESM::RefNum{ 0, -2 }, ESM::RefNum{ 9, -2 },
+                         ESM::RefNum{ UINT32_MAX, 0 },
+                         (destination ? input.mSource : input.mDestination).mProposedIdentities.front(),
+                         input.mScripts.mOther.front().mIdentity })
+                    mutate([&](auto& bad) {
+                        (destination ? bad.mDestination : bad.mSource).mSelection = selection;
+                    });
                 const auto object = [&](auto change) {
                     mutate([&](auto& bad) { change((destination ? bad.mDestination : bad.mSource).mObjects.back()); });
                 };
@@ -1732,6 +1748,25 @@ namespace MWWorld::Testing
                 change(tag, 999999, true);
             change("FVER", 1, true); // No version-1 migration or inferred metadata.
             change("FVER", 2, true); // Version 2 did not persist script service state.
+            change("FVER", 3, true); // Version 3 did not persist selections.
+            change("FVER", 5, true);
+            bad = bytes;
+            bad.erase(bad.begin() + find("SSEL").mHeader, bad.begin() + find("DSEL").mHeader + 16);
+            put(bad, find("SSEL").mRecord + 4, number(bytes, find("SSEL").mRecord + 4) - 32);
+            put(bad, find("FVER").mHeader + 8, 3);
+            reject(bad, bindings, true); // Actual version-3 layout without either selection field.
+            for (const auto tag : { "SSEL", "DSEL" })
+                for (auto selection : { ESM::RefNum{ 0, -2 }, ESM::RefNum{ 9, -2 },
+                         ESM::RefNum{ UINT32_MAX, 0 }, bindings.mEnvelope.mSourceOwner,
+                         input.mScripts.mOther.front().mIdentity,
+                         (std::string_view(tag) == "SSEL" ? input.mDestination : input.mSource)
+                             .mProposedIdentities.front() })
+                {
+                    bad = bytes;
+                    put(bad, find(tag).mHeader + 8, selection.mIndex);
+                    put(bad, find(tag).mHeader + 12, static_cast<uint32_t>(selection.mContentFile));
+                    reject(bad, bindings, true);
+                }
             bad = bytes;
             bad.erase(bad.begin() + find("RREV").mHeader, bad.begin() + find("LGEN").mHeader + 16);
             put(bad, find("RREV").mRecord + 4, number(bytes, find("RREV").mRecord + 4) - 32);
@@ -1750,7 +1785,7 @@ namespace MWWorld::Testing
             }
             // Strict framing: missing, short, long, duplicate and reordered
             // metadata must fail before ESMReader allocation or output publication.
-            for (const auto tag : { "RREV", "LGEN" })
+            for (const auto tag : { "RREV", "LGEN", "SSEL", "DSEL" })
                 for (const size_t size : { size_t{ 0 }, size_t{ 4 }, size_t{ 12 } })
                 {
                     const auto& field = find(tag);
@@ -1763,7 +1798,7 @@ namespace MWWorld::Testing
                             + static_cast<uint32_t>(size));
                     reject(bad, bindings, true);
                 }
-            for (const auto tag : { "RREV", "LGEN" })
+            for (const auto tag : { "RREV", "LGEN", "SSEL", "DSEL" })
             {
                 const auto& field = find(tag);
                 bad = bytes;
@@ -1857,7 +1892,7 @@ namespace MWWorld::Testing
             reject(bad, bindings, true);
             append("XSAV", 1); // Well-framed duplicate extension.
             reject(bad, bindings);
-            for (const auto tag : { "RREV", "LGEN" })
+            for (const auto tag : { "RREV", "LGEN", "SSEL", "DSEL" })
             {
                 append(tag, 1);
                 reject(bad, bindings, true);
@@ -1896,7 +1931,7 @@ namespace MWWorld::Testing
             reject(bytes, { bindings.mEnvelope, bindings.mContent, bindings.mReferenceIds.first(1) }, true);
 
             const auto invalidRestarts = invalidRestartValues(input.mRestart);
-            for (size_t mode = 0; mode < 21 + invalidRestarts.size(); ++mode)
+            for (size_t mode = 0; mode < 33 + invalidRestarts.size(); ++mode)
             {
                 auto invalid = input;
                 auto envelope = bindings.mEnvelope;
@@ -1946,13 +1981,23 @@ namespace MWWorld::Testing
                 }
                 if (mode >= 18 && mode < 18 + invalidRestarts.size())
                     invalid.mRestart = invalidRestarts[mode - 18];
-                if (mode >= 18 + invalidRestarts.size())
+                if (mode >= 18 + invalidRestarts.size() && mode < 21 + invalidRestarts.size())
                 {
                     const auto owner = mode - 18 - invalidRestarts.size();
                     auto& id = owner == 0 ? envelope.mSourceOwner
                         : owner == 1     ? envelope.mDestinationOwner
                                          : envelope.mInitiator;
                     id = { input.mRestart.mLastGenerated.mIndex + 1, -1 };
+                }
+                if (mode >= 21 + invalidRestarts.size())
+                {
+                    const auto selectionCase = mode - 21 - invalidRestarts.size();
+                    auto& side = selectionCase < 6 ? invalid.mSource : invalid.mDestination;
+                    const auto& other = selectionCase < 6 ? invalid.mDestination : invalid.mSource;
+                    const std::array selections{ ESM::RefNum{ 0, -2 }, ESM::RefNum{ 9, -2 },
+                        ESM::RefNum{ UINT32_MAX, 0 }, envelope.mSourceOwner,
+                        invalid.mScripts.mOther.front().mIdentity, other.mProposedIdentities.front() };
+                    side.mSelection = selections[selectionCase % 6];
                 }
                 const auto retained = pairOutputState(invalid);
                 TransferSaveBytes output(57, 'x');
@@ -2028,6 +2073,13 @@ namespace MWWorld::Testing
             decodeTransferSave(bytes, bindings, output);
         }
 
+        void checkSelections(const DisposableTransferRehearsal& fixture, const SerializedPair& saved)
+        {
+            require(fixture.selectionIdentity(fixture.mSource) == saved.mSource.mSelection
+                    && fixture.selectionIdentity(fixture.mDestination) == saved.mDestination.mSelection,
+                "installed selection lost identity, owner, dormant position or unset state");
+        }
+
         void saveFixture(const DisposableTransferRehearsal& fixture, const Compiler::Locals& declarations,
             SerializedPair& output)
         {
@@ -2040,6 +2092,8 @@ namespace MWWorld::Testing
             };
             save(fixture.sourceStorage(), output.mSource);
             save(fixture.destinationStorage(), output.mDestination);
+            output.mSource.mSelection = fixture.selectionIdentity(fixture.mSource);
+            output.mDestination.mSelection = fixture.selectionIdentity(fixture.mDestination);
             output.mScripts = {};
             output.mScripts.mShared = fixture.mDestinationAdd.mLocalScripts == &fixture.mSourceScripts;
             for (const auto& node : fixture.otherStorage())
@@ -4164,8 +4218,7 @@ namespace MWWorld::Testing
                         && fixture.scriptCursor(fixture.mSourceScripts) == sourceCursor
                         && fixture.scriptCursor(*fixture.mDestinationAdd.mLocalScripts) == destinationCursor,
                     "restart did not consume exact registry/list storage/cursor");
-                for (const auto* store : { &fixture.mSource, &fixture.mDestination })
-                    require(store->getSelectedEnchantItem() == store->end(), "restart restored deferred selection");
+                checkSelections(fixture, saved);
                 for (const auto& [id, binding] : registry.mEntries)
                 {
                     const auto item = fixture.mModel.getPtr(id);
@@ -4183,7 +4236,7 @@ namespace MWWorld::Testing
                 checkSavedValues(installed, saved);
                 TransferSaveBytes bytes;
                 encodeTransferSave(installed, bindings, bytes);
-                require(bytes == wire, "installed engine save differs from accepted version-3 bytes");
+                require(bytes == wire, "installed engine save differs from accepted version-4 bytes");
                 SerializedPair decodedAgain;
                 decodeTransferSave(bytes, bindings, decodedAgain);
                 std::unique_ptr<const RestoredPair> again;
@@ -4253,7 +4306,7 @@ namespace MWWorld::Testing
 
             // Independently tamper with protected candidates and caller inputs;
             // every repair retries the same retained nodes on a healthy fixture.
-            for (int mode = 0; mode < 20; ++mode)
+            for (int mode = 0; mode < 27; ++mode)
             {
                 auto input = make(decoded);
                 auto& nodes = const_cast<RestoredPair&>(*input.mNodes);
@@ -4265,6 +4318,10 @@ namespace MWWorld::Testing
                 auto originalRef = inventory.mNodes.front().mRef;
                 auto originalData = inventory.mNodes.front().mData.copyForContainerTransfer();
                 const auto originalRestart = nodes.mRestart;
+                const auto originalSelection = inventory.mSelection;
+                const auto originalDestinationSelection = nodes.mDestination.mSelection;
+                const auto freshSourceSelection = fixture.mSource.getSelectedEnchantItem();
+                const auto freshDestinationSelection = fixture.mDestination.getSelectedEnchantItem();
                 const auto* originalBase = inventory.mNodes.front().mBase;
                 const auto* originalService = fixture.mDestinationAdd.mLocalScripts;
                 const auto originalRegistry = input.mRegistry->getBindings();
@@ -4318,6 +4375,25 @@ namespace MWWorld::Testing
                     ++inventory.mProposedIdentities.front().mIndex;
                 if (mode == 19)
                     ++const_cast<PtrRegistry::Snapshot&>(input.mRegistry->getBindings()).mLastGenerated.mIndex;
+                if (mode == 20)
+                    inventory.mSelection = nodes.mDestination.mProposedIdentities.front();
+                if (mode == 21)
+                    bad.mDestination.mSelection = bad.mSource.mProposedIdentities.front();
+                if (mode == 22)
+                    inventory.mSelection = bad.mSource.mSelection = bindings.mEnvelope.mSourceOwner;
+                if (mode == 23)
+                    inventory.mSelection = bad.mSource.mSelection = { 0, -2 };
+                if (mode == 24)
+                {
+                    // Coherent but changed selection metadata cannot match accepted bytes.
+                    auto& selection = bad.mDestination.mSelection;
+                    selection = selection.isSet() ? ESM::RefNum{} : bad.mDestination.mProposedIdentities.front();
+                    nodes.mDestination.mSelection = selection;
+                }
+                if (mode == 25)
+                    fixture.mSource.setSelectedEnchantItem(fixture.mOther.end());
+                if (mode == 26)
+                    fixture.mDestination.setSelectedEnchantItem(fixture.mOther.end());
                 // Empty original service has no cursor change to reject.
                 if (mode != 15 || !fixture.mSourceScripts.snapshot().mEntries.empty())
                     reject(input, [&] { attempt(input, bad, wire); });
@@ -4334,6 +4410,10 @@ namespace MWWorld::Testing
                 inventory.mNodes.front().mData = std::move(originalData);
                 inventory.mNodes.front().mBase = originalBase;
                 nodes.mRestart = originalRestart;
+                inventory.mSelection = originalSelection;
+                nodes.mDestination.mSelection = originalDestinationSelection;
+                fixture.mSource.setSelectedEnchantItem(freshSourceSelection);
+                fixture.mDestination.setSelectedEnchantItem(freshDestinationSelection);
                 fixture.mDestinationAdd.mLocalScripts = const_cast<LocalScripts*>(originalService);
                 const_cast<PtrRegistry::Snapshot&>(input.mRegistry->getBindings()) = originalRegistry;
                 const_cast<std::remove_const_t<std::remove_reference_t<decltype(storage.getCursor())>>&>(
@@ -4543,9 +4623,7 @@ namespace MWWorld::Testing
                 encodeTransferSave(actual, bindings, again);
                 require(again == bytes && actual.mRestart == decoded.mRestart,
                     "continuation fresh install rebuilt counters or changed accepted engine bytes");
-                require(fixture->mSource.getSelectedEnchantItem() == fixture->mSource.end()
-                        && fixture->mDestination.getSelectedEnchantItem() == fixture->mDestination.end(),
-                    "continuation restart restored deferred selections");
+                checkSelections(*fixture, decoded);
                 return fixture;
             };
             const auto commandFor = [&](const SerializedPair& prior) {
@@ -4638,6 +4716,12 @@ namespace MWWorld::Testing
                     auto pair = fixture->mSource.prepareTransfer(
                         item, quantity, fixture->mDestination, fixture->mRemoval, fixture->mDestinationAdd, resolved);
                     serializePair(*fixture, pair, bindings.mContent.mDeclarations, expected);
+                    const auto sourceSelection = prior.mSource.mSelection == sourceId
+                            && pair.getSourceItem().getCellRef().getCount(false) == 0
+                        ? ESM::RefNum{} : prior.mSource.mSelection;
+                    require(expected.mSource.mSelection == sourceSelection
+                            && expected.mDestination.mSelection == prior.mDestination.mSelection,
+                        "continuation changed stock full/partial removal or retained destination selection");
                     expectedResult = { command, owned(pair.getDestinationIdentity()),
                         pair.getSourceItem().getCellRef().getCount(false),
                         pair.getDestinationItem().getCellRef().getCount(false), expected.mRestart.mRevision };
@@ -4697,6 +4781,15 @@ namespace MWWorld::Testing
                     fixture->mDestinationAdd.mLocalScripts = nullptr;
                     reject(command, false);
                     fixture->mDestinationAdd.mLocalScripts = service;
+                    for (bool destination : { false, true })
+                    {
+                        auto& store = destination ? fixture->mDestination : fixture->mSource;
+                        const auto originalSelection = store.getSelectedEnchantItem();
+                        store.setSelectedEnchantItem(
+                            destination ? fixture->mSource.begin() : fixture->mDestination.begin());
+                        reject(command, false);
+                        store.setSelectedEnchantItem(originalSelection);
+                    }
                     for (auto safe :
                         { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close, FileFault::Replace })
                     {
@@ -4851,13 +4944,12 @@ namespace MWWorld::Testing
                                     == &fixture->mDestination
                                 && nodeState(ConstPtr(&fixture->otherStorage().front())) == otherBefore
                                 && fixture->cacheState(fixture->mOther) == otherCache
-                                && fixture->mNotifications == notifications && listener.mCalls == 0
-                                && fixture->mSource.getSelectedEnchantItem() == fixture->mSource.end()
-                                && fixture->mDestination.getSelectedEnchantItem() == fixture->mDestination.end(),
+                                && fixture->mNotifications == notifications && listener.mCalls == 0,
                             "continuation result lost fresh ownership or changed unrelated state/effects");
                         SerializedPair actual;
                         saveFixture(*fixture, bindings.mContent.mDeclarations, actual);
                         checkSavedValues(actual, expected);
+                        checkSelections(*fixture, expected);
                         const auto committed = snapshot(*fixture);
                         const auto* success = output.get();
                         faults = {};
@@ -4944,7 +5036,22 @@ namespace MWWorld::Testing
             TransferSaveBytes bytes;
             encodeTransferSave(saved, bindings, bytes);
             verifyOriginal();
-            if (install || continuation)
+            if (continuation)
+            {
+                TransferFileSink file(scratch / "inventory.bin");
+                FileFaults faults;
+                require(original->commitDurably(make(), content.mDeclarations,
+                            [&](const SerializedPair& committed) {
+                                TransferSaveBytes actual;
+                                encodeTransferSave(committed, bindings, actual);
+                                require(actual == bytes, "initial transfer save differs from prepared values");
+                                return file.write(actual, faults);
+                            }),
+                    "initial transfer file save was not accepted");
+                require(fileBytes(scratch / "inventory.bin") == bytes, "initial accepted file differs from save");
+                checkSelections(*original, saved);
+            }
+            else if (install)
                 require(original->commit(make(), content.mDeclarations,
                             [&](const SerializedPair& committed) {
                                 TransferSaveBytes actual;
@@ -6197,6 +6304,113 @@ namespace MWWorld::Testing
             content, afterRestart ? AllocationCheck::RestartCommand : AllocationCheck::Command, scratch);
         require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
             "command test left staging files");
+    }
+
+    void checkTransferSelections(const ESMStore& content, const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "selection scratch directory already exists");
+        struct Cleanup
+        {
+            const std::filesystem::path& mPath;
+            ~Cleanup()
+            {
+                std::error_code ignored;
+                std::filesystem::remove_all(mPath, ignored);
+            }
+        } cleanup{ scratch };
+        MWClass::registerClasses();
+        ESMStore store;
+        const auto plainId = ESM::RefId::stringRefId("native_plain");
+        const auto scriptedId = ESM::RefId::stringRefId("native_scripted");
+        const auto ownerId = ESM::RefId::stringRefId("player");
+        const auto scriptId = ESM::RefId::stringRefId("native_script");
+        for (auto id : { plainId, scriptedId })
+            store.insertStatic(*content.get<ESM::Miscellaneous>().find(id));
+        store.insertStatic(*content.get<ESM::NPC>().find(ownerId));
+        const auto script = *content.get<ESM::Script>().find(scriptId);
+        store.insertStatic(script);
+        ESM::ReadersCache readers;
+        Compiler::Extensions extensions;
+        Compiler::registerExtensions(extensions);
+        MWScript::CompilerContext context(MWScript::CompilerContext::Type_Full);
+        context.setExtensions(&extensions);
+        struct Scripts final : MWScript::ScriptManager
+        {
+            using MWScript::ScriptManager::ScriptManager;
+            int mRuns = 0;
+            bool run(const ESM::RefId&, Interpreter::Context&) override
+            {
+                ++mRuns;
+                throw std::runtime_error("selection test executed script instructions");
+            }
+        } scripts(store, context, 1);
+        const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
+            store.get<ESM::Miscellaneous>().find(scriptedId) };
+        const RestoreContent suppliedContent{ bases, script, scripts.getLocals(scriptId) };
+        CommandEvidence evidence;
+        size_t cases = 0, rejected = 0;
+        for (bool shared : { false, true })
+            for (bool scripted : { false, true })
+                for (int quantity : { 1, 3 })
+                    for (int selection : { 0, 1, 2, 3 })
+                    {
+                        auto fixture = std::make_unique<DisposableTransferRehearsal>(
+                            store, readers, scripts, ownerId, shared);
+                        ManualRef itemTemplate(store, scripted ? scriptedId : plainId);
+                        ManualRef unrelated(store, plainId);
+                        unrelated.getPtr().getCellRef().setSoul(ESM::RefId::stringRefId("dormant_soul"));
+                        const auto item = fixture->mSource.add(itemTemplate.getPtr(), 4, fixture->mSourceAdd);
+                        const auto sourceOther = fixture->mSource.add(unrelated.getPtr(), 2, fixture->mSourceAdd);
+                        const auto destination = fixture->mDestination.add(
+                            selection == 3 ? unrelated.getPtr() : itemTemplate.getPtr(), 7, fixture->mDestinationAdd);
+                        if (selection >= 2)
+                            destination->getCellRef() = destination->getCellRef().copyWithCount(0);
+                        if (selection == 3)
+                            sourceOther->getCellRef() = sourceOther->getCellRef().copyWithCount(0);
+                        fixture->mSource.setSelectedEnchantItem(selection == 0 ? fixture->mSource.end()
+                                : selection == 1                              ? item
+                                                                              : sourceOther);
+                        fixture->mDestination.setSelectedEnchantItem(
+                            selection == 0 ? fixture->mDestination.end() : destination);
+                        const auto other = fixture->mOther.add(itemTemplate.getPtr(), 3, fixture->mOtherAdd);
+                        other->getCellRef() = other->getCellRef().copyWithCount(0);
+                        if (shared)
+                            fixture->mDestinationAdd.mPlayer = fixture->mSourceOwner.getPtr();
+                        const auto sourceId = item->getCellRef().getRefNum();
+                        const auto sourceSelection = fixture->selectionIdentity(fixture->mSource);
+                        const auto destinationSelection = fixture->selectionIdentity(fixture->mDestination);
+                        const std::array resolved{ ContainerStoreResolution(
+                            fixture->mOther, fixture->mOtherOwner.getPtr()) };
+                        const auto make = [&] {
+                            auto prepared = fixture->mSource.prepareTransfer(*item, 1, fixture->mDestination,
+                                fixture->mRemoval, fixture->mDestinationAdd, resolved);
+                            require(prepared.getSourceSelection() == sourceSelection
+                                    && prepared.getDestinationSelection() == destinationSelection,
+                                "initial partial transfer changed selected identity or unset state");
+                            if (selection == 2)
+                                require(prepared.getDestinationIdentity() != destinationSelection
+                                        && prepared.getRelocation().mDestinationSelection.getCellRef().getCount(false)
+                                            == 0,
+                                    "stock addition must retain the dormant selection and create a different stack");
+                            return prepared;
+                        };
+                        const auto before = snapshot(*fixture);
+                        checkRestartRegistryCase(fixture, make,
+                            [&] { require(snapshot(*fixture) == before, "selection preparation mutated fixture"); },
+                            store, readers, scripts, ownerId, shared, suppliedContent, rejected, true, false,
+                            &evidence, scratch, sourceId, quantity, !shared && quantity == 1 && selection == 2);
+                        require(scripts.mRuns == 0, "selection continuation ran scripts");
+                        ++cases;
+                    }
+        require(cases == 32 && evidence.mResultFailures == 2 && evidence.mRecovered == 128,
+            "focused selection failure/recovery coverage incomplete");
+        require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
+            "selection test left staging files");
+        std::cout << "Selection persistence: cases=" << cases << " safe-rejections=" << evidence.mRejected
+                  << " stale/repeated=" << evidence.mRepeated << " fail-closed-outcomes=" << evidence.mUncertain
+                  << " allocation-failures=" << evidence.mAllocations
+                  << " fresh-composition-recoveries=" << evidence.mRecovered
+                  << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";
     }
 
     void checkTransferCommit(const ESMStore& content)

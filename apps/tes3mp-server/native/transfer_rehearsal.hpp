@@ -33,6 +33,7 @@ namespace MWWorld::Testing
     {
         std::vector<ESM::ObjectState> mObjects;
         std::vector<ESM::RefNum> mProposedIdentities;
+        ESM::RefNum mSelection; // Owned identity or canonical unset, including dormant nodes.
 
         void swap(SerializedInventory& other) noexcept
         {
@@ -40,6 +41,8 @@ namespace MWWorld::Testing
             static_assert(noexcept(mProposedIdentities.swap(other.mProposedIdentities)));
             mObjects.swap(other.mObjects);
             mProposedIdentities.swap(other.mProposedIdentities);
+            static_assert(std::is_nothrow_swappable_v<ESM::RefNum>);
+            std::swap(mSelection, other.mSelection);
         }
     };
 
@@ -111,6 +114,7 @@ namespace MWWorld::Testing
     {
         PreparedContainerTransfer::MiscList mNodes;
         std::vector<ESM::RefNum> mProposedIdentities;
+        ESM::RefNum mSelection; // Owned identity or canonical unset, including dormant nodes.
         std::vector<ConstPtr> mViews;
     };
 
@@ -273,10 +277,10 @@ namespace MWWorld::Testing
             const RestartScriptBindings& fresh, std::unique_ptr<const RestartScripts>& output) const;
 
         // Fresh-fixture-only consumption of candidates from the preparation APIs.
-        // accepted is the caller's previously accepted version-3 save, not proof
+        // accepted is the caller's previously accepted version-4 save, not proof
         // of production durability. Serialized access and content lifetimes remain
         // required. Failure retains every input/output; success consumes all three
-        // candidates and publishes an owned coherent save. No selections/effects.
+        // candidates and publishes an owned coherent save. No effects.
         void installRestart(std::span<const char> accepted, const SerializedPair& decoded, const SaveBindings& bindings,
             std::unique_ptr<const RestoredPair>& restored, std::unique_ptr<const RestartRegistry>& registry,
             std::unique_ptr<const RestartScripts>& scripts, std::unique_ptr<const SerializedPair>& output);
@@ -292,6 +296,8 @@ namespace MWWorld::Testing
             const SaveBindings& bindings, const RestartRegistry& registry, const RestartScripts& scripts) const;
 
     public:
+
+        ESM::RefNum selectionIdentity(const ContainerStore& store) const { return store.transferSelection(); }
 
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
@@ -322,6 +328,7 @@ namespace MWWorld::Testing
     void checkTransferScriptMetadata(const ESMStore& content);
     void checkTransferRestartScripts(const ESMStore& content);
     void checkTransferRestartInstallation(const ESMStore& content);
+    void checkTransferSelections(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCodec(const ESMStore& content);
     void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommand(const ESMStore& content, const std::filesystem::path& scratch, bool afterRestart = false);
