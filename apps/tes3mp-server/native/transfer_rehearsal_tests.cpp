@@ -2258,6 +2258,11 @@ namespace MWWorld::Testing
             size_t mReturns = 0;
             size_t mAlternations = 0;
             std::array<unsigned, 2> mAlternatingDeliveryModes{};
+            size_t mContended = 0, mContentionStale = 0;
+            unsigned mContentionOrders = 0;
+            size_t mContentionRestarts = 0, mContentionDeliveryFailed = 0, mContentionViewFailures = 0;
+            std::array<unsigned, 2> mContentionDeliveryModes{};
+            size_t mContentionSafe = 0, mContentionAllocations = 0, mContentionResultFailures = 0;
         };
 
         InventoryNotificationBatch expectedNotifications(const InventoryTransferSuccess& success,
@@ -2615,6 +2620,218 @@ namespace MWWorld::Testing
             ++evidence.mAlternations;
             evidence.mAlternatingDeliveryModes[reverse] |= 1u << mode;
             return result;
+        }
+
+        // Both callers are authorized by the composition before either arrives.
+        // The commands and their outputs remain independent owned values.
+        template <class Install>
+        void checkContendedCommands(Install install, InventoryTransferCommand seed,
+            const TransferSaveBytes& priorBytes, const SaveBindings& bindings, const std::filesystem::path& path,
+            CommandEvidence& evidence, bool exhaustive)
+        {
+            using namespace Allocations;
+            CommandEvidence flow;
+            const auto owned = [](ESM::RefNum id) { return InventoryInstanceId{ id.mIndex, id.mContentFile }; };
+            const auto engine = [](InventoryInstanceId id) { return ESM::RefNum{ id.mIndex, id.mContentFile }; };
+            const std::array callers{ InventoryTransferCaller{ owned(bindings.mEnvelope.mSourceOwner) },
+                InventoryTransferCaller{ owned(bindings.mEnvelope.mDestinationOwner) } };
+            auto temporary = path;
+            temporary += ".tmp";
+            for (size_t first : { 0u, 1u })
+                for (bool restart : { false, true })
+                {
+                    TransferFileSink file(path);
+                    FileFaults faults;
+                    require(file.write(priorBytes, faults) == TestPersistenceResult::Accepted,
+                        "contention seed persistence failed");
+                    InventoryViewSnapshot views;
+                    auto fixture = install(fileBytes(path), &views);
+                    std::array commands{ seed, seed };
+                    for (size_t index : { 0u, 1u })
+                        commands[index].mInitiator = callers[index].mInitiator;
+                    const auto commandsBefore = commands;
+                    const bool reverse = seed.mSourceOwner == owned(bindings.mEnvelope.mDestinationOwner);
+                    auto& source = reverse ? fixture->mDestination : fixture->mSource;
+                    auto& destination = reverse ? fixture->mSource : fixture->mDestination;
+                    const auto before = snapshot(*fixture);
+                    const auto item = fixture->mModel.getPtr(engine(seed.mItem));
+                    std::array<SerializedPair, 2> saves;
+                    std::array<InventoryTransferSuccess, 2> expected;
+                    // Independent stock contexts prove that each intent is viable at
+                    // this revision, including each caller's OnPCAdd consequence.
+                    for (size_t index : { 0u, 1u })
+                    {
+                        const auto removal = reverse
+                            ? ContainerStoreRemoveContext{ fixture->mModel, fixture->mDestinationOwner.getPtr(),
+                                *fixture->mDestinationAdd.mLocalScripts, fixture->mDestinationAdd.mInventoryUpdated }
+                            : fixture->mRemoval;
+                        auto addition = reverse ? fixture->mSourceAdd : fixture->mDestinationAdd;
+                        addition.mPlayer = fixture->mModel.getPtr(engine(callers[index].mInitiator));
+                        const std::array resolved{ ContainerStoreResolution(fixture->mOther, fixture->mOtherOwner.getPtr()) };
+                        const auto pair = source.prepareTransfer(item, seed.mQuantity, destination, removal, addition, resolved);
+                        require(source.validateTransfer(pair, destination, removal, addition).isComplete(),
+                            "contention intent was not independently viable before arrival");
+                        serializePair(*fixture, pair, bindings.mContent.mDeclarations, saves[index], reverse, addition.mPlayer);
+                        expected[index] = { commands[index], owned(pair.getDestinationIdentity()),
+                            pair.getSourceItem().getCellRef().getCount(false),
+                            pair.getDestinationItem().getCellRef().getCount(false), pair.getRelocation().mRegistry.mRevision };
+                        expected[index].mSourceSelection = owned(pair.getSourceSelection());
+                        expected[index].mDestinationSelection = owned(pair.getDestinationSelection());
+                        expected[index].mNotifications = expectedNotifications(expected[index]);
+                        const auto target = fixture->mModel.getPtr(pair.getDestinationIdentity());
+                        const auto counter = fixture->mModel.getLastGeneratedRefNum();
+                        require(expected[index].mRevision == seed.mExpectedRevision + 1
+                                && saves[index].mRestart.mLastGenerated
+                                    == ESM::RefNum{ counter.mIndex + (target.isEmpty() ? 1u : 0u), -1 },
+                            "contention preparation rebuilt exact saved counters");
+                        if (!item.getRefData().getLocals().getScriptId().empty())
+                            require(pair.getDestinationItem().getRefData().getLocals().mShorts.front()
+                                    == (callers[index].mInitiator == seed.mDestinationOwner
+                                            ? 1 : item.getRefData().getLocals().mShorts.front()),
+                                "contender preparation substituted the other caller's script context");
+                    }
+                    require(snapshot(*fixture) == before && commands[0].mExpectedRevision == commands[1].mExpectedRevision,
+                        "constructing contenders mutated their common revision");
+                    std::array<std::unique_ptr<const InventoryTransferSuccess>, 2> outputs;
+                    for (size_t index : { 0u, 1u })
+                        outputs[index] = std::make_unique<const InventoryTransferSuccess>(
+                            InventoryTransferSuccess{ commands[index] });
+                    const size_t last = 1 - first;
+                    const auto* loserStorage = outputs[last].get();
+                    const auto loserValue = *outputs[last];
+                    if (!restart)
+                    {
+                        const auto* firstStorage = outputs[first].get();
+                        const auto firstValue = *outputs[first];
+                        const auto beforeViews = views;
+                        const auto beforeStorage = viewStorage(views);
+                        const auto rejectBeforeArrival = [&](FileFault fault, size_t ordinal = 0) {
+                            faults = { fault, 17 };
+                            Trace rejected;
+                            bool rejectedSafely = false, allocationFailed = false;
+                            {
+                                Observe observe(rejected, ordinal);
+                                try
+                                {
+                                    rejectedSafely = !executeInventoryTransfer(*fixture, callers[last], commands[last],
+                                        bindings, file, faults, outputs[last]);
+                                }
+                                catch (const std::bad_alloc&) { allocationFailed = true; }
+                            }
+                            require((ordinal ? allocationFailed && rejected.mFailures == 1
+                                               && rejected.mTotal == ordinal && faults.mReached == FileFault::None
+                                             : rejectedSafely && faults.mReached != FileFault::None)
+                                    && rejected.visits(Phase::Installation) == 0 && rejected.visits(Phase::Publication) == 0
+                                    && rejected.mOutstanding == 0 && rejected.mTrackingOverflow == 0
+                                    && snapshot(*fixture) == before && views == beforeViews && viewStorage(views) == beforeStorage
+                                    && outputs[first].get() == firstStorage && *outputs[first] == firstValue
+                                    && outputs[last].get() == loserStorage && *outputs[last] == loserValue
+                                    && !file.failedClosed() && !fixture->failedClosed() && fileBytes(path) == priorBytes
+                                    && commands == commandsBefore && !std::filesystem::exists(temporary),
+                                "safe contender failure changed either pending intent, output, view or canonical state");
+                            if (ordinal)
+                            {
+                                ++evidence.mContentionAllocations;
+                                evidence.mContentionResultFailures += rejected.mFailedPhase == Phase::Result;
+                            }
+                            else
+                                ++evidence.mContentionSafe;
+                            return rejected.mTotal;
+                        };
+                        const auto allocations = rejectBeforeArrival(FileFault::Create);
+                        for (auto fault : { FileFault::Write, FileFault::Flush, FileFault::Close, FileFault::Replace })
+                            rejectBeforeArrival(fault);
+                        if (exhaustive)
+                            for (size_t ordinal = 1; ordinal <= allocations; ++ordinal)
+                                rejectBeforeArrival(FileFault::Create, ordinal);
+                        // The other already-issued intent can now win without any
+                        // revision repair: safe rejection committed neither caller.
+                    }
+                    TransferSaveBytes accepted;
+                    encodeTransferSave(saves[first], bindings, accepted);
+                    faults = {};
+                    Trace trace;
+                    {
+                        Observe observe(trace);
+                        require(executeInventoryTransfer(*fixture, callers[first], commands[first], bindings, file, faults,
+                                    outputs[first]), "first authorized contender did not commit");
+                    }
+                    require(*outputs[first] == expected[first] && fileBytes(path) == accepted
+                            && trace.allocations(Phase::Result) == 1 && trace.visits(Phase::Installation) == 1
+                            && trace.visits(Phase::Publication) == 1 && trace.allocations(Phase::Installation) == 0
+                            && trace.allocations(Phase::Retirement) == 0 && trace.allocations(Phase::Publication) == 0
+                            && trace.mTrackingOverflow == 0,
+                        "contention winner did not persist once before allocation-free installation/publication");
+                    SerializedPair actual;
+                    saveFixture(*fixture, bindings.mContent.mDeclarations, actual);
+                    checkSavedValues(actual, saves[first]);
+                    checkSelections(*fixture, saves[first]);
+                    const auto committed = snapshot(*fixture);
+                    const auto rejectLoser = [&] {
+                        const auto state = snapshot(*fixture);
+                        const auto oldViews = views;
+                        const auto oldViewStorage = viewStorage(views);
+                        const auto* winnerStorage = outputs[first].get();
+                        for (size_t failAt : { 0u, 1u })
+                        {
+                            faults = {};
+                            Trace rejected;
+                            bool stale = false;
+                            {
+                                Observe observe(rejected, failAt);
+                                try
+                                {
+                                    executeInventoryTransfer(*fixture, callers[last], commands[last], bindings, file, faults,
+                                        outputs[last]);
+                                }
+                                catch (const std::invalid_argument&) { stale = true; }
+                                catch (const std::bad_alloc&) { stale = failAt == 1; }
+                            }
+                            require(stale && outputs[last].get() == loserStorage && *outputs[last] == loserValue
+                                    && outputs[first].get() == winnerStorage
+                                    && (!outputs[first] || *outputs[first] == expected[first]) && commands == commandsBefore
+                                    && snapshot(*fixture) == state && views == oldViews && viewStorage(views) == oldViewStorage
+                                    && faults.mReached == FileFault::None && faults.mWrites == 0 && faults.mReads == 0
+                                    && fileBytes(path) == accepted && rejected.visits(Phase::Preparation) == 0
+                                    && rejected.visits(Phase::Persistence) == 0 && rejected.visits(Phase::Installation) == 0
+                                    && rejected.visits(Phase::Publication) == 0 && rejected.mOutstanding == 0
+                                    && !fixture->failedClosed() && !file.failedClosed(),
+                                "stale authorized loser changed output, views, gameplay or persistence");
+                            ++evidence.mContentionStale;
+                        }
+                    };
+                    rejectLoser();
+                    const auto acceptedViews = savedViews(saves[first], bindings.mEnvelope);
+                    const auto mode = static_cast<unsigned>((evidence.mContended / 4) % 15);
+                    checkNotificationConsumption(outputs[first], expected[first],
+                        [&] { return fixture->mModel.getPtrRegistryRevision() == expected[first].mRevision; },
+                        mode, flow, &views, &acceptedViews);
+                    require(snapshot(*fixture) == committed && fileBytes(path) == accepted,
+                        "contention delivery failure changed committed state or persistence");
+                    if (restart)
+                    {
+                        fixture.reset();
+                        fixture = install(fileBytes(path));
+                        rejectLoser(); // Owned stale input/output outlive the winning fixture.
+                        ++evidence.mContentionRestarts;
+                    }
+                    const auto recoveryState = snapshot(*fixture);
+                    checkViewResynchronization(*fixture, views, acceptedViews, flow);
+                    require(snapshot(*fixture) == recoveryState && fileBytes(path) == accepted,
+                        "contention view recovery replayed committed gameplay");
+                    const auto next = checkAlternatingCommand(*fixture, bindings, file, path, expected[first],
+                        saves[first], accepted, flow, views);
+                    require(next.mCommand.mInitiator == callers[last].mInitiator
+                            && next.mCommand.mExpectedRevision == acceptedViews.mOwners[last].mRevision
+                            && next.mRevision == expected[first].mRevision + 1
+                            && outputs[last].get() == loserStorage && *outputs[last] == loserValue,
+                        "resynchronized loser did not issue a new intent with independent output");
+                    ++evidence.mContended;
+                    evidence.mContentionOrders |= 1u << first;
+                    evidence.mContentionDeliveryFailed += mode != 0;
+                    evidence.mContentionViewFailures += mode >= 13;
+                    evidence.mContentionDeliveryModes[first] |= 1u << mode;
+                }
         }
 
         template <class Make, class Verify, class Unrelated>
@@ -5205,6 +5422,15 @@ namespace MWWorld::Testing
                 auto fixture = installed(fileBytes(path), &views);
                 const auto command = commandFor(prior);
                 const auto commandBefore = command;
+                const auto waitingCommand = [&] {
+                    auto waiting = command;
+                    waiting.mInitiator = alternate.mInitiator;
+                    return waiting;
+                }();
+                auto waitingOutput = std::make_unique<const InventoryTransferSuccess>(
+                    InventoryTransferSuccess{ waitingCommand });
+                const auto* waitingStorage = waitingOutput.get();
+                const auto waitingValue = *waitingOutput;
                 auto& source = reverse ? fixture->mDestination : fixture->mSource;
                 auto& destination = reverse ? fixture->mSource : fixture->mDestination;
                 const auto item = fixture->mModel.getPtr(sourceId);
@@ -5223,7 +5449,8 @@ namespace MWWorld::Testing
                 const auto sentinelValue = *output;
                 const auto preserved = [&] {
                     require(snapshot(*fixture) == before && output.get() == sentinel && *output == sentinelValue
-                            && listener.mCalls == 0 && command == commandBefore,
+                            && listener.mCalls == 0 && command == commandBefore
+                            && waitingOutput.get() == waitingStorage && *waitingOutput == waitingValue,
                         "failed continuation changed engine state, command or caller output storage/value");
                     unchangedInputs();
                 };
@@ -5461,25 +5688,29 @@ namespace MWWorld::Testing
                         "uncertain continuation lost a coherent accepted save");
                     TransferFileSink freshSink(path);
                     for (auto* sink : { &file, &freshSink })
-                    {
-                        faults = {};
-                        Trace closed;
-                        bool blocked = false;
+                        for (bool waiting : { false, true })
                         {
-                            Observe observe(closed, 1);
-                            try
+                            faults = {};
+                            Trace closed;
+                            bool blocked = false;
                             {
-                                executeInventoryTransfer(*fixture, caller, command, bindings, *sink, faults, output);
+                                Observe observe(closed, 1);
+                                try
+                                {
+                                    executeInventoryTransfer(*fixture, waiting ? alternate : caller,
+                                        waiting ? waitingCommand : command, bindings, *sink, faults,
+                                        waiting ? waitingOutput : output);
+                                }
+                                catch (const TestDurabilityUncertain&)
+                                {
+                                    blocked = true;
+                                }
                             }
-                            catch (const TestDurabilityUncertain&)
-                            {
-                                blocked = true;
-                            }
+                            require(blocked && closed.mTotal == 0 && faults.mReached == FileFault::None
+                                    && faults.mWrites == 0 && faults.mReads == 0 && fileBytes(path) == coherent,
+                                "uncertain continuation let a waiting caller retry through old/new sink");
+                            preserved();
                         }
-                        require(blocked && closed.mTotal == 0 && faults.mReached == FileFault::None,
-                            "uncertain continuation retried through old/new sink");
-                        preserved();
-                    }
                     fixture.reset();
                     auto recovered = installed(coherent);
                     faults = {};
@@ -5670,6 +5901,8 @@ namespace MWWorld::Testing
                     "continuation notified listeners or left staging");
                 return trace.mTotal;
             };
+            checkContendedCommands(installed, commandFor(saved), accepted, bindings, path, evidence, exhaustive);
+            unchangedInputs();
             const size_t allocations = run(saved, accepted, 0, 0, FileFault::None, true);
             for (unsigned listeners = 0; listeners < 3; ++listeners)
                 run(saved, accepted, 0, 0, FileFault::None, false, listeners);
@@ -6854,6 +7087,13 @@ namespace MWWorld::Testing
                     "same-fixture alternating initiation/delivery coverage missing");
                 require(!restartCommand || commandEvidence.mRecovered == 192,
                     "post-restart uncertainty recovery coverage missing");
+                require(!restartCommand || (commandEvidence.mContended == 4 * cases
+                            && commandEvidence.mContentionStale == 12 * cases && commandEvidence.mContentionOrders == 3
+                            && commandEvidence.mContentionRestarts == 2 * cases
+                            && commandEvidence.mContentionSafe == 10 * cases
+                            && commandEvidence.mContentionAllocations > 0 && commandEvidence.mContentionResultFailures == 4
+                            && commandEvidence.mContentionDeliveryModes == std::array<unsigned, 2>{ 0x7fff, 0x7fff }),
+                    "serialized two-caller contention missed an arrival order");
                 require(commandEvidence.mDeliveryModes == 0x7fff && commandEvidence.mViewAllocationFailures > 0
                         && commandEvidence.mViewResyncs > 0,
                     "notification consumer missed a failure boundary");
@@ -6866,6 +7106,13 @@ namespace MWWorld::Testing
                           << " allocation-failures=" << commandEvidence.mAllocations
                           << " return-commands=" << commandEvidence.mReturns
                           << " same-fixture-alternations=" << commandEvidence.mAlternations
+                          << " contended-winners=" << commandEvidence.mContended
+                          << " stale-contenders=" << commandEvidence.mContentionStale
+                          << " contention-restarts=" << commandEvidence.mContentionRestarts
+                          << " contention-delivery-failures=" << commandEvidence.mContentionDeliveryFailed
+                          << " contention-view-allocation-failures=" << commandEvidence.mContentionViewFailures
+                          << " contention-safe-file-failures=" << commandEvidence.mContentionSafe
+                          << " contention-allocation-failures=" << commandEvidence.mContentionAllocations
                           << " result-allocation-failures=" << commandEvidence.mResultFailures
                           << " fresh-composition-recoveries=" << commandEvidence.mRecovered
                           << " notification-delivered=" << commandEvidence.mDelivered
@@ -7178,7 +7425,12 @@ namespace MWWorld::Testing
             return;
         }
         require(cases == 32 && evidence.mResultFailures == 2 && evidence.mRecovered == 128
-                && evidence.mReturns == (returnTransfers ? 352u : 160u) && evidence.mAlternations == 160,
+                && evidence.mReturns == (returnTransfers ? 352u : 160u) && evidence.mAlternations == 160
+                && evidence.mContended == 4 * cases && evidence.mContentionStale == 12 * cases
+                && evidence.mContentionOrders == 3 && evidence.mContentionRestarts == 2 * cases
+                && evidence.mContentionSafe == 10 * cases && evidence.mContentionAllocations > 0
+                && evidence.mContentionResultFailures == 4
+                && evidence.mContentionDeliveryModes == std::array<unsigned, 2>{ 0x7fff, 0x7fff },
             "focused selection failure/recovery coverage incomplete");
         require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
             "selection test left staging files");
@@ -7188,6 +7440,13 @@ namespace MWWorld::Testing
                   << " fresh-composition-recoveries=" << evidence.mRecovered
                   << " return-commands=" << evidence.mReturns
                   << " same-fixture-alternations=" << evidence.mAlternations
+                  << " contended-winners=" << evidence.mContended
+                  << " stale-contenders=" << evidence.mContentionStale
+                  << " contention-restarts=" << evidence.mContentionRestarts
+                  << " contention-delivery-failures=" << evidence.mContentionDeliveryFailed
+                  << " contention-view-allocation-failures=" << evidence.mContentionViewFailures
+                  << " contention-safe-file-failures=" << evidence.mContentionSafe
+                  << " contention-allocation-failures=" << evidence.mContentionAllocations
                   << " delivery-failed-after-commit=" << evidence.mDeliveryFailed
                   << " view-resynchronizations=" << evidence.mViewResyncs
                   << " installation=0 retirement=0 publication=0 remaining-after-cleanup=0\n";
