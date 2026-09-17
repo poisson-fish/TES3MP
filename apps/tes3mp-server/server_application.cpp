@@ -1523,6 +1523,7 @@ namespace TES3MP::ServerApp
             mFailure = "melee contact history capture failed";
             return false;
         }
+        std::vector<TransportConnectionId> sendFailures;
         for (const auto connection : mWiring->sessions.connections())
         {
             const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;
@@ -1530,7 +1531,10 @@ namespace TES3MP::ServerApp
             if (!pumped || *pumped == OutboundPumpResult::TransportFailed || *pumped == OutboundPumpResult::InvalidTime
                 || *pumped == OutboundPumpResult::SlowPeerEvicted)
             {
-                (void)failConnection(connection, "connection send failed");
+                // A send may fail before the transport's closed event arrives.
+                // Keep session ownership until canonical disconnect is committed;
+                // erasing it here leaves a live lifecycle binding that cannot resume.
+                sendFailures.push_back(connection);
                 continue;
             }
             auto* session = mWiring->sessions.session(connection);
@@ -1564,6 +1568,18 @@ namespace TES3MP::ServerApp
             mRejectedCloseDeadlines.erase(deadline);
             (void)mWiring->sessions.close(connection);
             (void)mTransport.close(connection, TransportCloseMode::Graceful);
+        }
+        if (!sendFailures.empty())
+        {
+            // Both peers can disconnect in one pump. Project their removal as one
+            // transaction, without routing leave messages through a failed peer.
+            if (!disconnectConnections(sendFailures, tick))
+            {
+                mFailure = "send failure disconnect lifecycle failed";
+                return false;
+            }
+            for (const auto connection : sendFailures)
+                (void)failConnection(connection, "connection send failed");
         }
         return true;
     }

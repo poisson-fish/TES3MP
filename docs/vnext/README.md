@@ -26,14 +26,20 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking stays engine-independent. An app-local OpenMW runtime now owns bounded
-plain-shirt transfer, shared-container drop/take and equipment commands, coherent
-installation and recovery. An opt-in persistent native service now connects
-authenticated production intake, joint command/image durability and existing
-owned client baselines, including join/resume/resync. Real-loadout application
-tests use synthetic transport; two actual desktop clients also verify mapped
-plain-shirt GUI put/take, reconnect and durable restart. Automatic placed-reference
-bootstrap and broader modded-world observation remain unfinished. The server and desktop adapter remain the migration
+Networking stays engine-independent. An app-local OpenMW runtime owns bounded
+inventory transfer across all TES3 item record types, shared-container take/put,
+and coherent installation/recovery. OpenMW loads fixed and leveled base loot;
+both endpoints derive item identities from loaded content. Authenticated intake,
+joint command/image durability and client baselines include join/resume/resync.
+Two actual desktop clients verify stocked-chest GUI take/put, late join, reconnect
+and durable restart. Whole-interior bootstrap now discovers bounded shared
+inventories, with real-content headless verification of nine placements.
+Character bootstrap can load each player's winning NPC inventory, including
+fixed/leveled starting items, with stable identities and recovery without refill.
+Ordinary clothing, armor and weapons support authoritative equip/unequip across
+all 19 slots, coherent saves and private/public replication. Starting equipment
+is carried unequipped until commanded; auto-equipping and chargen/scripts remain pending.
+Scripts, locks/traps, respawn and dynamic world activation remain unfinished. The server and desktop adapter remain the migration
 base; each subsystem changes authority exactly once. Broad compatibility is the
 destination, reached through
 small playable slices rather than an engine-wide rewrite before the first test.

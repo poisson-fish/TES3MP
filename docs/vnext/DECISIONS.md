@@ -97,11 +97,41 @@ installation precedes owned publication. Format 6 deliberately rejects older
 development saves and requires explicit migration or a new campaign. Never mirror
 native results into CanonicalInventoryWorld. The initial production composition
 admits one native mutation per tick, durably rejecting later native intents in
-ingress order. A bounded operator descriptor binds established player roles and
-selected content to the authenticated manifest; recovery also checks actual
-content fingerprints. Seeded actor counts and an empty base container are explicit
-bootstrap limits, not placed-world import. Remove this bootstrap when engine-derived
-references and desktop mappings cover its callers.
+ingress order. A bounded descriptor binds established player roles and a selected
+OpenMW placement to the authenticated manifest; recovery also checks actual ordered
+content fingerprints and resolved placement. Descriptor v3 replaces manual item
+prototype mappings and binds explicit initial-loot level/seed. Older descriptors
+require explicit migration; never reset their campaigns automatically.
+Placed reference IDs use record-plugin order; script lists still participate in
+content fingerprints but their reader slots do not shift reference identity.
+Descriptor v4 discovers 1–32 winning container placements in one configured interior,
+ordered by stable identity, and binds the complete domain into the content digest.
+These stores stay loaded for the host lifetime; dynamic activation and respawn are
+not inferred from a client's scene. Any unsupported placement rejects this bootstrap.
+V3 descriptors and existing pair/one-container image layouts retain their meaning;
+changing the saved domain requires explicit migration or a new campaign. All shared
+stores and both players have one registry/counter and one atomic recovery boundary.
+Fresh inventories consume one stock fixed/leveled RNG stream in placement order;
+recovery installs saved contents without loading or rerolling base loot. Record-derived native item identities use
+raw condition/light-time and enchantment-charge bits in their projection fields;
+the complete engine image remains authoritative. Scripts, locks and traps fail
+visibly until their engine services exist.
+
+**Character inventory bootstrap is explicit.** Descriptor v5 binds each established
+player to a winning NPC inventory template, with no seed item. Assign all owner
+identities before loot; consume the configured stream in player-role order, then
+placement order. Empty inventories are valid. Recovery never loads base loot.
+Carried inventory initialization does not imply equipped slots, chargen/script
+execution or save import. V3/v4 retain their seeded meaning; switching versions
+requires explicit migration or a new campaign, never an automatic reset.
+
+**Equipment is part of the coherent inventory image.** Retain all 19 engine slots
+by item identity, including stackable ammunition. Full slot format 7 carries an
+explicit payload mode; shirt-only 1/5/6 encodings remain readable and unchanged.
+Every accepted equipment intent invalidates stale inventory revisions, including
+changes without a split. Use stock eligibility with explicit actor context;
+unsupported effect services reject. Slot initialization is separate from carried
+loot loading and never reruns during recovery.
 
 **Determinism is explicit, not assumed.** Server-owned order/ticks and saved RNG
 state remain important. Measure scheduling and stream consumption when reusing

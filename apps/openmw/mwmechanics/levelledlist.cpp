@@ -18,8 +18,6 @@ namespace MWMechanics
     ESM::RefId getLevelledItem(
         const ESM::LevelledListBase* levItem, bool creature, Misc::Rng::Generator& prng, std::optional<int> level)
     {
-        const std::vector<ESM::LevelledListBase::LevelItem>& items = levItem->mList;
-
         int playerLevel;
         if (level.has_value())
             playerLevel = *level;
@@ -27,8 +25,17 @@ namespace MWMechanics
         {
             const MWWorld::Ptr& player = getPlayer();
             playerLevel = player.getClass().getCreatureStats(player).getLevel();
-            level = playerLevel;
         }
+
+        return getLevelledItem(levItem, creature, prng, playerLevel, *MWBase::Environment::get().getESMStore());
+    }
+
+    ESM::RefId getLevelledItem(const ESM::LevelledListBase* levItem, bool creature,
+        Misc::Rng::Generator& prng, int playerLevel, const MWWorld::ESMStore& content, unsigned depth)
+    {
+        if (depth >= 64 || levItem->mList.size() > 4096)
+            throw std::invalid_argument("Levelled inventory list recursion or candidate budget exceeded");
+        const auto& items = levItem->mList;
 
         if (Misc::Rng::roll0to99(prng) < levItem->mChanceNone)
             return ESM::RefId();
@@ -56,7 +63,7 @@ namespace MWMechanics
         const ESM::RefId& item = *candidates[Misc::Rng::rollDice(candidates.size(), prng)];
 
         // Vanilla doesn't fail on nonexistent items in levelled lists
-        if (!MWBase::Environment::get().getESMStore()->find(item))
+        if (!content.find(item))
         {
             Log(Debug::Warning) << "Warning: ignoring nonexistent item " << item << " in levelled list "
                                 << levItem->mId;
@@ -64,7 +71,7 @@ namespace MWMechanics
         }
 
         // Is this another levelled item or a real item?
-        MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(), item, 1);
+        MWWorld::ManualRef ref(content, item, 1);
         if (ref.getPtr().getType() != ESM::ItemLevList::sRecordId
             && ref.getPtr().getType() != ESM::CreatureLevList::sRecordId)
         {
@@ -73,9 +80,9 @@ namespace MWMechanics
         else
         {
             if (ref.getPtr().getType() == ESM::ItemLevList::sRecordId)
-                return getLevelledItem(ref.getPtr().get<ESM::ItemLevList>()->mBase, false, prng, level);
+                return getLevelledItem(ref.getPtr().get<ESM::ItemLevList>()->mBase, false, prng, playerLevel, content, depth + 1);
             else
-                return getLevelledItem(ref.getPtr().get<ESM::CreatureLevList>()->mBase, true, prng, level);
+                return getLevelledItem(ref.getPtr().get<ESM::CreatureLevList>()->mBase, true, prng, playerLevel, content, depth + 1);
         }
     }
 }

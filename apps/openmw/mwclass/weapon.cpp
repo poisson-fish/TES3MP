@@ -1,4 +1,5 @@
 #include "weapon.hpp"
+#include "../mwworld/equipmentslots.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -83,26 +84,7 @@ namespace MWClass
 
     std::pair<std::vector<int>, bool> Weapon::getEquipmentSlots(const MWWorld::ConstPtr& ptr) const
     {
-        const MWWorld::LiveCellRef<ESM::Weapon>* ref = ptr.get<ESM::Weapon>();
-        ESM::WeaponType::Class weapClass = MWMechanics::getWeaponType(ref->mBase->mData.mType)->mWeaponClass;
-
-        std::vector<int> slots;
-        bool stack = false;
-
-        if (weapClass == ESM::WeaponType::Ammo)
-        {
-            slots.push_back(int(MWWorld::InventoryStore::Slot_Ammunition));
-            stack = true;
-        }
-        else if (weapClass == ESM::WeaponType::Thrown)
-        {
-            slots.push_back(int(MWWorld::InventoryStore::Slot_CarriedRight));
-            stack = true;
-        }
-        else
-            slots.push_back(int(MWWorld::InventoryStore::Slot_CarriedRight));
-
-        return std::make_pair(slots, stack);
+        return MWWorld::equipmentSlots(*ptr.get<ESM::Weapon>()->mBase).asClassSlots();
     }
 
     ESM::RefId Weapon::getEquipmentSkill(const MWWorld::ConstPtr& ptr, bool useLuaInterfaceIfAvailable) const

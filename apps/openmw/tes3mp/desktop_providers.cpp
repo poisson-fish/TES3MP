@@ -22,6 +22,8 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
+#include "../mwworld/placedrefid.hpp"
+#include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/manualref.hpp"
@@ -43,6 +45,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -874,6 +877,7 @@ namespace TES3MP::OpenMWAdapter
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
         std::map<ItemStackId, ObservedInventoryStack> observedInventoryStacks;
         std::map<ContainerId, ContainerRevision> observedContainerRevisions;
+        MWWorld::InventoryRecordMap nativeItemRecords, nativeSoulRecords;
         std::map<ItemStackId, MWWorld::Ptr> presentedGroundItems;
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
@@ -961,9 +965,10 @@ namespace TES3MP::OpenMWAdapter
                 if (index == static_cast<std::size_t>(EquipmentSlot::Ammunition))
                     continue;
                 const auto* local = itemMapping(*prototype);
-                if (!local)
+                const auto native = nativeItemRecords.find(prototype->value());
+                if (!local && native == nativeItemRecords.end())
                     return false;
-                records.push_back(refId(local->record));
+                records.push_back(native != nativeItemRecords.end() ? native->second : refId(local->record));
             }
             return true;
         }
@@ -1851,7 +1856,9 @@ namespace TES3MP::OpenMWAdapter
                 return std::nullopt;
             const auto found = std::ranges::find_if(mapping->itemPrototypes,
                 [&](const auto& item) { return refId(item.record) == ptr.getCellRef().getRefId(); });
-            return found == mapping->itemPrototypes.end() ? std::nullopt : std::optional(found->id);
+            if (found != mapping->itemPrototypes.end()) return found->id;
+            const auto id = MWWorld::inventoryRecordId(ptr.getCellRef().getRefId());
+            return nativeItemRecords.contains(id) ? ItemPrototypeId::fromValue(id) : std::nullopt;
         }
 
         std::optional<ContainerId> containerId(const MWWorld::Ptr& ptr) const noexcept
@@ -1863,6 +1870,10 @@ namespace TES3MP::OpenMWAdapter
                 return container.refNumIndex == refNum.mIndex
                     && (container.refNumContentFile < 0 || container.refNumContentFile == refNum.mContentFile);
             });
+            const auto placed = MWWorld::placedRefId(refNum, MWBase::Environment::get().getWorld()->getContentFiles());
+            if (placed)
+                if (const auto id = ContainerId::fromValue(*placed); id && observedContainerRevisions.contains(*id))
+                    return id;
             return found == mapping->containers.end() ? std::nullopt : std::optional(found->id);
         }
 
@@ -1885,26 +1896,46 @@ namespace TES3MP::OpenMWAdapter
         std::optional<MWWorld::Ptr> materializeItem(const CanonicalItemStack& stack, Sink&& sink) const
         {
             const auto* local = itemMapping(stack.prototypeId);
-            if (!local || stack.count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
-                || stack.condition > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+            const auto native = nativeItemRecords.find(stack.prototypeId.value());
+            const bool isNative = native != nativeItemRecords.end();
+            if ((!local && !isNative) || stack.count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+                || (!isNative && stack.condition > static_cast<std::uint32_t>(std::numeric_limits<int>::max())))
                 return std::nullopt;
             MWWorld::ManualRef reference(
-                *MWBase::Environment::get().getESMStore(), refId(local->record), static_cast<int>(stack.count));
+                *MWBase::Environment::get().getESMStore(), isNative ? native->second : refId(local->record), static_cast<int>(stack.count));
             auto ptr = reference.getPtr();
             ptr.getCellRef().setCount(static_cast<int>(stack.count));
-            if (ptr.getClass().hasItemHealth(ptr))
+            if (isNative)
+            {
+                if (!ptr.getClass().getScript(ptr).empty()) return std::nullopt;
+                const auto charge = std::bit_cast<float>(stack.enchantmentCharge);
+                const auto condition = std::bit_cast<int32_t>(stack.condition);
+                if (!std::isfinite(charge) || charge < -1 || condition < -1) return std::nullopt;
+                ptr.getCellRef().setCharge(condition);
+                ptr.getCellRef().setEnchantmentCharge(charge);
+            }
+            else if (ptr.getClass().hasItemHealth(ptr))
                 ptr.getCellRef().setCharge(static_cast<int>(stack.condition));
-            if (!ptr.getClass().getEnchantment(ptr).empty())
+            if (!isNative && !ptr.getClass().getEnchantment(ptr).empty())
                 ptr.getCellRef().setEnchantmentCharge(static_cast<float>(stack.enchantmentCharge));
             if (stack.soulPrototype)
             {
-                if (!mapping)
-                    return std::nullopt;
-                const auto soul = std::ranges::lower_bound(
-                    mapping->actorPrototypes, *stack.soulPrototype, {}, &DesktopActorPrototypeMapping::id);
-                if (soul == mapping->actorPrototypes.end() || soul->id != *stack.soulPrototype)
-                    return std::nullopt;
-                ptr.getCellRef().setSoul(refId(soul->record));
+                if (isNative)
+                {
+                    const auto soul = nativeSoulRecords.find(stack.soulPrototype->value());
+                    if (soul == nativeSoulRecords.end()) return std::nullopt;
+                    ptr.getCellRef().setSoul(soul->second);
+                }
+                else
+                {
+                    if (!mapping)
+                        return std::nullopt;
+                    const auto soul = std::ranges::lower_bound(
+                        mapping->actorPrototypes, *stack.soulPrototype, {}, &DesktopActorPrototypeMapping::id);
+                    if (soul == mapping->actorPrototypes.end() || soul->id != *stack.soulPrototype)
+                        return std::nullopt;
+                    ptr.getCellRef().setSoul(refId(soul->record));
+                }
             }
             return std::forward<Sink>(sink)(ptr);
         }
@@ -1918,6 +1949,13 @@ namespace TES3MP::OpenMWAdapter
             auto world = MWBase::Environment::get().getWorld();
             if (!world)
                 return ProviderResult::PresentationFailed;
+
+            if (nativeItemRecords.empty() && std::ranges::any_of(containers,
+                    [](const auto& container) { return (container.container.value() & MWWorld::PlacedRefTag) != 0; }))
+            {
+                nativeItemRecords = MWWorld::inventoryRecords(*MWBase::Environment::get().getESMStore());
+                nativeSoulRecords = MWWorld::inventorySoulRecords(*MWBase::Environment::get().getESMStore());
+            }
 
             if (!observedPlayerInventoryRevision || *observedPlayerInventoryRevision != player.revision)
             {
@@ -1966,13 +2004,33 @@ namespace TES3MP::OpenMWAdapter
                     continue;
                 const auto localMapping = std::ranges::lower_bound(
                     mapping->containers, baseline.container, {}, &DesktopContainerMapping::id);
-                if (localMapping == mapping->containers.end() || localMapping->id != baseline.container)
+                MWWorld::Ptr ptr;
+                if (localMapping != mapping->containers.end() && localMapping->id == baseline.container)
+                    ptr = findActiveContainer(localMapping->refNumIndex, localMapping->refNumContentFile);
+                else if (baseline.container.value() & MWWorld::PlacedRefTag)
+                {
+                    const auto ref = MWWorld::localPlacedRef(baseline.container.value(), world->getContentFiles());
+                    if (!ref) return ProviderResult::ContentMappingFailed;
+                    ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
+                    if (!ptr.isEmpty() && ptr.getCell() != resolveCell(baseline.cell, *mapping))
+                        return ProviderResult::ContentMappingFailed;
+                    if (!ptr.isEmpty())
+                    {
+                        const auto& p = ptr.getCellRef().getPosition().pos;
+                        for (float v : p)
+                            if (!std::isfinite(v) || std::abs(double(v)) >= double(INT64_MAX) / PositionScale)
+                                return ProviderResult::ContentMappingFailed;
+                        if (Position3(std::llround(double(p[0]) * PositionScale), std::llround(double(p[1]) * PositionScale),
+                                std::llround(double(p[2]) * PositionScale)) != baseline.position)
+                            return ProviderResult::ContentMappingFailed;
+                    }
+                }
+                else
                     return ProviderResult::ContentMappingFailed;
-                auto ptr = findActiveContainer(localMapping->refNumIndex, localMapping->refNumContentFile);
                 if (ptr.isEmpty())
                     continue;
                 auto& store = ptr.getClass().getContainerStore(ptr);
-                store.clear();
+                store.clearAuthoritative();
                 std::erase_if(observedInventoryStacks,
                     [&](const auto& value) { return value.second.container == baseline.container; });
                 for (const auto& stack : baseline.stacks)

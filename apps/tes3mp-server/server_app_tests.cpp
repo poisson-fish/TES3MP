@@ -107,6 +107,8 @@ namespace
         TES3MP::TransportResult send(TES3MP::TransportConnectionId connection, TES3MP::TransportChannel channel,
             std::span<const std::byte> bytes) override
         {
+            if (std::ranges::find(failedSends, connection) != failedSends.end())
+                return TES3MP::TransportResult::UnknownId;
             sentConnections.push_back(connection);
             sentChannels.push_back(channel);
             sent.emplace_back(bytes.begin(), bytes.end());
@@ -155,6 +157,7 @@ namespace
         std::vector<TES3MP::TransportMessage> incoming;
         std::map<TES3MP::TransportConnectionId, std::vector<TES3MP::TransportMessage>> incomingByConnection;
         std::size_t closes = 0;
+        std::vector<TES3MP::TransportConnectionId> failedSends;
     };
 
     class WeatherDurabilityProbe final : public CanonicalDurabilityPort
@@ -684,6 +687,17 @@ namespace TES3MP::ServerApp::Testing
         assert(application.pump(id<ServerTick>(3)));
         observe(2, 1);
         assert(resumeToken);
+        // The socket can stop accepting sends before delivering a closed event.
+        // Both peers fail in the same pump; canonical disconnect must happen
+        // before session bookkeeping is erased, or the resume below is rejected.
+        runtime.failedSends = {id<TransportConnectionId>(1), id<TransportConnectionId>(2)};
+        const std::array<std::byte, 1> pending{std::byte{0}};
+        for (const auto connection : runtime.failedSends)
+            assert(queues.enqueue(connection, TransportChannel::ReliableOrdered, pending) == TransportResult::Accepted);
+        assert(application.pump(id<ServerTick>(3)));
+        assert(!reducer.state().findActiveSession(id<SessionId>(1))
+            && !reducer.state().findActiveSession(id<SessionId>(2)));
+        runtime.failedSends.clear();
         runtime.events.push_back({TransportEventKind::ConnectionClosed, TransportFailure::None, {}, {},
             id<TransportConnectionId>(1)});
         assert(application.pump(id<ServerTick>(3)));

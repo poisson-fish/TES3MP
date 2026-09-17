@@ -1,4 +1,5 @@
 #include "clothing.hpp"
+#include "../mwworld/equipmentslots.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -64,38 +65,7 @@ namespace MWClass
 
     std::pair<std::vector<int>, bool> Clothing::getEquipmentSlots(const MWWorld::ConstPtr& ptr) const
     {
-        const MWWorld::LiveCellRef<ESM::Clothing>* ref = ptr.get<ESM::Clothing>();
-
-        std::vector<int> slots;
-
-        if (ref->mBase->mData.mType == ESM::Clothing::Ring)
-        {
-            slots.push_back(int(MWWorld::InventoryStore::Slot_LeftRing));
-            slots.push_back(int(MWWorld::InventoryStore::Slot_RightRing));
-        }
-        else
-        {
-            const int size = 9;
-
-            static const int sMapping[size][2] = { { ESM::Clothing::Shirt, MWWorld::InventoryStore::Slot_Shirt },
-                { ESM::Clothing::Belt, MWWorld::InventoryStore::Slot_Belt },
-                { ESM::Clothing::Robe, MWWorld::InventoryStore::Slot_Robe },
-                { ESM::Clothing::Pants, MWWorld::InventoryStore::Slot_Pants },
-                { ESM::Clothing::Shoes, MWWorld::InventoryStore::Slot_Boots },
-                { ESM::Clothing::LGlove, MWWorld::InventoryStore::Slot_LeftGauntlet },
-                { ESM::Clothing::RGlove, MWWorld::InventoryStore::Slot_RightGauntlet },
-                { ESM::Clothing::Skirt, MWWorld::InventoryStore::Slot_Skirt },
-                { ESM::Clothing::Amulet, MWWorld::InventoryStore::Slot_Amulet } };
-
-            for (int i = 0; i < size; ++i)
-                if (sMapping[i][0] == ref->mBase->mData.mType)
-                {
-                    slots.push_back(int(sMapping[i][1]));
-                    break;
-                }
-        }
-
-        return std::make_pair(slots, false);
+        return MWWorld::equipmentSlots(*ptr.get<ESM::Clothing>()->mBase).asClassSlots();
     }
 
     ESM::RefId Clothing::getEquipmentSkill(const MWWorld::ConstPtr& ptr, bool useLuaInterfaceIfAvailable) const
@@ -199,6 +169,12 @@ namespace MWClass
     std::pair<int, std::string_view> Clothing::canBeEquipped(
         const MWWorld::ConstPtr& ptr, const MWWorld::Ptr& npc) const
     {
+        return canBeEquipped(ptr, npc, *MWBase::Environment::get().getESMStore());
+    }
+
+    std::pair<int, std::string_view> Clothing::canBeEquipped(const MWWorld::ConstPtr& ptr,
+        const MWWorld::Ptr& npc, const MWWorld::ESMStore& content) const
+    {
         // slots that this item can be equipped in
         std::pair<std::vector<int>, bool> slots = getEquipmentSlots(ptr);
 
@@ -210,7 +186,7 @@ namespace MWClass
             const ESM::RefId& npcRace = npc.get<ESM::NPC>()->mBase->mRace;
 
             // Beast races cannot equip shoes / boots, or full helms (head part vs hair part)
-            const ESM::Race* race = MWBase::Environment::get().getESMStore()->get<ESM::Race>().find(npcRace);
+            const ESM::Race* race = content.get<ESM::Race>().find(npcRace);
             if (race->mData.mFlags & ESM::Race::Beast)
             {
                 std::vector<ESM::PartReference> parts = ptr.get<ESM::Clothing>()->mBase->mParts.mParts;

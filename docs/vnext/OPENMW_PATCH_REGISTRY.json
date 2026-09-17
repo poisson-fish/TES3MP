@@ -3,6 +3,53 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M3-003",
+      "slice": "authoritative equipment slots",
+      "owner": "OpenMW server runtime",
+      "purpose": "Share allocation-free stock clothing/armor/weapon slot rules and explicit actor/content clothing/armor eligibility. Preserve all 19 slots and complete activation flags through detached staging and recovery. Native equipment commands use coherent durability, private/public projection and full-slot equipment format 7; unavailable effects still reject.",
+      "paths": [
+        "apps/openmw/mwworld/equipmentslots.hpp",
+        "apps/openmw/mwworld/inventoryitem.hpp",
+        "apps/openmw/mwworld/plainequipment.cpp",
+        "apps/openmw/mwworld/plainequipment.hpp",
+        "apps/openmw/mwclass/clothing.cpp",
+        "apps/openmw/mwclass/clothing.hpp",
+        "apps/openmw/mwclass/armor.cpp",
+        "apps/openmw/mwclass/armor.hpp",
+        "apps/openmw/mwclass/weapon.cpp",
+        "apps/openmw/mwmechanics/activespells.cpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests equipment-slots",
+        "tes3mp_native_loadout_tests equipment-canonical",
+        "tes3mp_native_loadout_tests player-inventory-host",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted",
+        "tes3mp_native_loadout_tests inventory-equipment-codec-guards"
+      ],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit actor equipment checks and transactional slot-state interfaces"
+    },
+    {
+      "id": "M3-002",
+      "slice": "stocked chest inventory",
+      "owner": "OpenMW server runtime and desktop adapter",
+      "purpose": "Generalize isolated inventory transfer/serialization to all TES3 inventory record types; share fixed/leveled initial loading with explicit content, level, RNG and registry services. Derive matching record identities and prevent client baseline replacement from refilling unresolved base loot. Scripts and unsupported execution remain rejected.",
+      "paths": ["apps/openmw/mwworld/inventoryitem.hpp", "apps/openmw/mwworld/inventoryrecordid.hpp", "apps/openmw/mwworld/containerstore.cpp", "apps/openmw/mwworld/containerstore.hpp", "apps/openmw/mwworld/containeradd.hpp", "apps/openmw/mwworld/plainequipment.cpp", "apps/openmw/mwworld/plainequipment.hpp", "apps/openmw/mwmechanics/levelledlist.cpp", "apps/openmw/mwmechanics/levelledlist.hpp", "apps/openmw/mwgui/containeritemmodel.cpp"],
+      "tests": ["tes3mp_native_loadout_tests stocked-inventory", "scripts/capture_native_inventory_desktop.py"],
+      "disposition": "local shared engine extraction",
+      "removal_condition": "OpenMW supplies equivalent explicit inventory initialization and transactional storage interfaces"
+    },
+    {
+      "id": "M3-001",
+      "slice": "shared placed container identity",
+      "owner": "OpenMW server runtime and desktop adapter",
+      "purpose": "Translate loaded OpenMW reference numbers to an ordered record-plugin identity shared by server and desktop, excluding script-list reader slots. Barrels and chests use the same placement mapping; the native host binds resolved placement and content fingerprints during recovery.",
+      "paths": ["apps/openmw/mwworld/placedrefid.hpp"],
+      "tests": ["tes3mp_native_loadout_tests placed-containers", "tes3mp_native_loadout_tests inventory-host", "scripts/capture_native_inventory_desktop.py"],
+      "disposition": "local shared placement identity helper",
+      "removal_condition": "OpenMW supplies an equivalent stable reference identity independent of local script-list reader slots"
+    },
+    {
       "id": "M2-001",
       "slice": "explicit actor constant-effect shirt mechanics",
       "owner": "OpenMW server runtime",

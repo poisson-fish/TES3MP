@@ -11,12 +11,17 @@ namespace ESM
     class RefId;
 }
 
+namespace MWWorld { class ESMStore; }
+
 namespace MWMechanics
 {
 
     /// @return ID of resulting item, or empty if none
     ESM::RefId getLevelledItem(
         const ESM::LevelledListBase* levItem, bool creature, Misc::Rng::Generator& prng, std::optional<int> level = {});
+
+    ESM::RefId getLevelledItem(const ESM::LevelledListBase* levItem, bool creature,
+        Misc::Rng::Generator& prng, int level, const MWWorld::ESMStore& content, unsigned depth = 0);
 
 }
 

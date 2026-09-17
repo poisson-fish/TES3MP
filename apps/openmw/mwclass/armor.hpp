@@ -3,6 +3,8 @@
 
 #include "../mwworld/registeredclass.hpp"
 
+namespace MWWorld { class ESMStore; class InventoryStore; }
+
 namespace MWClass
 {
     class Armor : public MWWorld::RegisteredClass<Armor>
@@ -64,6 +66,9 @@ namespace MWClass
         const ESM::RefId& applyEnchantment(const MWWorld::ConstPtr& ptr, const ESM::RefId& enchId, int enchCharge,
             const std::string& newName) const override;
         ///< Creates a new record using \a ptr as template, with the given name and the given enchantment applied to it.
+
+        std::pair<int, std::string_view> canBeEquipped(const MWWorld::ConstPtr& ptr,
+            const MWWorld::Ptr& npc, const MWWorld::ESMStore& content, const MWWorld::InventoryStore& inventory) const;
 
         std::pair<int, std::string_view> canBeEquipped(
             const MWWorld::ConstPtr& ptr, const MWWorld::Ptr& npc) const override;

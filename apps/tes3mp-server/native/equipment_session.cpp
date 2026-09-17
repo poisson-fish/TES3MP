@@ -1,6 +1,7 @@
 #include "equipment_session.hpp"
 
 #include <limits>
+#include <set>
 #include <stdexcept>
 
 namespace TES3MP::Native
@@ -9,43 +10,34 @@ namespace TES3MP::Native
     {
         constexpr uint64_t PairMagic = 0x3152494150335354; // TS3PAIR1: existing pair images remain valid.
         constexpr uint64_t SharedMagic = 0x3253534553335354; // TS3SESS2: two actors and one required container.
+        constexpr uint64_t CellMagic = 0x3353534553335354; // TS3SESS3: bounded shared inventories.
+        uint64_t magic(size_t count) { return count == 0 ? PairMagic : count == 1 ? SharedMagic : CellMagic; }
+        size_t headerSize(size_t count) { return 32 + 8 * count + (count > 1 ? 8 : 0); }
         void validate(const EquipmentSessionValues& values, const std::array<EquipmentBindings, 2>& bindings,
-            const EquipmentBindings* container)
+            std::span<const EquipmentBindings> containers)
         {
             if (values.mRevision == 0 || values.mRevision >= std::numeric_limits<size_t>::max()
-                || values.mContainer.has_value() != (container != nullptr))
+                || containers.size() > MaxEquipmentContainers || values.mContainers.size() != containers.size())
                 throw std::invalid_argument("Equipment session revision or container binding mismatch");
-            const std::array images{ &values.mActors[0], &values.mActors[1],
-                values.mContainer ? &*values.mContainer : nullptr };
-            const std::array contexts{ &bindings[0], &bindings[1], container };
-            for (size_t i = 0; i < (container ? 3 : 2); ++i)
+            std::set<ESM::RefNum> identities;
+            for (size_t i = 0; i < 2 + containers.size(); ++i)
             {
-                const auto& image = *images[i];
-                const auto& binding = *contexts[i];
-                if (image.mLastGenerated != images[0]->mLastGenerated)
+                const auto& image = i < 2 ? values.mActors[i] : values.mContainers[i - 2];
+                const auto& binding = i < 2 ? bindings[i] : containers[i - 2];
+                if (image.mLastGenerated != values.mActors[0].mLastGenerated)
                     throw std::invalid_argument("Equipment session counter mismatch");
                 if (binding.mEnvelope.mRuntime != bindings[0].mEnvelope.mRuntime
                     || binding.mEnvelope.mContent != bindings[0].mEnvelope.mContent
                     || &binding.mContent != &bindings[0].mContent)
                     throw std::invalid_argument("Equipment session shared content mismatch");
-                if (i == 2 && (image.mShirt.isSet() || image.mSelected.isSet() || image.mNpcStats))
+                if (i >= 2 && (std::any_of(image.mSlots.begin(), image.mSlots.end(), [](auto id) { return id.isSet(); }) || image.mSelected.isSet() || image.mNpcStats))
                     throw std::invalid_argument("Equipment session container has equipment or stats");
                 image.validate(binding.mContent, binding.mEnvelope.mActor, binding.mScriptLocals.get());
-                for (size_t j = 0; j < (container ? 3 : 2); ++j)
-                {
-                    if (i != j && image.mActor == images[j]->mActor)
-                        throw std::invalid_argument("Equipment session duplicate owner identity");
-                    for (const auto& object : image.mObjects)
-                    {
-                        const auto id = object.mRef.mRefNum;
-                        if (id == images[j]->mActor)
-                            throw std::invalid_argument("Equipment session item collides with owner");
-                        if (i != j)
-                            for (const auto& other : images[j]->mObjects)
-                                if (other.mRef.mRefNum == id)
-                                    throw std::invalid_argument("Equipment session duplicate item identity");
-                    }
-                }
+                if (!identities.insert(image.mActor).second)
+                    throw std::invalid_argument("Equipment session duplicate owner or item identity");
+                for (const auto& object : image.mObjects)
+                    if (!identities.insert(object.mRef.mRefNum).second)
+                        throw std::invalid_argument("Equipment session duplicate owner or item identity");
             }
         }
         void put(EquipmentBytes& bytes, uint64_t value)
@@ -60,47 +52,65 @@ namespace TES3MP::Native
         }
     }
     void encodeEquipmentSession(const EquipmentSessionValues& values,
-        const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, const EquipmentBindings* container)
+        const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
+        std::span<const EquipmentBindings> containers)
     {
-        validate(values, bindings, container);
-        std::array<EquipmentBytes, 3> actors;
-        for (size_t i = 0; i < 2; ++i) encodeEquipment(values.mActors[i], bindings[i], actors[i]);
-        if (container) encodeEquipment(*values.mContainer, *container, actors[2]);
+        validate(values, bindings, containers);
+        std::vector<EquipmentBytes> owners(2 + containers.size());
+        size_t size = headerSize(containers.size());
+        for (size_t i = 0; i < owners.size(); ++i)
+        {
+            encodeEquipment(i < 2 ? values.mActors[i] : values.mContainers[i - 2],
+                i < 2 ? bindings[i] : containers[i - 2], owners[i]);
+            if (owners[i].size() > MaxEquipmentSessionBytes - size)
+                throw std::invalid_argument("Equipment session image budget exceeded");
+            size += owners[i].size();
+        }
         EquipmentBytes staged;
-        staged.reserve((container ? 40 : 32) + actors[0].size() + actors[1].size() + actors[2].size());
-        put(staged, container ? SharedMagic : PairMagic);
+        staged.reserve(size);
+        put(staged, magic(containers.size()));
         put(staged, values.mRevision);
-        put(staged, actors[0].size());
-        put(staged, actors[1].size());
-        if (container) put(staged, actors[2].size());
-        for (const auto& actor : actors) staged.insert(staged.end(), actor.begin(), actor.end());
+        if (containers.size() > 1) put(staged, containers.size());
+        for (const auto& owner : owners) put(staged, owner.size());
+        for (const auto& owner : owners) staged.insert(staged.end(), owner.begin(), owner.end());
         output.swap(staged);
     }
     void decodeEquipmentSession(std::span<const char> bytes,
-        const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output, const EquipmentBindings* container)
+        const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
+        std::span<const EquipmentBindings> containers)
     {
-        const size_t header = container ? 40 : 32;
+        if (containers.size() > MaxEquipmentContainers)
+            throw std::invalid_argument("Equipment session container budget exceeded");
+        const auto header = headerSize(containers.size());
         if (bytes.size() < header || bytes.size() > MaxEquipmentSessionBytes
-            || get(bytes, 0) != (container ? SharedMagic : PairMagic))
-            throw std::invalid_argument("Invalid equipment session header");
-        const auto a = get(bytes, 16), b = get(bytes, 24), c = container ? get(bytes, 32) : 0;
-        if (a == 0 || b == 0 || a > MaxEquipmentBytes || b > MaxEquipmentBytes || c > MaxEquipmentBytes || (c != 0) != (container != nullptr)
-            || a + b + c != bytes.size() - header)
-            throw std::invalid_argument("Invalid equipment session lengths");
+            || get(bytes, 0) != magic(containers.size())
+            || (containers.size() > 1 && get(bytes, 16) != containers.size()))
+            throw std::invalid_argument("Invalid equipment session header or container count");
+        // Preflight every length before decoding or allocating owner images.
+        std::array<size_t, 2 + MaxEquipmentContainers> lengths{};
+        size_t remaining = bytes.size() - header;
+        for (size_t i = 0; i < 2 + containers.size(); ++i)
+        {
+            const auto size = get(bytes, 16 + (containers.size() > 1 ? 8 : 0) + 8 * i);
+            if (!size || size > MaxEquipmentBytes || size > remaining)
+                throw std::invalid_argument("Invalid equipment session lengths");
+            lengths[i] = size;
+            remaining -= size;
+        }
+        if (remaining) throw std::invalid_argument("Invalid equipment session trailing bytes");
         EquipmentSessionValues staged;
         staged.mRevision = get(bytes, 8);
         if (staged.mRevision == 0 || staged.mRevision >= std::numeric_limits<size_t>::max())
             throw std::invalid_argument("Invalid equipment session revision");
-        // Each existing codec preflights bounded stock fields and trusted IDs
-        // before allocating its image. Neither candidate is installed here.
-        decodeEquipment(bytes.subspan(header, a), bindings[0], staged.mActors[0]);
-        decodeEquipment(bytes.subspan(header + a, b), bindings[1], staged.mActors[1]);
-        if (container)
+        staged.mContainers.resize(containers.size());
+        size_t offset = header;
+        for (size_t i = 0; i < 2 + containers.size(); ++i)
         {
-            staged.mContainer.emplace();
-            decodeEquipment(bytes.subspan(header + a + b, c), *container, *staged.mContainer);
+            decodeEquipment(bytes.subspan(offset, lengths[i]), i < 2 ? bindings[i] : containers[i - 2],
+                i < 2 ? staged.mActors[i] : staged.mContainers[i - 2]);
+            offset += lengths[i];
         }
-        validate(staged, bindings, container);
+        validate(staged, bindings, containers);
         output.swap(staged);
     }
 }

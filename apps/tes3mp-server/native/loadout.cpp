@@ -258,6 +258,7 @@ namespace TES3MP::Native
             "content", bpo::value<std::vector<std::string>>()->default_value({}, "")->multitoken()->composing())(
             "encoding", bpo::value<std::string>()->default_value("win1252"))(
             "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample")(
+            "containers", bpo::value<std::string>(), "List placed containers in one interior using OpenMW")(
             "inventory", bpo::value<std::string>(), "Probe adding a MISC item to an engine ContainerStore")(
             "enchantment", bpo::value<std::string>(), "Probe an enchantment's engine cast cost and charge")(
             "equipment", bpo::value<std::string>(), "Run durable shirt equipment and fresh restart")(
@@ -281,6 +282,7 @@ namespace TES3MP::Native
         result.mContent = variables["content"].as<std::vector<std::string>>();
         result.mEncoding = variables["encoding"].as<std::string>();
         result.mSample = variables["sample"].as<bool>();
+        if (variables.count("containers")) result.mContainerCell = variables["containers"].as<std::string>();
         if (variables.count("inventory"))
         {
             result.mInventoryItem = variables["inventory"].as<std::string>();
@@ -503,8 +505,11 @@ namespace TES3MP::Native
         const std::string inventoryItem = options.mInventoryItem;
         const std::string enchantment = options.mEnchantment;
         const bool equipment = !options.mEquipment.empty();
+        const std::string containerCell = options.mContainerCell;
         Loadout loadout(std::move(options));
-        if (equipment)
+        if (!containerCell.empty())
+            loadout.writeContainers(output, containerCell);
+        else if (equipment)
             loadout.writeEquipmentProbe(output);
         else if (!enchantment.empty())
             loadout.writeEnchantmentProbe(output, enchantment);

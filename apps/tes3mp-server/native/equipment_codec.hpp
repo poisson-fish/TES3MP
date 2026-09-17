@@ -29,17 +29,21 @@ namespace TES3MP::Native
     };
 
     inline constexpr uint32_t EquipmentFormatVersion = 1;
-    // Version 1 stays plain-only. Version 5 requires the applied race-ability
+    // Version 1 stores typed inventory records without NPC stats. Version 5 requires the applied race-ability
     // magnitude: saved base Luck includes it. Formats 2/3/4 reject explicitly;
     // no inferred activation/default-value migration. Transfer v4 is independent.
     inline constexpr uint32_t NpcEquipmentFormatVersion = 5;
     // Version 6 adds required stock named locals for explicitly bound scripted
     // shirts. Plain 1 and unscripted NPC 5 retain their exact field layouts.
     inline constexpr uint32_t ScriptedEquipmentFormatVersion = 6;
+    // Full slot table plus an explicit legacy payload mode (plain/stats/scripted).
+    // Shirt-only images keep their canonical encoding and remain readable.
+    inline constexpr uint32_t SlottedEquipmentFormatVersion = 7;
     // Accommodate every supported combination of 65 items, 256 animations and
     // 4096-byte strings. These limits include stock fields and lossless fields.
     inline constexpr size_t MaxEquipmentBytes = 80 * 1024 * 1024;
     inline constexpr size_t MaxEquipmentObjectBytes = 2 * 1024 * 1024;
+    inline constexpr size_t MaxEquipmentReferenceIds = 262144;
     using EquipmentBytes = std::vector<char>;
 
     // Complete owned output is published by swap only after validation. No

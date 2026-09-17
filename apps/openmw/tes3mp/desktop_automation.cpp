@@ -584,15 +584,17 @@ namespace TES3MP::OpenMWAdapter
             const auto count = [](const auto& stacks) {
                 std::uint32_t total = 0;
                 for (const auto& stack : stacks)
-                    if (stack.prototypeId.value() == 70)
-                        total += stack.count;
+                    total += stack.count;
                 return total;
             };
             mNativePlayerCount = count(player.stacks);
-            const auto container = std::ranges::find_if(containers,
-                [](const auto& value) { return value.container.value() == 90; });
-            if (container != containers.end())
-                mNativeContainerCount = count(container->stacks);
+            mNativePlayerStacks = player.stacks;
+            if (containers.size() == 1)
+            {
+                mNativeContainerCount = count(containers.front().stacks);
+                mNativeContainerStacks = containers.front().stacks;
+                mNativeContainerId = containers.front().container;
+            }
             mNativeRevision = player.revision.value();
             // Resume baselines can be presented before the final readiness lane
             // reports Resumed. The wire generation is the continuity witness.
@@ -899,6 +901,7 @@ namespace TES3MP::OpenMWAdapter
         mPresentation.clear();
         mNativePlayerCount.reset();
         mNativeContainerCount.reset();
+        mNativeContainerId.reset();
         mNativeInventoryAfterResume = false;
     }
 

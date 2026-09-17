@@ -28,6 +28,7 @@ namespace TES3MP::Native
         InventoryInstanceId mActor, mItem;
         std::uint64_t mExpectedRevision = 0;
         EquipmentRequestedState mState = EquipmentRequestedState::Unequipped;
+        int mSlot = 8; // Owned slot index; validated against stock slots in the runtime.
         bool operator==(const EquipmentCommand&) const = default;
     };
 
@@ -56,7 +57,7 @@ namespace TES3MP::Native
     // recovery into an explicitly fresh runtime. All failures preserve output
     // allocation/value and bytes. Owned success swaps only after durable install.
     // Preserve stock counters (including revision rollover), 64-node preparation
-    // and 65-node saves (plain 1, NPC stats/ability 5, scripted NPC shirt 6).
+    // and 65-node saves (legacy 1/5/6; full slot table 7).
     // Revision is not a request-deduplication token.
     PersistenceResult executeEquipment(EquipmentRuntime& runtime, EquipmentCaller caller,
         EquipmentCommand command, EquipmentFileSink& file, const EquipmentBindings& bindings,

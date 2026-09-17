@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -93,6 +94,14 @@ namespace MWWorld
         std::function<void(const Ptr&)> mRegisterSplit;
         std::function<void(const Ptr&, int)> mRemoveSplit;
         std::function<void(const Ptr&)> mDeleteStack;
+    };
+
+    struct ContainerStoreInitialContext
+    {
+        const ESMStore& mStore;
+        WorldModel& mWorld;
+        int mLevel;
+        size_t mRemaining = 4096;
     };
 
     // Capture from a current store, then pass by value without following saved
@@ -566,6 +575,11 @@ namespace MWWorld
             MWWorld::CellRefList<ESM::Probe> mProbes;
             MWWorld::CellRefList<ESM::Repair> mRepairs;
             MWWorld::CellRefList<ESM::Weapon> mWeapons;
+
+            auto all() { return std::tie(mPotions, mAppas, mArmors, mBooks, mClothes, mIngreds,
+                mLights, mLockpicks, mMiscItems, mProbes, mRepairs, mWeapons); }
+            auto all() const { return std::tie(mPotions, mAppas, mArmors, mBooks, mClothes, mIngreds,
+                mLights, mLockpicks, mMiscItems, mProbes, mRepairs, mWeapons); }
         };
 
     public:
@@ -619,6 +633,29 @@ namespace MWWorld
 
     private:
         Lists mLists;
+
+        // Transaction preparation also visits dormant nodes: their identities
+        // remain reserved until the containing image is retired.
+        template<class F> void forEachStored(F&& f)
+        {
+            const auto visit = [&](auto& list) {
+                for (auto it = list.mList.begin(); it != list.mList.end(); ++it)
+                    f(*it, ContainerStoreIterator(this, it));
+            };
+            std::apply([&](auto&... lists) { (visit(lists), ...); }, mLists.all());
+        }
+        template<class F> void forEachStored(F&& f) const
+        {
+            const auto visit = [&](const auto& list) {
+                for (auto it = list.mList.begin(); it != list.mList.end(); ++it)
+                    f(*it, ConstContainerStoreIterator(this, it));
+            };
+            std::apply([&](const auto&... lists) { (visit(lists), ...); }, mLists.all());
+        }
+        size_t storedSize() const
+        {
+            return std::apply([](const auto&... lists) { return (lists.mList.size() + ...); }, mLists.all());
+        }
 
         // Assigning/moving storage may destroy or reuse list node addresses and
         // item IDs. A decision owns this token so replacement cannot reuse it.
@@ -679,9 +716,10 @@ namespace MWWorld
         void validateExplicitOwner(const ConstPtr& owner, const WorldModel& worldModel) const;
         void resolve(const Ptr& container);
         void addInitialItem(
-            const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel = true);
+            const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel = true,
+            ContainerStoreInitialContext* context = nullptr);
         void addInitialItemImp(const MWWorld::Ptr& ptr, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng,
-            bool topLevel = true);
+            bool topLevel = true, ContainerStoreInitialContext* context = nullptr);
 
         template <typename T>
         ContainerStoreIterator getState(CellRefList<T>& collection, const ESM::ObjectState& state);
@@ -876,6 +914,20 @@ namespace MWWorld
         ///< @return true if the two specified objects can stack with each other
 
         void fill(const ESM::InventoryList& items, const ESM::RefId& owner, Misc::Rng::Generator& seed);
+
+        // Fresh disposable runtime initialization. Failures propagate; the caller
+        // must discard this store AND its exclusive registry before publication.
+        void fill(const ESM::InventoryList& items, const ESM::RefId& owner, Misc::Rng::Generator& seed,
+            ContainerStoreInitialContext context);
+
+        // A committed remote baseline is already resolved. Discard local base
+        // loot without rolling leveled lists or subsequently refilling on add.
+        void clearAuthoritative()
+        {
+            mResolved = true;
+            clear();
+            mModified = true;
+        }
         ///< Insert items into *this.
 
         void fillNonRandom(const ESM::InventoryList& items, const ESM::RefId& owner, unsigned int seed);

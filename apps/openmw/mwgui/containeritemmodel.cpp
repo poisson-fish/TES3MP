@@ -9,6 +9,7 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
+#include "../mwworld/containeradd.hpp"
 #include "../mwworld/manualref.hpp"
 
 #include "../mwbase/environment.hpp"
@@ -228,24 +229,16 @@ namespace MWGui
 
         // Check container organic flag
         MWWorld::LiveCellRef<ESM::Container>* ref = target.get<ESM::Container>();
-        if (ref->mBase->mFlags & ESM::Container::Organic)
+        const auto check = MWWorld::checkContainerPut((ref->mBase->mFlags & ESM::Container::Organic) != 0,
+            target.getClass().getCapacity(target), target.getClass().getEncumbrance(target),
+            item.getClass().getWeight(item), count);
+        if (check == MWWorld::ContainerPutCheck::Organic)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sContentsMessage2}");
             return false;
         }
 
-        // Check for container without capacity
-        float capacity = target.getClass().getCapacity(target);
-        if (capacity <= 0.0f)
-        {
-            MWBase::Environment::get().getWindowManager()->messageBox("#{sContentsMessage3}");
-            return false;
-        }
-
-        // Check the container capacity plus one increment so the expected total weight can
-        // fit in the container with floating-point imprecision
-        float newEncumbrance = target.getClass().getEncumbrance(target) + (item.getClass().getWeight(item) * count);
-        if (std::nextafterf(capacity, std::numeric_limits<float>::max()) < newEncumbrance)
+        if (check == MWWorld::ContainerPutCheck::Capacity)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sContentsMessage3}");
             return false;

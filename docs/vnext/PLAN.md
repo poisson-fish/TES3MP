@@ -66,7 +66,8 @@ identity, validation, and failure tests against the replacement.
 ## M3 - Connect two clients to a shared modded world
 
 **Outcome:** two desktop clients enter a real modded cell and observe one
-server-owned set of references, actors, doors, containers, time, and weather.
+server-owned set of references, actors, doors, containers (barrels and chests),
+time, and weather.
 
 Connect the runtime to existing authentication, command intake, transport, and
 interest. Derive content and placed references from OpenMW instead of fixture

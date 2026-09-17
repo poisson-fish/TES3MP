@@ -8,33 +8,44 @@
 
 namespace TES3MP::Native
 {
-    // Trusted composition for the selected plain-shirt interaction. These wire
-    // mappings must come from server startup, never first arrival/client fields.
-    // This does not yet discover placed references or populate base inventories.
+    // Trusted composition for the loaded placed inventory domain. Bindings
+    // come from server startup, never first arrival/client fields.
+    // Production resolves placements from OpenMW; synthetic tests may use
+    // a base-only container. Item identities derive from the loaded records.
+    struct InventoryContainerBinding
+    {
+        ContainerId mId;
+        CellId mCell;
+        Position3 mPosition;
+        ESM::RefId mBase;
+        std::optional<ESM::CellRef> mPlacement;
+    };
     struct InventoryServiceBinding
     {
         std::array<PlayerId, 2> mPlayers;
-        ItemPrototypeId mShirt;
-        ContainerId mContainer;
-        CellId mCell;
-        Position3 mPosition;
+        std::optional<ItemPrototypeId> mShirt; // Legacy seed/projection override only.
         std::array<EquipmentActorBinding, 2> mActors;
-        ESM::RefId mContainerBase;
         std::array<unsigned char, 32> mContent;
+        std::vector<InventoryContainerBinding> mContainers;
+        int mLootLevel = 1;
+        uint32_t mLootSeed = 0;
     };
 
-    // One long-lived engine service group per selected inventory domain. Loaded
+    // One long-lived engine service group for all shared inventories. Loaded
     // content/readers outlive this object; registry/scripts precede the runtime
     // and die after it. There is no CanonicalInventoryWorld or shadow writer.
     class InventoryService final : public ServerApp::NativeInventoryService
     {
         const InventoryServiceBinding mBinding;
+        std::map<ESM::RefId, ItemPrototypeId> mItemIds;
         MWWorld::WorldModel mWorld;
         MWWorld::LocalScripts mScripts;
         EquipmentRuntime mRuntime;
         EquipmentBytes mImage;
         class Transaction;
+        class EquipmentTransaction;
         size_t actor(PlayerId player) const;
+        size_t container(std::optional<ContainerId> id) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
 
     public:
@@ -70,7 +81,8 @@ namespace TES3MP::Native
         // writable mirror. Candidate baselines stay staged until durable commit.
         std::optional<ServerApp::InventoryInterestDelivery> project(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
-            const PreparedCommand* candidate = nullptr) const;
+            const PreparedCommand* candidate = nullptr,
+            const EquipmentRuntime::PreparedEquipment* equipment = nullptr) const;
     };
 }
 #endif

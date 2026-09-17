@@ -155,8 +155,8 @@ namespace TES3MP::Native
         }
         if (!container.empty())
         {
-            if (!restored->mContainer || restored->mContainer->mObjects.size() != 1
-                || restored->mContainer->mObjects[0].mRef.mCount != 1)
+            if (restored->mContainers.empty() || restored->mContainers[0].mObjects.size() != 1
+                || restored->mContainers[0].mObjects[0].mRef.mCount != 1)
                 throw std::runtime_error("Shared container recovery lost its remaining shirt");
             for (size_t actor = 0; actor < 2; ++actor)
             {

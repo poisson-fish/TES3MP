@@ -1,10 +1,12 @@
 #include "inventory_host.hpp"
 #include "inventory_service.hpp"
 #include "loadout.hpp"
+#include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <cmath>
 #include <stdexcept>
 
 namespace TES3MP::Native
@@ -26,6 +28,9 @@ namespace TES3MP::Native
             std::string text;
             LoadoutOptions options;
             InventoryServiceBinding binding;
+            std::string cell, plugin;
+            uint32_t index;
+            CellId wireCell;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -43,7 +48,12 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native inventory record ID invalid");
                 return ESM::RefId::stringRefId(name);
             };
-            key("native-inventory-1"); key("manifest");
+            std::string version; in >> version;
+            if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5")
+                throw std::invalid_argument("Native inventory descriptor version incompatible");
+            const bool baseInventory = version == "native-inventory-5";
+            const bool wholeInterior = version != "native-inventory-3";
+            key("manifest");
             std::string identity; in >> identity;
             if (ContentManifestId::fromHex(identity) != manifest.id())
                 throw std::invalid_argument("Native inventory descriptor is not bound to the authenticated manifest");
@@ -71,41 +81,69 @@ namespace TES3MP::Native
                 registration += "\nregistered-binding " + std::to_string(player.value()) + " "
                     + std::to_string(registered->claim.entity.value()) + " " + std::to_string(registered->claim.appearance.value());
             }
-            key("actors"); const auto actorA = record(); int countA = 0; in >> countA;
-            const auto actorB = record(); int countB = 0; in >> countB;
-            if (countA <= 0 || countB <= 0 || countA > MaximumTransferCount || countB > MaximumTransferCount)
-                throw std::invalid_argument("Native starting shirt counts out of range");
-            key("shirt"); const auto shirt = record(); uint64_t itemId = 0; in >> itemId;
-            key("container"); const auto container = record(); uint64_t containerId = 0; in >> containerId;
+            key("actors"); const auto actorA = record(); int countA = 0, countB = 0;
+            if (!baseInventory) in >> countA;
+            const auto actorB = record();
+            ESM::RefId shirt;
+            std::optional<ItemPrototypeId> itemId;
+            if (!baseInventory)
+            {
+                in >> countB;
+                if (countA <= 0 || countB <= 0 || countA > MaximumTransferCount || countB > MaximumTransferCount)
+                    throw std::invalid_argument("Native starting shirt counts out of range");
+                key("shirt"); shirt = record();
+                itemId = ItemPrototypeId::fromValue(MWWorld::inventoryRecordId(shirt));
+            }
+            key("loot"); int lootLevel = 0; uint64_t lootSeed = 0; in >> lootLevel >> lootSeed;
+            std::string cell, plugin; uint64_t index = 0;
+            if (wholeInterior) { key("interior"); in >> std::quoted(cell); }
+            else { key("container"); in >> std::quoted(cell) >> std::quoted(plugin) >> index; }
             key("cell"); std::string cellText; in >> cellText;
             const auto cells = parseContentCells(cellText);
-            key("position"); int64_t x = 0, y = 0, z = 0; in >> x >> y >> z;
-            if (!in || !(in >> std::ws).eof() || !ItemPrototypeId::fromValue(itemId)
-                || !ContainerId::fromValue(containerId) || !cells || cells->size() != 1 || !manifest.contains(cells->front()))
-                throw std::invalid_argument("Native inventory wire mapping or position invalid");
-            InventoryServiceBinding binding{{*first, *second}, *ItemPrototypeId::fromValue(itemId),
-                *ContainerId::fromValue(containerId), cells->front(), Position3(x, y, z),
-                {{{actorA, shirt, countA}, {actorB, shirt, countB}}}, container, {}};
+            if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
+                || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
+                || cell.empty() || cell.size() > 256 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
+                || !cells || cells->size() != 1 || !manifest.contains(cells->front())
+                || cells->front().kind() != CellId::Kind::Interior)
+                throw std::invalid_argument("Native inventory placed selection or cell mapping invalid");
+            InventoryServiceBinding binding{{*first, *second}, itemId,
+                {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
+            binding.mLootLevel = lootLevel;
+            binding.mLootSeed = uint32_t(lootSeed);
             // Hash semantic bindings, never local configuration paths or
             // descriptor whitespace, so moving the same loadout preserves saves.
             std::ostringstream semantic;
-            semantic << "native-inventory-1\n" << identity << registration << '\n'
+            semantic << version << '\n' << identity << registration << '\n'
                 << actorA << ':' << countA << '\n' << actorB << ':' << countB << '\n'
-                << shirt << ':' << itemId << '\n' << container << ':' << containerId << '\n'
-                << cellText << ':' << x << ':' << y << ':' << z << '\n';
-            return {semantic.str(), std::move(options), std::move(binding)};
+                << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
+            return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front()};
         }
     }
     struct InventoryHost::Impl
     {
         Loadout loadout;
         InventoryService inventory;
-        static InventoryServiceBinding bind(Startup& start, const Loadout& loadout, CredentialCrypto& crypto)
+        static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto)
         {
-            // The descriptor explicitly binds operator-selected engine content to
-            // the authenticated pack. Recovery additionally binds actual ordered
-            // file bytes, encoding and every trusted role/mapping in that descriptor.
-            auto material = start.text + loadout.contentFingerprint();
+            const auto references = start.plugin.empty()
+                ? loadout.resolveContainers(start.cell, MaxEquipmentContainers)
+                : std::vector{loadout.resolveContainer(start.cell, start.plugin, start.index)};
+            std::ostringstream placement;
+            for (const auto& placed : references)
+            {
+                const auto& p = placed.mRef.mPos.pos;
+                const Position3 position(std::llround(double(p[0]) * 1024),
+                    std::llround(double(p[1]) * 1024), std::llround(double(p[2]) * 1024));
+                start.binding.mContainers.push_back({ContainerId::fromValue(placed.mIdentity).value(),
+                    start.wireCell, position, placed.mRef.mRefID, placed.mRef});
+                if (start.binding.mContainers.size() > 1) placement << '\n';
+                placement << std::quoted(loadout.store().get<ESM::Cell>().find(start.cell)->mId.serializeText())
+                    << ':' << placed.mIdentity << ':' << placed.mRef.mRefID << ':'
+                    << position.x() << ':' << position.y() << ':' << position.z();
+            }
+            // Re-resolve before recovery. The image envelope binds resolved
+            // placement plus actual ordered file bytes, encoding and player roles.
+            auto material = start.text + placement.str() + '\n' + loadout.contentFingerprint();
             CredentialDigest digest;
             if (!crypto.sha256(std::as_bytes(std::span(material)), digest))
                 throw std::runtime_error("Native content binding digest unavailable");
@@ -119,8 +157,9 @@ namespace TES3MP::Native
         {
             if (!restored.empty())
             {
-                const std::array references{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase,
-                    start.binding.mActors[0].mShirt};
+                std::vector<ESM::RefId> references{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase};
+                for (const auto& [id, record] : MWWorld::inventoryRecords(loadout.store())) references.push_back(record);
+                for (const auto& [id, record] : MWWorld::inventorySoulRecords(loadout.store())) references.push_back(record);
                 inventory.recover(restored, references);
             }
         }

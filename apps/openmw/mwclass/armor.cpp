@@ -1,4 +1,5 @@
 #include "armor.hpp"
+#include "../mwworld/equipmentslots.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -83,32 +84,7 @@ namespace MWClass
 
     std::pair<std::vector<int>, bool> Armor::getEquipmentSlots(const MWWorld::ConstPtr& ptr) const
     {
-        const MWWorld::LiveCellRef<ESM::Armor>* ref = ptr.get<ESM::Armor>();
-
-        std::vector<int> slots;
-
-        const int size = 11;
-
-        static const int sMapping[size][2] = { { ESM::Armor::Helmet, MWWorld::InventoryStore::Slot_Helmet },
-            { ESM::Armor::Cuirass, MWWorld::InventoryStore::Slot_Cuirass },
-            { ESM::Armor::LPauldron, MWWorld::InventoryStore::Slot_LeftPauldron },
-            { ESM::Armor::RPauldron, MWWorld::InventoryStore::Slot_RightPauldron },
-            { ESM::Armor::Greaves, MWWorld::InventoryStore::Slot_Greaves },
-            { ESM::Armor::Boots, MWWorld::InventoryStore::Slot_Boots },
-            { ESM::Armor::LGauntlet, MWWorld::InventoryStore::Slot_LeftGauntlet },
-            { ESM::Armor::RGauntlet, MWWorld::InventoryStore::Slot_RightGauntlet },
-            { ESM::Armor::Shield, MWWorld::InventoryStore::Slot_CarriedLeft },
-            { ESM::Armor::LBracer, MWWorld::InventoryStore::Slot_LeftGauntlet },
-            { ESM::Armor::RBracer, MWWorld::InventoryStore::Slot_RightGauntlet } };
-
-        for (int i = 0; i < size; ++i)
-            if (sMapping[i][0] == ref->mBase->mData.mType)
-            {
-                slots.push_back(int(sMapping[i][1]));
-                break;
-            }
-
-        return std::make_pair(slots, false);
+        return MWWorld::equipmentSlots(*ptr.get<ESM::Armor>()->mBase).asClassSlots();
     }
 
     ESM::RefId Armor::getEquipmentSkill(const MWWorld::ConstPtr& ptr, bool useLuaInterfaceIfAvailable) const
@@ -346,8 +322,12 @@ namespace MWClass
 
     std::pair<int, std::string_view> Armor::canBeEquipped(const MWWorld::ConstPtr& ptr, const MWWorld::Ptr& npc) const
     {
-        const MWWorld::InventoryStore& invStore = npc.getClass().getInventoryStore(npc);
+        return canBeEquipped(ptr, npc, *MWBase::Environment::get().getESMStore(), npc.getClass().getInventoryStore(npc));
+    }
 
+    std::pair<int, std::string_view> Armor::canBeEquipped(const MWWorld::ConstPtr& ptr,
+        const MWWorld::Ptr& npc, const MWWorld::ESMStore& content, const MWWorld::InventoryStore& invStore) const
+    {
         if (getItemHealth(ptr) == 0)
             return { 0, "#{sInventoryMessage1}" };
 
@@ -362,7 +342,7 @@ namespace MWClass
             const ESM::RefId& npcRace = npc.get<ESM::NPC>()->mBase->mRace;
 
             // Beast races cannot equip shoes / boots, or full helms (head part vs hair part)
-            const ESM::Race* race = MWBase::Environment::get().getESMStore()->get<ESM::Race>().find(npcRace);
+            const ESM::Race* race = content.get<ESM::Race>().find(npcRace);
             if (race->mData.mFlags & ESM::Race::Beast)
             {
                 std::vector<ESM::PartReference> parts = ptr.get<ESM::Armor>()->mBase->mParts.mParts;

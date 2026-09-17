@@ -10,6 +10,7 @@
 
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/readerscache.hpp>
+#include <components/esm3/cellref.hpp>
 #include <components/toutf8/toutf8.hpp>
 
 namespace TES3MP::Native
@@ -27,6 +28,7 @@ namespace TES3MP::Native
         std::string mEquipmentContainer;
         std::vector<std::string> mEquipmentActors;
         std::filesystem::path mEquipmentSaveDirectory;
+        std::string mContainerCell;
     };
 
     LoadoutOptions readLoadoutOptions(int argc, const char* const argv[]);
@@ -42,6 +44,19 @@ namespace TES3MP::Native
         MWWorld::ESMStore& store() { return mStore; }
         ESM::ReadersCache& readers() { return mReaders; }
         std::string contentFingerprint() const;
+        struct PlacedContainer
+        {
+            ESM::CellRef mRef;
+            uint64_t mIdentity;
+            std::string mPlugin;
+            bool mEmptyBase, mScripted;
+        };
+        // One interior's winning engine references, including barrels and chests.
+        // No gameplay or base-inventory execution occurs during discovery.
+        std::vector<PlacedContainer> placedContainers(std::string_view cell);
+        PlacedContainer resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index);
+        std::vector<PlacedContainer> resolveContainers(std::string_view cell, size_t limit);
+        void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;
         // Prepare completely before touching output. Stream/device write failure

@@ -37,7 +37,7 @@ namespace TES3MP::Native
         PersistenceResult writeSessionImage(std::span<const char> image, FileFaults& faults) noexcept;
         PersistenceResult writeSession(const EquipmentSessionValues& values,
             const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults,
-        const EquipmentBindings* container = nullptr);
+        std::span<const EquipmentBindings> containers = {});
         // Encode and validate before any I/O. Accepted publishes complete owned
         // bytes by nonthrowing swap. Rejection/exception/uncertainty preserves
         // prior output storage/value. Uncertainty blocks further writes, even

@@ -6221,6 +6221,36 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "equipment-slots")
+        {
+            TES3MP::Native::Testing::checkEquipmentSlots(root);
+            return;
+        }
+        if (filter == "equipment-canonical")
+        {
+            TES3MP::Native::Testing::checkCanonicalInventory(root, true);
+            return;
+        }
+        if (filter == "player-inventories")
+        {
+            TES3MP::Native::Testing::checkPlayerInventories(root);
+            return;
+        }
+        if (filter == "cell-inventories")
+        {
+            TES3MP::Native::Testing::checkCellInventories(root);
+            return;
+        }
+        if (filter == "stocked-inventory")
+        {
+            TES3MP::Native::Testing::checkStockedInventory(root);
+            return;
+        }
+        if (filter == "placed-containers")
+        {
+            TES3MP::Native::Testing::checkPlacedContainers(root);
+            return;
+        }
         if (filter == "inventory-application")
         {
             TES3MP::Native::Testing::checkInventoryApplication(root);
@@ -6394,11 +6424,13 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc == 4 && std::string_view(argv[1]) == "inventory-host")
+        if (argc == 4 && (std::string_view(argv[1]) == "inventory-host" || std::string_view(argv[1]) == "cell-inventory-host"
+            || std::string_view(argv[1]) == "player-inventory-host"))
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
-                std::filesystem::absolute(std::filesystem::u8path(argv[3])));
-            std::cout << "PASS inventory-host\n";
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])), std::string_view(argv[1]) != "inventory-host",
+                std::string_view(argv[1]) == "player-inventory-host");
+            std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }
         require(argc == 3, "Usage: tes3mp_native_loadout_tests FILTER SCRATCH_DIRECTORY [OPENMW_CONFIG_FILE for inventory-host]");

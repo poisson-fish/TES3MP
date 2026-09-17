@@ -114,7 +114,12 @@ namespace TES3MP::OpenMWAdapter
         DesktopSemanticInput* mDesktopInput = nullptr;
         std::optional<std::uint32_t> mNativePlayerCount;
         std::optional<std::uint32_t> mNativeContainerCount;
+        std::optional<ContainerId> mNativeContainerId;
         std::uint64_t mNativeRevision = 0;
+        std::vector<CanonicalItemStack> mNativePlayerStacks, mNativeContainerStacks, mNativeExpectedPlayer;
+        std::optional<CanonicalItemStack> mNativeSelected;
+        std::uint32_t mNativeInitialCount = 0;
+        std::uint64_t mNativeSubmittedRevision = 0;
         unsigned mNativeStage = 0;
         bool mNativeInventoryAfterResume = false;
         std::optional<MonotonicInstant> mNativeStageAt;

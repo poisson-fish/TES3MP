@@ -4,6 +4,7 @@
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <limits>
+#include <set>
 #include <stdexcept>
 
 namespace TES3MP::Native
@@ -12,7 +13,8 @@ namespace TES3MP::Native
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
-        std::optional<size_t> restartActor, bool connected, ESM::RefId container)
+        std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
+        int lootLevel, uint32_t lootSeed)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
         , mScriptLocals(std::move(locals)), mConnected(connected)
     {
@@ -26,7 +28,13 @@ namespace TES3MP::Native
         // Validate all trusted startup records before constructing registered nodes.
         for (const auto& actor : actors)
         {
-            content.get<ESM::NPC>().find(actor.mBase);
+            const auto* npc = content.get<ESM::NPC>().find(actor.mBase);
+            if (actor.mBaseInventory)
+            {
+                if (!connected || !actor.mShirt.empty() || actor.mCount != 0 || !npc->mScript.empty())
+                    throw std::invalid_argument("Base actor inventory requires connected mode, no seed and no actor script");
+                continue;
+            }
             const auto* shirt = content.get<ESM::Clothing>().find(actor.mShirt);
             if (shirt->mData.mType != ESM::Clothing::Shirt || actor.mCount == 0
                 || actor.mCount == std::numeric_limits<int>::min())
@@ -38,9 +46,17 @@ namespace TES3MP::Native
                 mScriptLocals->declarations(content, shirt->mScript);
             }
         }
-        if (!container.empty())
+        if (containers.size() > MaxEquipmentContainers)
+            throw std::invalid_argument("Shared container budget exceeded");
+        std::set<ESM::RefNum> placements;
+        for (const auto& binding : containers)
         {
-            const auto* base = content.get<ESM::Container>().find(container);
+            const auto& placement = binding.mPlacement;
+            if (placement && (!placement->mRefNum.hasContentFile() || placement->mRefID != binding.mBase
+                || placement->mIsLocked || !placement->mTrap.empty()
+                || !placements.insert(placement->mRefNum).second))
+                throw std::invalid_argument("Placed container runtime binding invalid or duplicate");
+            const auto* base = content.get<ESM::Container>().find(binding.mBase);
             if (!connected || !base->mScript.empty())
                 throw std::invalid_argument("Shared container requires connected mode and no container script");
         }
@@ -57,26 +73,57 @@ namespace TES3MP::Native
             inventory.setPtr(actor, world);
             Misc::Rng::Generator rng{ 0 };
             inventory.fill({}, {}, rng);
-            ManualRef item(content, actors[i].mShirt);
-            mItems[i] = *inventory.addNewStack(item.getPtr(), actors[i].mCount);
-            world.registerPtr(mItems[i]);
+            if (!actors[i].mBaseInventory)
+            {
+                ManualRef item(content, actors[i].mShirt);
+                mItems[i] = *inventory.addNewStack(item.getPtr(), actors[i].mCount);
+                world.registerPtr(mItems[i]);
+                const auto script = content.get<ESM::Clothing>().find(actors[i].mShirt)->mScript;
+                if (!script.empty())
+                    mItems[i].getRefData().setLocals(*content.get<ESM::Script>().find(script), *declarations);
+            }
             ContainerStoreResolution witness(inventory, actor);
-            const auto script = content.get<ESM::Clothing>().find(actors[i].mShirt)->mScript;
-            if (!script.empty())
-                mItems[i].getRefData().setLocals(*content.get<ESM::Script>().find(script), *declarations);
             if (actors[i].mNpcStats)
                 mNpcStats[i] = std::make_shared<EquipmentNpcStats>(actor, content);
             bindEffects(i);
         }
-        if (!container.empty())
+        for (const auto& binding : containers)
         {
-            mContainer = std::make_unique<ManualRef>(content, container);
-            world.registerPtr(mContainer->getPtr());
-            mContainerStore.setPtr(mContainer->getPtr(), world);
-            Misc::Rng::Generator rng{ 0 };
-            mContainerStore.fill({}, {}, rng);
-            ContainerStoreResolution witness(mContainerStore, mContainer->getPtr());
-            mContainerStore.setContListener(&mContainerEffects.mListener);
+            auto& shared = *mContainers.emplace_back(std::make_unique<SharedContainer>());
+            shared.mReference = std::make_unique<ManualRef>(content, binding.mBase);
+            if (binding.mPlacement)
+            {
+                // Detached engine reference; discovery never initializes its inventory.
+                shared.mReference->getPtr().getCellRef() = CellRef(*binding.mPlacement);
+                shared.mReference->getPtr().getRefData().setPosition(binding.mPlacement->mPos);
+            }
+            world.registerPtr(shared.mReference->getPtr());
+            shared.mStore.setPtr(shared.mReference->getPtr(), world);
+        }
+        // Bind every owner before loot consumes dynamic IDs, so even base-only
+        // diagnostic owners have identical identities during empty recovery.
+        Misc::Rng::Generator rng{ lootSeed };
+        // All owner identities exist before variable-size character loot. A
+        // restart must bind exactly the same owners without generating items.
+        for (size_t i = 0; i < actors.size(); ++i)
+            if (actors[i].mBaseInventory && !restartActor)
+            {
+                auto& inventory = mInventories[i];
+                inventory.fill(content.get<ESM::NPC>().find(actors[i].mBase)->mInventory, actors[i].mBase, rng,
+                    {content, world, lootLevel});
+                if (inventory.begin() != inventory.end()) mItems[i] = *inventory.begin();
+            }
+        for (size_t i = 0; i < containers.size(); ++i)
+        {
+            const auto& binding = containers[i];
+            auto& shared = *mContainers[i];
+            if (restartActor)
+                shared.mStore.fill({}, {}, rng);
+            else
+                shared.mStore.fill(content.get<ESM::Container>().find(binding.mBase)->mInventory, {}, rng,
+                    {content, world, lootLevel});
+            ContainerStoreResolution witness(shared.mStore, shared.mReference->getPtr());
+            shared.mStore.setContListener(&shared.mEffects.mListener);
         }
         if (restartActor)
         {
@@ -89,6 +136,15 @@ namespace TES3MP::Native
             mRestartActor = restartActor;
         }
     }
+
+    EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
+        std::string runtime, std::array<unsigned char, 32> contentIdentity,
+        const std::array<EquipmentActorBinding, 2>& actors,
+        std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
+        std::optional<size_t> restartActor, bool connected, ESM::RefId container)
+        : EquipmentRuntime(content, world, scripts, std::move(runtime), contentIdentity, actors,
+            std::move(locals), declarations, restartActor, connected, container.empty()
+                ? std::vector<EquipmentContainerBinding>{} : std::vector<EquipmentContainerBinding>{{container, {}}}) {}
 
     EquipmentEnvelope EquipmentRuntime::expectedEnvelope(ESM::RefNum actor) const
     {
@@ -176,7 +232,7 @@ namespace TES3MP::Native
 
     void EquipmentRuntime::validateCaller(size_t actor, const Ptr& caller) const
     {
-        if (actor > 2 || (actor == 2 ? !mContainer : !mActors[actor]) || !caller.hasLiveReference())
+        if (actor >= ownerCount() || !caller.hasLiveReference())
             throw std::invalid_argument("Equipment trusted caller lifetime or actor changed");
         const auto expected = ownerPtr(actor);
         if (caller != expected || caller.mCell != expected.mCell
@@ -189,14 +245,17 @@ namespace TES3MP::Native
     {
         if (mFailedClosed || !mRestartActor || mWorld.mPtrRegistry.mIndex.size() > registryBound())
             throw std::invalid_argument("Equipment restart requires an explicit fresh bounded runtime");
-        return { this, { &mInventories[0], &mInventories[1] },
+        RestartBindings result{ this, { &mInventories[0], &mInventories[1] },
             { mInventories[0].mResolutionLifetime, mInventories[1].mResolutionLifetime },
             { mInventories[0].mStorageIdentity, mInventories[1].mStorageIdentity },
             mScripts.lifetimeWitness(), mWorld.mPtrRegistry.mIndex, mWorld.getPtrRegistryRevision(),
             mWorld.getLastGeneratedRefNum(), savedCounter, { mNpcStats[0], mNpcStats[1] },
             { mNpcStats[0] ? std::optional{ mNpcStats[0]->values() } : std::nullopt,
                 mNpcStats[1] ? std::optional{ mNpcStats[1]->values() } : std::nullopt }, mScriptLocals,
-            mContainer ? std::optional{ ContainerStoreResolution(mContainerStore, mContainer->getPtr()) } : std::nullopt };
+            {} };
+        for (const auto& shared : mContainers)
+            result.mContainers.emplace_back(shared->mStore, shared->mReference->getPtr());
+        return result;
     }
 
     bool EquipmentRuntime::sameReference(const ConstPtr& a, const ConstPtr& b)
@@ -235,24 +294,20 @@ namespace TES3MP::Native
                 valid(fresh.mStatValues[i] == mNpcStats[i]->values());
             }
         }
-        if (mContainer)
+        valid(fresh.mContainers.size() == mContainers.size());
+        for (size_t i = 0; i < mContainers.size(); ++i)
         {
-            valid(fresh.mContainer.has_value());
-            const auto& witness = *fresh.mContainer;
-            valid(!witness.mLifetime.expired() && witness.mLifetime.lock() == mContainerStore.mResolutionLifetime
-                && witness.mStorage == mContainerStore.mStorageIdentity && witness.mStore == &mContainerStore
-                && mContainerStore.mResolved && mContainerStore.mLists.mClothes.mList.empty()
-                && mContainerStore.mLists.mPotions.mList.empty() && mContainerStore.mLists.mAppas.mList.empty()
-                && mContainerStore.mLists.mArmors.mList.empty() && mContainerStore.mLists.mBooks.mList.empty()
-                && mContainerStore.mLists.mIngreds.mList.empty() && mContainerStore.mLists.mLights.mList.empty()
-                && mContainerStore.mLists.mLockpicks.mList.empty() && mContainerStore.mLists.mMiscItems.mList.empty()
-                && mContainerStore.mLists.mProbes.mList.empty() && mContainerStore.mLists.mRepairs.mList.empty()
-                && mContainerStore.mLists.mWeapons.mList.empty());
-            valid(sameReference(mContainer->getPtr(), mWorld.getPtr(mContainer->getPtr().getCellRef().getRefNum()))
-                && sameReference(mContainerStore.getPtr(mWorld), mContainer->getPtr())
-                && mContainerStore.mListener == &mContainerEffects.mListener);
+            const auto& shared = *mContainers[i];
+            const auto& store = shared.mStore;
+            const auto& witness = fresh.mContainers[i];
+            valid(!witness.mLifetime.expired() && witness.mLifetime.lock() == store.mResolutionLifetime
+                && witness.mStorage == store.mStorageIdentity && witness.mStore == &store
+                && store.mResolved && store.storedSize() == 0);
+            store.forEachStored([&](const auto&, auto) { valid(false); });
+            valid(sameReference(shared.mReference->getPtr(), mWorld.getPtr(shared.mReference->getPtr().getCellRef().getRefNum()))
+                && sameReference(store.getPtr(mWorld), shared.mReference->getPtr())
+                && store.mListener == &shared.mEffects.mListener);
         }
-        else valid(!fresh.mContainer);
         const auto& target = mInventories[actor];
         const auto& lists = target.mLists;
         valid(lists.mClothes.mList.empty() && lists.mPotions.mList.empty() && lists.mAppas.mList.empty()
@@ -310,19 +365,19 @@ namespace TES3MP::Native
         auto& live = mInventories[actor];
         auto staged = std::make_unique<RestartInstallation>(fresh, live);
         staged->mRegistry = fresh.mRegistry;
-        for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
-        {
-            Ptr node(&*it, nullptr);
+        candidate.forEachStored([&](auto& ref, auto it) {
+            it.mContainer = &live;
+            Ptr node(&ref, nullptr);
             node.mContainerStore = &live;
-            const auto id = it->mRef.getRefNum();
+            const auto id = ref.mRef.getRefNum();
             staged->mRegistry.emplace(id, node);
-            if (id == saved.mShirt)
-                staged->mShirt = ContainerStoreIterator(&live, it);
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (id == saved.mSlots[slot]) staged->mSlots[slot] = it;
             if (id == saved.mSelected)
-                staged->mSelected = ContainerStoreIterator(&live, it);
-            if (staged->mItem.isEmpty() && it->mRef.getCount(false) != 0)
+                staged->mSelected = it;
+            if (staged->mItem.isEmpty() && ref.mRef.getCount(false) != 0)
                 staged->mItem = node;
-        }
+        });
         phase.set(Phase::Result);
         if (saved.mNpcStats.has_value() != static_cast<bool>(mNpcStats[actor]))
             throw std::invalid_argument("Equipment restart stat context/save mode mismatch");
@@ -372,23 +427,24 @@ namespace TES3MP::Native
         for (const auto& [id, node] : staged->mFresh.mRegistry)
             if (!sameReference(node, staged->mRegistry.at(id)))
                 throw std::invalid_argument("Equipment restart changed unrelated registry binding");
-        auto shirt = live.end(), selected = live.end();
+        std::vector<ContainerStoreIterator> slots(InventoryStore::Slots, live.end());
+        auto selected = live.end();
         Ptr first;
-        for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
-        {
-            Ptr node(&*it, nullptr);
+        candidate.forEachStored([&](auto& ref, auto it) {
+            it.mContainer = &live;
+            Ptr node(&ref, nullptr);
             node.mContainerStore = &live;
-            const auto id = it->mRef.getRefNum();
+            const auto id = ref.mRef.getRefNum();
             if (!sameReference(node, staged->mRegistry.at(id)))
                 throw std::invalid_argument("Equipment restart node relocation changed");
-            if (id == restored.mShirt)
-                shirt = ContainerStoreIterator(&live, it);
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (id == restored.mSlots[slot]) slots[slot] = it;
             if (id == restored.mSelected)
-                selected = ContainerStoreIterator(&live, it);
-            if (first.isEmpty() && it->mRef.getCount(false) != 0)
+                selected = it;
+            if (first.isEmpty() && ref.mRef.getCount(false) != 0)
                 first = node;
-        }
-        if (shirt != staged->mShirt || selected != staged->mSelected || !sameReference(first, staged->mItem))
+        });
+        if (slots != staged->mSlots || selected != staged->mSelected || !sameReference(first, staged->mItem))
             throw std::invalid_argument("Equipment restart slot, selection or item relocation changed");
         validateRestart(actor, caller, bindings, staged->mFresh);
 
@@ -396,7 +452,7 @@ namespace TES3MP::Native
         // complete. No equip/removal callbacks are replayed on restart.
         const auto install = [&]() noexcept {
             phase.set(Phase::Installation);
-            installInventory(actor, candidate, staged->mShirt, staged->mSelected, staged->mItem, staged->mNpcStats, true);
+            installInventory(actor, candidate, staged->mSlots, staged->mSelected, staged->mItem, staged->mNpcStats, true);
             auto& registry = mWorld.mPtrRegistry;
             registry.mIndex.swap(staged->mRegistry);
             // Format 1 saves the generation counter, not a registry epoch.
@@ -457,22 +513,23 @@ namespace TES3MP::Native
         staged->mRegistry = mWorld.mPtrRegistry.mIndex;
         staged->mRevision = mWorld.getPtrRegistryRevision();
         staged->mEffects = pending;
-        staged->mShirt = staged->mSelected = live.end();
+        std::fill(staged->mSlots.begin(), staged->mSlots.end(), live.end());
+        staged->mSelected = live.end();
         const auto& result = staged->mPrepared.result();
-        for (auto it = candidate.mLists.mClothes.mList.begin(); it != candidate.mLists.mClothes.mList.end(); ++it)
-        {
-            Ptr node(&*it, nullptr); // Allocate lifetime witnesses before persistence.
+        candidate.forEachStored([&](auto& ref, auto it) {
+            it.mContainer = &live;
+            Ptr node(&ref, nullptr); // Allocate lifetime witnesses before persistence.
             node.mContainerStore = &live;
-            const auto id = it->mRef.getRefNum();
+            const auto id = ref.mRef.getRefNum();
             staged->mRegistry.insert_or_assign(id, node);
-            if (id == result.mShirt)
-                staged->mShirt = ContainerStoreIterator(&live, it);
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (id == result.mSlots[slot]) staged->mSlots[slot] = it;
             if (id == result.mSelected)
-                staged->mSelected = ContainerStoreIterator(&live, it);
+                staged->mSelected = it;
             if (actor < 2 && (mItems[actor].isEmpty() ? staged->mItem.isEmpty()
                 : node.getCellRef().getRefNum() == mItems[actor].getCellRef().getRefNum()))
                 staged->mItem = node;
-        }
+        });
         using Kind = PlainEquipmentResult::EffectKind;
         for (const auto& effect : result.mEffects)
         {
@@ -577,24 +634,23 @@ namespace TES3MP::Native
     PlainEquipmentValues EquipmentRuntime::installedValues(size_t actor) const
     {
         const auto& inventory = storage(actor);
-        if (inventory.mLists.mClothes.mList.size() > PlainEquipmentValues::MaxItems)
+        if (inventory.storedSize() > PlainEquipmentValues::MaxItems)
             throw std::invalid_argument("Equipment inventory export bound exceeded");
         PlainEquipmentValues result;
         result.mActor = ownerPtr(actor).getCellRef().getRefNum();
         result.mLastGenerated = mWorld.getLastGeneratedRefNum();
-        for (auto it = inventory.mLists.mClothes.mList.begin(); it != inventory.mLists.mClothes.mList.end(); ++it)
-        {
-            const auto position = ConstContainerStoreIterator(&inventory, it);
-            if (actor < 2 && position == mInventories[actor].mSlots[InventoryStore::Slot_Shirt])
-                result.mShirt = it->mRef.getRefNum();
+        inventory.forEachStored([&](const auto& ref, auto position) {
+            if (actor < 2)
+                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                    if (position == mInventories[actor].mSlots[slot]) result.mSlots[slot] = ref.mRef.getRefNum();
             if (actor < 2 && position == mInventories[actor].mSelectedEnchantItem)
-                result.mSelected = it->mRef.getRefNum();
+                result.mSelected = ref.mRef.getRefNum();
             auto& object = result.mObjects.emplace_back();
             object.blank();
-            it->mRef.writeState(object);
-            it->mData.write(object, equipmentDeclarations(mStore, it->mBase->mScript, mScriptLocals.get()));
+            ref.mRef.writeState(object);
+            ref.mData.write(object, equipmentDeclarations(mStore, ref.mBase->mScript, mScriptLocals.get()));
             object.mHasCustomState = false;
-        }
+        });
         if (actor < 2 && mNpcStats[actor])
             result.mNpcStats = mNpcStats[actor]->values();
         return result;
@@ -631,8 +687,8 @@ namespace TES3MP::Native
 
     bool EquipmentRuntime::sameValues(const PlainEquipmentValues& a, const PlainEquipmentValues& b)
     {
-        return std::tie(a.mActor, a.mShirt, a.mSelected, a.mLastGenerated)
-            == std::tie(b.mActor, b.mShirt, b.mSelected, b.mLastGenerated)
+        return std::tie(a.mActor, a.mSlots, a.mSelected, a.mLastGenerated)
+            == std::tie(b.mActor, b.mSlots, b.mSelected, b.mLastGenerated)
             && a.mNpcStats == b.mNpcStats
             && std::equal(a.mObjects.begin(), a.mObjects.end(), b.mObjects.begin(), b.mObjects.end(), sameObject);
     }
@@ -647,6 +703,7 @@ namespace TES3MP::Native
         const auto id = [](InventoryInstanceId value) { return ESM::RefNum{ value.mIndex, value.mContentFile }; };
         if (mRestartActor || !id(command.mActor).isSet() || !id(command.mItem).isSet()
             || caller.mActor != command.mActor || command.mExpectedRevision != mWorld.getPtrRegistryRevision()
+            || command.mSlot < 0 || command.mSlot >= InventoryStore::Slots
             || (command.mState != EquipmentRequestedState::Equipped
                 && command.mState != EquipmentRequestedState::Unequipped))
             throw std::invalid_argument("Equipment command caller, identity, revision or state invalid");
@@ -687,7 +744,7 @@ namespace TES3MP::Native
         phase.set(Phase::Preparation);
         auto prepared = PreparedPlainEquipment::prepare(ContainerStoreResolution(mInventories[actor], actorPtr),
             item, itemId, static_cast<size_t>(command.mExpectedRevision),
-            command.mState == EquipmentRequestedState::Equipped, preparationContext(actor));
+            command.mState == EquipmentRequestedState::Equipped, preparationContext(actor), command.mSlot);
         const auto& result = prepared.result();
         auto revision = mWorld.getPtrRegistryRevision();
         for (const auto& effect : result.mEffects)
@@ -695,7 +752,7 @@ namespace TES3MP::Native
                 ++revision; // Same stock counter semantics as commitEquipment.
         phase.set(Phase::Result);
         auto staged = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{ command,
-            ownedId(result.mShirt), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision, result.mLuck, result.mSkipped });
+            ownedId(result.mSlots[InventoryStore::Slot_Shirt]), ownedId(result.mSelected), ownedId(result.mLastGenerated), revision, result.mLuck, result.mSkipped });
         std::unique_ptr<const PlainEquipmentResult> internal;
         const auto outcome = commitEquipment(actor, actorPtr, std::move(prepared), file, bindings, internal, bytes, faults);
         if (outcome == PersistenceResult::Accepted)

@@ -428,6 +428,8 @@ namespace MWMechanics
                 continue;
             // Item script locals belong to the equipment caller. Effect membership
             // only owns the shirt's constant enchantment, never script execution.
+            if (item->getClass().getEnchantment(*item).empty())
+                continue;
             if (slot != MWWorld::InventoryStore::Slot_Shirt || item->getType() != ESM::Clothing::sRecordId)
                 throw std::invalid_argument("Constant effect context requires a shirt");
             constantFortifyLuckMagnitude(content, item->getClass().getEnchantment(*item));

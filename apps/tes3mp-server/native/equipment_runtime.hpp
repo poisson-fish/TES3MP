@@ -18,8 +18,17 @@ namespace TES3MP::Native
     struct EquipmentActorBinding
     {
         ESM::RefId mBase, mShirt;
-        int mCount;
+        int mCount = 0;
         bool mNpcStats = false;
+        // Explicit startup mode; an empty base inventory is valid. Legacy
+        // diagnostics/descriptors retain their seed and saved owner identities.
+        bool mBaseInventory = false;
+    };
+
+    struct EquipmentContainerBinding
+    {
+        ESM::RefId mBase;
+        std::optional<ESM::CellRef> mPlacement;
     };
 
     class EquipmentRuntime
@@ -48,8 +57,6 @@ namespace TES3MP::Native
         const std::array<unsigned char, 32> mContent;
         std::array<std::unique_ptr<ManualRef>, 2> mActors;
         std::array<InventoryStore, 2> mInventories;
-        std::unique_ptr<ManualRef> mContainer;
-        ContainerStore mContainerStore;
         std::array<Ptr, 2> mItems;
         // The runtime is the sole writer of each bound stock NPC stat context.
         // No NPC custom-data or global player is installed alongside it.
@@ -64,7 +71,14 @@ namespace TES3MP::Native
             std::vector<ESM::RefNum> mNotifications;
         };
         std::array<ActorEffects, 2> mActorEffects;
-        ActorEffects mContainerEffects;
+        struct SharedContainer
+        {
+            std::unique_ptr<ManualRef> mReference;
+            ContainerStore mStore;
+            ActorEffects mEffects;
+        };
+        // Stable addresses keep registry pointers and listener bindings valid.
+        std::vector<std::unique_ptr<SharedContainer>> mContainers;
         bool mFailedClosed = false;
         const bool mConnected;
         const std::shared_ptr<const void> mLifetime = std::make_shared<const char>(0);
@@ -84,12 +98,13 @@ namespace TES3MP::Native
             PlainEquipmentValues mSaved;
             std::unique_ptr<const PlainEquipmentResult> mResult;
             ActorEffects mEffects;
-            ContainerStoreIterator mShirt, mSelected;
+            std::vector<ContainerStoreIterator> mSlots;
+            ContainerStoreIterator mSelected;
             Ptr mItem;
 
             Installation(PreparedPlainEquipment prepared, ContainerStore& target)
                 : mPrepared(std::move(prepared))
-                , mShirt(target.end())
+                , mSlots(InventoryStore::Slots, target.end())
                 , mSelected(target.end())
             {
             }
@@ -108,7 +123,7 @@ namespace TES3MP::Native
             std::array<std::shared_ptr<const EquipmentNpcStats>, 2> mNpcStats;
             std::array<std::optional<EquipmentNpcStatsValues>, 2> mStatValues;
             std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
-            std::optional<ContainerStoreResolution> mContainer;
+            std::vector<ContainerStoreResolution> mContainers;
         };
 
         struct RestartInstallation
@@ -118,19 +133,20 @@ namespace TES3MP::Native
             RestartBindings mFresh;
             PtrRegistry::Index mRegistry;
             std::unique_ptr<const PlainEquipmentValues> mValues;
-            ContainerStoreIterator mShirt, mSelected;
+            std::vector<ContainerStoreIterator> mSlots;
+            ContainerStoreIterator mSelected;
             Ptr mItem;
             std::shared_ptr<EquipmentNpcStats> mNpcStats;
 
             RestartInstallation(const RestartBindings& fresh, InventoryStore& target)
                 : mFresh(fresh)
-                , mShirt(target.end())
+                , mSlots(InventoryStore::Slots, target.end())
                 , mSelected(target.end())
             {
             }
         };
 
-        void installInventory(size_t actor, InventoryStore& candidate, ContainerStoreIterator shirt,
+        void installInventory(size_t actor, InventoryStore& candidate, const std::vector<ContainerStoreIterator>& slots,
             ContainerStoreIterator selected, const Ptr& item, std::shared_ptr<EquipmentNpcStats>& stats, bool replaceStorage = false) noexcept;
         void installStorage(ContainerStore& live, ContainerStore& candidate, bool replaceStorage) noexcept;
         void installPrepared(size_t owner, Installation& staged, ContainerStore& candidate) noexcept;
@@ -139,7 +155,8 @@ namespace TES3MP::Native
         Ptr ownerPtr(size_t owner) const;
         ActorEffects& effects(size_t owner);
         const ActorEffects& effects(size_t owner) const;
-        size_t registryBound() const { return (mContainer ? 3 : 2) * (PlainEquipmentValues::MaxItems + 1); }
+        size_t ownerCount() const { return 2 + mContainers.size(); }
+        size_t registryBound() const { return ownerCount() * (PlainEquipmentValues::MaxItems + 1); }
         PersistenceResult persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
             EquipmentBytes& bytes, FileFaults& faults) const;
         void encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const;
@@ -197,17 +214,41 @@ namespace TES3MP::Native
         PersistenceResult commit(PreparedTransfer& prepared, EquipmentSessionCommitter& durability,
             std::unique_ptr<const InventoryTransferSuccess>& output, EquipmentBytes& bytes);
 
+        class PreparedEquipment
+        {
+            friend class EquipmentRuntime;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit PreparedEquipment(std::unique_ptr<State> state);
+        public:
+            PreparedEquipment(PreparedEquipment&&) noexcept;
+            PreparedEquipment& operator=(PreparedEquipment&&) noexcept;
+            ~PreparedEquipment();
+            const EquipmentSuccess& candidate() const;
+            std::span<const char> image() const;
+        };
+        PreparedEquipment prepare(EquipmentCaller caller, EquipmentCommand command);
+        PersistenceResult commit(PreparedEquipment& prepared, EquipmentSessionCommitter& durability,
+            std::unique_ptr<const EquipmentSuccess>& output, EquipmentBytes& bytes);
+
         // connected fixes this owner's persistence mode for its lifetime. Both
         // transfer and equipment then require a session sink; restartActor=2 means
         // fresh coherent recovery, with commands blocked until all owners install.
-        // A supplied container base binds one empty diagnostic ContainerStore;
-        // base inventory lists, placed-reference access and scripts are not loaded.
+        // Shared inventories load stock loot once, in binding order. Recovery
+        // constructs empty storage and retains placed reference identity/state.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,
             const std::array<EquipmentActorBinding, 2>& actors,
             std::shared_ptr<const EquipmentScriptLocals> locals = {},
             MWBase::ScriptManager* declarations = nullptr,
-            std::optional<size_t> restartActor = {}, bool connected = false, ESM::RefId container = {});
+            std::optional<size_t> restartActor = {}, bool connected = false,
+            std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0);
+        // Diagnostic convenience; delegates to the same multi-owner runtime.
+        EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
+            std::string runtime, std::array<unsigned char, 32> contentIdentity,
+            const std::array<EquipmentActorBinding, 2>& actors,
+            std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
+            std::optional<size_t> restartActor, bool connected, ESM::RefId container);
         EquipmentRuntime(const EquipmentRuntime&) = delete;
         EquipmentRuntime& operator=(const EquipmentRuntime&) = delete;
 
@@ -217,7 +258,8 @@ namespace TES3MP::Native
             EquipmentFileSink& file, std::unique_ptr<const EquipmentSuccess>& output,
             EquipmentBytes& bytes, FileFaults& faults);
         InventoryTransferCommand transferCommand(size_t source, InventoryInstanceId item, int quantity) const;
-        InventoryTransferCommand containerCommand(size_t actor, bool drop, InventoryInstanceId item, int quantity) const;
+        InventoryTransferCommand containerCommand(size_t actor, bool drop, InventoryInstanceId item, int quantity,
+            size_t container = 0) const;
         PersistenceResult execute(InventoryTransferCaller caller, InventoryTransferCommand command,
             EquipmentFileSink& file, std::unique_ptr<const InventoryTransferSuccess>& output,
             EquipmentBytes& bytes, FileFaults& faults);
@@ -230,6 +272,7 @@ namespace TES3MP::Native
             EquipmentBytes& bytes, FileFaults& faults);
     private:
         PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
+        PlainEquipmentValues preparedValues(const PreparedEquipment& prepared, size_t owner) const;
     };
 }
 #endif

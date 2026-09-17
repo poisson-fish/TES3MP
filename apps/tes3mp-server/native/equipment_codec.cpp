@@ -1,6 +1,7 @@
 #include "equipment_codec.hpp"
 
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/inventoryitem.hpp>
 #include <apps/openmw/mwmechanics/activespells.hpp>
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/esmwriter.hpp>
@@ -37,7 +38,7 @@ namespace TES3MP::Native
             textValue(e.mRuntime, true);
             valid(e.mRuntime.size() <= 128 && e.mActor.isSet()
                 && std::any_of(e.mContent.begin(), e.mContent.end(), [](auto b) { return b != 0; })
-                && bindings.mReferenceIds.size() <= 4096);
+                && bindings.mReferenceIds.size() <= MaxEquipmentReferenceIds);
             for (const auto& id : bindings.mReferenceIds)
             {
                 valid(id.is<ESM::StringRefId>());
@@ -145,7 +146,8 @@ namespace TES3MP::Native
 
         struct Preflight
         {
-            ESM::RefNum mActor, mShirt, mSelected, mCounter;
+            ESM::RefNum mActor, mSelected, mCounter;
+            std::array<ESM::RefNum, InventoryStore::Slots> mSlots{};
             uint32_t mCount;
             std::optional<EquipmentNpcStatsValues> mNpcStats;
         };
@@ -163,7 +165,9 @@ namespace TES3MP::Native
             const auto records = data.number();
             valid(header.empty());
             auto equipment = file.record(ESM::fourCC("EQUP"));
-            const auto version = equipment.field(ESM::fourCC("FVER"), 4).number();
+            const auto format = equipment.field(ESM::fourCC("FVER"), 4).number();
+            const auto version = format == SlottedEquipmentFormatVersion
+                ? equipment.field(ESM::fourCC("MODE"), 4).number() : format;
             valid(version == EquipmentFormatVersion || version == NpcEquipmentFormatVersion || version == ScriptedEquipmentFormatVersion);
             valid(text(equipment.sub(ESM::fourCC("RUNT")).mBytes) == bindings.mEnvelope.mRuntime);
             const auto content = equipment.field(ESM::fourCC("CONT"), 32).mBytes;
@@ -171,7 +175,12 @@ namespace TES3MP::Native
                 [](char a, unsigned char b) { return static_cast<unsigned char>(a) == b; }));
             Preflight result;
             result.mActor = equipment.field(ESM::fourCC("ACTR"), 8).identity();
-            result.mShirt = equipment.field(ESM::fourCC("SHRT"), 8).identity();
+            if (format == SlottedEquipmentFormatVersion)
+            {
+                auto slots = equipment.field(ESM::fourCC("SLOT"), InventoryStore::Slots * 8);
+                for (auto& slot : result.mSlots) slot = slots.identity();
+            }
+            else result.mSlots[InventoryStore::Slot_Shirt] = equipment.field(ESM::fourCC("SHRT"), 8).identity();
             result.mSelected = equipment.field(ESM::fourCC("SELE"), 8).identity();
             result.mCounter = equipment.field(ESM::fourCC("LGEN"), 8).identity();
             result.mCount = equipment.field(ESM::fourCC("SIZE"), 4).number();
@@ -201,13 +210,16 @@ namespace TES3MP::Native
                 && result.mActor == bindings.mEnvelope.mActor && result.mCounter.mContentFile < 0);
             covers(result.mCounter, result.mActor);
             std::array<ESM::RefNum, PlainEquipmentValues::MaxItems> identities;
-            bool shirtFound = result.mShirt == ESM::RefNum{};
+            bool shirtFound = result.mSlots[InventoryStore::Slot_Shirt] == ESM::RefNum{};
             bool selectedFound = result.mSelected == ESM::RefNum{};
             int64_t total = 0;
             float luckMagnitude = 0;
             for (size_t i = 0; i < result.mCount; ++i)
             {
-                auto object = file.record(ESM::REC_CLOT);
+                auto peek = file;
+                const auto type = peek.number();
+                valid(ContainerStore::isStorableType(type));
+                auto object = file.record(type);
                 valid(object.mBytes.size() <= MaxEquipmentObjectBytes);
                 const auto id = object.field(ESM::fourCC("FRMR"), 8).identity();
                 covers(result.mCounter, id);
@@ -215,12 +227,13 @@ namespace TES3MP::Native
                     && std::find(identities.begin(), identities.begin() + i, id) == identities.begin() + i);
                 identities[i] = id;
                 const auto baseId = reference(object.sub(ESM::fourCC("NAME")), bindings);
-                const auto* base = bindings.mContent.get<ESM::Clothing>().search(baseId);
-                valid(base && base->mData.mType == ESM::Clothing::Shirt
-                    && (result.mNpcStats || base->mEnchant.empty())
+                const auto record = inventoryItemRecord(bindings.mContent, baseId);
+                const auto* base = &record;
+                valid(base->mType == type
                     && (base->mScript.empty() || (version == ScriptedEquipmentFormatVersion && !base->mEnchant.empty())));
-                const auto magnitude = MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant);
-                if (id == result.mShirt)
+                const auto magnitude = id == result.mSlots[InventoryStore::Slot_Shirt]
+                    ? MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant) : 0.f;
+                if (id == result.mSlots[InventoryStore::Slot_Shirt])
                     luckMagnitude = magnitude;
                 const auto optionalId = [&](uint32_t tag) {
                     if (object.next(tag))
@@ -249,9 +262,10 @@ namespace TES3MP::Native
                     count = std::bit_cast<int32_t>(object.field(ESM::fourCC("NAM9"), 4).number());
                 valid(count != std::numeric_limits<int32_t>::min()
                     && (base->mScript.empty() || std::abs(static_cast<int64_t>(count)) <= 1));
+                validateEquipmentItemSlots(record, id, count, result.mSlots, result.mNpcStats.has_value());
                 total += std::abs(static_cast<int64_t>(count));
                 valid(total <= std::numeric_limits<int>::max());
-                if (id == result.mShirt)
+                if (id == result.mSlots[InventoryStore::Slot_Shirt])
                 {
                     valid(std::abs(count) == 1);
                     shirtFound = true;
@@ -309,6 +323,9 @@ namespace TES3MP::Native
                     object.field(ESM::fourCC("XTIM"), 4);
                 valid(object.empty());
             }
+            for (auto slot : result.mSlots)
+                valid(!slot.isSet() || std::find(identities.begin(), identities.begin() + result.mCount, slot)
+                    != identities.begin() + result.mCount);
             valid(file.empty() && shirtFound && selectedFound
                 && (!result.mNpcStats
                     || result.mNpcStats->mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)][1] == luckMagnitude));
@@ -407,12 +424,27 @@ namespace TES3MP::Native
         writer.startRecord("EQUP");
         const bool scripted = std::any_of(input.mObjects.begin(), input.mObjects.end(),
             [](const auto& object) { return object.mHasLocals != 0; });
-        writer.writeHNT("FVER", scripted ? ScriptedEquipmentFormatVersion
-            : input.mNpcStats ? NpcEquipmentFormatVersion : EquipmentFormatVersion);
+        const auto mode = scripted ? ScriptedEquipmentFormatVersion
+            : input.mNpcStats ? NpcEquipmentFormatVersion : EquipmentFormatVersion;
+        bool slotted = false;
+        for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+            slotted = slotted || (slot != InventoryStore::Slot_Shirt && input.mSlots[slot].isSet());
+        writer.writeHNT("FVER", slotted ? SlottedEquipmentFormatVersion : mode);
+        if (slotted) writer.writeHNT("MODE", mode);
         writer.writeHNString("RUNT", bindings.mEnvelope.mRuntime);
         writer.writeHNT("CONT", bindings.mEnvelope.mContent);
         writer.writeFormId(input.mActor, true, "ACTR");
-        writer.writeFormId(input.mShirt, true, "SHRT");
+        if (slotted)
+        {
+            writer.startSubRecord("SLOT");
+            for (auto slot : input.mSlots)
+            {
+                writer.writeT(slot.mIndex);
+                writer.writeT(slot.mContentFile);
+            }
+            writer.endRecord("SLOT");
+        }
+        else writer.writeFormId(input.mSlots[InventoryStore::Slot_Shirt], true, "SHRT");
         writer.writeFormId(input.mSelected, true, "SELE");
         writer.writeFormId(input.mLastGenerated, true, "LGEN");
         writer.writeHNT("SIZE", static_cast<uint32_t>(input.mObjects.size()));
@@ -432,9 +464,10 @@ namespace TES3MP::Native
         for (const auto& object : input.mObjects)
         {
             buffer.mLimit = std::min(MaxEquipmentBytes, buffer.mBytes.size() + 16 + MaxEquipmentObjectBytes);
-            writer.startRecord(ESM::REC_CLOT);
+            const auto type = inventoryItemRecord(bindings.mContent, object.mRef.mRefID).mType;
+            writer.startRecord(type);
             saveObject(writer, object);
-            writer.endRecord(ESM::REC_CLOT);
+            writer.endRecord(type);
         }
         writer.close();
         output.swap(buffer.mBytes);
@@ -450,12 +483,12 @@ namespace TES3MP::Native
         valid(reader.getRecName() == ESM::fourCC("EQUP"));
         reader.getRecHeader();
         reader.skipRecord();
-        PlainEquipmentValues staged{ checked.mActor, checked.mShirt, checked.mSelected, checked.mCounter, {} };
+        PlainEquipmentValues staged{ checked.mActor, checked.mSlots, checked.mSelected, checked.mCounter, {} };
         staged.mNpcStats = checked.mNpcStats;
         staged.mObjects.reserve(checked.mCount);
         for (size_t i = 0; i < checked.mCount; ++i)
         {
-            valid(reader.getRecName() == ESM::REC_CLOT);
+            valid(ContainerStore::isStorableType(reader.getRecName().toInt()));
             reader.getRecHeader();
             auto& object = staged.mObjects.emplace_back();
             object.blank();

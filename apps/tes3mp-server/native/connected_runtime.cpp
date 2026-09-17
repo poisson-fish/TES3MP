@@ -8,48 +8,50 @@ namespace TES3MP::Native
 {
     ContainerStore& EquipmentRuntime::storage(size_t owner)
     {
-        if (owner == 2 && mContainer) return mContainerStore;
+        if (owner >= 2) return mContainers.at(owner - 2)->mStore;
         return mInventories.at(owner);
     }
     const ContainerStore& EquipmentRuntime::storage(size_t owner) const
     {
-        if (owner == 2 && mContainer) return mContainerStore;
+        if (owner >= 2) return mContainers.at(owner - 2)->mStore;
         return mInventories.at(owner);
     }
     Ptr EquipmentRuntime::ownerPtr(size_t owner) const
     {
-        if (owner == 2 && mContainer) return mContainer->getPtr();
+        if (owner >= 2) return mContainers.at(owner - 2)->mReference->getPtr();
         return mActors.at(owner)->getPtr();
     }
     EquipmentRuntime::ActorEffects& EquipmentRuntime::effects(size_t owner)
     {
-        return owner == 2 ? mContainerEffects : mActorEffects.at(owner);
+        return owner >= 2 ? mContainers.at(owner - 2)->mEffects : mActorEffects.at(owner);
     }
     const EquipmentRuntime::ActorEffects& EquipmentRuntime::effects(size_t owner) const
     {
-        return owner == 2 ? mContainerEffects : mActorEffects.at(owner);
+        return owner >= 2 ? mContainers.at(owner - 2)->mEffects : mActorEffects.at(owner);
     }
 
     void EquipmentRuntime::installStorage(ContainerStore& live, ContainerStore& candidate, bool replaceStorage) noexcept
     {
-        auto& nodes = candidate.mLists.mClothes.mList;
-        for (auto& node : nodes) node.mWorldModel = &mWorld;
-        nodes.swap(live.mLists.mClothes.mList);
+        candidate.forEachStored([&](auto& node, auto) { node.mWorldModel = &mWorld; });
+        const auto swapLists = [&]<size_t... I>(std::index_sequence<I...>) {
+            (std::get<I>(candidate.mLists.all()).mList.swap(std::get<I>(live.mLists.all()).mList), ...);
+        };
+        swapLists(std::make_index_sequence<12>{});
         if (replaceStorage) live.mStorageIdentity.swap(candidate.mStorageIdentity);
         live.mRechargingItems.clear();
         live.mWeightUpToDate = live.mRechargingItemsUpToDate = false;
         live.mModified = true;
         // Retired nodes cannot deregister their replacements.
-        for (auto& node : nodes) node.mWorldModel = nullptr;
+        candidate.forEachStored([](auto& node, auto) { node.mWorldModel = nullptr; });
     }
 
     void EquipmentRuntime::installInventory(size_t actor, InventoryStore& candidate,
-        ContainerStoreIterator shirt, ContainerStoreIterator selected, const Ptr& item,
+        const std::vector<ContainerStoreIterator>& slots, ContainerStoreIterator selected, const Ptr& item,
         std::shared_ptr<EquipmentNpcStats>& stats, bool replaceStorage) noexcept
     {
         auto& live = mInventories[actor];
         installStorage(live, candidate, replaceStorage);
-        live.mSlots[InventoryStore::Slot_Shirt] = shirt;
+        std::copy(slots.begin(), slots.end(), live.mSlots.begin());
         live.mSelectedEnchantItem = selected;
         mItems[actor] = item;
         mNpcStats[actor].swap(stats);
@@ -57,8 +59,8 @@ namespace TES3MP::Native
 
     void EquipmentRuntime::installPrepared(size_t actor, Installation& staged, ContainerStore& candidate) noexcept
     {
-        if (actor == 2) installStorage(mContainerStore, candidate, false);
-        else installInventory(actor, static_cast<InventoryStore&>(candidate), staged.mShirt, staged.mSelected, staged.mItem,
+        if (actor >= 2) installStorage(storage(actor), candidate, false);
+        else installInventory(actor, static_cast<InventoryStore&>(candidate), staged.mSlots, staged.mSelected, staged.mItem,
             staged.mPrepared.installationNpcStats());
         auto& pending = effects(actor);
         pending.mListener.mCalls = staged.mEffects.mListener.mCalls;
@@ -81,21 +83,24 @@ namespace TES3MP::Native
     {
         // Equipment may generate one split in either actor. The other actor's
         // image keeps its own fields and shares the resulting registry counter.
-        if (mContainer && !values.mContainer) values.mContainer = installedValues(2);
+        if (values.mContainers.empty())
+            for (size_t i = 2; i < ownerCount(); ++i) values.mContainers.push_back(installedValues(i));
+        if (values.mContainers.size() != mContainers.size())
+            throw std::invalid_argument("Session container count changed");
         auto counter = values.mActors[0].mLastGenerated;
         const auto other = values.mActors[1].mLastGenerated;
         if (other.mContentFile < counter.mContentFile
             || (other.mContentFile == counter.mContentFile && other.mIndex > counter.mIndex)) counter = other;
-        if (values.mContainer)
+        for (const auto& container : values.mContainers)
         {
-            const auto shared = values.mContainer->mLastGenerated;
+            const auto shared = container.mLastGenerated;
             if (shared.mContentFile < counter.mContentFile
                 || (shared.mContentFile == counter.mContentFile && shared.mIndex > counter.mIndex)) counter = shared;
         }
         std::vector<ESM::RefId> ids;
-        for (size_t i = 0; i < (mContainer ? 3 : 2); ++i)
+        for (size_t i = 0; i < ownerCount(); ++i)
         {
-            auto& actor = i == 2 ? *values.mContainer : values.mActors[i];
+            auto& actor = i >= 2 ? values.mContainers[i - 2] : values.mActors[i];
             actor.mLastGenerated = counter;
             actor.validate(mStore, ownerPtr(i).getCellRef().getRefNum(), mScriptLocals.get());
             if (actor.mNpcStats)
@@ -111,9 +116,13 @@ namespace TES3MP::Native
         const std::array envelopes{ expectedEnvelope(values.mActors[0].mActor), expectedEnvelope(values.mActors[1].mActor) };
         const std::array<EquipmentBindings, 2> bindings{{
             { envelopes[0], mStore, ids, mScriptLocals }, { envelopes[1], mStore, ids, mScriptLocals } }};
-        const auto containerEnvelope = mContainer ? expectedEnvelope(ownerPtr(2).getCellRef().getRefNum()) : EquipmentEnvelope{};
-        const EquipmentBindings containerBinding{ containerEnvelope, mStore, ids, mScriptLocals };
-        encodeEquipmentSession(values, bindings, bytes, mContainer ? &containerBinding : nullptr);
+        std::vector<EquipmentEnvelope> containerEnvelopes;
+        for (size_t i = 2; i < ownerCount(); ++i)
+            containerEnvelopes.push_back(expectedEnvelope(ownerPtr(i).getCellRef().getRefNum()));
+        std::vector<EquipmentBindings> containerBindings;
+        for (const auto& envelope : containerEnvelopes)
+            containerBindings.push_back({envelope, mStore, ids, mScriptLocals});
+        encodeEquipmentSession(values, bindings, bytes, containerBindings);
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -125,11 +134,11 @@ namespace TES3MP::Native
     }
 
     InventoryTransferCommand EquipmentRuntime::containerCommand(size_t actor, bool drop,
-        InventoryInstanceId item, int quantity) const
+        InventoryInstanceId item, int quantity, size_t shared) const
     {
-        if (actor >= 2 || !mContainer) throw std::invalid_argument("Container command requires a bound actor and container");
+        if (actor >= 2 || shared >= mContainers.size()) throw std::invalid_argument("Container command requires a bound actor and container");
         const auto player = ownedId(ownerPtr(actor).getCellRef().getRefNum());
-        const auto container = ownedId(ownerPtr(2).getCellRef().getRefNum());
+        const auto container = ownedId(ownerPtr(2 + shared).getCellRef().getRefNum());
         return { drop ? player : container, drop ? container : player, player, item,
             quantity, mWorld.getPtrRegistryRevision() };
     }
@@ -199,18 +208,18 @@ namespace TES3MP::Native
             || mWorld.mPtrRegistry.mIndex.size() > registryBound())
             throw std::invalid_argument("Transfer persistence, recovery, revision or registry bound invalid");
         const auto index = [&](InventoryInstanceId value) {
-            for (size_t i = 0; i < (mContainer ? 3 : 2); ++i)
+            for (size_t i = 0; i < ownerCount(); ++i)
                 if (ownedId(ownerPtr(i).getCellRef().getRefNum()) == value) return i;
             throw std::invalid_argument("Transfer owner is not bound to this runtime");
         };
         const size_t source = index(command.mSourceOwner), destination = index(command.mDestinationOwner);
         const size_t initiator = index(caller.mInitiator);
-        if (initiator >= 2 || (source == 2 && destination != initiator)
-            || (destination == 2 && source != initiator))
+        if (initiator >= 2 || (source >= 2 && destination != initiator)
+            || (destination >= 2 && source != initiator))
             throw std::invalid_argument("Container intent requires its participating actor as trusted caller");
         validateInventoryTransferIntent(caller, command, { command.mSourceOwner, command.mDestinationOwner },
             mWorld.getPtrRegistryRevision(), ownedId(mWorld.getLastGeneratedRefNum()));
-        for (size_t i = 0; i < (mContainer ? 3 : 2); ++i)
+        for (size_t i = 0; i < ownerCount(); ++i)
             validateCaller(i, mWorld.getPtr(ownerPtr(i).getCellRef().getRefNum()));
         const auto item = mWorld.getPtr(id(command.mItem));
         if (!item.hasLiveReference() || item.getContainerStore() != &storage(source))
@@ -225,6 +234,7 @@ namespace TES3MP::Native
         std::array<std::unique_ptr<Installation>, 2> staged;
         auto registry = mWorld.mPtrRegistry.mIndex;
         EquipmentSessionValues values{ { installedValues(0), installedValues(1) } };
+        for (size_t i = 2; i < ownerCount(); ++i) values.mContainers.push_back(installedValues(i));
         for (size_t i = 0; i < 2; ++i)
         {
             const auto owner = owners[i];
@@ -232,7 +242,7 @@ namespace TES3MP::Native
             (void)staged[i]->mPrepared.installationCandidate(contexts[i], storage(owner));
             for (const auto& object : staged[i]->mSaved.mObjects)
                 registry.insert_or_assign(object.mRef.mRefNum, staged[i]->mRegistry.at(object.mRef.mRefNum));
-            if (owner == 2) values.mContainer = staged[i]->mSaved;
+            if (owner >= 2) values.mContainers[owner - 2] = staged[i]->mSaved;
             else values.mActors[owner] = staged[i]->mSaved;
         }
         const auto revision = staged[1]->mRevision;
@@ -277,7 +287,7 @@ namespace TES3MP::Native
         const auto& command = state.mSuccess->mCommand;
         if (mWorld.getPtrRegistryRevision() != command.mExpectedRevision)
             throw std::invalid_argument("Transfer preparation is stale");
-        for (size_t i = 0; i < (mContainer ? 3 : 2); ++i)
+        for (size_t i = 0; i < ownerCount(); ++i)
             validateCaller(i, mWorld.getPtr(ownerPtr(i).getCellRef().getRefNum()));
         std::array<ContainerStore*, 2> candidates;
         phase.set(Phase::Revalidation);
@@ -313,6 +323,112 @@ namespace TES3MP::Native
         return result;
     }
 
+    struct EquipmentRuntime::PreparedEquipment::State
+    {
+        const EquipmentRuntime* mOwner;
+        std::weak_ptr<const void> mLifetime;
+        size_t mActor;
+        std::unique_ptr<Installation> mStaged;
+        std::unique_ptr<const EquipmentSuccess> mSuccess;
+        EquipmentBytes mImage;
+    };
+    EquipmentRuntime::PreparedEquipment::PreparedEquipment(std::unique_ptr<State> state) : mState(std::move(state)) {}
+    EquipmentRuntime::PreparedEquipment::PreparedEquipment(PreparedEquipment&&) noexcept = default;
+    EquipmentRuntime::PreparedEquipment& EquipmentRuntime::PreparedEquipment::operator=(PreparedEquipment&&) noexcept = default;
+    EquipmentRuntime::PreparedEquipment::~PreparedEquipment() = default;
+    const EquipmentSuccess& EquipmentRuntime::PreparedEquipment::candidate() const
+    {
+        if (!mState || !mState->mSuccess) throw std::invalid_argument("Consumed equipment preparation");
+        return *mState->mSuccess;
+    }
+    std::span<const char> EquipmentRuntime::PreparedEquipment::image() const
+    {
+        (void)candidate();
+        return mState->mImage;
+    }
+    PlainEquipmentValues EquipmentRuntime::preparedValues(const PreparedEquipment& prepared, size_t owner) const
+    {
+        (void)prepared.candidate();
+        const auto& state = *prepared.mState;
+        if (state.mOwner != this || state.mLifetime.lock() != mLifetime
+            || state.mSuccess->mCommand.mExpectedRevision != mWorld.getPtrRegistryRevision())
+            throw std::invalid_argument("Equipment projection candidate is stale or foreign");
+        return owner == state.mActor ? state.mStaged->mSaved : installedValues(owner);
+    }
+    EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepare(EquipmentCaller caller, EquipmentCommand command)
+    {
+        using namespace Allocations;
+        InPhase phase(Phase::Validation);
+        if (mFailedClosed || !mConnected || mRestartActor
+            || command.mExpectedRevision >= std::numeric_limits<size_t>::max() - 1)
+            throw std::invalid_argument("Equipment persistence, recovery or revision mode invalid");
+        const auto actor = validateCommand(caller, command);
+        for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
+        const ESM::RefNum item{command.mItem.mIndex, command.mItem.mContentFile};
+        phase.set(Phase::Preparation);
+        auto input = PreparedPlainEquipment::prepare(ContainerStoreResolution(storage(actor), ownerPtr(actor)),
+            mWorld.getPtr(item), item, command.mExpectedRevision,
+            command.mState == EquipmentRequestedState::Equipped, preparationContext(actor), command.mSlot);
+        auto staged = stageInstallation(actor, ownerPtr(actor), std::move(input), actor);
+        // Slot changes invalidate stale commands even when no stack was split.
+        staged->mRevision = std::max(staged->mRevision, size_t(command.mExpectedRevision) + 1);
+        const auto& result = staged->mPrepared.result();
+        auto success = std::make_unique<const EquipmentSuccess>(EquipmentSuccess{command,
+            ownedId(result.mSlots[InventoryStore::Slot_Shirt]), ownedId(result.mSelected),
+            ownedId(result.mLastGenerated), staged->mRevision, result.mLuck, result.mSkipped});
+        EquipmentSessionValues values{{installedValues(0), installedValues(1)}, staged->mRevision};
+        values.mActors[actor] = staged->mSaved;
+        EquipmentBytes image;
+        encodeSession(std::move(values), image);
+        auto state = std::make_unique<PreparedEquipment::State>();
+        state->mOwner = this;
+        state->mLifetime = mLifetime;
+        state->mActor = actor;
+        state->mStaged = std::move(staged);
+        state->mSuccess = std::move(success);
+        state->mImage = std::move(image);
+        return PreparedEquipment(std::move(state));
+    }
+    PersistenceResult EquipmentRuntime::commit(PreparedEquipment& prepared, EquipmentSessionCommitter& durability,
+        std::unique_ptr<const EquipmentSuccess>& output, EquipmentBytes& bytes)
+    {
+        using namespace Allocations;
+        InPhase phase(Phase::Validation);
+        if (mFailedClosed) return PersistenceResult::Uncertain;
+        if (!prepared.mState || prepared.mState->mOwner != this || prepared.mState->mLifetime.lock() != mLifetime
+            || !prepared.mState->mSuccess || mRestartActor)
+            throw std::invalid_argument("Equipment preparation does not belong to this live runtime");
+        auto& state = *prepared.mState;
+        const auto& command = state.mSuccess->mCommand;
+        if (validateCommand({command.mActor}, command) != state.mActor)
+            throw std::invalid_argument("Equipment preparation actor changed");
+        for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
+        phase.set(Phase::Revalidation);
+        auto& staged = *state.mStaged;
+        auto& candidate = staged.mPrepared.installationCandidate(preparationContext(state.mActor), storage(state.mActor));
+        phase.set(Phase::Persistence);
+        const auto outcome = durability.commit(state.mImage);
+        if (outcome != PersistenceResult::Accepted)
+        {
+            mFailedClosed = outcome == PersistenceResult::Uncertain;
+            return outcome;
+        }
+        const auto install = [&]() noexcept {
+            phase.set(Phase::Installation);
+            installPrepared(state.mActor, staged, candidate);
+            mWorld.mPtrRegistry.mIndex.swap(staged.mRegistry);
+            mWorld.mPtrRegistry.mRevision = staged.mRevision;
+            mWorld.mPtrRegistry.mLastGenerated = staged.mSaved.mLastGenerated;
+            phase.set(Phase::Publication);
+            output.swap(state.mSuccess);
+            bytes.swap(state.mImage);
+        };
+        install();
+        phase.set(Phase::Retirement);
+        prepared.mState.reset();
+        return outcome;
+    }
+
     FileReadResult EquipmentRuntime::restartSession(const std::filesystem::path& path,
         std::span<const ESM::RefId> referenceIds, std::unique_ptr<const EquipmentSessionValues>& output,
         EquipmentBytes& bytes, FileFaults& faults)
@@ -337,16 +453,19 @@ namespace TES3MP::Native
             { envelopes[1], mStore, referenceIds, mScriptLocals } }};
         auto fresh = restartBindings(mWorld.getLastGeneratedRefNum());
         for (size_t i = 0; i < 2; ++i) validateRestart(i, mActors[i]->getPtr(), bindings[i], fresh);
-        if (fresh.mRegistry.size() != (mContainer ? 3 : 2))
+        if (fresh.mRegistry.size() != ownerCount())
             throw std::invalid_argument("Session recovery requires exactly its registered owners");
         phase.set(Phase::Preparation);
         EquipmentSessionValues values;
-        const auto containerEnvelope = mContainer ? expectedEnvelope(ownerPtr(2).getCellRef().getRefNum()) : EquipmentEnvelope{};
-        const EquipmentBindings containerBinding{ containerEnvelope, mStore, referenceIds, mScriptLocals };
-        const auto* sharedBinding = mContainer ? &containerBinding : nullptr;
-        decodeEquipmentSession(accepted, bindings, values, sharedBinding);
+        std::vector<EquipmentEnvelope> containerEnvelopes;
+        for (size_t i = 2; i < ownerCount(); ++i)
+            containerEnvelopes.push_back(expectedEnvelope(ownerPtr(i).getCellRef().getRefNum()));
+        std::vector<EquipmentBindings> containerBindings;
+        for (const auto& envelope : containerEnvelopes)
+            containerBindings.push_back({envelope, mStore, referenceIds, mScriptLocals});
+        decodeEquipmentSession(accepted, bindings, values, containerBindings);
         EquipmentBytes canonical;
-        encodeEquipmentSession(values, bindings, canonical, sharedBinding);
+        encodeEquipmentSession(values, bindings, canonical, containerBindings);
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;
@@ -362,20 +481,21 @@ namespace TES3MP::Native
                 if (!registry.emplace(object.mRef.mRefNum, staged[i]->mRegistry.at(object.mRef.mRefNum)).second)
                     throw std::invalid_argument("Session recovery registry identity collision");
         }
-        std::optional<RestoredPlainEquipment> container;
-        ContainerStore* sharedCandidate = nullptr;
-        if (values.mContainer)
+        std::vector<std::unique_ptr<RestoredPlainEquipment>> containers;
+        std::vector<ContainerStore*> sharedCandidates;
+        for (size_t i = 0; i < values.mContainers.size(); ++i)
         {
-            container.emplace(RestoredPlainEquipment::restore(*values.mContainer, mStore,
-                ownerPtr(2).getCellRef().getRefNum(), mScriptLocals, true));
-            sharedCandidate = &container->installationStorage(mStore, ownerPtr(2).getCellRef().getRefNum(), fresh.mSavedCounter);
-            for (auto& node : sharedCandidate->mLists.mClothes.mList)
-            {
+            containers.push_back(std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
+                values.mContainers[i], mStore, ownerPtr(i + 2).getCellRef().getRefNum(), mScriptLocals, true)));
+            auto& candidate = containers.back()->installationStorage(
+                mStore, ownerPtr(i + 2).getCellRef().getRefNum(), fresh.mSavedCounter);
+            sharedCandidates.push_back(&candidate);
+            candidate.forEachStored([&](auto& node, auto) {
                 Ptr ptr(&node, nullptr);
-                ptr.mContainerStore = &mContainerStore;
+                ptr.mContainerStore = &storage(i + 2);
                 if (!registry.emplace(node.mRef.getRefNum(), ptr).second)
                     throw std::invalid_argument("Container recovery identity collision");
-            }
+            });
         }
         phase.set(Phase::Result);
         auto saved = std::make_unique<const EquipmentSessionValues>(std::move(values));
@@ -384,9 +504,10 @@ namespace TES3MP::Native
         const auto install = [&]() noexcept {
             phase.set(Phase::Installation);
             for (size_t i = 0; i < 2; ++i)
-                installInventory(i, *candidates[i], staged[i]->mShirt, staged[i]->mSelected, staged[i]->mItem, staged[i]->mNpcStats, true);
+                installInventory(i, *candidates[i], staged[i]->mSlots, staged[i]->mSelected, staged[i]->mItem, staged[i]->mNpcStats, true);
             mWorld.mPtrRegistry.mIndex.swap(registry);
-            if (sharedCandidate) installStorage(mContainerStore, *sharedCandidate, true);
+            for (size_t i = 0; i < sharedCandidates.size(); ++i)
+                installStorage(storage(i + 2), *sharedCandidates[i], true);
             mWorld.mPtrRegistry.mRevision = saved->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = fresh.mSavedCounter;
             mRestartActor.reset();

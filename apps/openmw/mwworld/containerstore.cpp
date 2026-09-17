@@ -2324,6 +2324,20 @@ void MWWorld::ContainerStore::fill(const ESM::InventoryList& items, const ESM::R
     mResolved = true;
 }
 
+void MWWorld::ContainerStore::fill(const ESM::InventoryList& items, const ESM::RefId& owner,
+    Misc::Rng::Generator& prng, ContainerStoreInitialContext context)
+{
+    if (storedSize() != 0 || items.mList.size() > 256 || context.mLevel < 1 || context.mLevel > 1000)
+        throw std::invalid_argument("Initial inventory requires fresh bounded storage and a valid level");
+    for (const auto& item : items.mList)
+        if (item.mCount == std::numeric_limits<int>::min() || std::abs(item.mCount) > 1000000)
+            throw std::invalid_argument("Initial inventory count out of range");
+    for (const auto& item : items.mList)
+        addInitialItem(item.mItem, owner, item.mCount, &prng, true, &context);
+    flagAsModified();
+    mResolved = true;
+}
+
 void MWWorld::ContainerStore::fillNonRandom(const ESM::InventoryList& items, const ESM::RefId& owner, unsigned int seed)
 {
     mSeed = seed;
@@ -2337,32 +2351,41 @@ void MWWorld::ContainerStore::fillNonRandom(const ESM::InventoryList& items, con
 }
 
 void MWWorld::ContainerStore::addInitialItem(
-    const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel)
+    const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel,
+    ContainerStoreInitialContext* context)
 {
     if (count == 0)
         return; // Don't restock with nothing.
     try
     {
-        ManualRef ref(*MWBase::Environment::get().getESMStore(), id, count);
+        if (context && context->mRemaining-- == 0)
+            throw std::invalid_argument("Initial inventory expansion budget exceeded");
+        const auto& content = context ? context->mStore : *MWBase::Environment::get().getESMStore();
+        ManualRef ref(content, id, count);
+        if (context && (!ref.getPtr().getClass().getScript(ref.getPtr()).empty()
+            || (ref.getPtr().getType() != ESM::ItemLevList::sRecordId && !isStorableType(ref.getPtr().getType()))))
+            throw std::invalid_argument("Initial inventory script or item type needs unavailable server services");
         if (ref.getPtr().getClass().getScript(ref.getPtr()).empty())
         {
-            addInitialItemImp(ref.getPtr(), owner, count, prng, topLevel);
+            addInitialItemImp(ref.getPtr(), owner, count, prng, topLevel, context);
         }
         else
         {
             // Adding just one item per time to make sure there isn't a stack of scripted items
             for (int i = 0; i < std::abs(count); i++)
-                addInitialItemImp(ref.getPtr(), owner, count < 0 ? -1 : 1, prng, topLevel);
+                addInitialItemImp(ref.getPtr(), owner, count < 0 ? -1 : 1, prng, topLevel, context);
         }
     }
     catch (const std::exception& e)
     {
+        if (context) throw;
         Log(Debug::Warning) << "Warning: MWWorld::ContainerStore::addInitialItem: " << e.what();
     }
 }
 
 void MWWorld::ContainerStore::addInitialItemImp(
-    const MWWorld::Ptr& ptr, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel)
+    const MWWorld::Ptr& ptr, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel,
+    ContainerStoreInitialContext* context)
 {
     if (ptr.getType() == ESM::ItemLevList::sRecordId)
     {
@@ -2373,22 +2396,33 @@ void MWWorld::ContainerStore::addInitialItemImp(
         if (topLevel && std::abs(count) > 1 && levItemList->mFlags & ESM::ItemLevList::Each)
         {
             for (int i = 0; i < std::abs(count); ++i)
-                addInitialItem(ptr.getCellRef().getRefId(), owner, count > 0 ? 1 : -1, prng, true);
+                addInitialItem(ptr.getCellRef().getRefId(), owner, count > 0 ? 1 : -1, prng, true, context);
             return;
         }
         else
         {
-            const auto& itemId = MWMechanics::getLevelledItem(ptr.get<ESM::ItemLevList>()->mBase, false, *prng);
+            const auto itemId = context
+                ? MWMechanics::getLevelledItem(levItemList, false, *prng, context->mLevel, context->mStore)
+                : MWMechanics::getLevelledItem(levItemList, false, *prng);
             if (itemId.empty())
                 return;
-            addInitialItem(itemId, owner, count, prng, false);
+            addInitialItem(itemId, owner, count, prng, false, context);
         }
     }
     else
     {
         ptr.getCellRef().setOwner(owner);
-        MWWorld::ContainerStoreIterator it = addImp(ptr, count, *MWBase::Environment::get().getESMStore());
-        MWBase::Environment::get().getWorldModel()->registerPtr(*it);
+        const auto& content = context ? context->mStore : *MWBase::Environment::get().getESMStore();
+        if (context)
+        {
+            if (storedSize() >= 64) throw std::invalid_argument("Initial inventory stack budget exceeded");
+            int64_t total = std::abs(int64_t(count));
+            for (const auto& item : *this) total += std::abs(int64_t(item.getCellRef().getCount(false)));
+            if (total > std::numeric_limits<int>::max()) throw std::invalid_argument("Initial inventory total overflow");
+        }
+        MWWorld::ContainerStoreIterator it = addImp(ptr, count, content);
+        auto& world = context ? context->mWorld : *MWBase::Environment::get().getWorldModel();
+        world.registerPtr(*it);
     }
 }
 

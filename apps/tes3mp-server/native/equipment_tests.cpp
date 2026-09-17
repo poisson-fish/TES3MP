@@ -93,6 +93,11 @@ namespace MWWorld::Testing
             ESM::NPC npc;
             npc.blank();
             npc.mId = ESM::RefId::stringRefId("equipment_actor");
+            ESM::Race race;
+            race.blank();
+            race.mId = ESM::RefId::stringRefId("equipment_plain_race");
+            mContentStore.insertStatic(race);
+            npc.mRace = race.mId;
             mContentStore.insertStatic(npc);
             ESM::Clothing shirt;
             shirt.blank();
@@ -252,7 +257,7 @@ namespace MWWorld::Testing
                 {
                     auto unchangedOther = other;
                     unchangedOther.mLastGenerated = world.getLastGeneratedRefNum();
-                    require(typeid(runtime.mContainerStore) == typeid(ContainerStore)
+                    require(typeid(runtime.mContainers[0]->mStore) == typeid(ContainerStore)
                         && EquipmentRuntime::sameValues(unchangedOther, runtime.installedValues(1)),
                         "Drop changed the other actor or used an inventory as the container");
                     sharedItem = transferred->mDestinationItem;
@@ -266,7 +271,7 @@ namespace MWWorld::Testing
                     try { runtime.execute({ take.mInitiator }, take, sink, transferred, bytes, faults); }
                     catch (const std::invalid_argument&) { rejected = true; }
                     require(rejected && priorResult == transferred.get() && bytes == priorBytes
-                        && runtime.mContainerStore.count(shirt) == 1, "Stale container contention duplicated a take");
+                        && runtime.mContainers[0]->mStore.count(shirt) == 1, "Stale container contention duplicated a take");
                 }
                 received = transferred->mDestinationItem;
                 std::unique_ptr<const EquipmentSuccess> equipped;
@@ -280,7 +285,7 @@ namespace MWWorld::Testing
                 committed = { runtime.installedValues(0), runtime.installedValues(1) };
                 if (shared) committedContainer = runtime.installedValues(2);
                 revision = world.getPtrRegistryRevision();
-                require(committed[0].mShirt.isSet() && committed[1].mShirt.isSet(), "Connected actors were not both equipped");
+                require(committed[0].mSlots[InventoryStore::Slot_Shirt].isSet() && committed[1].mSlots[InventoryStore::Slot_Shirt].isSet(), "Connected actors were not both equipped");
                 // Per-actor persistence cannot fork a connected session.
                 EquipmentFileSink wrongSink(scratch / "actor.bin");
                 bool rejected = false;
@@ -304,7 +309,7 @@ namespace MWWorld::Testing
                 for (bool slot : { false, true })
                 {
                     auto wrong = committedContainer;
-                    if (slot) wrong.mShirt = wrong.mObjects[0].mRef.mRefNum;
+                    if (slot) wrong.mSlots[InventoryStore::Slot_Shirt] = wrong.mObjects[0].mRef.mRefNum;
                     else wrong.mObjects[0].mRef.mRefNum = committed[0].mObjects[0].mRef.mRefNum;
                     EquipmentBytes original, corrupted;
                     encodeEquipment(committedContainer, binding, original);
@@ -317,7 +322,7 @@ namespace MWWorld::Testing
                     try { fresh.restartSession(scratch / "broken.bin", ids, restored, accepted, faults); }
                     catch (const std::invalid_argument&) { rejected = true; }
                     require(rejected && !restored && accepted.empty() && world.snapshotPtrRegistry() == registry
-                        && fresh.mContainerStore.begin() == fresh.mContainerStore.end(),
+                        && fresh.mContainers[0]->mStore.begin() == fresh.mContainers[0]->mStore.end(),
                         "Shared recovery accepted duplicate identity/slot or partially installed");
                 }
             }
@@ -327,9 +332,9 @@ namespace MWWorld::Testing
                 require(EquipmentRuntime::sameValues(committed[i], fresh.installedValues(i))
                     && fresh.mActorEffects[i].mListener.mCalls == 0 && fresh.mActorEffects[i].mNotifications.empty(),
                     "Pair recovery lost a committed actor or replayed effects");
-            if (shared) require(restored->mContainer
+            if (shared) require(!restored->mContainers.empty()
                 && EquipmentRuntime::sameValues(committedContainer, fresh.installedValues(2))
-                && fresh.mContainerEffects.mListener.mCalls == 0 && fresh.mContainerEffects.mNotifications.empty(),
+                && fresh.mContainers[0]->mEffects.mListener.mCalls == 0 && fresh.mContainers[0]->mEffects.mNotifications.empty(),
                 "Shared recovery lost container state or replayed effects");
             EquipmentFileSink sink(path, true);
             std::unique_ptr<const EquipmentSuccess> equipped;
@@ -347,7 +352,7 @@ namespace MWWorld::Testing
                 "Recovered return transfer lost or duplicated committed items");
             if (shared)
             {
-                require(fresh.mContainerStore.count(shirt) == 0 && fresh.mInventories[0].count(shirt) == 2
+                require(fresh.mContainers[0]->mStore.count(shirt) == 0 && fresh.mInventories[0].count(shirt) == 2
                     && fresh.mInventories[1].count(shirt) == 6, "Shared recovery lost or duplicated shirts");
                 for (size_t i = 0; i < 2; ++i)
                 {
@@ -463,7 +468,7 @@ namespace MWWorld::Testing
                 };
                 require(total(restored->mActors[0]) == (!shared && oldImage ? 3 : 0)
                     && total(restored->mActors[1]) == (oldImage ? 1 : 4)
-                    && (!shared || (restored->mContainer && total(*restored->mContainer) == (oldImage ? 3 : 0))),
+                    && (!shared || (!restored->mContainers.empty() && total(restored->mContainers[0]) == (oldImage ? 3 : 0))),
                     "Fresh recovery combined independently durable actors or lost/duplicated items");
                 for (size_t actor = 0; actor < 2; ++actor)
                     require(fresh.mActorEffects[actor].mListener.mCalls == 0
@@ -874,13 +879,13 @@ namespace MWWorld::Testing
                     if (variant == 2)
                     {
                         saved.mObjects.clear();
-                        saved.mShirt = saved.mSelected = {};
+                        saved.mSlots[InventoryStore::Slot_Shirt] = saved.mSelected = {};
                     }
                     if (variant == 3)
                     {
                         saved.mObjects.resize(1);
                         saved.mObjects.front().mRef.mCount = 0;
-                        saved.mShirt = {};
+                        saved.mSlots[InventoryStore::Slot_Shirt] = {};
                         saved.mSelected = saved.mObjects.front().mRef.mRefNum;
                     }
                     if (variant == 4)
@@ -1039,7 +1044,7 @@ namespace MWWorld::Testing
                             nodes.clear();
                             break;
                         }
-                        case 27: staged->mShirt = fresh.mInventories[1 - actor].begin(); break;
+                        case 27: staged->mSlots[InventoryStore::Slot_Shirt] = fresh.mInventories[1 - actor].begin(); break;
                         case 28: staged->mSelected = fresh.mInventories[1 - actor].begin(); break;
                         case 29: staged->mRegistry.begin()->second = source.mItems[actor]; break;
                         case 30: accepted.back() ^= 1; break;
@@ -1111,7 +1116,7 @@ namespace MWWorld::Testing
                     if (test == 0)
                     {
                         saved.mObjects.front().mRef.mRefNum = fresh.mItems[1 - actor].getCellRef().getRefNum();
-                        saved.mShirt = saved.mObjects.front().mRef.mRefNum;
+                        saved.mSlots[InventoryStore::Slot_Shirt] = saved.mObjects.front().mRef.mRefNum;
                     }
                     if (test == 1)
                         ++witnesses.mSavedCounter.mIndex;
@@ -1133,7 +1138,7 @@ namespace MWWorld::Testing
                     if (test == 7)
                     {
                         saved.mObjects.clear();
-                        saved.mShirt = saved.mSelected = {};
+                        saved.mSlots[InventoryStore::Slot_Shirt] = saved.mSelected = {};
                         auto other = fresh.mItems[1 - actor];
                         fresh.mWorld.mPtrRegistry.mIndex.erase(other.getCellRef().getRefNum());
                         other.getCellRef().setRefNum({ 100, -1 });
@@ -2379,7 +2384,7 @@ namespace MWWorld::Testing
                     {
                         const auto before = fresh.snapshot();
                         auto skipped = fresh.prepareContinuation(actor, true);
-                        require(skipped.result().mSkipped && skipped.result().mShirt == saved.mShirt
+                        require(skipped.result().mSkipped && skipped.result().mSlots[InventoryStore::Slot_Shirt] == saved.mSlots[InventoryStore::Slot_Shirt]
                                 && skipped.result().mEffects.empty(), "Equipped skip lost its existing equipment");
                         fresh.unchanged(before);
                     }
@@ -3455,7 +3460,7 @@ namespace MWWorld::Testing
             }
             PlainEquipmentValues decoded;
             decodeEquipment(equipmentFileBytes(path), bindings, decoded);
-            const EquipmentSuccess expectedSuccess{ command, ownedId(expected.mShirt), ownedId(expected.mSelected),
+            const EquipmentSuccess expectedSuccess{ command, ownedId(expected.mSlots[InventoryStore::Slot_Shirt]), ownedId(expected.mSelected),
                 ownedId(expected.mLastGenerated), static_cast<size_t>(before.mRegistry.mRevision + splits) };
             require(outcome == TestPersistenceResult::Accepted
                     && (commandOutput ? *commandOutput && **commandOutput == expectedSuccess : output && *output == expected)
@@ -4103,7 +4108,7 @@ namespace MWWorld::Testing
                             for (size_t retryActor = 0; retryActor < 2; ++retryActor)
                                 for (bool freshSink : { false, true })
                                 {
-                                    const bool retryEquip = !f.installedValues(retryActor).mShirt.isSet();
+                                    const bool retryEquip = !f.installedValues(retryActor).mSlots[InventoryStore::Slot_Shirt].isSet();
                                     auto retry = f.prepareContinuation(retryActor, retryEquip);
                                     const auto retryValues = f.installedValues(retryActor);
                                     const auto retryIds = referenceIds(retryValues);
@@ -4241,7 +4246,7 @@ namespace MWWorld::Testing
                                     == TestPersistenceResult::Accepted,
                                 "recovery allocation other actor file setup failed");
                         }
-                        const bool nextEquip = !recovery.mShirt.isSet();
+                        const bool nextEquip = !recovery.mSlots[InventoryStore::Slot_Shirt].isSet();
                         for (bool next : { nextEquip, !nextEquip })
                         {
                             if (allocations)
@@ -4277,7 +4282,7 @@ namespace MWWorld::Testing
             const auto ids = referenceIds(prior);
             const auto e = envelope(prior.mActor);
             auto output = std::make_unique<const PlainEquipmentResult>(PlainEquipmentResult{
-                prior.mActor, prior.mShirt, prior.mSelected, prior.mLastGenerated, {}, {} });
+                prior.mActor, prior.mSlots, prior.mSelected, prior.mLastGenerated, {}, {} });
             const auto* outputStorage = output.get();
             const auto outputValue = *output;
             auto success = std::make_unique<const EquipmentSuccess>();
@@ -4336,7 +4341,7 @@ namespace MWWorld::Testing
                         for (auto fault : { FileFault::None, FileFault::ReplaceError, FileFault::AfterReplace })
                         {
                             auto saved = continuationSave(actor, false, true);
-                            saved.mShirt = {};
+                            saved.mSlots[InventoryStore::Slot_Shirt] = {};
                             for (auto& object : saved.mObjects)
                                 object.mRef.mCount = 0;
                             saved.mObjects.front().mRef.mCount = (actor == 0 ? 1 : -1) * (split ? 3 : 1);
@@ -4432,7 +4437,7 @@ namespace MWWorld::Testing
                             EquipmentBytes bytes;
                             // Prior-file recovery still has the last permitted
                             // split available; new-file recovery already used it.
-                            if (!recovery.mShirt.isSet())
+                            if (!recovery.mSlots[InventoryStore::Slot_Shirt].isSet())
                             {
                                 f.commitContinuation(actor, true, fresh, path, output, bytes, 0, commands ? &success : nullptr);
                                 ++commits;
@@ -4510,7 +4515,7 @@ namespace MWWorld::Testing
                         auto prepared = f.prepare(actor, equip);
                         const auto result = prepared.result();
                         prepared.exportValues(f.preparationContext(actor), retained);
-                        require(retained.mActor == result.mActor && retained.mShirt == result.mShirt
+                        require(retained.mActor == result.mActor && retained.mSlots[InventoryStore::Slot_Shirt] == result.mSlots[InventoryStore::Slot_Shirt]
                                 && retained.mSelected == result.mSelected
                                 && retained.mLastGenerated == result.mLastGenerated
                                 && retained.mObjects.size() == result.mItems.size(),
@@ -4800,7 +4805,7 @@ namespace MWWorld::Testing
                 }
                 record = end;
             }
-            throw std::runtime_error("equipment test field missing");
+            throw std::runtime_error("equipment test field missing: " + std::to_string(tag));
         }
 
         static void replaceField(EquipmentBytes& bytes, uint32_t tag, std::span<const char> replacement)
@@ -4853,6 +4858,7 @@ namespace MWWorld::Testing
                     require(sameValues(retained, outputValue), "codec rejection changed restored nodes");
                     f.unchanged(before);
                 };
+                int malformedCase = -1;
                 const auto rejectBytes = [&](std::span<const char> bytes, const EquipmentBindings& expected,
                                              bool preflightOnly = true) {
                     Allocations::Trace trace;
@@ -4868,6 +4874,9 @@ namespace MWWorld::Testing
                             failed = true;
                         }
                     }
+                    if (!failed || trace.mOutstanding != 0)
+                        std::cerr << "equipment malformed case=" << malformedCase << " rejected=" << failed
+                                  << " outstanding=" << trace.mOutstanding << '\n';
                     require(failed && trace.mOutstanding == 0, "malformed equipment bytes accepted or leaked");
                     // The sole permitted preflight allocation is the exception's
                     // diagnostic. No stream/object/string storage may be staged.
@@ -4885,6 +4894,7 @@ namespace MWWorld::Testing
                 rejectBytes(bad, bindings);
                 for (int test = 0; test < 40; ++test)
                 {
+                    malformedCase = test;
                     bad = good;
                     const auto field = [&](const char (&tag)[5], size_t occurrence = 0) {
                         return fieldAt(bad, ESM::fourCC(tag), occurrence).mData;
@@ -5036,6 +5046,7 @@ namespace MWWorld::Testing
                 }
                 for (int test = 0; test < 9; ++test)
                 {
+                    malformedCase = 40 + test;
                     auto foreign = e;
                     auto foreignIds = ids;
                     switch (test)
@@ -5065,7 +5076,7 @@ namespace MWWorld::Testing
                             foreignIds.clear();
                             break;
                         case 8:
-                            foreignIds.resize(4097, ids[0]);
+                            foreignIds.resize(MaxEquipmentReferenceIds + 1, ids[0]);
                             break;
                     }
                     rejectBytes(good, { foreign, f.mStore, foreignIds });
@@ -5183,7 +5194,7 @@ namespace MWWorld::Testing
 
                 // Empty equipment remains a complete actor/counter-bound state.
                 values.mObjects.clear();
-                values.mShirt = {};
+                values.mSlots[InventoryStore::Slot_Shirt] = {};
                 values.mSelected = {};
                 encodeEquipment(values, bindings, bytes);
                 decodeEquipment(bytes, bindings, decoded);
@@ -5668,7 +5679,7 @@ namespace MWWorld::Testing
             for (size_t i = 0; i < expected.mObjects.size(); ++i)
                 expected.mObjects[i].mRef.mRefNum = { static_cast<uint32_t>(100 + i), -1 };
             expected.mObjects.back().mRef.mCount = 0;
-            expected.mShirt = expected.mObjects.front().mRef.mRefNum;
+            expected.mSlots[InventoryStore::Slot_Shirt] = expected.mObjects.front().mRef.mRefNum;
             expected.mSelected = expected.mObjects.back().mRef.mRefNum;
             expected.mLastGenerated = { 900, -2 };
             EquipmentFileSink file(path);
@@ -5685,7 +5696,7 @@ namespace MWWorld::Testing
                 "large equipment file lost animations, signed/dormant values or exact counters");
             const size_t largeBytes = committed.size();
             expected.mObjects.clear();
-            expected.mShirt = {};
+            expected.mSlots[InventoryStore::Slot_Shirt] = {};
             expected.mSelected = {};
             faults = {};
             require(file.write(expected, bindings, committed, faults) == TestPersistenceResult::Accepted,
@@ -5955,7 +5966,7 @@ namespace MWWorld::Testing
                             ref.mCount = -2;
                             break;
                         case 25:
-                            bad.mShirt = output.mObjects[0].mRef.mRefNum;
+                            bad.mSlots[InventoryStore::Slot_Shirt] = output.mObjects[0].mRef.mRefNum;
                             break;
                         case 26:
                             bad.mSelected = output.mObjects[0].mRef.mRefNum;
@@ -6652,7 +6663,7 @@ namespace MWWorld::Testing
                 prepared.validate(preparationContext(i));
                 const auto result = prepared.result();
                 require(result.mActor == mActors[i]->getPtr().getCellRef().getRefNum()
-                        && result.mShirt == mItems[i].getCellRef().getRefNum() && result.mItems.size() == 2
+                        && result.mSlots[InventoryStore::Slot_Shirt] == mItems[i].getCellRef().getRefNum() && result.mItems.size() == 2
                         && result.mItems[0].mCount == (count > 0 ? 1 : -1)
                         && result.mItems[1].mCount == ContainerStore::subtractItems(count, 1)
                         && result.mEffects.size() == 4 && result.mEffects[0].mKind == Kind::RegisterSplit
@@ -6677,7 +6688,7 @@ namespace MWWorld::Testing
                 const auto equippedRegistry = mWorld.snapshotPtrRegistry();
                 auto unequip = prepare(i, false);
                 unequip.validate(preparationContext(i));
-                require(!unequip.result().mShirt.isSet() && unequip.result().mItems.size() == 2
+                require(!unequip.result().mSlots[InventoryStore::Slot_Shirt].isSet() && unequip.result().mItems.size() == 2
                         && unequip.result().mItems[0].mCount == 0 && unequip.result().mItems[1].mCount == count
                         && unequip.result().mEffects.size() == 2
                         && unequip.result().mEffects[0].mKind == Kind::DeleteStackScript
@@ -6712,7 +6723,7 @@ namespace MWWorld::Testing
                         std::next(store.begin())->getCellRef().setSoul(ESM::RefId::stringRefId("incompatible_soul"));
                     const auto unequipBefore = f.snapshot();
                     auto unequipped = f.prepare(actor, false);
-                    require(!unequipped.result().mShirt.isSet() && !unequipped.result().mSelected.isSet()
+                    require(!unequipped.result().mSlots[InventoryStore::Slot_Shirt].isSet() && !unequipped.result().mSelected.isSet()
                             && unequipped.result().mItems[0].mCount == (actor == 0 ? 1 : -1)
                             && unequipped.result().mEffects.size() == 1,
                         "equipment no-restack selection cleanup/effects mismatch");
@@ -6733,7 +6744,7 @@ namespace MWWorld::Testing
                 f.mEvents.clear();
                 const auto before = f.snapshot();
                 auto prepared = f.prepare(actor, true);
-                require(prepared.result().mShirt == item->getCellRef().getRefNum()
+                require(prepared.result().mSlots[InventoryStore::Slot_Shirt] == item->getCellRef().getRefNum()
                         && prepared.result().mItems.size() == 4 && prepared.result().mEffects.size() == 6
                         && prepared.result().mItems[0].mCount == 0
                         && prepared.result().mItems[1].mCount == (actor == 0 ? 3 : -5),
@@ -6745,7 +6756,7 @@ namespace MWWorld::Testing
                 PlainEquipmentFixture f;
                 retained = f.prepare(0, true).result();
             }
-            require(retained.mItems.size() == 2 && retained.mEffects.size() == 4 && retained.mShirt.isSet(),
+            require(retained.mItems.size() == 2 && retained.mEffects.size() == 4 && retained.mSlots[InventoryStore::Slot_Shirt].isSet(),
                 "owned equipment result did not survive fixture/preparation destruction");
         }
     };

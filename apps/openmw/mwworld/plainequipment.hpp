@@ -1,7 +1,7 @@
 #ifndef OPENMW_MWWORLD_PLAINEQUIPMENT_H
 #define OPENMW_MWWORLD_PLAINEQUIPMENT_H
 
-#include "containerstore.hpp"
+#include "inventorystore.hpp"
 
 #include "../mwmechanics/npcstats.hpp"
 
@@ -118,7 +118,9 @@ namespace MWWorld
             int mCount;
             bool operator==(const Effect&) const = default;
         };
-        ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
+        ESM::RefNum mActor;
+        std::array<ESM::RefNum, InventoryStore::Slots> mSlots{};
+        ESM::RefNum mSelected, mLastGenerated;
         std::vector<Item> mItems; // Includes dormant nodes; owned IDs/values only.
         std::optional<std::array<float, 3>> mLuck;
         std::vector<Effect> mEffects;
@@ -134,7 +136,9 @@ namespace MWWorld
     {
         // A bounded source may gain one split node.
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
-        ESM::RefNum mActor, mShirt, mSelected, mLastGenerated;
+        ESM::RefNum mActor;
+        std::array<ESM::RefNum, InventoryStore::Slots> mSlots{};
+        ESM::RefNum mSelected, mLastGenerated;
         std::vector<ESM::ObjectState> mObjects;
         // NPC saves include initialized spells and the applied ability witness.
         // Skills, level, disposition and reputation stay at NPDT values; other
@@ -146,7 +150,7 @@ namespace MWWorld
         void swap(PlainEquipmentValues& other) noexcept;
     };
 
-    // Fresh, protected stock clothing storage. Content must outlive this object.
+    // Fresh, protected stock inventory storage. Content must outlive this object.
     // Restore validates all input before allocation; move assignment publishes
     // only a complete result. It never binds an owner/service or executes effects.
     // Runtime change tracking, scene bindings and caches are not saved values;
@@ -176,12 +180,13 @@ namespace MWWorld
     };
 
     // Bounded engine preparation, NOT a command/installation/persistence API.
-    // Only resolved, <=64-node shirt inventories and one slot are supported.
+    // Resolved, <=64-node TES3 inventories; all 19 clothing/armor/weapon slots.
     // Actor/player must match; callers still provide authentication/serialization.
     // Plain by default; bound NPC stats opt into one fixed constant effect.
     // An explicit declaration binding permits one scripted constant shirt with
     // isolated initialized locals (single items, no executing registrations).
-    // Reject other enchantments, Lua/custom state and other slots/types.
+    // Stored enchantments do not execute during transfer. Reject executing
+    // scripts, Lua/custom state, lights/tools and other equipment effects.
     // Content/WorldModel must outlive validation; store/reference/service lifetimes
     // are witnessed. Revalidation checks current state, not mutation history.
     // Failure leaves live storage, services, effects and prior caller output intact.
@@ -201,8 +206,8 @@ namespace MWWorld
         static constexpr size_t MaxItems = 64;
         static PreparedPlainEquipment prepare(const ContainerStoreResolution& inventory, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRegistryRevision, bool equip,
-            const PlainEquipmentContext& context);
-        // Plain, unequipped shirt transfer between protected stock inventories
+            const PlainEquipmentContext& context, int slot = InventoryStore::Slot_Shirt);
+        // Unscripted, unequipped item transfer between protected stock inventories
         // or a base ContainerStore. Actor/player is the explicit initiator for
         // a container; its owner comes from the resolution. Both candidates
         // share one generation counter and must be installed as a pair.
