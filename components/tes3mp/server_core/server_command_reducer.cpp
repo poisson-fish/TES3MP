@@ -310,10 +310,10 @@ namespace TES3MP
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
         std::vector<CanonicalSessionProgress> sessions(
             mState->activeSessions().begin(), mState->activeSessions().end());
-        const auto existing = std::find_if(
-            players.begin(), players.end(), [&](const auto& value) { return value.playerId() == player.playerId(); });
-        if (existing == players.end())
-            players.push_back(player);
+        const auto existing = std::ranges::lower_bound(players, player.playerId(), {},
+            &CanonicalPlayerEntityState::playerId);
+        if (existing == players.end() || existing->playerId() != player.playerId())
+            players.insert(existing, player);
         else if (*existing != player)
         {
             const auto nextRevision = existing->entityRevision().next();

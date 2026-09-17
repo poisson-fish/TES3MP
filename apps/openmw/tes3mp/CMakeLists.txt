@@ -43,7 +43,8 @@ add_library(openmw_tes3mp_desktop_providers STATIC
     desktop_providers.hpp
 )
 if(TES3MP_ENABLE_DESKTOP_AUTOMATION)
-    target_sources(openmw_tes3mp_desktop_providers PRIVATE desktop_automation.cpp desktop_automation.hpp)
+    target_sources(openmw_tes3mp_desktop_providers PRIVATE desktop_automation.cpp desktop_automation.hpp
+        native_inventory_automation.cpp)
     target_compile_definitions(openmw_tes3mp_desktop_providers PUBLIC TES3MP_OPENMW_DESKTOP_AUTOMATION)
 endif()
 add_library(TES3MP::OpenMWDesktopProviders ALIAS openmw_tes3mp_desktop_providers)

@@ -40,11 +40,12 @@ namespace
 namespace TES3MP
 {
     FixedTickScheduler::FixedTickScheduler(
-        const MonotonicClock& clock, MonotonicInstant epoch, ServerTick nextTick) noexcept
+        const MonotonicClock& clock, MonotonicInstant epoch, ServerTick nextTick, TickEpoch tickEpoch) noexcept
         : mClock(clock)
         , mEpoch(epoch)
         , mLastObservation(epoch)
         , mNextTick(nextTick)
+        , mEpochTick(tickEpoch == TickEpoch::NextTick ? nextTick : ServerTick::initial())
     {
     }
 
@@ -64,7 +65,8 @@ namespace TES3MP
             return result;
         }
 
-        const auto nextDeadline = deadlineNanoseconds(mEpoch, mNextTick);
+        const auto nextDeadline = deadlineNanoseconds(
+            mEpoch, ServerTick::fromValue(mNextTick.value() - mEpochTick.value()).value());
         if (!nextDeadline)
         {
             result.mError = SchedulerError::DeadlineOverflow;
@@ -78,7 +80,13 @@ namespace TES3MP
         }
 
         const std::uint64_t elapsed = observation.nanoseconds() - mEpoch.nanoseconds();
-        const std::uint64_t latestDue = maximumDueTick(elapsed);
+        const auto dueOffset = maximumDueTick(elapsed);
+        if (dueOffset >= std::numeric_limits<std::uint64_t>::max() - mEpochTick.value())
+        {
+            result.mError = SchedulerError::TickExhausted;
+            return result;
+        }
+        const std::uint64_t latestDue = mEpochTick.value() + dueOffset;
         result.mDueTickLag = latestDue - mNextTick.value() + 1;
         const std::uint64_t emitted = std::min<std::uint64_t>(result.mDueTickLag, MaximumCatchUpTicks);
 

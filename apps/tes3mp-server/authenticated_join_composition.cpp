@@ -12,6 +12,7 @@
 #include "tes3mp/protocol_frame.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <variant>
 
 namespace TES3MP::ServerApp
@@ -281,7 +282,11 @@ namespace TES3MP::ServerApp
             ? mJoins.prepareReattach(principal, *playerClaim, generation, tick)
             : mJoins.prepare(principal, generation, tick, std::move(providedCredential), std::move(username));
         if (!std::holds_alternative<AuthenticatedJoinPreparation>(prepared))
+        {
+            std::fprintf(stderr, "authenticated join preparation failed: %u\n",
+                static_cast<unsigned>(std::get<AuthenticatedJoinError>(prepared)));
             return { JoinCompositionResult::JoinRejected, std::nullopt };
+        }
 
         auto preparation = std::get<AuthenticatedJoinPreparation>(std::move(prepared));
         const auto cancel = [this, id = preparation.id]() noexcept { mJoins.cancel(id); };

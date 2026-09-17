@@ -550,6 +550,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             multiplayerAutomation = std::make_unique<TES3MP::OpenMWAdapter::DesktopAutomation>(
                 *role, automationOutput, *contentManifest, multiplayerPresentation, multiplayerStatus);
+            multiplayerAutomation->setDesktopInput(&multiplayerInput);
             if (!multiplayerAutomation->valid())
             {
                 Log(Debug::Error) << "TES3MP startup failed: automation evidence path is unavailable";

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -152,6 +153,38 @@ namespace
             && exhaustedScheduler.nextTick().value() == std::numeric_limits<std::uint64_t>::max();
     }
 
+    bool restored_tick_uses_a_fresh_monotonic_epoch()
+    {
+        using namespace TES3MP;
+        TestSupport::ManualClock clock(MonotonicInstant::fromNanoseconds(17));
+        // Even a campaign older than the clock's representable tick duration
+        // resumes immediately; its durable tick identity must not become a delay.
+        constexpr auto resumedTick = std::numeric_limits<std::uint64_t>::max() / 2;
+        FixedTickScheduler scheduler(clock, clock.now(), *ServerTick::fromValue(resumedTick), TickEpoch::NextTick);
+        const auto initial = scheduler.pump();
+        if (!initial || initial.ticks().size() != 1 || initial.ticks()[0].value().value() != resumedTick
+            || !scheduler.pump().ticks().empty())
+            return false;
+        clock.advance(33'333'333);
+        if (!scheduler.pump().ticks().empty())
+            return false;
+        clock.advance(1);
+        const auto next = scheduler.pump();
+        if (!next || next.ticks().size() != 1 || next.ticks()[0].value().value() != resumedTick + 1)
+            return false;
+        clock.advance(1'000'000'000);
+        const auto catchup = scheduler.pump();
+        if (!catchup || catchup.dueTickLag() != 30 || catchup.ticks().size() != MaximumCatchUpTicks
+            || catchup.ticks()[0].value().value() != resumedTick + 2)
+            return false;
+        FixedTickScheduler exhausted(clock, clock.now(),
+            *ServerTick::fromValue(std::numeric_limits<std::uint64_t>::max() - 2), TickEpoch::NextTick);
+        clock.advance(100'000'000);
+        const auto overflow = exhausted.pump();
+        return overflow.error() == SchedulerError::TickExhausted && overflow.ticks().empty()
+            && exhausted.nextTick().value() == std::numeric_limits<std::uint64_t>::max() - 2;
+    }
+
     bool splitmix64_matches_version_one_test_vectors()
     {
         constexpr std::array<std::uint64_t, 5> Expected{
@@ -247,8 +280,21 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc > 1)
+    {
+        if (argc != 2 || std::string_view(argv[1]) != "scheduler")
+            return 64;
+        return thirty_hz_scheduler_has_no_accumulated_rounding_drift()
+                && scheduler_pump_executes_at_most_four_due_ticks()
+                && stall_never_produces_variable_delta_or_tick_reordering()
+                && scheduler_rejects_backwards_clock_deadline_overflow_and_tick_exhaustion()
+                && restored_tick_uses_a_fresh_monotonic_epoch()
+            ? 0 : 12;
+    }
+    if (!restored_tick_uses_a_fresh_monotonic_epoch())
+        return 12;
     if (!manual_clock_advances_checked_monotonic_instants_only())
         return 1;
     if (!thirty_hz_scheduler_has_no_accumulated_rounding_drift())

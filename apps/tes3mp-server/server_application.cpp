@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <iterator>
 #include <ranges>
 
@@ -183,6 +184,9 @@ namespace TES3MP::ServerApp
 
     bool ServerApplication::failConnection(TransportConnectionId connection, std::string_view failure) noexcept
     {
+        // Fixed server-owned labels only: make production admission failures
+        // observable without logging credentials or client-controlled payloads.
+        std::fprintf(stderr, "connection closed: %.*s\n", static_cast<int>(failure.size()), failure.data());
         mRejectedCloseDeadlines.erase(connection);
         if (mWiring)
         {

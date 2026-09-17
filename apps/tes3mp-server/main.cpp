@@ -686,7 +686,7 @@ int main(int argc, char** argv)
         return 2;
     }
     TES3MP::ServerCommandIntakeCoordinator intake(
-        clock, observability, clock.now(), *nextTick, TES3MP::IngressOrdinal::initial());
+        clock, observability, clock.now(), *nextTick, TES3MP::IngressOrdinal::initial(), TES3MP::TickEpoch::NextTick);
     auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns, config.contentManifest,
                                         *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer)
                                   : std::nullopt;

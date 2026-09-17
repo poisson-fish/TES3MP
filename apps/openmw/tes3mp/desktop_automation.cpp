@@ -5,6 +5,8 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/statemanager.hpp"
 
+#include <components/debug/debuglog.hpp>
+
 #include <limits>
 #include <ranges>
 #include <thread>
@@ -125,6 +127,14 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::MagicSpellCaster;
         if (value == "magic-spell-target")
             return DesktopAutomationRole::MagicSpellTarget;
+        if (value == "native-put")
+            return DesktopAutomationRole::NativePut;
+        if (value == "native-take")
+            return DesktopAutomationRole::NativeTake;
+        if (value == "native-recover-one")
+            return DesktopAutomationRole::NativeRecoverOne;
+        if (value == "native-recover-two")
+            return DesktopAutomationRole::NativeRecoverTwo;
         return std::nullopt;
     }
 
@@ -385,6 +395,19 @@ namespace TES3MP::OpenMWAdapter
         if (mFinished)
             return ProviderResult::Accepted;
         const auto elapsed = now.nanoseconds() - mStartedAt->nanoseconds();
+        if (nativeInventoryRole())
+        {
+            try
+            {
+                advanceNativeInventory(now);
+            }
+            catch (const std::exception& error)
+            {
+                Log(Debug::Error) << "Native desktop evidence failed: " << error.what();
+                finish(false);
+            }
+            return ProviderResult::Accepted;
+        }
         const bool submitsWaitRest = mRole == DesktopAutomationRole::WaitOne || mRole == DesktopAutomationRole::WaitTwo
             || mRole == DesktopAutomationRole::WaitAnchor || mRole == DesktopAutomationRole::WaitSlowAnchor
             || mRole == DesktopAutomationRole::WaitSlow;
@@ -556,6 +579,27 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (nativeInventoryRole())
+        {
+            const auto count = [](const auto& stacks) {
+                std::uint32_t total = 0;
+                for (const auto& stack : stacks)
+                    if (stack.prototypeId.value() == 70)
+                        total += stack.count;
+                return total;
+            };
+            mNativePlayerCount = count(player.stacks);
+            const auto container = std::ranges::find_if(containers,
+                [](const auto& value) { return value.container.value() == 90; });
+            if (container != containers.end())
+                mNativeContainerCount = count(container->stacks);
+            mNativeRevision = player.revision.value();
+            // Resume baselines can be presented before the final readiness lane
+            // reports Resumed. The wire generation is the continuity witness.
+            if (player.header.targetSessionGeneration > SessionGeneration::initial())
+                mNativeInventoryAfterResume = true;
+            return applied;
+        }
         if (mRole == DesktopAutomationRole::MagicSpellCaster)
         {
             mMagicInventoryRevision = player.revision;
@@ -853,6 +897,9 @@ namespace TES3MP::OpenMWAdapter
     void DesktopAutomation::clear() noexcept
     {
         mPresentation.clear();
+        mNativePlayerCount.reset();
+        mNativeContainerCount.reset();
+        mNativeInventoryAfterResume = false;
     }
 
     void DesktopAutomation::report(ConnectionStatus status) noexcept
@@ -881,6 +928,8 @@ namespace TES3MP::OpenMWAdapter
             : mRole == DesktopAutomationRole::SecurityProbe                   ? 1u
             : mRole == DesktopAutomationRole::MagicItem                       ? 1u
             : mRole == DesktopAutomationRole::MagicSpellCaster                ? 1u
+            : mRole == DesktopAutomationRole::NativePut                       ? 1u
+            : mRole == DesktopAutomationRole::NativeTake                      ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
@@ -938,6 +987,14 @@ namespace TES3MP::OpenMWAdapter
     {
         switch (mRole)
         {
+            case DesktopAutomationRole::NativePut:
+                return "native-put";
+            case DesktopAutomationRole::NativeTake:
+                return "native-take";
+            case DesktopAutomationRole::NativeRecoverOne:
+                return "native-recover-one";
+            case DesktopAutomationRole::NativeRecoverTwo:
+                return "native-recover-two";
             case DesktopAutomationRole::FlowOne:
                 return "flow-one";
             case DesktopAutomationRole::FlowTwo:

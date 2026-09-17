@@ -75,9 +75,10 @@ namespace
 namespace TES3MP
 {
     ServerCommandIntakeCoordinator::ServerCommandIntakeCoordinator(const MonotonicClock& clock,
-        Observability& observability, MonotonicInstant epoch, ServerTick nextTick, IngressOrdinal nextIngressOrdinal)
+        Observability& observability, MonotonicInstant epoch, ServerTick nextTick, IngressOrdinal nextIngressOrdinal,
+        TickEpoch tickEpoch)
         : mObservability(observability)
-        , mScheduler(clock, epoch, nextTick)
+        , mScheduler(clock, epoch, nextTick, tickEpoch)
         , mNextIngressOrdinal(nextIngressOrdinal)
     {
         mPending.reserve(MaximumPendingServerCommands);

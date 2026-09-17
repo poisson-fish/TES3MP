@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <limits>
 #include <ranges>
 
@@ -886,6 +887,8 @@ namespace TES3MP::OpenMWAdapter
         private:
             void handleRuntimeFailure(ClientRuntimeResult result, ClientSessionAction action, MonotonicInstant now)
             {
+                std::fprintf(stderr, "TES3MP runtime failure: result=%u action=%u\n",
+                    static_cast<unsigned>(result), static_cast<unsigned>(action));
                 if (mResuming)
                 {
                     if (mResumeToken && mContinuity && mAttemptGeneration)

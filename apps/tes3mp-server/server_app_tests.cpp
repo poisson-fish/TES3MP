@@ -582,7 +582,8 @@ namespace TES3MP::ServerApp::Testing
         ConnectionSessionCoordinator sessions(clock, observability,
             SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
             offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &native);
-        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(baseTick.value() + 1), IngressOrdinal::initial());
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(baseTick.value() + 1),
+            IngressOrdinal::initial(), restored ? TickEpoch::NextTick : TickEpoch::Zero);
         FakeRuntime runtime;
         ServerApplicationWiring wiring{sessions, joins, crypto, queues, clock, intake, reducer, lifecycle};
         wiring.nativeInventory = &native;
@@ -593,17 +594,20 @@ namespace TES3MP::ServerApp::Testing
                 std::get<std::vector<std::byte>>(encodeProtocolFrame(category, kind, body))});
         };
         std::optional<ResumeToken> resumeToken;
-        auto join = [&](uint64_t connection, ServerTick tick) {
+        auto join = [&](uint64_t connection) {
             runtime.events.push_back({TransportEventKind::ConnectionAccepted, TransportFailure::None, {}, {},
                 id<TransportConnectionId>(connection), {}, TransportSecurity::EncryptedUnauthenticated, scope(std::byte(connection))});
             send(connection, MessageClass::SessionControl, MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(offer)));
-            assert(application.pump(tick));
+            assert(application.pump(intake.nextTick()));
             send(connection, MessageClass::SessionControl, MessageKind::AuthenticationRequest,
                 encodeAuthenticationRequest(AuthenticationRequest::join(AuthenticationMaterial::create({}).value(),
-                    PlayerCredential::create(credentials[connection - 1]))));
-            assert(application.pump(tick));
+                    // Registered players can connect in either order. Player 2
+                    // deliberately precedes player 1, including after recovery.
+                    PlayerCredential::create(credentials[2 - connection]))));
+            assert(application.pump(intake.nextTick()));
             assert(sessions.session(id<TransportConnectionId>(connection))
                 && sessions.session(id<TransportConnectionId>(connection))->sessionId() == id<SessionId>(connection));
+            assert(reducer.state().findActiveSession(id<SessionId>(connection))->playerId() == id<PlayerId>(3 - connection));
             if (connection == 1)
                 for (const auto& bytes : runtime.sent)
                 {
@@ -642,27 +646,27 @@ namespace TES3MP::ServerApp::Testing
         };
         if (restored)
         {
-            join(1, baseTick); join(2, baseTick);
+            join(1); join(2);
             observe(1, 1); observe(2, 1);
             runtime.sent.clear(); runtime.sentConnections.clear(); runtime.sentChannels.clear();
             const auto take = command(2, false, 1, 1);
             send(2, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand,
                 encodeClientInventoryTransactionCommand(take));
-            const auto tick = id<ServerTick>(baseTick.value() + 1);
-            clock.nanoseconds = tick.value() * 33'333'334;
+            const auto tick = id<ServerTick>(baseTick.value() + 2);
+            clock.nanoseconds = 33'333'334;
             assert(application.pump(tick));
             observe(1, 0); observe(2, 0);
             assert(application.stop());
             std::cout << "ServerApplication recovery: registered credentials rejoin stable actors; continued take delivered to both\n";
             return;
         }
-        join(1, ServerTick::initial());
+        join(1);
         const auto put = command(1, true, 2, 1);
         send(1, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand, encodeClientInventoryTransactionCommand(put));
         clock.nanoseconds = 34'000'000;
         assert(application.pump(id<ServerTick>(1)));
         observe(1, 2);
-        join(2, id<ServerTick>(1)); // Late join observes the already committed container.
+        join(2); // Late join observes the already committed container.
         observe(2, 2);
         runtime.sent.clear(); runtime.sentConnections.clear(); runtime.sentChannels.clear();
         const auto take = command(2, false, 1, 1);

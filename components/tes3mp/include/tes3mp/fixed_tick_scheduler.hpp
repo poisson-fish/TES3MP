@@ -13,6 +13,12 @@ namespace TES3MP
     inline constexpr std::uint32_t ServerTicksPerSecond = 30;
     inline constexpr std::size_t MaximumCatchUpTicks = 4;
 
+    enum class TickEpoch
+    {
+        Zero,
+        NextTick, // Recovery: nextTick is due at the new process's monotonic epoch.
+    };
+
     enum class SchedulerError : std::uint8_t
     {
         None,
@@ -81,7 +87,8 @@ namespace TES3MP
     class FixedTickScheduler
     {
     public:
-        FixedTickScheduler(const MonotonicClock& clock, MonotonicInstant epoch, ServerTick nextTick) noexcept;
+        FixedTickScheduler(const MonotonicClock& clock, MonotonicInstant epoch, ServerTick nextTick,
+            TickEpoch tickEpoch = TickEpoch::Zero) noexcept;
 
         SchedulerPumpResult pump() noexcept;
         ServerTick nextTick() const noexcept { return mNextTick; }
@@ -91,6 +98,7 @@ namespace TES3MP
         MonotonicInstant mEpoch;
         MonotonicInstant mLastObservation;
         ServerTick mNextTick;
+        ServerTick mEpochTick;
     };
 }
 

@@ -433,7 +433,8 @@ namespace TES3MP
     {
     public:
         ServerCommandIntakeCoordinator(const MonotonicClock& clock, Observability& observability,
-            MonotonicInstant epoch, ServerTick nextTick, IngressOrdinal nextIngressOrdinal);
+            MonotonicInstant epoch, ServerTick nextTick, IngressOrdinal nextIngressOrdinal,
+            TickEpoch tickEpoch = TickEpoch::Zero);
 
         ServerCommandIntakeCoordinator(const ServerCommandIntakeCoordinator&) = delete;
         ServerCommandIntakeCoordinator& operator=(const ServerCommandIntakeCoordinator&) = delete;

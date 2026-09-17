@@ -39,6 +39,10 @@ namespace TES3MP::OpenMWAdapter
         MagicItem,
         MagicSpellCaster,
         MagicSpellTarget,
+        NativePut,
+        NativeTake,
+        NativeRecoverOne,
+        NativeRecoverTwo,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -59,6 +63,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<MagicUseCapture> captureMagicUse() noexcept override;
+        std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
+        void clearSessionState() noexcept override;
+        void setDesktopInput(DesktopSemanticInput* input) noexcept { mDesktopInput = input; }
         void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
@@ -93,6 +100,9 @@ namespace TES3MP::OpenMWAdapter
         void writeWeatherSample(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick) noexcept;
         void writeWaitRestSample(const ReliableWorldTimeState& state) noexcept;
         void finish(bool success) noexcept;
+        bool nativeInventoryRole() const noexcept;
+        void advanceNativeInventory(MonotonicInstant now);
+        void writeNativeInventory(std::string_view event);
 
         DesktopAutomationRole mRole;
         CellId mInterior;
@@ -101,6 +111,13 @@ namespace TES3MP::OpenMWAdapter
         DesktopPresentation& mPresentation;
         ConnectionStatusProvider& mStatus;
         EngineCoordinator* mCoordinator = nullptr;
+        DesktopSemanticInput* mDesktopInput = nullptr;
+        std::optional<std::uint32_t> mNativePlayerCount;
+        std::optional<std::uint32_t> mNativeContainerCount;
+        std::uint64_t mNativeRevision = 0;
+        unsigned mNativeStage = 0;
+        bool mNativeInventoryAfterResume = false;
+        std::optional<MonotonicInstant> mNativeStageAt;
         std::size_t mEvidenceEvents = 0;
         std::size_t mSnapshots = 0;
         std::size_t mResumes = 0;

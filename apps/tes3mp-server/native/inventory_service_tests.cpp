@@ -432,7 +432,7 @@ namespace TES3MP::Native::Testing
                 if (test == 2) invalid.count = MaximumTransferCount + 1;
                 if (test == 3) invalid.containerId = id<ContainerId>(91);
                 if (test == 4) invalid.expectedInventoryRevision = InventoryRevision::initial();
-                if (test == 5) invalid.interactionOrigin = Position3(1000, 0, 0);
+                if (test == 5) invalid.interactionOrigin = Position3(384 * 1024 + 1, 0, 0);
                 if (test == 6) invalid.kind = InventoryTransactionKind::DropItem;
                 const auto binding = ServerApp::InventoryCommandBinding::resolve(authority,
                     input.sessionId, input.sessionGeneration, invalid).value();
@@ -441,6 +441,10 @@ namespace TES3MP::Native::Testing
                 catch (const std::invalid_argument&) { rejected = true; }
                 require(rejected && faults.mWrites == 0, "Invalid service command reached durability");
             }
+            auto atReach = wire(service, authority, 1, true, 1);
+            atReach.interactionOrigin = Position3(384 * 1024, 0, 0);
+            (void)service.prepare(authority, bind(authority, atReach));
+            require(faults.mWrites == 0, "Reach-boundary preparation mutated durability");
             auto prepared = service.prepare(authority, bound);
             auto replacement = players(*SessionGeneration::initial().next());
             bool rejected = false;

@@ -5,89 +5,86 @@
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M3 in [PLAN.md](PLAN.md). M2's bounded headless exit is met;
-  retirement follows production caller cutover. Equipped-shirt drop is not an
-  integration blocker.
-- **Next action:** bind the native host's shared-container identity to an actual
-  OpenMW placed reference and the existing desktop content map, then exercise
-  plain-shirt put/take with two authenticated desktop clients. Preserve the
-  installed production command/durability path; do not build another rehearsal.
-- **Scope:** 2–3 related bounded slices sequentially; inspect, implement, verify
-  narrowly, review and commit. This change continues fda7739deb15. No planning files.
+  retirement follows production caller cutover.
+- **Next action:** replace the operator-selected base container/position and manual
+  desktop mapping with an OpenMW-derived placed reference and matching content
+  identity. Preserve the now-verified native production put/take, reconnect and
+  durable restart path. M3's TR/shared-world exit remains unfinished.
+- **Scope:** one bounded slice at a time; inspect, implement, verify narrowly,
+  review and commit. No additional planning files.
 
-## Production capability
+## Implemented behavior
 
-`tes3mp_server` now accepts `native_inventory_file`, constructing an
-[InventoryHost](../../apps/tes3mp-server/native/inventory_host.hpp) that owns loaded
-OpenMW content/readers and one persistent
-[InventoryService](../../apps/tes3mp-server/native/inventory_service.hpp).
-The bounded trusted descriptor names two already registered established PlayerIds,
-NPC bases, one plain shirt, an empty base container, initial counts and wire
-mappings. Registered entity/appearance identity, role order, actual ordered content
-fingerprints and encoding bind recovery. The operator explicitly attests that this
-loadout corresponds to the authenticated manifest; automatic desktop-pack mapping
-and complete gameplay-resource identity are still missing.
+`tes3mp_server` accepts `native_inventory_file` and owns loaded OpenMW content plus
+one persistent [InventoryService](../../apps/tes3mp-server/native/inventory_service.hpp).
+Authenticated intake binds server-owned player/entity/session/generation. Engine
+inventory images and command dispositions share the existing canonical file
+transaction; durability precedes installation and publication. Native mode excludes
+legacy inventory/combat/character-creation writers. Format **6** requires matching
+native configuration and explicitly rejects older development saves.
 
-Authenticated intake resolves server-owned player/entity/session/generation.
-`CanonicalCommandReducer` prepares the engine transaction after existing order,
-retry and authority checks. The existing coherent engine image (both actors and
-container) and command dispositions share one `CanonicalPersistenceFile` record.
-File durability precedes native installation and canonical publication. Existing
-engine field serializers and file replacement are reused; there is no parallel
-snapshot or CanonicalInventoryWorld mirror. Join, resume, resync, rejected/empty
-ticks and journal compaction retain the same native domain.
+Registered players can now join in either order: canonical insertion preserves
+sorted PlayerIds. Restart rebases scheduler deadlines to the new monotonic epoch
+while preserving durable tick numbers, 30 Hz cadence, bounded catch-up and checked
+exhaustion. Previously, recovery at tick 20,032 delayed simulation for about eleven
+minutes despite successful joins. Fixed-label connection diagnostics expose failures
+without credentials or payloads.
 
-One native mutation may be accepted per tick; later native intents are durably
-rejected in ingress order. Rejected durability permits retry; uncertainty closes
-the native runtime. Stale/consumed preparations cannot reach durability. Existing
-owned baselines/queues deliver staged native values only after commit.
-
-Native mode rejects simultaneous legacy inventory, combat or character-creation
-configuration. Old writers remain only for unmigrated compositions. Canonical save
-format **6** rejects older development saves explicitly; no automatic migration or
-silent reset exists. Native saves require the matching configured service.
+Desktop put/take recognizes the visible inventory's proxy models through their
+existing ownership query. Native reach validation now converts the bounded
+384-unit radius to the desktop protocol's 1024 position quanta per OpenMW unit.
+The prior leaf-model cast prevented intent capture; the prior reach constant
+rejected ordinary nearby interactions.
 
 ## Verification
 
 Windows MSVC `scripts/setup_msvc_env.ps1 -PreferLatest`, RelWithDebInfo,
-`build/vnext-product`. Builds exit **0**: `tes3mp_native_loadout_tests`,
-`tes3mp_server`, `openmw_tes3mp_desktop_providers`, and affected server-app,
-canonical-persistence and server-scripting test executables. Logs in `build/logs`:
-`native-final-build.log`, `native-production-build.log`, `native-client-build.log`,
-`native-affected-tests-build.log`. The broad test executables were built, not run.
+`build/vnext-product`, desktop automation enabled. Affected `openmw`,
+`tes3mp_server`, `tes3mp_native_loadout_tests` and
+`tes3mp_deterministic_facilities_tests` builds exit **0**. Build logs under
+`build/logs`: `native-gui-build.log`, `native-recovery-build.log`,
+`native-reach-build.log` and `native-application-rebuild.log`.
 
-Individual native filters, all exit **0**; logs in `build/logs`:
+Individual checks, all exit **0**:
 
-| Filter | Evidence | Log |
+| Check | Evidence | Log in build/logs |
 |---|---|---|
-| inventory-canonical | joint image/dispositions; ordering, retry/stale rejection, dual-writer/domain-loss guards, recovery/continuation | native-canonical-test.log |
-| inventory-application | production authentication/registered credentials, put/take, late join, both deliveries, retry, resync, resume, compaction; fresh recovery and continued take | native-application-test.log |
-| inventory-host | real Morrowind.esm, player/player, common_shirt_01, barrel_01 through the same host/application and recovery path | native-host-real.log |
-| inventory-service-durability | safe retry, uncertain closure, coherent recovery | native-service-durability.log |
-| inventory-equipment-container-prepared | detached staging, retry, consumed/stale rejection | native-prepared-test.log |
-| inventory-equipment-container-state | PCSkipEquip, constant effects, abilities, initialized spells, unrelated stats, isolated locals, atomic recovery | native-service-state.log |
-| inventory-equipment-container-allocations | 1,072 atomic failures; no retained/post-acceptance allocations | native-service-allocations.log |
-| inventory-equipment-container-recovery | eight failure/recovery cases | native-service-recovery.log |
-| inventory-equipment-connected | transfer/equip/return/recovery preserved | native-service-transfer.log |
+| deterministic-facilities `scheduler` | fresh recovery epoch, cadence, bounded catch-up, overflow/exhaustion | native-scheduler-test.log |
+| native `inventory-application` | reverse join order, production authentication, recovery with a fresh clock, continued delivery | native-desktop-application.log |
+| native `inventory-service` | trusted binding, reach boundary/rejection, transfer and recovery | native-desktop-service.log |
+| desktop `transfer` | actual GUI put/take and both session resumes | native-desktop-transfer.log |
+| desktop `restart` | both relaunched clients recover and continue taking | native-desktop-restart.log |
+| original mapped save `restart` | accumulated-tick recovery without resetting that save | native-desktop-original-restart.log |
+| documentation budget / local links | individual methods | docs-budget.log / docs-links.log |
 
-Application evidence uses synthetic transport and registered profiles; the host
-filter uses real engine content. Neither is actual socket/desktop presentation
-evidence. No two-desktop or TR run is claimed. Documentation budget and local links
-pass individually, exit **0** (`docs-budget.log`, `docs-links.log`). No full suites
-or expensive gates.
+The [capture driver](../../scripts/capture_native_inventory_desktop.py) runs actual
+OpenMW clients over localhost transport against the production native server.
+Loadout: Morrowind.esm, Imperial Prison Ship, common_shirt_01, barrel_01 placed
+reference **299164:1**, wire item/container **70/90**. The testing-only driver opens
+the real container window and invokes item selection, quantity-dialog and drop
+callbacks through the normal desktop input interceptor. It checks visible GUI
+item models against committed baselines; it uses no screen control or screenshots.
+Pixel layout and manual mouse interaction are not claimed.
 
-Earlier setup/build failures were fixed and rerun: CMake dependency declaration
-(1), startup declaration order (2), scheduler/test preparation and established
-profile fixtures (1), synthetic queue time causing a crash (-1073741819), missing
-authentication registry in the continuation fixture (-1073740791).
+Evidence under `build/native-desktop-mapped/transfer-final` shows initial player
+counts **3/5**, empty barrel; putting two gives **1/5/2**; taking one gives
+**1/6/1**. Both clients resume once with stable identity and those counts.
+`restart-final` starts fresh processes using the same canonical save (matching
+before/after SHA-256 evidence), observes **1/6/1**, then reaches **1/7/0**.
+The server is terminated between phases; no shutdown save is needed.
+`original-restart-final` also passes against the original mapped save.
+Only the repeatable transfer campaign uses a separate prepared runtime directory;
+the original committed save was preserved and continued.
 
 ## Limits
 
-The missing production operation is **placed-container bootstrap and matching
-desktop reference/item mapping**. The descriptor seeds actor shirt counts and an
-empty base container; it does not import placed references or base inventory lists.
-Native actor bases are explicitly selected, not derived from character profiles.
-Gameplay-active desktop rebuild retirement is still pending verified client cutover.
-Wire intake covers plain-shirt put/take; broader scripts, categories, combat and
-complete world saves remain outside scope. Inherited bounds include fixed actor
-roles, bounded nodes/effects, actor-scoped spell IDs, private save directories,
-rejected postponed physics, client-reported movement and broad headless link/provenance debt.
+The server still seeds actor counts and an empty base container from a trusted
+operator descriptor; the desktop maps that identity to a real placed barrel.
+Automatic placed-reference import, base inventory population and desktop-pack
+mapping remain missing. Actor bases are selected explicitly; complete gameplay
+resource identity is unfinished. No TR or full M3 world proof is claimed.
+
+Inherited native preparation/durability/atomic-failure probes remain applicable
+but were not broadly rerun. Gameplay-active desktop inventory rebuild retirement,
+broader items/scripts/combat/world saves, authoritative movement and headless
+link/provenance cleanup remain pending. No complete suites or expensive gates ran.

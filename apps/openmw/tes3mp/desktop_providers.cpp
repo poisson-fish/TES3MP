@@ -2046,11 +2046,10 @@ namespace TES3MP::OpenMWAdapter
                 .expectedInventoryRevision = *observedPlayerInventoryRevision,
                 .interactionOrigin = playerOrigin() };
             const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
-            const auto sourceInventory = dynamic_cast<MWGui::InventoryItemModel*>(&source);
-            const auto targetInventory = dynamic_cast<MWGui::InventoryItemModel*>(&target);
-            const bool sourcePlayer
-                = sourceInventory && sourceInventory->actor() == player && !stack->container && !stack->ground;
-            const bool targetPlayer = targetInventory && targetInventory->actor() == player;
+            // The visible inventory uses TradeItemModel/SortFilterItemModel
+            // proxies. Ask the model for its owner instead of requiring its leaf type.
+            const bool sourcePlayer = source.usesContainer(player) && !stack->container && !stack->ground;
+            const bool targetPlayer = target.usesContainer(player);
             if (stack->container && targetPlayer)
             {
                 result.kind = InventoryTransactionKind::TakeFromContainer;

@@ -69,6 +69,9 @@ namespace TES3MP::Native
 
     void InventoryService::validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& bound) const
     {
+        // Desktop positions are fixed-point quanta (1024 per OpenMW unit).
+        // Preserve the bounded 384-unit interaction radius in that wire domain.
+        constexpr std::uint32_t ReachQuanta = 384 * 1024;
         if (!bound.current(players)) throw std::invalid_argument("Inventory session binding is no longer current");
         (void)actor(bound.player());
         const auto& command = bound.transaction();
@@ -82,9 +85,9 @@ namespace TES3MP::Native
             || (command.kind != InventoryTransactionKind::PutIntoContainer
                 && command.kind != InventoryTransactionKind::TakeFromContainer)
             || player.transform().cell() != mBinding.mCell
-            || !positionsWithinReach(player.transform().position(), mBinding.mPosition, 384)
-            || !positionsWithinReach(command.interactionOrigin, mBinding.mPosition, 384)
-            || !positionsWithinReach(player.transform().position(), command.interactionOrigin, 384))
+            || !positionsWithinReach(player.transform().position(), mBinding.mPosition, ReachQuanta)
+            || !positionsWithinReach(command.interactionOrigin, mBinding.mPosition, ReachQuanta)
+            || !positionsWithinReach(player.transform().position(), command.interactionOrigin, ReachQuanta))
             throw std::invalid_argument("Native container command shape, revision, identity or reach invalid");
     }
 

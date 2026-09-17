@@ -14,6 +14,7 @@
 #include "tes3mp/protocol_handshake.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <variant>
 
 namespace TES3MP::ServerApp
@@ -640,7 +641,10 @@ namespace TES3MP::ServerApp
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
             state->takePlayerCredential(), state->username());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)
+        {
+            std::fprintf(stderr, "authenticated join composition failed: %u\n", static_cast<unsigned>(outcome.result));
             return ConnectionSessionResult::ProtocolRejected;
+        }
         if (state->bindPreissuedInitialSession(outcome.committed->session)
             != PreissuedInitialSessionBindingResult::Bound)
             return ConnectionSessionResult::ProtocolRejected;

@@ -31,8 +31,9 @@ plain-shirt transfer, shared-container drop/take and equipment commands, coheren
 installation and recovery. An opt-in persistent native service now connects
 authenticated production intake, joint command/image durability and existing
 owned client baselines, including join/resume/resync. Real-loadout application
-tests use synthetic transport; placed-reference bootstrap and actual desktop
-observation remain unfinished. The server and desktop adapter remain the migration
+tests use synthetic transport; two actual desktop clients also verify mapped
+plain-shirt GUI put/take, reconnect and durable restart. Automatic placed-reference
+bootstrap and broader modded-world observation remain unfinished. The server and desktop adapter remain the migration
 base; each subsystem changes authority exactly once. Broad compatibility is the
 destination, reached through
 small playable slices rather than an engine-wide rewrite before the first test.
