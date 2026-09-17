@@ -70,6 +70,15 @@ namespace TES3MP::Native
     PersistenceResult EquipmentRuntime::persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
         EquipmentBytes& bytes, FileFaults& faults) const
     {
+        EquipmentBytes staged;
+        encodeSession(std::move(values), staged);
+        const auto result = file.writeSessionImage(staged, faults);
+        if (result == PersistenceResult::Accepted) bytes.swap(staged);
+        return result;
+    }
+
+    void EquipmentRuntime::encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const
+    {
         // Equipment may generate one split in either actor. The other actor's
         // image keeps its own fields and shares the resulting registry counter.
         if (mContainer && !values.mContainer) values.mContainer = installedValues(2);
@@ -104,7 +113,7 @@ namespace TES3MP::Native
             { envelopes[0], mStore, ids, mScriptLocals }, { envelopes[1], mStore, ids, mScriptLocals } }};
         const auto containerEnvelope = mContainer ? expectedEnvelope(ownerPtr(2).getCellRef().getRefNum()) : EquipmentEnvelope{};
         const EquipmentBindings containerBinding{ containerEnvelope, mStore, ids, mScriptLocals };
-        return file.writeSession(values, bindings, bytes, faults, mContainer ? &containerBinding : nullptr);
+        encodeEquipmentSession(values, bindings, bytes, mContainer ? &containerBinding : nullptr);
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -136,8 +145,44 @@ namespace TES3MP::Native
             mFailedClosed = true;
             return PersistenceResult::Uncertain;
         }
+        if (!file.session()) throw std::invalid_argument("Transfer requires a session sink");
+        auto prepared = prepare(caller, command);
+        EquipmentFileCommitter durability(file, faults);
+        return commit(prepared, durability, output, bytes);
+    }
+
+    struct EquipmentRuntime::PreparedTransfer::State
+    {
+        const EquipmentRuntime* mOwner;
+        std::weak_ptr<const void> mLifetime;
+        size_t mInitiator;
+        std::array<size_t, 2> mOwners;
+        std::array<std::unique_ptr<Installation>, 2> mStaged;
+        PtrRegistry::Index mRegistry;
+        std::unique_ptr<const InventoryTransferSuccess> mSuccess;
+        EquipmentBytes mImage;
+    };
+    EquipmentRuntime::PreparedTransfer::PreparedTransfer(std::unique_ptr<State> state) : mState(std::move(state)) {}
+    EquipmentRuntime::PreparedTransfer::PreparedTransfer(PreparedTransfer&&) noexcept = default;
+    EquipmentRuntime::PreparedTransfer& EquipmentRuntime::PreparedTransfer::operator=(PreparedTransfer&&) noexcept = default;
+    EquipmentRuntime::PreparedTransfer::~PreparedTransfer() = default;
+    const InventoryTransferSuccess& EquipmentRuntime::PreparedTransfer::candidate() const
+    {
+        if (!mState || !mState->mSuccess) throw std::invalid_argument("Consumed transfer preparation");
+        return *mState->mSuccess;
+    }
+    std::span<const char> EquipmentRuntime::PreparedTransfer::image() const
+    {
+        (void)candidate();
+        return mState->mImage;
+    }
+
+    EquipmentRuntime::PreparedTransfer EquipmentRuntime::prepare(InventoryTransferCaller caller, InventoryTransferCommand command)
+    {
+        using namespace Allocations;
+        InPhase phase(Phase::Validation);
         const auto id = [](InventoryInstanceId value) { return ESM::RefNum{ value.mIndex, value.mContentFile }; };
-        if (!mConnected || !file.session() || mRestartActor
+        if (mFailedClosed || !mConnected || mRestartActor
             || command.mExpectedRevision >= std::numeric_limits<size_t>::max() - 1
             || mWorld.mPtrRegistry.mIndex.size() > registryBound())
             throw std::invalid_argument("Transfer persistence, recovery, revision or registry bound invalid");
@@ -166,14 +211,13 @@ namespace TES3MP::Native
                 ContainerStoreResolution(storage(destination), ownerPtr(destination)) },
             item, id(command.mItem), command.mExpectedRevision, command.mQuantity, contexts);
         std::array<std::unique_ptr<Installation>, 2> staged;
-        std::array<ContainerStore*, 2> candidates;
         auto registry = mWorld.mPtrRegistry.mIndex;
         EquipmentSessionValues values{ { installedValues(0), installedValues(1) } };
         for (size_t i = 0; i < 2; ++i)
         {
             const auto owner = owners[i];
             staged[i] = stageInstallation(owner, ownerPtr(owner), std::move(prepared[i]), initiator);
-            candidates[i] = &staged[i]->mPrepared.installationCandidate(contexts[i], storage(owner));
+            (void)staged[i]->mPrepared.installationCandidate(contexts[i], storage(owner));
             for (const auto& object : staged[i]->mSaved.mObjects)
                 registry.insert_or_assign(object.mRef.mRefNum, staged[i]->mRegistry.at(object.mRef.mRefNum));
             if (owner == 2) values.mContainer = staged[i]->mSaved;
@@ -195,8 +239,47 @@ namespace TES3MP::Native
         phase.set(Phase::Revalidation);
         for (size_t i = 0; i < 2; ++i) staged[i]->mPrepared.validate(contexts[i]);
         EquipmentBytes encoded;
+        encodeSession(std::move(values), encoded);
+        auto state = std::make_unique<PreparedTransfer::State>();
+        state->mOwner = this;
+        state->mLifetime = mLifetime;
+        state->mInitiator = initiator;
+        state->mOwners = owners;
+        state->mStaged = std::move(staged);
+        state->mRegistry = std::move(registry);
+        state->mSuccess = std::move(success);
+        state->mImage = std::move(encoded);
+        return PreparedTransfer(std::move(state));
+    }
+
+    PersistenceResult EquipmentRuntime::commit(PreparedTransfer& prepared, EquipmentSessionCommitter& durability,
+        std::unique_ptr<const InventoryTransferSuccess>& output, EquipmentBytes& bytes)
+    {
+        using namespace Allocations;
+        InPhase phase(Phase::Validation);
+        if (mFailedClosed) return PersistenceResult::Uncertain;
+        if (!prepared.mState || prepared.mState->mOwner != this
+            || prepared.mState->mLifetime.lock() != mLifetime || !prepared.mState->mSuccess || mRestartActor)
+            throw std::invalid_argument("Transfer preparation does not belong to this live runtime");
+        auto& state = *prepared.mState;
+        const auto& command = state.mSuccess->mCommand;
+        if (mWorld.getPtrRegistryRevision() != command.mExpectedRevision)
+            throw std::invalid_argument("Transfer preparation is stale");
+        for (size_t i = 0; i < (mContainer ? 3 : 2); ++i)
+            validateCaller(i, mWorld.getPtr(ownerPtr(i).getCellRef().getRefNum()));
+        std::array<ContainerStore*, 2> candidates;
+        phase.set(Phase::Revalidation);
+        for (size_t i = 0; i < 2; ++i)
+        {
+            const auto owner = state.mOwners[i];
+            const auto context = preparationContext(owner, state.mInitiator);
+            state.mStaged[i]->mPrepared.validate(context);
+            candidates[i] = &state.mStaged[i]->mPrepared.installationCandidate(context, storage(owner));
+        }
+        const auto revision = state.mSuccess->mRevision;
+        const auto counter = state.mStaged[1]->mPrepared.result().mLastGenerated;
         phase.set(Phase::Persistence);
-        const auto result = persistSession(std::move(values), file, encoded, faults);
+        const auto result = durability.commit(state.mImage);
         if (result != PersistenceResult::Accepted)
         {
             mFailedClosed = result == PersistenceResult::Uncertain;
@@ -204,16 +287,17 @@ namespace TES3MP::Native
         }
         const auto install = [&]() noexcept {
             phase.set(Phase::Installation);
-            for (size_t i = 0; i < 2; ++i) installPrepared(owners[i], *staged[i], *candidates[i]);
-            mWorld.mPtrRegistry.mIndex.swap(registry);
+            for (size_t i = 0; i < 2; ++i) installPrepared(state.mOwners[i], *state.mStaged[i], *candidates[i]);
+            mWorld.mPtrRegistry.mIndex.swap(state.mRegistry);
             mWorld.mPtrRegistry.mRevision = revision;
-            mWorld.mPtrRegistry.mLastGenerated = to.mLastGenerated;
+            mWorld.mPtrRegistry.mLastGenerated = counter;
             phase.set(Phase::Publication);
-            output.swap(success);
-            bytes.swap(encoded);
+            output.swap(state.mSuccess);
+            bytes.swap(state.mImage);
         };
         install();
         phase.set(Phase::Retirement);
+        prepared.mState.reset();
         return result;
     }
 

@@ -114,6 +114,54 @@ namespace MWWorld::Testing
         std::vector<std::string> mEvents;
         Listener mListener;
         ESMStore& mStore = mContentStore;
+        static void checkPreparedContainer(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            EquipmentContentFixture content;
+            const auto base = ESM::RefId::stringRefId("equipment_actor");
+            const auto shirt = ESM::RefId::stringRefId("equipment_shirt");
+            const auto container = ESM::RefId::stringRefId("equipment_container");
+            EquipmentRuntime runtime(content.mContentStore, content.mWorldService, content.mScriptService,
+                "synthetic-prepared-1", { 1, 2, 3 }, {{{ base, shirt, 3 }, { base, shirt, -5 }}},
+                {}, nullptr, {}, true, container);
+            const auto before = runtime.installedValues(0), other = runtime.installedValues(1);
+            const auto command = runtime.containerCommand(0, true, runtime.command(0, true).mItem, 2);
+            auto first = runtime.prepare({ command.mInitiator }, command);
+            auto stale = runtime.prepare({ command.mInitiator }, command);
+            require(EquipmentRuntime::sameValues(before, runtime.installedValues(0))
+                && EquipmentRuntime::sameValues(other, runtime.installedValues(1))
+                && runtime.installedValues(2).mObjects.empty() && !first.image().empty(),
+                "Detached transfer preparation changed live state");
+            EquipmentFileSink file(scratch / "session.bin", true);
+            FileFaults faults{ FileFault::Flush };
+            EquipmentFileCommitter durability(file, faults);
+            std::unique_ptr<const InventoryTransferSuccess> success;
+            EquipmentBytes bytes;
+            require(runtime.commit(first, durability, success, bytes) == PersistenceResult::Rejected
+                && !success && bytes.empty() && first.candidate().mSourceCount == 1
+                && EquipmentRuntime::sameValues(before, runtime.installedValues(0)),
+                "Rejected preparation did not preserve live state and retry");
+            faults = {};
+            require(runtime.commit(first, durability, success, bytes) == PersistenceResult::Accepted
+                && success->mSourceCount == 1 && success->mDestinationCount == 2,
+                "Prepared transfer did not commit through the file service");
+            const auto accepted = *success;
+            const auto writes = faults.mWrites;
+            for (auto* rejected : { &first, &stale })
+            {
+                bool failed = false;
+                try { runtime.commit(*rejected, durability, success, bytes); }
+                catch (const std::invalid_argument&) { failed = true; }
+                require(failed && faults.mWrites == writes && *success == accepted,
+                    "Consumed/stale preparation reached durability or changed publication");
+            }
+            const auto take = runtime.containerCommand(1, false, success->mDestinationItem, 1);
+            auto next = runtime.prepare({ take.mInitiator }, take);
+            require(runtime.commit(next, durability, success, bytes) == PersistenceResult::Accepted
+                && success->mSourceCount == 1 && success->mDestinationCount == -6,
+                "Other actor could not continue after prepared commit");
+            std::cout << "prepared container: isolated preparation, safe retry, consumed/stale rejection, other actor continuation\n";
+        }
         static void checkTransferPreparation(const std::filesystem::path& scratch)
         {
             EquipmentScratch directory(scratch);
@@ -6705,6 +6753,11 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-container-prepared")
+        {
+            PlainEquipmentFixture::checkPreparedContainer(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-container")
         {
             PlainEquipmentFixture::checkConnected(scratch, true);

@@ -1,5 +1,6 @@
 #include "loadout.hpp"
 #include "equipment_tests.hpp"
+#include "inventory_service_tests.hpp"
 #include "transfer_rehearsal.hpp"
 
 #include <cmath>
@@ -6220,6 +6221,11 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "inventory-service" || filter == "inventory-service-durability")
+        {
+            TES3MP::Native::Testing::checkInventoryService(root, filter == "inventory-service-durability");
+            return;
+        }
         if (filter.starts_with("inventory-equipment-"))
         {
             MWWorld::Testing::checkPlainEquipment(filter, root);

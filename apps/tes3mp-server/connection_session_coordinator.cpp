@@ -2,6 +2,7 @@
 #include "authenticated_join_composition.hpp"
 #include "combat_interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
+#include "inventory_command_binding.hpp"
 #include "resume_token_context.hpp"
 
 #include "tes3mp/authentication.hpp"
@@ -489,26 +490,9 @@ namespace TES3MP::ServerApp
             if (!hello
                 || !std::ranges::binary_search(hello->negotiatedCapabilities(), inventoryReplicationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
-            const auto* progress = joins.state().findActiveSession(*state->sessionId());
-            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
-            if (!progress || !player)
-                return ConnectionSessionResult::ProtocolRejected;
-            InventoryTransactionCommand transaction{ .player = progress->playerId(),
-                .kind = command->kind,
-                .containerId = command->containerId,
-                .prototypeId = command->prototypeId,
-                .stackId = command->stackId,
-                .count = command->count,
-                .slot = command->slot,
-                .expectedInventoryRevision = command->expectedInventoryRevision,
-                .expectedContainerRevision = command->expectedContainerRevision,
-                .expectedWorldItemRevision = command->expectedWorldItemRevision,
-                .interactionOrigin = command->interactionOrigin };
-            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
-                command->commandId, command->observedCanonicalRevision,
-                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
-                InventoryCommandProposal(std::move(transaction)));
-            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+            auto binding = InventoryCommandBinding::resolve(joins.state(), *state->sessionId(), state->generation(), *command);
+            if (!binding) return ConnectionSessionResult::ProtocolRejected;
+            return intake.submit(binding->proposal()) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;
         }

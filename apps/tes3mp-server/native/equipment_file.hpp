@@ -3,6 +3,7 @@
 
 #include "bounded_file.hpp"
 #include "equipment_session.hpp"
+#include "session_commit.hpp"
 
 namespace TES3MP::Native
 {
@@ -32,6 +33,8 @@ namespace TES3MP::Native
     public:
         explicit EquipmentFileSink(const std::filesystem::path& path, bool session = false);
         bool session() const noexcept { return mSession; }
+        // Trusted runtime-encoded session only; no validation/installation here.
+        PersistenceResult writeSessionImage(std::span<const char> image, FileFaults& faults) noexcept;
         PersistenceResult writeSession(const EquipmentSessionValues& values,
             const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults,
         const EquipmentBindings* container = nullptr);
@@ -44,6 +47,18 @@ namespace TES3MP::Native
         PersistenceResult write(const PlainEquipmentValues& values, const EquipmentBindings& bindings,
             EquipmentBytes& output, FileFaults& faults);
         bool failedClosed() const noexcept { return mFile.failedClosed(); }
+    };
+
+    class EquipmentFileCommitter final : public EquipmentSessionCommitter
+    {
+        EquipmentFileSink& mFile;
+        FileFaults& mFaults;
+    public:
+        EquipmentFileCommitter(EquipmentFileSink& file, FileFaults& faults) : mFile(file), mFaults(faults) {}
+        PersistenceResult commit(std::span<const char> image) noexcept override
+        {
+            return mFile.writeSessionImage(image, mFaults);
+        }
     };
 }
 

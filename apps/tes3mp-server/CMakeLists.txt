@@ -28,6 +28,8 @@ add_library(tes3mp_server_app STATIC
     interactive_object_interest_projection.cpp
     inventory_interest_projection.hpp
     inventory_interest_projection.cpp
+    inventory_command_binding.hpp
+    inventory_command_binding.cpp
     inventory_content.hpp
     inventory_content.cpp
     melee_contact_history.hpp

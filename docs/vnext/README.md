@@ -28,11 +28,12 @@ OpenMW clients: input, prediction, UI, graphics, audio
 
 Networking stays engine-independent. An app-local OpenMW runtime now owns bounded
 plain-shirt transfer, shared-container drop/take and equipment commands, coherent
-installation and recovery; the native loadout
-probe and synthetic tests share it. Production server integration is still
-unfinished. The existing server
-and desktop adapter remain the working migration base; each subsystem changes
-authority exactly once. Broad compatibility is the destination, reached through
+installation and recovery. A persistent native service shares trusted inventory
+caller binding with production intake and projects existing client baselines in
+synthetic tests. Joint command durability and production runtime dispatch remain
+unfinished. The existing server and desktop adapter remain the working migration
+base; each subsystem changes authority exactly once. Broad compatibility is the
+destination, reached through
 small playable slices rather than an engine-wide rewrite before the first test.
 
 ## Product boundaries

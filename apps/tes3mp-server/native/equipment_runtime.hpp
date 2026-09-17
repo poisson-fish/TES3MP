@@ -4,6 +4,7 @@
 #include "equipment_command.hpp"
 #include "inventory_transfer_command.hpp"
 #include "equipment_file.hpp"
+#include "session_commit.hpp"
 #include <apps/openmw/mwworld/inventorystore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
@@ -23,6 +24,7 @@ namespace TES3MP::Native
 
     class EquipmentRuntime
     {
+        friend class InventoryService; // Read-only wire projection; runtime remains the only writer.
         friend class MWWorld::Testing::PlainEquipmentFixture; // Seed/inspect/fault injection only.
         friend PersistenceResult executeEquipment(EquipmentRuntime&, EquipmentCaller, EquipmentCommand,
             EquipmentFileSink&, const EquipmentBindings&, std::unique_ptr<const EquipmentSuccess>&,
@@ -65,6 +67,7 @@ namespace TES3MP::Native
         ActorEffects mContainerEffects;
         bool mFailedClosed = false;
         const bool mConnected;
+        const std::shared_ptr<const void> mLifetime = std::make_shared<const char>(0);
         // Actor diagnostics recover 0 or 1; a connected session uses 2 to
         // authorize only recovery of the complete pair. Never a command field.
         // Only construction can authorize restart. Consumption closes this mode;
@@ -139,6 +142,7 @@ namespace TES3MP::Native
         size_t registryBound() const { return (mContainer ? 3 : 2) * (PlainEquipmentValues::MaxItems + 1); }
         PersistenceResult persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
             EquipmentBytes& bytes, FileFaults& faults) const;
+        void encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const;
         void bindEffects(size_t actor);
         void validateCaller(size_t actor, const Ptr& caller) const;
         RestartBindings restartBindings(ESM::RefNum savedCounter) const;
@@ -173,6 +177,26 @@ namespace TES3MP::Native
         EquipmentEnvelope expectedEnvelope(ESM::RefNum actor) const;
 
     public:
+        // Detached preparation is not a published success. Content/services must
+        // outlive it. No engine views escape; commit rechecks its exact runtime
+        // lifetime and current state before calling the trusted durability port.
+        class PreparedTransfer
+        {
+            friend class EquipmentRuntime;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit PreparedTransfer(std::unique_ptr<State> state);
+        public:
+            PreparedTransfer(PreparedTransfer&&) noexcept;
+            PreparedTransfer& operator=(PreparedTransfer&&) noexcept;
+            ~PreparedTransfer();
+            const InventoryTransferSuccess& candidate() const;
+            std::span<const char> image() const;
+        };
+        PreparedTransfer prepare(InventoryTransferCaller caller, InventoryTransferCommand command);
+        PersistenceResult commit(PreparedTransfer& prepared, EquipmentSessionCommitter& durability,
+            std::unique_ptr<const InventoryTransferSuccess>& output, EquipmentBytes& bytes);
+
         // connected fixes this owner's persistence mode for its lifetime. Both
         // transfer and equipment then require a session sink; restartActor=2 means
         // fresh coherent recovery, with commands blocked until all owners install.
