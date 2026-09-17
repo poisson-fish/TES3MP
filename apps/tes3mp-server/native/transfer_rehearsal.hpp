@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_TRANSFER_REHEARSAL_H
 
 #include "persistence.hpp"
+#include "inventory_transfer_command.hpp"
 
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -16,6 +17,15 @@
 
 namespace MWWorld::Testing
 {
+    using namespace TES3MP::Native;
+    class TransferFileSink;
+    struct SaveBindings;
+    class DisposableTransferRehearsal;
+    // Retained MISC-only migration composition. Owned intent checks, result
+    // construction and delivery come from the non-test runtime target.
+    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCaller caller,
+        InventoryTransferCommand command, const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
+        std::unique_ptr<const InventoryTransferSuccess>& output);
     // Allocation-free signal. An uncertain fixture must be discarded; no retry
     // or recovery installation is authorized by this test composition.
     struct TestDurabilityUncertain

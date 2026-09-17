@@ -36,7 +36,7 @@ namespace TES3MP::Native
         // Bind ordered bytes, encoding and startup actor/item roles. This is not
         // an authenticated multiplayer pack manifest. Content stays immutable.
         std::ostringstream identity;
-        identity << "equipment-probe-1\n" << mOptions.mEncoding << '\n';
+        identity << "equipment-probe-2\n" << mOptions.mEncoding << '\n';
         for (const auto& actor : actors)
             identity << actor.mBase << '\n' << actor.mShirt << '\n' << actor.mCount << '\n';
         for (size_t i = 0; i < mFiles.size(); ++i)
@@ -61,55 +61,77 @@ namespace TES3MP::Native
         if (!std::filesystem::create_directory(mOptions.mEquipmentSaveDirectory))
             throw std::invalid_argument("Equipment save directory must be new (existing files are never overwritten)");
         std::ostringstream report;
-        report << "native-equipment-runtime\t1\ncontent-fingerprint\t";
+        report << "native-equipment-runtime\t2\ncontent-fingerprint\t";
         for (auto byte : contentIdentity)
             report << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned>(byte);
         report << std::dec << "\nshirt\t" << shirtId << "\nnpc-stats\t" << stats << '\n';
-        for (size_t actor = 0; actor < actors.size(); ++actor)
+        const auto path = mOptions.mEquipmentSaveDirectory / "session.equipment";
+        EquipmentBytes bytes;
+        std::unique_ptr<const EquipmentSuccess> success;
+        FileFaults faults;
+        std::vector<ESM::RefId> ids{ shirtId, actors[0].mBase, actors[1].mBase };
         {
-            const auto path = mOptions.mEquipmentSaveDirectory / ("actor-" + std::to_string(actor) + ".equipment");
-            EquipmentBytes bytes;
-            std::unique_ptr<const EquipmentSuccess> success;
-            FileFaults faults;
-            std::vector<ESM::RefId> ids{ shirtId, actors[actor].mBase };
+            MWWorld::WorldModel world(mStore, mReaders, 1);
+            MWWorld::LocalScripts scripts(mStore);
+            EquipmentRuntime runtime(mStore, world, scripts, "native-equipment-probe-2", contentIdentity,
+                actors, locals, &declarations, {}, true);
+            EquipmentFileSink file(path, true);
+            InventoryInstanceId received;
+            if (!stats)
             {
-                MWWorld::WorldModel world(mStore, mReaders, 1);
-                MWWorld::LocalScripts scripts(mStore);
-                EquipmentRuntime runtime(mStore, world, scripts, "native-equipment-probe-1", contentIdentity,
-                    actors, locals, &declarations);
-                const auto command = runtime.command(actor, true);
-                EquipmentFileSink file(path);
+                const auto command = runtime.transferCommand(0, runtime.command(0, true).mItem, 2);
+                std::unique_ptr<const InventoryTransferSuccess> transferred;
+                if (runtime.execute({ command.mInitiator }, command, file, transferred, bytes, faults)
+                    != PersistenceResult::Accepted)
+                    throw std::runtime_error("Connected transfer was not durably accepted");
+                received = transferred->mDestinationItem;
+                report << "transfer\t0->1\tquantity=2\tsource=" << transferred->mSourceCount
+                       << "\tdestination=" << transferred->mDestinationCount << "\titem=" << received.mIndex << '\n';
+            }
+            for (size_t actor : { size_t(1), size_t(0) })
+            {
+                auto command = runtime.command(actor, true);
+                if (actor == 1 && !stats) command.mItem = received;
                 if (runtime.execute({ command.mActor }, command, file, success, bytes, faults) != PersistenceResult::Accepted)
-                    throw std::runtime_error("Equipment probe equip was not durably accepted");
-                // Only trusted content-derived initial spells enter the decode allowlist.
+                    throw std::runtime_error("Connected equipment was not durably accepted");
                 if (stats)
                 {
                     MWWorld::ManualRef base(mStore, actors[actor].mBase);
                     base.getPtr().getCellRef().setRefNum({ command.mActor.mIndex, command.mActor.mContentFile });
                     const MWWorld::EquipmentNpcStats initial(base.getPtr(), mStore);
-                    for (auto spell : initial.values().mSpells)
-                        if (!spell.empty()) ids.push_back(spell);
+                    for (auto spell : initial.values().mSpells) if (!spell.empty()) ids.push_back(spell);
                 }
                 report << "actor\t" << actor << "\tbase=" << actors[actor].mBase
                        << "\tequipped=" << success->mShirt.mIndex << "\trevision=" << success->mRevision << '\n';
             }
-            // Every actor node, store, stat context and registry from execution
-            // has died. Recovery cannot borrow the old runtime or replay effects.
-            MWWorld::WorldModel world(mStore, mReaders, 1);
-            MWWorld::LocalScripts scripts(mStore);
-            EquipmentRuntime fresh(mStore, world, scripts, "native-equipment-probe-1", contentIdentity,
-                actors, locals, &declarations, actor);
-            std::unique_ptr<const MWWorld::PlainEquipmentValues> restored;
-            EquipmentBytes accepted;
-            if (fresh.restart(actor, path, ids, restored, accepted, faults) != FileReadResult::Read
-                || accepted != bytes || restored->mShirt.mIndex != success->mShirt.mIndex)
-                throw std::runtime_error("Equipment probe fresh recovery mismatch");
+        }
+        // Both actor inventories, stats and their registry have died. Restore
+        // the one accepted pair before either actor may continue.
+        MWWorld::WorldModel world(mStore, mReaders, 1);
+        MWWorld::LocalScripts scripts(mStore);
+        EquipmentRuntime fresh(mStore, world, scripts, "native-equipment-probe-2", contentIdentity,
+            actors, locals, &declarations, 2, true);
+        std::unique_ptr<const EquipmentSessionValues> restored;
+        EquipmentBytes accepted;
+        if (fresh.restartSession(path, ids, restored, accepted, faults) != FileReadResult::Read || accepted != bytes)
+            throw std::runtime_error("Connected fresh recovery mismatch");
+        EquipmentFileSink file(path, true);
+        for (size_t actor = 0; actor < 2; ++actor)
+        {
             const auto command = fresh.command(actor, false);
-            EquipmentFileSink file(path);
             if (fresh.execute({ command.mActor }, command, file, success, bytes, faults) != PersistenceResult::Accepted
                 || success->mShirt.mIndex != 0)
-                throw std::runtime_error("Equipment probe recovered continuation failed");
+                throw std::runtime_error("Connected recovered continuation failed");
             report << "restored\t" << actor << "\tcontinued-unequipped\tbytes=" << bytes.size() << '\n';
+        }
+        if (!stats)
+        {
+            const auto command = fresh.transferCommand(1, fresh.command(1, true).mItem, 1);
+            std::unique_ptr<const InventoryTransferSuccess> transferred;
+            if (fresh.execute({ command.mInitiator }, command, file, transferred, bytes, faults) != PersistenceResult::Accepted)
+                throw std::runtime_error("Connected recovered return transfer failed");
+            report << "return-transfer\t1->0\tquantity=1\tsource=" << transferred->mSourceCount
+                   << "\tdestination=" << transferred->mDestinationCount << '\n';
         }
         report << "complete\n";
         output << report.str();

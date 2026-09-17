@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "class.hpp"
+#include "containeradd.hpp"
 #include "esmstore.hpp"
 #include "inventorystore.hpp"
 #include "worldmodel.hpp"
@@ -753,6 +754,12 @@ namespace MWWorld
                 const auto& luck = mNpcStats->mStats.getAttribute(ESM::Attribute::Luck);
                 mResult.mLuck = { luck.getBase(), luck.getModifier(), luck.getDamage() };
             }
+            finish();
+        }
+
+        void finish()
+        {
+            mResult.mItems.clear();
             mResult.mShirt = position(mCandidate, mCandidate.mSlots[InventoryStore::Slot_Shirt]);
             mResult.mSelected = position(mCandidate, mCandidate.mSelectedEnchantItem);
             for (const auto& ref : mCandidate.mLists.mClothes.mList)
@@ -793,6 +800,85 @@ namespace MWWorld
         state->run(expectedIdentity, equip);
         state->check(context);
         return PreparedPlainEquipment(std::move(state));
+    }
+
+    std::array<PreparedPlainEquipment, 2> PreparedPlainEquipment::prepareTransfer(
+        const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
+        ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
+        const std::array<PlainEquipmentContext, 2>& contexts)
+    {
+        const auto& source = State::inventory(inventories[0], contexts[0]);
+        const auto& destination = State::inventory(inventories[1], contexts[1]);
+        const auto& world = contexts[0].mWorldModel;
+        registered(item, world);
+        if (&source == &destination || contexts[0].mActor == contexts[1].mActor
+            || &world != &contexts[1].mWorldModel || &contexts[0].mStore != &contexts[1].mStore
+            || &contexts[0].mLocalScripts != &contexts[1].mLocalScripts
+            || expectedRevision != world.getPtrRegistryRevision()
+            || item.getContainerStore() != &source || item.getCellRef().getRefNum() != expectedIdentity
+            || item.getType() != ESM::Clothing::sRecordId || count <= 0
+            || count > std::abs(static_cast<int64_t>(item.getCellRef().getCount(false)))
+            || State::position(source, source.mSlots[InventoryStore::Slot_Shirt]) == expectedIdentity
+            || !item.getClass().getScript(item).empty()
+            || !item.getClass().getEnchantment(item).empty())
+            throw std::invalid_argument("Transfer requires a current unequipped plain shirt and distinct actors");
+        const auto generated = world.getLastGeneratedRefNum();
+        if (expectedRevision >= std::numeric_limits<size_t>::max() - 1
+            || generated.mContentFile != -1 || generated.mIndex == std::numeric_limits<uint32_t>::max())
+            throw std::invalid_argument("Shirt transfer registry counter exhausted");
+        // Check the aggregate before stock int arithmetic or candidate allocation.
+        int64_t total = count;
+        for (const auto& node : destination.mLists.mClothes.mList)
+            total += std::abs(static_cast<int64_t>(node.mRef.getCount(false)));
+        if (total > std::numeric_limits<int>::max())
+            throw std::invalid_argument("Transfer destination count bound exceeded");
+        std::array states{ std::make_unique<State>(inventories[0], contexts[0]),
+            std::make_unique<State>(inventories[1], contexts[1]) };
+        states[0]->capture(source);
+        states[1]->capture(destination);
+        auto& from = *states[0];
+        auto& to = *states[1];
+        auto origin = from.mCandidate.begin();
+        while (origin != from.mCandidate.end() && origin->getCellRef().getRefNum() != expectedIdentity)
+            ++origin;
+        if (origin == from.mCandidate.end())
+            throw std::invalid_argument("Transfer source is dormant or foreign");
+        auto incoming = detached(*origin->get<ESM::Clothing>());
+        incoming.mRef.unsetRefNum();
+        incoming.mRef.setCount(count);
+        // Exactly the stock add selection, signed count arithmetic and equipped
+        // stack exclusion. The protected copy owns RefData and no live service.
+        auto added = to.mCandidate.addImp(ConstPtr(&incoming), count, contexts[0].mStore);
+        if (!added->getCellRef().getRefNum().isSet())
+            added->getRefData() = incoming.mData.copyForContainerTransfer();
+        auto counter = world.getLastGeneratedRefNum();
+        const bool newIdentity = !added->getCellRef().getRefNum().isSet();
+        const auto destinationId = added->getCellRef().getOrAssignRefNum(counter);
+        if (newIdentity && from.mRegistry.mEntries.contains(destinationId))
+            throw std::invalid_argument("Transfer generated identity collision");
+        normalizeContainerAddReference(added->getCellRef());
+        const auto removal = ContainerStore::prepareRemoveCount(origin->getCellRef(), count);
+        origin->getCellRef() = origin->getCellRef().copyWithCount(removal.mRemainingCount);
+        if (removal.mFullRemoval && from.mCandidate.mSelectedEnchantItem == origin)
+            from.mCandidate.mSelectedEnchantItem = from.mCandidate.end();
+        from.mResult.mLastGenerated = to.mResult.mLastGenerated = counter;
+        from.mResult.mTransferred = expectedIdentity;
+        to.mResult.mTransferred = destinationId;
+        using Kind = PlainEquipmentResult::EffectKind;
+        from.effect(Kind::InventoryUpdated);
+        if (from.mContainerListener) from.effect(Kind::ItemRemoved, *origin, count);
+        from.effect(Kind::InventoryUpdated);
+        // Stock add registers even an existing destination stack once.
+        to.effect(Kind::RegisterSplit, *added);
+        to.effect(Kind::InventoryUpdated);
+        if (to.mContainerListener) to.effect(Kind::ItemAdded, *added, count);
+        to.effect(Kind::InventoryUpdated);
+        for (auto& state : states)
+        {
+            state->finish();
+            state->check(state->mContext);
+        }
+        return { PreparedPlainEquipment(std::move(states[0])), PreparedPlainEquipment(std::move(states[1])) };
     }
 
     void PreparedPlainEquipment::validate(const PlainEquipmentContext& context) const

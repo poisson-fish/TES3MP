@@ -24,10 +24,10 @@ int main(int argc, char** argv)
                      "--enchantment stages native cast cost (before skill adjustment) and maximum charge.\n"
                      "  Limits: 256 bytes/ID, 32 effects, nonnegative effect fields/base cost/multiplier <= 1e6,\n"
                      "  and representable rounded cost/charge. This does not execute enchanted effects.\n"
-                     "--equipment commits equip, destroys the owner, restores, then commits unequip for each actor.\n"
-                     "  Uses the app-local runtime and stock InventoryStore; retains bounded actor saves.\n"
+                     "--equipment transfers two plain shirts, equips both actors in one owner, then recovers the pair.\n"
+                     "  Both actors continue with unequip and a return transfer through one coherent session file.\n"
                      "  Supports plain shirts and the bounded constant Fortify Luck/script-locals operation.\n"
-                     "  Each recovery restores one actor beside the other actor's startup state, not a world save.\n"
+                     "  Constant/scripted shirts exercise pair equipment/recovery; their transfer remains unsupported.\n"
                      "No World, Environment, rendering, UI, or script instruction execution.\n";
         return 0;
     }

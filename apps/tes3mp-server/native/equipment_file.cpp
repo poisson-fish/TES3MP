@@ -1,4 +1,5 @@
 #include "equipment_file.hpp"
+#include <stdexcept>
 
 namespace TES3MP::Native
 {
@@ -26,8 +27,8 @@ namespace TES3MP::Native
         return FileReadResult::Read;
     }
 
-    EquipmentFileSink::EquipmentFileSink(const std::filesystem::path& path)
-        : mFile(path, MaxEquipmentBytes)
+    EquipmentFileSink::EquipmentFileSink(const std::filesystem::path& path, bool session)
+        : mFile(path, session ? MaxEquipmentSessionBytes : MaxEquipmentBytes), mSession(session)
     {
     }
 
@@ -36,6 +37,7 @@ namespace TES3MP::Native
     {
         if (mFile.failedClosed())
             return PersistenceResult::Uncertain;
+        if (mSession) throw std::invalid_argument("Session sink requires both actors");
         EquipmentBytes staged;
         encodeEquipment(values, bindings, staged);
         const auto result = mFile.write(staged, faults);
@@ -43,4 +45,16 @@ namespace TES3MP::Native
             output.swap(staged);
         return result;
     }
+    PersistenceResult EquipmentFileSink::writeSession(const EquipmentSessionValues& values,
+        const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults)
+    {
+        if (mFile.failedClosed()) return PersistenceResult::Uncertain;
+        if (!mSession) throw std::invalid_argument("Actor sink cannot commit a session");
+        EquipmentBytes staged;
+        encodeEquipmentSession(values, bindings, staged);
+        const auto result = mFile.write(staged, faults);
+        if (result == PersistenceResult::Accepted) output.swap(staged);
+        return result;
+    }
+
 }

@@ -12,15 +12,17 @@ namespace TES3MP::Native
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
-        std::optional<size_t> restartActor)
+        std::optional<size_t> restartActor, bool connected)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
-        , mScriptLocals(std::move(locals))
+        , mScriptLocals(std::move(locals)), mConnected(connected)
     {
         if (&world.mStore != &content || !scripts.usesStore(content) || mRuntime.empty()
             || mRuntime.size() > 128 || mRuntime.find('\0') != std::string::npos
             || std::none_of(mContent.begin(), mContent.end(), [](auto byte) { return byte != 0; })
-            || (restartActor && *restartActor >= 2))
+            || (restartActor && (connected ? *restartActor != 2 : *restartActor >= 2)))
             throw std::invalid_argument("Equipment runtime content/service/startup binding mismatch");
+        if (connected && (!world.mPtrRegistry.mIndex.empty() || !scripts.snapshot().mEntries.empty()))
+            throw std::invalid_argument("Connected runtime requires exclusive fresh registry and script services");
         // Validate all trusted startup records before constructing registered nodes.
         for (const auto& actor : actors)
         {
@@ -36,6 +38,9 @@ namespace TES3MP::Native
                 mScriptLocals->declarations(content, shirt->mScript);
             }
         }
+        // Bind lazy service identity during trusted startup, never during a
+        // rejectable command/recovery allocation observation.
+        scripts.lifetimeWitness();
         MWClass::registerClasses();
         for (size_t i = 0; i < actors.size(); ++i)
         {
@@ -59,8 +64,12 @@ namespace TES3MP::Native
         }
         if (restartActor)
         {
-            mItems[*restartActor] = Ptr();
-            mInventories[*restartActor].mLists.mClothes.mList.clear();
+            for (size_t i = 0; i < 2; ++i)
+                if (connected || i == *restartActor)
+                {
+                    mItems[i] = Ptr();
+                    mInventories[i].mLists.mClothes.mList.clear();
+                }
             mRestartActor = restartActor;
         }
     }
@@ -116,6 +125,7 @@ namespace TES3MP::Native
         EquipmentBytes& bytes, FileFaults& faults)
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
+        if (mConnected) throw std::invalid_argument("Connected runtime requires pair recovery");
         const auto caller = mActors.at(actor)->getPtr();
         const auto envelope = expectedEnvelope(caller.getCellRef().getRefNum());
         const EquipmentBindings bindings{ envelope, mStore, referenceIds, mScriptLocals };
@@ -185,7 +195,7 @@ namespace TES3MP::Native
             if (!value)
                 throw std::invalid_argument("Equipment fresh restart binding, lifetime or registry changed");
         };
-        valid(!mFailedClosed && mRestartActor && *mRestartActor == actor && fresh.mOwner == this
+        valid(!mFailedClosed && mRestartActor && (mConnected ? *mRestartActor == 2 : *mRestartActor == actor) && fresh.mOwner == this
             && fresh.mScriptLocals == mScriptLocals && bindings.mScriptLocals == mScriptLocals);
         validateCaller(actor, caller);
         const auto trusted = expectedEnvelope(caller.getCellRef().getRefNum());
@@ -351,23 +361,13 @@ namespace TES3MP::Native
         // complete. No equip/removal callbacks are replayed on restart.
         const auto install = [&]() noexcept {
             phase.set(Phase::Installation);
-            auto& nodes = candidate.mLists.mClothes.mList;
-            for (auto& node : nodes)
-                node.mWorldModel = &mWorld;
-            nodes.swap(live.mLists.mClothes.mList);
-            live.mStorageIdentity.swap(candidate.mStorageIdentity);
-            live.mSlots[InventoryStore::Slot_Shirt] = staged->mShirt;
-            live.mSelectedEnchantItem = staged->mSelected;
-            live.mWeightUpToDate = live.mRechargingItemsUpToDate = false;
-            live.mModified = true;
+            installInventory(actor, candidate, staged->mShirt, staged->mSelected, staged->mItem, staged->mNpcStats, true);
             auto& registry = mWorld.mPtrRegistry;
             registry.mIndex.swap(staged->mRegistry);
             // Format 1 saves the generation counter, not a registry epoch.
             // Invalidate old fresh-runtime preparations with one revision.
             registry.mRevision = staged->mFresh.mRevision + 1;
             registry.mLastGenerated = restored.mLastGenerated;
-            mItems[actor] = staged->mItem;
-            mNpcStats[actor].swap(staged->mNpcStats);
             mRestartActor.reset();
             phase.set(Phase::Publication);
             output.swap(staged->mValues);
@@ -413,7 +413,7 @@ namespace TES3MP::Native
         // or invoked after durable acceptance and are rejected visibly.
         if (live.mInventoryListener != &effects.mListener || live.mListener != &effects.mListener)
             throw std::invalid_argument("Unsupported equipment effect listener");
-        if (!mItems[actor].hasLiveReference() || mItems[actor].mContainerStore != &live)
+        if (!mItems[actor].isEmpty() && (!mItems[actor].hasLiveReference() || mItems[actor].mContainerStore != &live))
             throw std::invalid_argument("Equipment runtime item lifetime or binding changed");
 
         phase.set(Phase::Setup);
@@ -434,7 +434,8 @@ namespace TES3MP::Native
                 staged->mShirt = ContainerStoreIterator(&live, it);
             if (id == result.mSelected)
                 staged->mSelected = ContainerStoreIterator(&live, it);
-            if (node.getCellRef().getRefNum() == mItems[actor].getCellRef().getRefNum())
+            if (mItems[actor].isEmpty() ? staged->mItem.isEmpty()
+                : node.getCellRef().getRefNum() == mItems[actor].getCellRef().getRefNum())
                 staged->mItem = node;
         }
         using Kind = PlainEquipmentResult::EffectKind;
@@ -460,6 +461,9 @@ namespace TES3MP::Native
                     if (staged->mEffects.mListener.mRemovals.size() == ActorEffects::MaxPending)
                         throw std::invalid_argument("Equipment removal notification bound exceeded");
                     staged->mEffects.mListener.itemRemoved(staged->mRegistry.at(effect.mItem), effect.mCount);
+                    break;
+                case Kind::ItemAdded:
+                    ++staged->mEffects.mListener.mCalls;
                     break;
                 case Kind::EquipmentChanged:
                     staged->mEffects.mListener.equipmentChanged();
@@ -491,8 +495,8 @@ namespace TES3MP::Native
             mFailedClosed = true;
             return PersistenceResult::Uncertain;
         }
-        if (mRestartActor)
-            throw std::invalid_argument("Equipment fresh restart runtime is not installed");
+        if (mRestartActor || file.session() != mConnected)
+            throw std::invalid_argument("Equipment runtime recovery or persistence mode mismatch");
         validateCaller(actor, caller);
         const auto trusted = expectedEnvelope(caller.getCellRef().getRefNum());
         if (bindings.mScriptLocals != mScriptLocals
@@ -505,7 +509,11 @@ namespace TES3MP::Native
         auto& candidate = staged->mPrepared.installationCandidate(preparationContext(actor), live);
         EquipmentBytes encoded;
         phase.set(Phase::Persistence);
-        const auto outcome = file.write(staged->mSaved, bindings, encoded, faults);
+        const auto outcome = mConnected
+            ? persistSession({ actor == 0 ? std::array{ staged->mSaved, installedValues(1) }
+                                         : std::array{ installedValues(0), staged->mSaved }, staged->mRevision },
+                  file, encoded, faults)
+            : file.write(staged->mSaved, bindings, encoded, faults);
         if (outcome != PersistenceResult::Accepted)
         {
             mFailedClosed = outcome == PersistenceResult::Uncertain;
@@ -516,30 +524,11 @@ namespace TES3MP::Native
         // capacity, effects and owned publication storage already exist.
         const auto install = [&]() noexcept {
             phase.set(Phase::Installation);
-            auto& nodes = candidate.mLists.mClothes.mList;
-            for (auto& node : nodes)
-                node.mWorldModel = &mWorld;
-            static_assert(noexcept(nodes.swap(live.mLists.mClothes.mList)));
-            nodes.swap(live.mLists.mClothes.mList);
-            live.mSlots[InventoryStore::Slot_Shirt] = staged->mShirt;
-            live.mSelectedEnchantItem = staged->mSelected;
-            live.mRechargingItems.clear();
-            live.mWeightUpToDate = live.mRechargingItemsUpToDate = false;
-            live.mModified = true;
+            installPrepared(actor, *staged, candidate);
             auto& registry = mWorld.mPtrRegistry;
-            static_assert(noexcept(registry.mIndex.swap(staged->mRegistry)));
             registry.mIndex.swap(staged->mRegistry);
             registry.mRevision = staged->mRevision;
             registry.mLastGenerated = staged->mSaved.mLastGenerated;
-            mItems[actor] = staged->mItem;
-            mNpcStats[actor].swap(staged->mPrepared.installationNpcStats());
-            mActorEffects[actor].mListener.mCalls = staged->mEffects.mListener.mCalls;
-            mActorEffects[actor].mListener.mRemovals.swap(staged->mEffects.mListener.mRemovals);
-            mActorEffects[actor].mInventoryUpdates = staged->mEffects.mInventoryUpdates;
-            mActorEffects[actor].mNotifications.swap(staged->mEffects.mNotifications);
-            // Old nodes may not deregister their replacements on teardown.
-            for (auto& node : nodes)
-                node.mWorldModel = nullptr;
             phase.set(Phase::Publication);
             output.swap(staged->mResult);
             bytes.swap(encoded);
@@ -553,6 +542,8 @@ namespace TES3MP::Native
     PlainEquipmentValues EquipmentRuntime::installedValues(size_t actor) const
     {
         const auto& inventory = mInventories[actor];
+        if (inventory.mLists.mClothes.mList.size() > PlainEquipmentValues::MaxItems)
+            throw std::invalid_argument("Equipment inventory export bound exceeded");
         PlainEquipmentValues result;
         result.mActor = mActors[actor]->getPtr().getCellRef().getRefNum();
         result.mLastGenerated = mWorld.getLastGeneratedRefNum();
@@ -623,6 +614,10 @@ namespace TES3MP::Native
             || (command.mState != EquipmentRequestedState::Equipped
                 && command.mState != EquipmentRequestedState::Unequipped))
             throw std::invalid_argument("Equipment command caller, identity, revision or state invalid");
+        if (mConnected && (command.mExpectedRevision >= std::numeric_limits<size_t>::max() - 1
+            || mWorld.getLastGeneratedRefNum().mContentFile != -1
+            || mWorld.getLastGeneratedRefNum().mIndex == std::numeric_limits<uint32_t>::max()))
+            throw std::invalid_argument("Session registry counter exhausted");
         const auto actorPtr = mWorld.getPtr(id(command.mActor));
         if (!actorPtr.hasLiveReference() || actorPtr.getCellRef().getRefNum() != id(command.mActor))
             throw std::invalid_argument("Equipment command actor registry identity mismatch");

@@ -1,118 +1,41 @@
 #include "inventory_transfer_command.hpp"
-
-#include "test_allocations.hpp"
-#include "transfer_file_sink.hpp"
-
+#include "runtime_phases.hpp"
 #include <limits>
-#include <type_traits>
-#include <utility>
+#include <stdexcept>
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
-    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCaller caller,
-        InventoryTransferCommand command, const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
-        std::unique_ptr<const InventoryTransferSuccess>& output)
+    size_t validateInventoryTransferIntent(InventoryTransferCaller caller, const InventoryTransferCommand& command,
+        const std::array<InventoryInstanceId, 2>& owners, uint64_t revision, InventoryInstanceId counter)
     {
-        Allocations::InPhase phase(Allocations::Phase::Validation);
-        if (fixture.failedClosed() || sink.failedClosed())
-            throw TestDurabilityUncertain{};
-        const auto id = [](InventoryInstanceId value) { return ESM::RefNum{ value.mIndex, value.mContentFile }; };
-        const auto ownedId = [](ESM::RefNum value) {
-            return InventoryInstanceId{ value.mIndex, value.mContentFile };
-        };
         for (auto value : { command.mSourceOwner, command.mDestinationOwner, command.mInitiator, command.mItem })
-            if (!id(value).isSet() || value.mContentFile < -1)
+            if ((value.mIndex == 0 && value.mContentFile == -1) || value.mContentFile < -1)
                 throw std::invalid_argument("Inventory command requires valid instance IDs");
-        if (command.mInitiator != caller.mInitiator
-            || command.mQuantity <= 0 || command.mSourceOwner == command.mDestinationOwner
-            || command.mExpectedRevision != fixture.mModel.getPtrRegistryRevision())
-            throw std::invalid_argument("Inventory command quantity, owners or revision invalid");
-        // Version 4 preserves only the first generated-ID namespace. Close this
-        // bounded command at either saved counter's limit, including stacking:
-        // never wrap the revision or let stock generation enter content slot -2.
-        const auto counter = fixture.mModel.getLastGeneratedRefNum();
-        if (command.mExpectedRevision == std::numeric_limits<size_t>::max() || counter.mContentFile != -1
+        if (command.mInitiator != caller.mInitiator || command.mQuantity <= 0
+            || command.mSourceOwner == command.mDestinationOwner || command.mExpectedRevision != revision
+            || revision == std::numeric_limits<size_t>::max() || counter.mContentFile != -1
             || counter.mIndex == std::numeric_limits<uint32_t>::max())
-            throw std::invalid_argument("Inventory command saved counter exhausted or unsupported");
-        const auto& envelope = bindings.mEnvelope;
-        const bool reverse = id(command.mSourceOwner) == envelope.mDestinationOwner;
-        if (id(command.mSourceOwner) != (reverse ? envelope.mDestinationOwner : envelope.mSourceOwner)
-            || id(command.mDestinationOwner) != (reverse ? envelope.mSourceOwner : envelope.mDestinationOwner)
-            || (id(caller.mInitiator) != envelope.mSourceOwner
-                && id(caller.mInitiator) != envelope.mDestinationOwner))
-            throw std::invalid_argument("Inventory command save owner/initiator mismatch");
+            throw std::invalid_argument("Inventory command caller, quantity, owners or counters invalid");
+        const size_t source = command.mSourceOwner == owners[0] ? 0 : 1;
+        if (command.mSourceOwner != owners[source] || command.mDestinationOwner != owners[1 - source]
+            || (caller.mInitiator != owners[0] && caller.mInitiator != owners[1]))
+            throw std::invalid_argument("Inventory command current owner/initiator mismatch");
+        return source;
+    }
 
-        // Resolve afresh. Never follow a caller-supplied pointer or an old context
-        // before checking its lifetime; full stock validation remains mandatory.
-        const auto matches = [&](InventoryInstanceId value, const Ptr& expected) {
-            const auto current = fixture.mModel.getPtr(id(value));
-            return current.hasLiveReference() && expected.hasLiveReference() && current == expected
-                && current.getReferenceLifetime() == expected.getReferenceLifetime();
+    InventoryTransferSuccess inventoryTransferSuccess(InventoryTransferCommand command, InventoryInstanceId destination,
+        int32_t sourceCount, int32_t destinationCount, uint64_t revision,
+        InventoryInstanceId sourceSelection, InventoryInstanceId destinationSelection, bool removed, bool added)
+    {
+        const auto intent = [&](InventoryNotificationKind kind, InventoryInstanceId owner, InventoryInstanceId item) {
+            return InventoryNotificationIntent{ kind, owner, command.mInitiator, item, command.mQuantity, revision };
         };
-        const auto sourceOwner = reverse ? command.mDestinationOwner : command.mSourceOwner;
-        const auto destinationOwner = reverse ? command.mSourceOwner : command.mDestinationOwner;
-        if (!matches(sourceOwner, fixture.mSourceOwner.getPtr())
-            || !matches(sourceOwner, fixture.mRemoval.mContainer)
-            || !matches(destinationOwner, fixture.mDestinationOwner.getPtr())
-            || !matches(destinationOwner, fixture.mDestinationAdd.mContainer)
-            || !matches(ownedId(envelope.mInitiator), fixture.mDestinationAdd.mPlayer))
-            throw std::invalid_argument("Inventory command current context mismatch");
-        // Both eligible owners were checked against the current registry and
-        // their lifetime witnesses. Authorization comes from caller, not the
-        // fixed format-4 envelope or the command's claimed identity.
-        const auto initiator = fixture.mModel.getPtr(id(caller.mInitiator));
-        const auto item = fixture.mModel.getPtr(id(command.mItem));
-        auto& source = reverse ? fixture.mDestination : fixture.mSource;
-        auto& destination = reverse ? fixture.mSource : fixture.mDestination;
-        if (!item.hasLiveReference() || item.getContainerStore() != &source)
-            throw std::invalid_argument("Inventory command item ownership mismatch");
-
-        phase.set(Allocations::Phase::Preparation);
-        const auto contexts = fixture.transferContexts(reverse, initiator);
-        const std::array resolved{ ContainerStoreResolution(fixture.mOther, fixture.mOtherOwner.getPtr()) };
-        auto pair = source.prepareTransfer(
-            item, command.mQuantity, destination, contexts.mRemoval, contexts.mAddition, resolved);
-        if (!source.validateTransfer(pair, destination, contexts.mRemoval, contexts.mAddition).isComplete())
-            throw std::invalid_argument("Inventory command requires complete resolution");
-
-        phase.set(Allocations::Phase::Result);
-        // Stage all fallible result storage while the pair is detached. Result
-        // values contain no engine objects, iterators or borrowed lifetimes.
-        const auto destinationItem = ownedId(pair.getDestinationIdentity());
-        const auto revision = pair.getRelocation().mRegistry.mRevision;
-        const auto intent = [&](InventoryNotificationKind kind, InventoryInstanceId owner, InventoryInstanceId itemId) {
-            return InventoryNotificationIntent{ kind, owner, command.mInitiator, itemId,
-                pair.getRemoval().getCount(), revision };
-        };
-        const auto sourceItem = ownedId(pair.getRemoval().getItemIdentity());
         InventoryNotificationBatch notifications;
-        if (pair.hasRemovalNotification())
-            notifications[0] = intent(InventoryNotificationKind::ItemRemoved, command.mSourceOwner, sourceItem);
-        // validateTransfer requires both prepared inventory-updated consumers.
-        notifications[1] = intent(InventoryNotificationKind::InventoryUpdated, command.mSourceOwner, sourceItem);
-        if (pair.hasAdditionNotification())
-            notifications[2] = intent(InventoryNotificationKind::ItemAdded, command.mDestinationOwner, destinationItem);
-        notifications[3]
-            = intent(InventoryNotificationKind::InventoryUpdated, command.mDestinationOwner, destinationItem);
-        static_assert(std::is_trivially_copyable_v<InventoryNotificationBatch>);
-        auto staged = std::make_unique<const InventoryTransferSuccess>(InventoryTransferSuccess{ command,
-            destinationItem, pair.getSourceItem().getCellRef().getCount(false),
-            pair.getDestinationItem().getCellRef().getCount(false), revision, notifications,
-            ownedId(pair.getSourceSelection()), ownedId(pair.getDestinationSelection()) });
-        phase.set(Allocations::Phase::Setup);
-        const bool installed = fixture.commitDurably(
-            std::move(pair), bindings.mContent.mDeclarations, [&](const SerializedPair& saved) {
-                TransferSaveBytes bytes;
-                encodeTransferSave(saved, bindings, bytes);
-                return sink.write(bytes, faults); // No fallible work after possible replacement.
-            },
-            reverse, initiator);
-        if (!installed)
-            return false;
-        phase.set(Allocations::Phase::Publication);
-        static_assert(noexcept(output.swap(staged)));
-        output.swap(staged);
-        return true;
+        if (removed) notifications[0] = intent(InventoryNotificationKind::ItemRemoved, command.mSourceOwner, command.mItem);
+        notifications[1] = intent(InventoryNotificationKind::InventoryUpdated, command.mSourceOwner, command.mItem);
+        if (added) notifications[2] = intent(InventoryNotificationKind::ItemAdded, command.mDestinationOwner, destination);
+        notifications[3] = intent(InventoryNotificationKind::InventoryUpdated, command.mDestinationOwner, destination);
+        return { command, destination, sourceCount, destinationCount, revision, notifications, sourceSelection, destinationSelection };
     }
 
     InventoryNotificationDelivery consumeInventoryNotifications(

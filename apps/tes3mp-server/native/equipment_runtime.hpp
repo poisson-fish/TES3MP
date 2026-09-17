@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_EQUIPMENT_RUNTIME_H
 
 #include "equipment_command.hpp"
+#include "inventory_transfer_command.hpp"
 #include "equipment_file.hpp"
 #include <apps/openmw/mwworld/inventorystore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -60,6 +61,9 @@ namespace TES3MP::Native
         };
         std::array<ActorEffects, 2> mActorEffects;
         bool mFailedClosed = false;
+        const bool mConnected;
+        // Actor diagnostics recover 0 or 1; a connected session uses 2 to
+        // authorize only recovery of the complete pair. Never a command field.
         // Only construction can authorize restart. Consumption closes this mode;
         // an ordinary or uncertain runtime can never opt back into it.
         std::optional<size_t> mRestartActor;
@@ -119,6 +123,11 @@ namespace TES3MP::Native
             }
         };
 
+        void installInventory(size_t actor, InventoryStore& candidate, ContainerStoreIterator shirt,
+            ContainerStoreIterator selected, const Ptr& item, std::shared_ptr<EquipmentNpcStats>& stats, bool replaceStorage = false) noexcept;
+        void installPrepared(size_t actor, Installation& staged, InventoryStore& candidate) noexcept;
+        PersistenceResult persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
+            EquipmentBytes& bytes, FileFaults& faults) const;
         void bindEffects(size_t actor);
         void validateCaller(size_t actor, const Ptr& caller) const;
         RestartBindings restartBindings(ESM::RefNum savedCounter) const;
@@ -152,12 +161,15 @@ namespace TES3MP::Native
         EquipmentEnvelope expectedEnvelope(ESM::RefNum actor) const;
 
     public:
+        // connected fixes this owner's persistence mode for its lifetime. Both
+        // transfer and equipment then require a pair sink; restartActor=2 means
+        // fresh pair recovery, with commands blocked until both actors install.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,
             const std::array<EquipmentActorBinding, 2>& actors,
             std::shared_ptr<const EquipmentScriptLocals> locals = {},
             MWBase::ScriptManager* declarations = nullptr,
-            std::optional<size_t> restartActor = {});
+            std::optional<size_t> restartActor = {}, bool connected = false);
         EquipmentRuntime(const EquipmentRuntime&) = delete;
         EquipmentRuntime& operator=(const EquipmentRuntime&) = delete;
 
@@ -166,6 +178,12 @@ namespace TES3MP::Native
         PersistenceResult execute(EquipmentCaller caller, EquipmentCommand command,
             EquipmentFileSink& file, std::unique_ptr<const EquipmentSuccess>& output,
             EquipmentBytes& bytes, FileFaults& faults);
+        InventoryTransferCommand transferCommand(size_t source, InventoryInstanceId item, int quantity) const;
+        PersistenceResult execute(InventoryTransferCaller caller, InventoryTransferCommand command,
+            EquipmentFileSink& file, std::unique_ptr<const InventoryTransferSuccess>& output,
+            EquipmentBytes& bytes, FileFaults& faults);
+        FileReadResult restartSession(const std::filesystem::path& path, std::span<const ESM::RefId> referenceIds,
+            std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes, FileFaults& faults);
         FileReadResult restart(size_t actor, const std::filesystem::path& path,
             std::span<const ESM::RefId> referenceIds, std::unique_ptr<const PlainEquipmentValues>& output,
             EquipmentBytes& bytes, FileFaults& faults);

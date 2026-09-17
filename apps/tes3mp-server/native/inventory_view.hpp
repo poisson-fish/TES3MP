@@ -7,6 +7,10 @@
 
 namespace MWWorld::Testing
 {
+    using TES3MP::Native::InventoryInstanceId;
+    using TES3MP::Native::InventoryNotificationConsumer;
+    using TES3MP::Native::InventoryNotificationIntent;
+    using TES3MP::Native::InventoryTransferSuccess;
     struct InventoryViewItem
     {
         InventoryInstanceId mItem;

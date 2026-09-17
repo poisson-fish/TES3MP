@@ -1,4 +1,5 @@
 #include "containerstore.hpp"
+#include "containeradd.hpp"
 #include "inventorystore.hpp"
 
 #include <algorithm>
@@ -682,15 +683,6 @@ namespace
                 break;
         }
         return iter;
-    }
-
-    void normalizeContainerAddReference(MWWorld::CellRef& ref)
-    {
-        ref.setPosition({});
-        ref.setOwner(ESM::RefId());
-        ref.resetGlobalVariable();
-        ref.setFaction(ESM::RefId());
-        ref.setFactionRank(-2);
     }
 
     // The registration consumer chooses immediate stock registration or an owned

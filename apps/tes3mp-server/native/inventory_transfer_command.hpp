@@ -11,16 +11,9 @@
 
 namespace TES3MP::Native { struct FileFaults; }
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
-    class DisposableTransferRehearsal;
-    class TransferFileSink;
-    struct SaveBindings;
-    using TES3MP::Native::FileFaults;
-
     // Owned app-local values, not a wire protocol or a durable request identity.
-    using TES3MP::Native::InventoryInstanceId;
-
     struct InventoryTransferCommand
     {
         InventoryInstanceId mSourceOwner, mDestinationOwner, mInitiator, mItem;
@@ -30,7 +23,7 @@ namespace MWWorld::Testing
     };
 
     // Trusted per-call authorization supplied by the server composition, never
-    // derived from command input. This test boundary supports either fixed owner
+    // derived from command input. This boundary supports either fixed owner
     // as caller; it does not implement authentication or persist authorization.
     struct InventoryTransferCaller
     {
@@ -71,21 +64,13 @@ namespace MWWorld::Testing
         bool operator==(const InventoryTransferSuccess&) const = default;
     };
 
-    // Test-target-only, synchronous, serialized access. The fixture fixes the
-    // two owner stores and save-envelope initiator. The separately authorized
-    // caller may alternate; commands must match it and may choose either direction.
-    // Save owner/service roles stay fixed and commands cannot redirect services.
-    // Borrowed fixture/content/bindings/sink must outlive the call;
-    // their consumers may not mutate or reenter. No production callers or dispatch.
-    // Invalid input/preparation/encoding throws; safe file rejection returns false.
-    // Uncertainty throws TestDurabilityUncertain and forbids retry of that composition.
-    // Every failure preserves output (including its allocation). Success publishes
-    // by noexcept swap only after persistence acceptance AND fixture installation.
-    // The bounded version-4 command rejects exhausted revision/generated counters,
-    // even when a stack would not require another generated identity.
-    bool executeInventoryTransfer(DisposableTransferRehearsal& fixture, InventoryTransferCaller caller,
-        InventoryTransferCommand command, const SaveBindings& bindings, TransferFileSink& sink, FileFaults& faults,
-        std::unique_ptr<const InventoryTransferSuccess>& output);
+    // Shared owned-command boundary for the native runtime and retained MISC
+    // migration tests. The composition resolves live references separately.
+    size_t validateInventoryTransferIntent(InventoryTransferCaller caller, const InventoryTransferCommand& command,
+        const std::array<InventoryInstanceId, 2>& owners, uint64_t revision, InventoryInstanceId counter);
+    InventoryTransferSuccess inventoryTransferSuccess(InventoryTransferCommand command, InventoryInstanceId destination,
+        int32_t sourceCount, int32_t destinationCount, uint64_t revision,
+        InventoryInstanceId sourceSelection, InventoryInstanceId destinationSelection, bool removed, bool added);
 
     class InventoryNotificationConsumer
     {
@@ -108,7 +93,7 @@ namespace MWWorld::Testing
         std::size_t mConfirmed = 0;
     };
 
-    // Test-only one-shot delivery of an executeInventoryTransfer success. Detach
+    // One-shot delivery of a committed transfer success. Detach
     // it before callbacks; consume it on success AND failure. A throwing receiver
     // may already have handled the failing intent: stop, report the committed
     // revision and confirmed prefix, and never replay the batch or gameplay.

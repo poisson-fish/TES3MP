@@ -2,7 +2,7 @@
 #define TES3MP_NATIVE_EQUIPMENT_FILE_H
 
 #include "bounded_file.hpp"
-#include "equipment_codec.hpp"
+#include "equipment_session.hpp"
 
 namespace TES3MP::Native
 {
@@ -27,9 +27,13 @@ namespace TES3MP::Native
     class EquipmentFileSink
     {
         BoundedFileSink mFile;
+        const bool mSession;
 
     public:
-        explicit EquipmentFileSink(const std::filesystem::path& path);
+        explicit EquipmentFileSink(const std::filesystem::path& path, bool session = false);
+        bool session() const noexcept { return mSession; }
+        PersistenceResult writeSession(const EquipmentSessionValues& values,
+            const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults);
         // Encode and validate before any I/O. Accepted publishes complete owned
         // bytes by nonthrowing swap. Rejection/exception/uncertainty preserves
         // prior output storage/value. Uncertainty blocks further writes, even

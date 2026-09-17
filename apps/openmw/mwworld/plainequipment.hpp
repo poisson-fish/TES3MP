@@ -106,6 +106,7 @@ namespace MWWorld
             RegisterSplit,
             InventoryUpdated,
             ItemRemoved,
+            ItemAdded,
             DeleteStackScript,
             EquipmentChanged
         };
@@ -122,6 +123,7 @@ namespace MWWorld
         std::optional<std::array<float, 3>> mLuck;
         std::vector<Effect> mEffects;
         bool mSkipped = false;
+        ESM::RefNum mTransferred; // Transfer source/destination identity, otherwise unset.
         bool operator==(const PlainEquipmentResult&) const = default;
     };
 
@@ -198,6 +200,13 @@ namespace MWWorld
         static PreparedPlainEquipment prepare(const ContainerStoreResolution& inventory, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRegistryRevision, bool equip,
             const PlainEquipmentContext& context);
+        // Plain, unequipped shirt transfer between these same protected stock
+        // inventories. No registration/script scope expansion. Both candidates
+        // share one generation counter and must be installed as a pair.
+        static std::array<PreparedPlainEquipment, 2> prepareTransfer(
+            const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
+            ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
+            const std::array<PlainEquipmentContext, 2>& contexts);
         PreparedPlainEquipment(PreparedPlainEquipment&&) noexcept;
         PreparedPlainEquipment& operator=(PreparedPlainEquipment&&) noexcept;
         ~PreparedPlainEquipment();
