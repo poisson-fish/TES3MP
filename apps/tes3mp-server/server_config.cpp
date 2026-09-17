@@ -128,7 +128,7 @@ namespace TES3MP::ServerApp
         if (!validUtf8(text))
             return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 22> seen{};
+        std::array<bool, 23> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -145,6 +145,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path actorContentPath;
         std::filesystem::path interactiveObjectContentPath;
         std::filesystem::path inventoryContentPath;
+        std::filesystem::path nativeInventoryPath;
         std::filesystem::path combatContentPath;
         std::filesystem::path characterContentPath;
         std::filesystem::path worldContentPath;
@@ -213,6 +214,8 @@ namespace TES3MP::ServerApp
                     slot = 20;
                 else if (key == "script_package_file")
                     slot = 21;
+                else if (key == "native_inventory_file")
+                    slot = 22;
                 else
                     return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot])
@@ -350,11 +353,17 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     worldContentPath = std::filesystem::u8path(value);
                 }
-                else
+                else if (slot == 21)
                 {
                     if (value.size() > MaximumScriptPackageContentPathBytes)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     scriptPackageContentPath = std::filesystem::u8path(value);
+                }
+                else if (slot == 22)
+                {
+                    if (value.size() > MaximumInventoryContentPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    nativeInventoryPath = std::filesystem::u8path(value);
                 }
             }
             if (end == std::string_view::npos)
@@ -381,7 +390,7 @@ namespace TES3MP::ServerApp
             std::move(configuredSpawnPositions), std::move(collisionContentPath), std::move(actorContentPath),
             std::move(interactiveObjectContentPath), std::move(inventoryContentPath), std::move(combatContentPath),
             std::move(playerIdentityPath), std::move(characterContentPath), std::move(worldContentPath),
-            std::move(scriptPackageContentPath), combatDifficulty };
+            std::move(scriptPackageContentPath), combatDifficulty, std::move(nativeInventoryPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

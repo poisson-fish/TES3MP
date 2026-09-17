@@ -239,10 +239,14 @@ namespace TES3MP::ServerApp
         std::span<const DurableCommandOrder> commands, const CanonicalInventoryWorld* inventory,
         const CanonicalCombatWorld* combat, const CanonicalInteractiveObjectWorld* objects,
         const CanonicalActorWorld* actors, const CanonicalWorldState* world,
-        const CanonicalScriptState* scriptState) noexcept
+        const CanonicalScriptState* scriptState, std::span<const std::byte> nativeInventory) noexcept
     try
     {
         if (!candidate)
+            return CanonicalDurabilityResult::Rejected;
+        if (nativeInventory.size() > MaximumNativeInventoryImageBytes || (inventory && !nativeInventory.empty())
+            || (mPrefix.latest() && !mPrefix.latest()->nativeInventory().empty() && nativeInventory.empty())
+            || (mPrefix.latest() && mPrefix.latest()->inventory() && !nativeInventory.empty()))
             return CanonicalDurabilityResult::Rejected;
         if (!scriptState
             || !CanonicalScriptState::restore(mPrefix.identity().scriptStateCatalog(), scriptState->variables()))
@@ -268,7 +272,7 @@ namespace TES3MP::ServerApp
         std::ranges::sort(durablePlayers, {}, &CanonicalPlayerEntityState::playerId);
         auto transaction
             = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision, candidate->checkpointTick(),
-                durablePlayers, commands, prior, inventory, combat, objects, actors, world, scriptState);
+                durablePlayers, commands, prior, inventory, combat, objects, actors, world, scriptState, nativeInventory);
         if (!transaction)
             return CanonicalDurabilityResult::Rejected;
         std::vector<CanonicalDurableTick> transactions(mPrefix.transactions().begin(), mPrefix.transactions().end());
@@ -278,11 +282,11 @@ namespace TES3MP::ServerApp
             const auto& previous = transactions[transactions.size() - 2];
             auto checkpoint = CanonicalDurableTick::create(previous.stateVersion(), previous.canonicalRevision(),
                 previous.checkpointTick(), previous.players(), {}, CanonicalChecksum(0), previous.inventory(),
-                previous.combat(), previous.objects(), previous.actors(), previous.world(), previous.scriptState());
+                previous.combat(), previous.objects(), previous.actors(), previous.world(), previous.scriptState(), previous.nativeInventory());
             auto newest = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision,
                 candidate->checkpointTick(), durablePlayers, commands,
                 checkpoint ? checkpoint->transactionChecksum() : CanonicalChecksum(0), inventory, combat, objects,
-                actors, world, scriptState);
+                actors, world, scriptState, nativeInventory);
             if (!checkpoint || !newest)
                 return CanonicalDurabilityResult::Rejected;
             transactions.clear();

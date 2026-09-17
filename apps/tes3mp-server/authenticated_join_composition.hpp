@@ -1,6 +1,7 @@
 #ifndef TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
 #define TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
 
+#include "native_inventory_service.hpp"
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
 #include "tes3mp/combat_world.hpp"
@@ -78,13 +79,14 @@ namespace TES3MP::ServerApp
             CanonicalCombatWorld* combat = nullptr, const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
             const ItemPrototypeCatalog* itemCatalog = nullptr,
             const CharacterContentCatalog* characterContent = nullptr,
-            const CanonicalWorldState* world = nullptr) noexcept
+            const CanonicalWorldState* world = nullptr, NativeInventoryService* nativeInventory = nullptr) noexcept
             : mQueues(queues)
             , mConnection(connection)
             , mSessions(sessions)
             , mActors(actors)
             , mObjects(objects)
             , mInventory(inventory)
+            , mNativeInventory(nativeInventory)
             , mCombat(combat)
             , mPlayerCombatTemplate(playerCombatTemplate)
             , mItemCatalog(itemCatalog)
@@ -113,6 +115,7 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
+        NativeInventoryService* mNativeInventory;
         CanonicalCombatWorld* mCombat;
         const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
         const ItemPrototypeCatalog* mItemCatalog;

@@ -294,7 +294,7 @@ namespace
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& publication,
             CanonicalRevision, std::span<const DurableCommandOrder> commands, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
             const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState* world,
-            const CanonicalScriptState* scriptState) noexcept override
+            const CanonicalScriptState* scriptState, std::span<const std::byte>) noexcept override
         {
             sawExpected = (!expected || (scriptState && *scriptState == *expected))
                 && (!expectedWorld || (world && *world == *expectedWorld));

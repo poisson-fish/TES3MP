@@ -71,6 +71,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path worldContentFile;
         std::filesystem::path scriptPackageContentFile;
         std::int16_t combatDifficulty = 0;
+        std::filesystem::path nativeInventoryFile;
     };
 
     using ConfigParseResult = std::variant<ServerConfig, ConfigError>;

@@ -53,6 +53,11 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, mBinding.mContainerBase)
     {
+        if (!recovering)
+            mRuntime.encodeSession({{mRuntime.installedValues(0), mRuntime.installedValues(1)},
+                mWorld.getPtrRegistryRevision()}, mImage);
+        if (mImage.size() > MaximumNativeInventoryImageBytes)
+            throw std::invalid_argument("Native inventory image exceeds canonical record budget");
     }
 
     size_t InventoryService::actor(PlayerId player) const
@@ -99,18 +104,98 @@ namespace TES3MP::Native
         EquipmentBytes& bytes)
     {
         validate(players, command.mBinding);
-        return mRuntime.commit(command.mTransfer, durability, success, bytes);
+        const auto image = command.image();
+        if (image.size() > MaximumNativeInventoryImageBytes)
+            throw std::invalid_argument("Native inventory image exceeds canonical record budget");
+        EquipmentBytes retained(image.begin(), image.end());
+        const auto result = mRuntime.commit(command.mTransfer, durability, success, bytes);
+        if (result == PersistenceResult::Accepted) mImage.swap(retained);
+        return result;
     }
 
     FileReadResult InventoryService::recover(const std::filesystem::path& path, std::span<const ESM::RefId> references,
         EquipmentBytes& bytes, FileFaults& faults)
     {
         std::unique_ptr<const EquipmentSessionValues> values;
-        return mRuntime.restartSession(path, references, values, bytes, faults);
+        EquipmentBytes image;
+        const auto result = readBoundedFile(path, MaximumNativeInventoryImageBytes, image, faults);
+        if (result != FileReadResult::Read) return result;
+        EquipmentBytes retained = image;
+        mRuntime.restoreSession(std::move(image), references, values, bytes);
+        mImage.swap(retained);
+        return result;
+    }
+
+    class InventoryService::Transaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        CanonicalServerState players;
+        PreparedCommand prepared;
+        Transaction(InventoryService& owner, const CanonicalServerState& state, PreparedCommand command)
+            : service(owner), players(state), prepared(std::move(command)) {}
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        try
+        {
+            struct Sink final : EquipmentSessionCommitter
+            {
+                const NativeInventoryCommit& persist;
+                explicit Sink(const NativeInventoryCommit& value) : persist(value) {}
+                PersistenceResult commit(std::span<const char> image) noexcept override
+                {
+                    const auto result = persist(std::as_bytes(image));
+                    return result == CanonicalDurabilityResult::Committed ? PersistenceResult::Accepted
+                        : result == CanonicalDurabilityResult::Rejected ? PersistenceResult::Rejected
+                        : PersistenceResult::Uncertain;
+                }
+            } sink(persist);
+            std::unique_ptr<const InventoryTransferSuccess> success;
+            EquipmentBytes bytes;
+            const auto result = service.commit(players, prepared, sink, success, bytes);
+            return result == PersistenceResult::Accepted ? CanonicalDurabilityResult::Committed
+                : result == PersistenceResult::Rejected ? CanonicalDurabilityResult::Rejected
+                : CanonicalDurabilityResult::Failed;
+        }
+        catch (...) { return CanonicalDurabilityResult::Rejected; }
+    };
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareInventory(
+        const CanonicalServerState& players, const ServerCommandProposal& proposal)
+    {
+        const auto binding = ServerApp::InventoryCommandBinding::fromProposal(players, proposal);
+        if (!binding) return {};
+        try { return std::make_unique<Transaction>(*this, players, prepare(players, *binding)); }
+        catch (const std::invalid_argument&) { return {}; }
+    }
+
+    std::span<const std::byte> InventoryService::inventoryImage() const noexcept
+    {
+        return mRuntime.mFailedClosed || mRuntime.mRestartActor ? std::span<const std::byte>{}
+            : std::as_bytes(std::span(mImage));
+    }
+
+    void InventoryService::recover(std::span<const std::byte> image, std::span<const ESM::RefId> references)
+    {
+        if (image.empty() || image.size() > MaximumNativeInventoryImageBytes)
+            throw std::invalid_argument("Native inventory recovery image bound invalid");
+        EquipmentBytes accepted(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
+        std::unique_ptr<const EquipmentSessionValues> values;
+        EquipmentBytes output;
+        mRuntime.restoreSession(std::move(accepted), references, values, output);
+        mImage.swap(output);
+    }
+
+    std::optional<ServerApp::InventoryInterestDelivery> InventoryService::projectInventory(
+        const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
+        const PreparedNativeInventory* candidate) const
+    {
+        const auto* transaction = dynamic_cast<const Transaction*>(candidate);
+        if (candidate && (!transaction || &transaction->service != this)) return std::nullopt;
+        return project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr);
     }
 
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::project(const CanonicalServerState& players,
-        SessionId target, ServerTick tick, CanonicalRevision revision) const
+        SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedCommand* candidate) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -118,11 +203,14 @@ namespace TES3MP::Native
         const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
         if (!player) return std::nullopt;
         const auto index = actor(player->playerId());
-        const auto installed = mRuntime.installedValues(index);
+        const auto values = [&](size_t owner) {
+            return candidate ? mRuntime.preparedValues(candidate->mTransfer, owner) : mRuntime.installedValues(owner);
+        };
+        const auto installed = values(index);
         const auto items = stacks(installed, mBinding.mShirt);
         std::vector<EquipmentBinding> equipment;
         if (installed.mShirt.isSet()) equipment.push_back({ EquipmentSlot::Shirt, wireId(installed.mShirt) });
-        const auto version = mWorld.getPtrRegistryRevision();
+        const auto version = candidate ? candidate->candidate().mRevision : mWorld.getPtrRegistryRevision();
         const InventoryBaselineHeader header{ target, session->sessionGeneration(), tick, revision, 0, 1 };
         ServerApp::InventoryInterestDelivery result{ .targetSession = target };
         auto inventory = ReliablePlayerInventoryBaseline::create(header, player->playerId(),
@@ -133,7 +221,7 @@ namespace TES3MP::Native
         {
             auto shared = ReliableContainerInventoryBaseline::create(header, mBinding.mContainer, mBinding.mCell,
                 mBinding.mPosition, ContainerRevision::fromValue(version).value(), 0,
-                stacks(mRuntime.installedValues(2), mBinding.mShirt));
+                stacks(values(2), mBinding.mShirt));
             if (!std::holds_alternative<ReliableContainerInventoryBaseline>(shared)) return std::nullopt;
             result.containers.push_back(std::get<ReliableContainerInventoryBaseline>(std::move(shared)));
         }
@@ -146,7 +234,7 @@ namespace TES3MP::Native
                 other && other->transform().cell() == player->transform().cell())
             {
                 PublicEquipmentMember member{ .player = other->playerId() };
-                if (mRuntime.installedValues(i).mShirt.isSet())
+                if (values(i).mShirt.isSet())
                     member.slots[static_cast<size_t>(EquipmentSlot::Shirt)] = mBinding.mShirt;
                 visible.push_back(member);
             }

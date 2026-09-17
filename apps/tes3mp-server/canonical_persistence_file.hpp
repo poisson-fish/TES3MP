@@ -45,7 +45,8 @@ namespace TES3MP::ServerApp
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr, const CanonicalActorWorld* actors = nullptr,
             const CanonicalWorldState* world = nullptr,
-            const CanonicalScriptState* scriptState = nullptr) noexcept override;
+            const CanonicalScriptState* scriptState = nullptr,
+            std::span<const std::byte> nativeInventory = {}) noexcept override;
 
     private:
         CanonicalPersistenceFile(std::filesystem::path path, CanonicalDurablePrefix prefix) noexcept

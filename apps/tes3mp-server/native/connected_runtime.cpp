@@ -177,6 +177,18 @@ namespace TES3MP::Native
         return mState->mImage;
     }
 
+    PlainEquipmentValues EquipmentRuntime::preparedValues(const PreparedTransfer& prepared, size_t owner) const
+    {
+        (void)prepared.candidate();
+        const auto& state = *prepared.mState;
+        if (state.mOwner != this || state.mLifetime.lock() != mLifetime
+            || state.mSuccess->mCommand.mExpectedRevision != mWorld.getPtrRegistryRevision())
+            throw std::invalid_argument("Native projection candidate is stale or foreign");
+        for (size_t i = 0; i < 2; ++i)
+            if (state.mOwners[i] == owner) return state.mStaged[i]->mSaved;
+        return installedValues(owner);
+    }
+
     EquipmentRuntime::PreparedTransfer EquipmentRuntime::prepare(InventoryTransferCaller caller, InventoryTransferCommand command)
     {
         using namespace Allocations;
@@ -305,6 +317,16 @@ namespace TES3MP::Native
         std::span<const ESM::RefId> referenceIds, std::unique_ptr<const EquipmentSessionValues>& output,
         EquipmentBytes& bytes, FileFaults& faults)
     {
+        EquipmentBytes accepted;
+        const auto result = readBoundedFile(path, MaxEquipmentSessionBytes, accepted, faults);
+        if (result != FileReadResult::Read) return result;
+        restoreSession(std::move(accepted), referenceIds, output, bytes);
+        return result;
+    }
+
+    void EquipmentRuntime::restoreSession(EquipmentBytes accepted, std::span<const ESM::RefId> referenceIds,
+        std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes)
+    {
         using namespace Allocations;
         InPhase phase(Phase::Validation);
         if (!mConnected || !mRestartActor || *mRestartActor != 2 || mFailedClosed)
@@ -318,9 +340,6 @@ namespace TES3MP::Native
         if (fresh.mRegistry.size() != (mContainer ? 3 : 2))
             throw std::invalid_argument("Session recovery requires exactly its registered owners");
         phase.set(Phase::Preparation);
-        EquipmentBytes accepted;
-        const auto result = readBoundedFile(path, MaxEquipmentSessionBytes, accepted, faults);
-        if (result != FileReadResult::Read) return result;
         EquipmentSessionValues values;
         const auto containerEnvelope = mContainer ? expectedEnvelope(ownerPtr(2).getCellRef().getRefNum()) : EquipmentEnvelope{};
         const EquipmentBindings containerBinding{ containerEnvelope, mStore, referenceIds, mScriptLocals };
@@ -377,6 +396,5 @@ namespace TES3MP::Native
         };
         install();
         phase.set(Phase::Retirement);
-        return result;
     }
 }

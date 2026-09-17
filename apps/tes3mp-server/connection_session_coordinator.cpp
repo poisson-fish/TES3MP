@@ -40,7 +40,7 @@ namespace TES3MP::ServerApp
         const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
         CanonicalCombatWorld* combat, const CanonicalPlayerCombatTemplate* playerCombatTemplate,
         const ItemPrototypeCatalog* itemCatalog, const CharacterContentCatalog* characterContent,
-        const CanonicalWorldState* world) noexcept
+        const CanonicalWorldState* world, NativeInventoryService* nativeInventory) noexcept
         : mClock(clock)
         , mObservability(observability)
         , mTimeouts(timeouts)
@@ -51,6 +51,7 @@ namespace TES3MP::ServerApp
         , mActors(actors)
         , mObjects(objects)
         , mInventory(inventory)
+        , mNativeInventory(nativeInventory)
         , mCombat(combat)
         , mPlayerCombatTemplate(playerCombatTemplate)
         , mItemCatalog(itemCatalog)
@@ -478,7 +479,7 @@ namespace TES3MP::ServerApp
 
         if (frame->messageKind() == MessageKind::ClientInventoryTransactionCommand)
         {
-            if (frame->messageClass() != MessageClass::ReliableOperation || !mInventory
+            if (frame->messageClass() != MessageClass::ReliableOperation || (!mInventory && !mNativeInventory)
                 || state->state() != ServerSessionState::Established || !state->sessionId())
                 return ConnectionSessionResult::ProtocolRejected;
             auto decodedTransaction = decodeClientInventoryTransactionCommand(frame->payload());
@@ -634,7 +635,7 @@ namespace TES3MP::ServerApp
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
         TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory, mCombat,
-            mPlayerCombatTemplate, mItemCatalog, mCharacterContent, mWorld);
+            mPlayerCombatTemplate, mItemCatalog, mCharacterContent, mWorld, mNativeInventory);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
             state->takePlayerCredential(), state->username());

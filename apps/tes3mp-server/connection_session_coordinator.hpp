@@ -1,6 +1,7 @@
 #ifndef TES3MP_SERVER_CONNECTION_SESSION_COORDINATOR_HPP
 #define TES3MP_SERVER_CONNECTION_SESSION_COORDINATOR_HPP
 
+#include "native_inventory_service.hpp"
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
@@ -45,7 +46,7 @@ namespace TES3MP::ServerApp
             CanonicalCombatWorld* combat = nullptr, const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
             const ItemPrototypeCatalog* itemCatalog = nullptr,
             const CharacterContentCatalog* characterContent = nullptr,
-            const CanonicalWorldState* world = nullptr) noexcept;
+            const CanonicalWorldState* world = nullptr, NativeInventoryService* nativeInventory = nullptr) noexcept;
 
         ConnectionSessionResult accept(TransportConnectionId connection, AdmissionScopeId scope) noexcept;
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
@@ -59,6 +60,7 @@ namespace TES3MP::ServerApp
         ConnectionSessionResult pollAuthentication(TransportConnectionId connection,
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         ConnectionSessionResult checkTimeout(TransportConnectionId connection) noexcept;
+        const NativeInventoryService* nativeInventoryService() const noexcept { return mNativeInventory; }
         std::size_t size() const noexcept { return mConnections.size(); }
         std::vector<TransportConnectionId> connections() const;
         std::optional<TransportConnectionId> connectionForSession(SessionId session) const noexcept;
@@ -85,6 +87,7 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
+        NativeInventoryService* mNativeInventory;
         CanonicalCombatWorld* mCombat;
         const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
         const ItemPrototypeCatalog* mItemCatalog;

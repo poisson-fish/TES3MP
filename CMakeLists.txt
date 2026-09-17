@@ -685,7 +685,7 @@ add_subdirectory (components)
 # Apps and tools
 if (BUILD_OPENMW OR BUILD_OPENMW_TESTS)
     add_subdirectory( apps/openmw )
-    # Explicitly requested M1 probe; never part of the independent server graph.
+    # Engine-dependent runtime leaves; independent networking remains separate.
     add_subdirectory(apps/tes3mp-server/native EXCLUDE_FROM_ALL)
 endif()
 

@@ -25,7 +25,6 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/loadout-dependencies-$<CONFIG>
     CONTENT "Probe direct: tes3mp_native_loadout\nLoadout direct: $<TARGET_PROPERTY:tes3mp_native_loadout,LINK_LIBRARIES>\nEquipment runtime direct: $<TARGET_PROPERTY:tes3mp_native_equipment_runtime,LINK_LIBRARIES>\nOpenMW direct: $<TARGET_PROPERTY:openmw-lib,LINK_LIBRARIES>\nComponents direct: $<TARGET_PROPERTY:components,LINK_LIBRARIES>\nInitialized: ConfigurationManager, Utf8Encoder, ReadersCache, EsmLoader, ESMStore\nInventory mode additionally initializes: engine classes, WorldModel (one-entry cache), ManualRef, base ContainerStore, CompilerContext/extensions, ScriptManager (declarations only), LocalScripts\nEquipment mode additionally initializes: EquipmentRuntime, two actor InventoryStores, owned effects, plain-shirt transfer/drop/take and coherent session persistence/restart with an optional shared base ContainerStore; NPC stats and declaration locals when requested\nNot constructed: World, Environment, renderer, UI, audio, Lua runtime\nNot exercised: script instructions, live-world compiler queries, global script startup\n")
 
 # Concrete application adapter; engine/network types meet only in this leaf.
-# Not linked into server startup until joint command durability is installed.
 add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_service PUBLIC tes3mp_server_app PRIVATE tes3mp_native_equipment_runtime openmw-lib)
@@ -34,12 +33,22 @@ tes3mp_verify_target_dependencies(tes3mp_native_inventory_service
 tes3mp_verify_target_includes(tes3mp_native_inventory_service
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
+add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp)
+target_compile_features(tes3mp_native_inventory_host PUBLIC cxx_std_20)
+target_link_libraries(tes3mp_native_inventory_host PUBLIC tes3mp_native_inventory_service
+    PRIVATE tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_inventory_host
+    ALLOWED tes3mp_native_inventory_service tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_inventory_host
+    FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
+
 add_executable(tes3mp_native_loadout_probe main.cpp)
 target_link_libraries(tes3mp_native_loadout_probe PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_native_loadout)
 
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
+    ../server_app_tests.cpp
     inventory_service_tests.cpp inventory_service_tests.hpp
     equipment_tests.cpp equipment_tests.hpp equipment_command.hpp
     transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
@@ -49,7 +58,9 @@ add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
     transfer_rehearsal_command.cpp
     inventory_view.cpp inventory_view.hpp
     test_allocations.cpp test_allocations.hpp)
-target_link_libraries(tes3mp_native_loadout_tests PRIVATE tes3mp_native_loadout tes3mp_native_inventory_service tes3mp_client_session)
-tes3mp_verify_target_dependencies(tes3mp_native_loadout_tests ALLOWED tes3mp_native_loadout tes3mp_native_inventory_service tes3mp_client_session)
+target_link_libraries(tes3mp_native_loadout_tests PRIVATE tes3mp_native_loadout tes3mp_native_inventory_host tes3mp_native_inventory_service tes3mp_client_session)
+target_compile_definitions(tes3mp_native_loadout_tests PRIVATE TES3MP_NATIVE_INVENTORY_SCENARIO
+    TES3MP_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+tes3mp_verify_target_dependencies(tes3mp_native_loadout_tests ALLOWED tes3mp_native_loadout tes3mp_native_inventory_host tes3mp_native_inventory_service tes3mp_client_session)
 set_target_properties(tes3mp_native_equipment_runtime tes3mp_native_loadout tes3mp_native_loadout_probe tes3mp_native_loadout_tests
     PROPERTIES FOLDER "TES3MP/NativeProbe")

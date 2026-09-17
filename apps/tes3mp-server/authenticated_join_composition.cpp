@@ -85,10 +85,11 @@ namespace TES3MP::ServerApp
             }
             if (inventoryCapable)
             {
-                if (!mPendingInventory)
+                if ((!mPendingInventory && !mNativeInventory) || (mInventory && mNativeInventory))
                     return false;
-                auto inventoryBaseline
-                    = projectInventoryInterestBaseline(after, *mPendingInventory, join.session, tick, revision);
+                auto inventoryBaseline = mNativeInventory
+                    ? mNativeInventory->projectInventory(after, join.session, tick, revision)
+                    : projectInventoryInterestBaseline(after, *mPendingInventory, join.session, tick, revision);
                 if (!inventoryBaseline)
                     return false;
                 inventoryBaselines.emplace_back(mConnection, std::move(*inventoryBaseline));

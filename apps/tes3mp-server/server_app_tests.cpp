@@ -1,4 +1,6 @@
 #include "actor_content.hpp"
+#include "canonical_persistence_file.hpp"
+#include "native_inventory_service.hpp"
 #include "actor_interest_projection.hpp"
 #include "authenticated_join_composition.hpp"
 #include "character_content.hpp"
@@ -161,7 +163,7 @@ namespace
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&, CanonicalRevision,
             std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
             const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState*,
-            const CanonicalScriptState*) noexcept override
+            const CanonicalScriptState*, std::span<const std::byte>) noexcept override
         {
             ++commits;
             if (!runtime)
@@ -512,6 +514,198 @@ namespace
             .value();
     }
 }
+#ifdef TES3MP_NATIVE_INVENTORY_SCENARIO
+namespace TES3MP::ServerApp::Testing
+{
+    // Synthetic transport and registered profiles; production authentication,
+    // credential matching, scheduling, mutation, join and owned delivery.
+    void nativeInventoryApplication(NativeInventoryService& native, CanonicalPersistenceFile& persistence)
+    {
+        auto config = parsedConfig();
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        auto cryptoOwner = makeProductionCredentialCrypto();
+        assert(cryptoOwner);
+        auto& crypto = *cryptoOwner;
+        auto limiter = AuthenticationRateLimiter::create(
+            AuthenticationRateLimitPolicy::create(16, 32, 100, 100).value(), clock.now());
+        auto password = JoinPasswordAuthenticationProvider::create(crypto, AuthenticationMaterial::create({}).value());
+        auto tokens = ResumeTokenStore::create(crypto, 30'000);
+        assert(limiter && password && tokens);
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2).value();
+        const auto catalog = ServerScriptStateCatalog::create({}).value();
+        auto scripts = CanonicalScriptState::initial(catalog).value();
+        const auto restored = persistence.restoredState();
+        const auto baseTick = persistence.restoredCheckpointTick().value_or(ServerTick::initial());
+        struct Collision final : ServerCollisionQuery
+        {
+            std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest& request) noexcept override
+            { return ServerCollisionResult{request.currentRoot.position(), LinearVelocity3(0, 0, 0)}; }
+        } collision;
+        CanonicalCommandReducer reducer(restored.value_or(std::get<CanonicalServerState>(createCanonicalServerState({}, {}))),
+            persistence.restoredStateVersion().value_or(CanonicalStateVersion::initial()),
+            persistence.restoredCanonicalRevision().value_or(CanonicalRevision::initial()), baseTick,
+            observability, {}, testContentManifest(), collision);
+        assert(reducer.configureDurability(persistence, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &native));
+        struct IdentityStorage final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } identityStorage;
+        CharacterDerivedState derived;
+        derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter,
+            CharacterCreationPhase::Complete, "Native participant",
+            CharacterAppearance{id<RaceRecordId>(1), id<HeadRecordId>(1), id<HairRecordId>(1), CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)}, id<BirthsignRecordId>(1), derived, {}, id<CharacterProfileRevision>(2)).value();
+        std::array<std::array<std::byte, 32>, 2> credentials;
+        std::vector<PersistedPlayerIdentity> records;
+        const auto zero = Turn32::fromValue(0);
+        const Transform spawn(CellId::interior(id<CellSpaceId>(7)), Position3(0, 0, 0), Orientation3(zero, zero, zero));
+        for (uint64_t i : {1, 2})
+        {
+            credentials[i - 1].fill(std::byte(i));
+            CredentialDigest digest;
+            assert(crypto.sha256(credentials[i - 1], digest));
+            const auto* saved = reducer.state().findPlayer(id<PlayerId>(i));
+            records.push_back({{id<PlayerId>(i), id<EntityId>(i), id<AppearanceId>(1), testContentManifestId()}, digest,
+                saved ? *saved : CanonicalPlayerEntityState(id<PlayerId>(i), id<EntityId>(i), id<AppearanceId>(1),
+                    spawn, LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()), profile});
+        }
+        auto identities = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, identityStorage, records));
+        SharedServerAuthenticationService authentication(*limiter, *password, *tokens, clock, identities.get());
+        auto joins = AuthenticatedJoinCoordinator::create(spawn, testContentManifest(), id<SessionId>(1), *identities, reducer).value();
+        auto lifecycle = ServerLifecycleCoordinator::create(30'000'000'000, reducer).value();
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+        const std::array capabilities{inventoryReplicationCapability()};
+        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+        ConnectionSessionCoordinator sessions(clock, observability,
+            SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
+            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &native);
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(baseTick.value() + 1), IngressOrdinal::initial());
+        FakeRuntime runtime;
+        ServerApplicationWiring wiring{sessions, joins, crypto, queues, clock, intake, reducer, lifecycle};
+        wiring.nativeInventory = &native;
+        ServerApplication application(runtime, config, wiring);
+        assert(application.start());
+        auto send = [&](uint64_t connection, MessageClass category, MessageKind kind, std::vector<std::byte> body) {
+            runtime.incomingByConnection[id<TransportConnectionId>(connection)].push_back({TransportChannel::ReliableOrdered,
+                std::get<std::vector<std::byte>>(encodeProtocolFrame(category, kind, body))});
+        };
+        std::optional<ResumeToken> resumeToken;
+        auto join = [&](uint64_t connection, ServerTick tick) {
+            runtime.events.push_back({TransportEventKind::ConnectionAccepted, TransportFailure::None, {}, {},
+                id<TransportConnectionId>(connection), {}, TransportSecurity::EncryptedUnauthenticated, scope(std::byte(connection))});
+            send(connection, MessageClass::SessionControl, MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(offer)));
+            assert(application.pump(tick));
+            send(connection, MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(AuthenticationMaterial::create({}).value(),
+                    PlayerCredential::create(credentials[connection - 1]))));
+            assert(application.pump(tick));
+            assert(sessions.session(id<TransportConnectionId>(connection))
+                && sessions.session(id<TransportConnectionId>(connection))->sessionId() == id<SessionId>(connection));
+            if (connection == 1)
+                for (const auto& bytes : runtime.sent)
+                {
+                    const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(bytes));
+                    if (frame.messageKind() == MessageKind::AuthenticationAccepted)
+                    {
+                        auto accepted = std::get<AuthenticationAcceptedMessage>(decodeAuthenticationAccepted(frame.payload()));
+                        resumeToken.emplace(accepted.takeToken());
+                    }
+                }
+        };
+        auto command = [&](uint64_t session, bool put, uint32_t count, uint64_t sequence) {
+            const auto view = native.projectInventory(reducer.state(), id<SessionId>(session), reducer.checkpointTick(), reducer.canonicalRevision()).value();
+            const auto& inventory = view.playerInventory.front();
+            const auto& container = view.containers.front();
+            const auto& stack = (put ? inventory.stacks : container.stacks).front();
+            return ClientInventoryTransactionCommand{id<SessionId>(session), SessionGeneration::initial(),
+                id<CommandSequence>(sequence), id<CommandId>(sequence), reducer.canonicalRevision(),
+                put ? InventoryTransactionKind::PutIntoContainer : InventoryTransactionKind::TakeFromContainer,
+                container.container, stack.prototypeId, stack.stackId, count, {}, inventory.revision, container.revision, {}, Position3(0, 0, 0)};
+        };
+        auto observe = [&](uint64_t connection, uint32_t count) {
+            for (uint64_t now = 0; now < 16; ++now)
+                (void)queues.pump(runtime, id<TransportConnectionId>(connection), clock.nanoseconds / 1'000'000);
+            bool found = false;
+            for (size_t i = 0; i < runtime.sent.size(); ++i)
+            {
+                if (runtime.sentConnections[i] != id<TransportConnectionId>(connection)) continue;
+                const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[i]));
+                if (frame.messageKind() != MessageKind::ReliableContainerInventoryBaseline) continue;
+                const auto baseline = std::get<ReliableContainerInventoryBaseline>(decodeReliableContainerInventoryBaseline(frame.payload()));
+                if ((count == 0 && baseline.stacks.empty())
+                    || (baseline.stacks.size() == 1 && baseline.stacks[0].count == count)) found = true;
+            }
+            assert(found);
+        };
+        if (restored)
+        {
+            join(1, baseTick); join(2, baseTick);
+            observe(1, 1); observe(2, 1);
+            runtime.sent.clear(); runtime.sentConnections.clear(); runtime.sentChannels.clear();
+            const auto take = command(2, false, 1, 1);
+            send(2, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand,
+                encodeClientInventoryTransactionCommand(take));
+            const auto tick = id<ServerTick>(baseTick.value() + 1);
+            clock.nanoseconds = tick.value() * 33'333'334;
+            assert(application.pump(tick));
+            observe(1, 0); observe(2, 0);
+            assert(application.stop());
+            std::cout << "ServerApplication recovery: registered credentials rejoin stable actors; continued take delivered to both\n";
+            return;
+        }
+        join(1, ServerTick::initial());
+        const auto put = command(1, true, 2, 1);
+        send(1, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand, encodeClientInventoryTransactionCommand(put));
+        clock.nanoseconds = 34'000'000;
+        assert(application.pump(id<ServerTick>(1)));
+        observe(1, 2);
+        join(2, id<ServerTick>(1)); // Late join observes the already committed container.
+        observe(2, 2);
+        runtime.sent.clear(); runtime.sentConnections.clear(); runtime.sentChannels.clear();
+        const auto take = command(2, false, 1, 1);
+        send(2, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand, encodeClientInventoryTransactionCommand(take));
+        clock.nanoseconds = 67'000'000;
+        assert(application.pump(id<ServerTick>(2)));
+        observe(1, 1); observe(2, 1);
+        send(1, MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand, encodeClientInventoryTransactionCommand(put));
+        clock.nanoseconds = 101'000'000;
+        assert(application.pump(id<ServerTick>(3)));
+        assert(native.projectInventory(reducer.state(), id<SessionId>(1), id<ServerTick>(3), reducer.canonicalRevision())->containers[0].stacks[0].count == 1);
+        runtime.sent.clear(); runtime.sentConnections.clear(); runtime.sentChannels.clear();
+        const SessionResyncRequest resync(id<SessionId>(2), SessionGeneration::initial(), ResyncReason::LocalFeedGap, reducer.stateVersion());
+        send(2, MessageClass::SessionControl, MessageKind::SessionResyncRequest, encodeSessionResyncRequest(resync));
+        assert(application.pump(id<ServerTick>(3)));
+        observe(2, 1);
+        assert(resumeToken);
+        runtime.events.push_back({TransportEventKind::ConnectionClosed, TransportFailure::None, {}, {},
+            id<TransportConnectionId>(1)});
+        assert(application.pump(id<ServerTick>(3)));
+        runtime.events.push_back({TransportEventKind::ConnectionAccepted, TransportFailure::None, {}, {},
+            id<TransportConnectionId>(3), {}, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{3})});
+        send(3, MessageClass::SessionControl, MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(offer)));
+        assert(application.pump(id<ServerTick>(3)));
+        send(3, MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+            encodeAuthenticationRequest(AuthenticationRequest::resume(std::move(*resumeToken))));
+        assert(application.pump(id<ServerTick>(3)));
+        assert(sessions.session(id<TransportConnectionId>(3))
+            && sessions.session(id<TransportConnectionId>(3))->sessionId() == id<SessionId>(1)
+            && sessions.session(id<TransportConnectionId>(3))->generation() == *SessionGeneration::initial().next());
+        observe(3, 1);
+        // Cross the existing file journal compaction boundary through the real
+        // application pump; unchanged ticks must retain the coherent image.
+        for (uint64_t tick = 4; tick <= 36; ++tick)
+        {
+            clock.nanoseconds = tick * 33'333'334;
+            assert(application.pump(id<ServerTick>(tick)));
+        }
+        assert(application.stop());
+        std::cout << "ServerApplication with synthetic transport: production authentication, put/take, late join, two owned deliveries, retry, resync, resume and journal compaction\n";
+    }
+}
+#else
 int main()
 {
     using namespace TES3MP::ServerApp;
@@ -2635,3 +2829,4 @@ int main()
         assert(sawWeaponWear);
     }
 }
+#endif

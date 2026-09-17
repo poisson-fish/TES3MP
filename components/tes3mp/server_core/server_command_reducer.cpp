@@ -281,11 +281,13 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability,
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalInteractiveObjectWorld* objects,
-        CanonicalActorWorld* actors, CanonicalWorldState* world, CanonicalScriptState* scriptState) noexcept
+        CanonicalActorWorld* actors, CanonicalWorldState* world, CanonicalScriptState* scriptState,
+        NativeInventoryAuthority* nativeInventory) noexcept
     {
-        if (mDurability != nullptr)
+        if (mDurability != nullptr || (nativeInventory && (inventory || nativeInventory->inventoryImage().empty())))
             return false;
         mDurability = &durability;
+        mNativeInventory = nativeInventory;
         mDurableInventory = inventory;
         mDurableCombat = combat;
         mDurableObjects = objects;
@@ -345,7 +347,8 @@ namespace TES3MP
     bool CanonicalCommandReducer::commit(
         PreparedJoin&& prepared, const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat)
     {
-        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+        if ((mNativeInventory && (inventory || mNativeInventory->inventoryImage().empty()))
+            || prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
             return false;
         prepared.mPublication->mStateVersion = prepared.mStateVersion;
@@ -356,7 +359,8 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors, mDurableWorld, mDurableScriptState)
+                   mDurableActors, mDurableWorld, mDurableScriptState,
+                   mNativeInventory ? mNativeInventory->inventoryImage() : std::span<const std::byte>{})
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -544,7 +548,8 @@ namespace TES3MP
     bool CanonicalCommandReducer::commit(
         PreparedLifecycle&& prepared, const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat)
     {
-        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+        if ((mNativeInventory && (inventory || mNativeInventory->inventoryImage().empty()))
+            || prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
             return false;
         prepared.mPublication->mStateVersion = prepared.mStateVersion;
@@ -555,7 +560,8 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands,
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors, mDurableWorld, mDurableScriptState)
+                   mDurableActors, mDurableWorld, mDurableScriptState,
+                   mNativeInventory ? mNativeInventory->inventoryImage() : std::span<const std::byte>{})
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -683,6 +689,11 @@ namespace TES3MP
         prepared.mClientAuthoritativePlayers = mClientAuthoritativePlayers;
         auto& result = prepared.mResult;
         const auto commands = batch.commands();
+        if (mNativeInventory && (inventory || mNativeInventory->inventoryImage().empty()))
+        {
+            result.mError = CommandBatchReductionError::CandidateStateInvalid;
+            return prepared;
+        }
         const ServerTick tick = batch.scheduledTick().value();
         auto publication = std::shared_ptr<CanonicalStatePublication>(
             new CanonicalStatePublication(prepared.mStateVersion, tick, prepared.mState, {}));
@@ -1071,7 +1082,21 @@ namespace TES3MP
                                     {
                                         requiresSpatialAdvance = false;
                                         const auto& proposalCommand = inventoryProposal->command();
-                                        if (!prepared.mInventory || itemCatalog == nullptr)
+                                        if (mNativeInventory)
+                                        {
+                                            // One native mutation per tick. Further intents are finalized
+                                            // in ingress order against the same pre-tick revision and rejected.
+                                            if (prepared.mNativeInventory)
+                                                disposition = CommandDisposition::InventoryTransactionRejected;
+                                            else
+                                            {
+                                                prepared.mNativeInventory
+                                                    = mNativeInventory->prepareInventory(*prepared.mState, proposal);
+                                                disposition = prepared.mNativeInventory ? CommandDisposition::Applied
+                                                    : CommandDisposition::InventoryTransactionRejected;
+                                            }
+                                        }
+                                        else if (!prepared.mInventory || itemCatalog == nullptr)
                                             disposition = CommandDisposition::InventoryTransactionRejected;
                                         else
                                         {
@@ -1972,7 +1997,8 @@ namespace TES3MP
         const CanonicalWorldState* baseWorld, std::optional<CanonicalWorldState> world) noexcept
     try
     {
-        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision)
+        if ((mNativeInventory && (inventory || mNativeInventory->inventoryImage().empty()))
+            || prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision)
             return false;
         if (inventory)
         {
@@ -2053,7 +2079,8 @@ namespace TES3MP
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalActorWorld* actors,
         CanonicalWorldState* world, CanonicalScriptState* scriptState)
     {
-        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+        if ((mNativeInventory && (inventory || mNativeInventory->inventoryImage().empty()))
+            || prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
             || (prepared.mBaseInteractiveObjects && (!objects || *objects != *prepared.mBaseInteractiveObjects))
             || (prepared.mInventory && inventory == nullptr)
@@ -2074,13 +2101,18 @@ namespace TES3MP
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability)
         {
-            prepared.mResult.mDurabilityResult = mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision,
-                prepared.mDurableCommands, prepared.mInventory ? &*prepared.mInventory : mDurableInventory,
-                prepared.mCombat ? &*prepared.mCombat : mDurableCombat,
-                prepared.mInteractiveObjects ? &*prepared.mInteractiveObjects : mDurableObjects,
-                prepared.mActors ? &*prepared.mActors : mDurableActors,
-                prepared.mWorld ? &*prepared.mWorld : mDurableWorld,
-                prepared.mScriptState ? &*prepared.mScriptState : mDurableScriptState);
+            const NativeInventoryCommit persist = [&](std::span<const std::byte> image) noexcept {
+                return mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision,
+                    prepared.mDurableCommands, prepared.mInventory ? &*prepared.mInventory : mDurableInventory,
+                    prepared.mCombat ? &*prepared.mCombat : mDurableCombat,
+                    prepared.mInteractiveObjects ? &*prepared.mInteractiveObjects : mDurableObjects,
+                    prepared.mActors ? &*prepared.mActors : mDurableActors,
+                    prepared.mWorld ? &*prepared.mWorld : mDurableWorld,
+                    prepared.mScriptState ? &*prepared.mScriptState : mDurableScriptState, image);
+            };
+            prepared.mResult.mDurabilityResult = prepared.mNativeInventory
+                ? prepared.mNativeInventory->commit(persist)
+                : persist(mNativeInventory ? mNativeInventory->inventoryImage() : std::span<const std::byte>{});
             if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
                 return false;
         }

@@ -450,7 +450,7 @@ namespace
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
             const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld* actors,
-            const CanonicalWorldState* world, const CanonicalScriptState*) noexcept override
+            const CanonicalWorldState* world, const CanonicalScriptState*, std::span<const std::byte>) noexcept override
         {
             called = true;
             sawCandidate = candidate && candidate->state().players().size() == 1;

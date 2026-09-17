@@ -91,6 +91,18 @@ the existing independent schema is not sacred. Restore validates the complete
 world/player relationship before installation. This pivot does not authorize
 silently changing to checkpoint-only acknowledgment or losing saved progress.
 
+**Native inventory cutover is exclusive.** The existing coherent engine session
+image and command dispositions occupy one canonical file transaction; engine
+installation precedes owned publication. Format 6 deliberately rejects older
+development saves and requires explicit migration or a new campaign. Never mirror
+native results into CanonicalInventoryWorld. The initial production composition
+admits one native mutation per tick, durably rejecting later native intents in
+ingress order. A bounded operator descriptor binds established player roles and
+selected content to the authenticated manifest; recovery also checks actual
+content fingerprints. Seeded actor counts and an empty base container are explicit
+bootstrap limits, not placed-world import. Remove this bootstrap when engine-derived
+references and desktop mappings cover its callers.
+
 **Determinism is explicit, not assumed.** Server-owned order/ticks and saved RNG
 state remain important. Measure scheduling and stream consumption when reusing
 engine code; do not require copying old PRNG/formula implementations for their own

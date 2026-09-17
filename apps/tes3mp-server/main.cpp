@@ -1,3 +1,6 @@
+#ifdef TES3MP_NATIVE_INVENTORY_ENABLED
+#include "native/inventory_host.hpp"
+#endif
 #include "actor_content.hpp"
 #include "canonical_persistence_file.hpp"
 #include "character_content.hpp"
@@ -89,6 +92,13 @@ int main(int argc, char** argv)
     resolve(config.actorContentFile);
     resolve(config.interactiveObjectContentFile);
     resolve(config.inventoryContentFile);
+    resolve(config.nativeInventoryFile);
+    if (!config.nativeInventoryFile.empty() && (!config.inventoryContentFile.empty()
+        || !config.combatContentFile.empty() || !config.characterContentFile.empty()))
+    {
+        std::cerr << "native inventory requires exclusive inventory ownership and established characters; legacy inventory/combat/creation cannot be composed\n";
+        return 2;
+    }
     resolve(config.combatContentFile);
     resolve(config.playerIdentityFile);
     resolve(config.characterContentFile);
@@ -383,6 +393,8 @@ int main(int argc, char** argv)
     {
         if (*persistenceError == TES3MP::ServerApp::CanonicalPersistenceFileError::IdentityMismatch)
             std::cerr << "canonical persistence content, configuration, script, or seed identity mismatch\n";
+        else if (*persistenceError == TES3MP::ServerApp::CanonicalPersistenceFileError::UnsupportedVersion)
+            std::cerr << "unsupported canonical save version; preserve the existing save and migrate or select a new campaign explicitly\n";
         else
             std::cerr << "canonical persistence file could not be verified\n";
         return 2;
@@ -557,6 +569,42 @@ int main(int argc, char** argv)
         std::cerr << "canonical persistence identity composition failed\n";
         return 3;
     }
+    TES3MP::ServerApp::NativeInventoryService* nativeInventory = nullptr;
+    const auto nativeImage = persistenceFile->prefix().latest()
+        ? persistenceFile->prefix().latest()->nativeInventory() : std::span<const std::byte>{};
+    if (!nativeImage.empty() && config.nativeInventoryFile.empty())
+    {
+        std::cerr << "persisted native inventory requires its configured engine service\n";
+        return 2;
+    }
+#ifdef TES3MP_NATIVE_INVENTORY_ENABLED
+    std::unique_ptr<TES3MP::Native::InventoryHost> nativeHost;
+    if (!config.nativeInventoryFile.empty())
+    {
+        if (persistenceFile->restoredInventory())
+        {
+            std::cerr << "legacy inventory save cannot be silently replaced by native startup\n";
+            return 2;
+        }
+        try
+        {
+            nativeHost = std::make_unique<TES3MP::Native::InventoryHost>(config.nativeInventoryFile,
+                config.contentManifest, *playerIdentities, *crypto, nativeImage);
+            nativeInventory = &nativeHost->service();
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "native inventory startup failed: " << error.what() << '\n';
+            return 2;
+        }
+    }
+#else
+    if (!config.nativeInventoryFile.empty())
+    {
+        std::cerr << "this server build has no OpenMW inventory runtime\n";
+        return 2;
+    }
+#endif
     auto queues = TES3MP::OutboundQueueSet::create(
         TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
@@ -571,7 +619,7 @@ int main(int argc, char** argv)
         optionalCapabilities.push_back(TES3MP::characterCreationCapability());
     if (interactiveObjectWorld)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
-    if (inventoryWorld)
+    if (inventoryWorld || nativeInventory)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
     if (combatContent && meleeContactHistory)
     {
@@ -624,7 +672,7 @@ int main(int argc, char** argv)
     if (!reducer.configureDurability(*persistenceFile, inventoryWorld ? &*inventoryWorld : nullptr,
             combatContent ? &combatContent->world : nullptr,
             interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld, &worldContent.world,
-            &*scriptState))
+            &*scriptState, nativeInventory))
     {
         std::cerr << "canonical persistence composition failed\n";
         return 3;
@@ -657,7 +705,7 @@ int main(int argc, char** argv)
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
         interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
         combatContent ? &combatContent->world : nullptr, combatContent ? &combatContent->playerTemplate : nullptr,
-        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr, &worldContent.world);
+        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr, &worldContent.world, nativeInventory);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
@@ -668,7 +716,7 @@ int main(int argc, char** argv)
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
             combatContent ? &combatContent->securitySettings : nullptr, &scripts, &worldContent.globals,
-            &worldContent.world, &*scriptStateCatalog, &*scriptState });
+            &worldContent.world, &*scriptStateCatalog, &*scriptState, nativeInventory });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

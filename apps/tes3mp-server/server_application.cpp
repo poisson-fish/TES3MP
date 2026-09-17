@@ -403,8 +403,10 @@ namespace TES3MP::ServerApp
             ? projectInteractiveObjectInterestBaseline(
                   *candidate, *mWiring->interactiveObjects, *session->sessionId(), tick, *revision)
             : std::optional<InteractiveObjectInterestBaselineDelivery>{};
-        auto inventoryBaseline = candidate && mWiring->inventory && supportsInventory(connection)
-            ? projectInventoryInterestBaseline(*candidate, *mWiring->inventory, *session->sessionId(), tick, *revision)
+        auto inventoryBaseline = candidate && (mWiring->inventory || mWiring->nativeInventory) && supportsInventory(connection)
+            ? (mWiring->nativeInventory
+                ? mWiring->nativeInventory->projectInventory(*candidate, *session->sessionId(), tick, *revision)
+                : projectInventoryInterestBaseline(*candidate, *mWiring->inventory, *session->sessionId(), tick, *revision))
             : std::optional<InventoryInterestDelivery>{};
         auto combatSnapshot = candidate && revision && mWiring->combat && mWiring->actors && supportsCombat(connection)
             ? projectCombatSnapshot(
@@ -584,7 +586,7 @@ namespace TES3MP::ServerApp
             return false;
         if (wantObjects && !mWiring->interactiveObjects)
             return false;
-        if (wantInventory && !mWiring->inventory)
+        if (wantInventory && !mWiring->inventory && !mWiring->nativeInventory)
             return false;
         if (wantCombat && (!mWiring->combat || !mWiring->actors))
             return false;
@@ -605,8 +607,10 @@ namespace TES3MP::ServerApp
         if (wantObjects && !objectDelivery)
             return false;
         auto inventoryDelivery = wantInventory
-            ? projectInventoryInterestBaseline(resolved.publication()->state(), *mWiring->inventory,
-                  request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+            ? (mWiring->nativeInventory
+                ? mWiring->nativeInventory->projectInventory(resolved.publication()->state(), request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+                : projectInventoryInterestBaseline(resolved.publication()->state(), *mWiring->inventory,
+                  request->sessionId(), tick, mWiring->reducer.canonicalRevision()))
             : std::nullopt;
         if (wantInventory && !inventoryDelivery)
             return false;
@@ -947,7 +951,10 @@ namespace TES3MP::ServerApp
             mFailure = "interactive object composition incomplete";
             return false;
         }
-        if ((mWiring->itemCatalog || mWiring->inventory) && (!mWiring->itemCatalog || !mWiring->inventory))
+        if ((mWiring->nativeInventory && (mWiring->inventory || mWiring->itemCatalog))
+            || mWiring->nativeInventory != mWiring->sessions.nativeInventoryService()
+            || mWiring->nativeInventory != mWiring->reducer.nativeInventoryAuthority()
+            || ((mWiring->itemCatalog || mWiring->inventory) && (!mWiring->itemCatalog || !mWiring->inventory)))
         {
             mFailure = "inventory composition incomplete";
             return false;
@@ -1243,7 +1250,7 @@ namespace TES3MP::ServerApp
                         }
                         objectBaselines.emplace_back(*connection, std::move(*baseline));
                     }
-                if (mWiring->inventory)
+                if (mWiring->inventory || mWiring->nativeInventory)
                     for (const auto& target : prepared.candidateState().activeSessions())
                     {
                         const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
@@ -1255,10 +1262,12 @@ namespace TES3MP::ServerApp
                         if (!connection || !newPlayer || (!changedCell && !refreshInventoryBaselines)
                             || !supportsInventory(*connection))
                             continue;
-                        const auto& projectedInventory
-                            = prepared.candidateInventory() ? *prepared.candidateInventory() : *mWiring->inventory;
-                        auto baseline = projectInventoryInterestBaseline(prepared.candidateState(), projectedInventory,
-                            target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
+                        auto baseline = mWiring->nativeInventory
+                            ? mWiring->nativeInventory->projectInventory(prepared.candidateState(), target.sessionId(),
+                                batch.scheduledTick().value(), prepared.candidateRevision(), prepared.candidateNativeInventory())
+                            : projectInventoryInterestBaseline(prepared.candidateState(),
+                                prepared.candidateInventory() ? *prepared.candidateInventory() : *mWiring->inventory,
+                                target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
                         if (!baseline)
                         {
                             mFailure = "inventory baseline projection failed";

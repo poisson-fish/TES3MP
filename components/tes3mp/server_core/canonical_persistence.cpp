@@ -1487,7 +1487,7 @@ namespace
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
         const std::optional<CanonicalDurableActorState>& actors, const std::optional<CanonicalWorldState>& world,
-        const std::optional<CanonicalScriptState>& scriptState)
+        const std::optional<CanonicalScriptState>& scriptState, std::span<const std::byte> nativeInventory)
     {
         writeBool(writer, inventory.has_value());
         if (inventory)
@@ -1507,13 +1507,15 @@ namespace
         writeBool(writer, scriptState.has_value());
         if (scriptState)
             writeScriptState(writer, *scriptState);
+        writer.fixed(static_cast<std::uint32_t>(nativeInventory.size()));
+        writer.bytes(nativeInventory);
     }
 
     bool readDomains(Reader& reader, std::optional<CanonicalDurableInventoryState>& inventory,
         std::optional<CanonicalDurableCombatState>& combat,
         std::optional<CanonicalDurableInteractiveObjectState>& objects,
         std::optional<CanonicalDurableActorState>& actors, std::optional<CanonicalWorldState>& world,
-        std::optional<CanonicalScriptState>& scriptState) noexcept
+        std::optional<CanonicalScriptState>& scriptState, std::vector<std::byte>& nativeInventory)
     {
         bool present = false;
         if (!readBool(reader, present))
@@ -1570,6 +1572,11 @@ namespace
                 return false;
             scriptState = std::move(*value);
         }
+        const auto size = reader.fixed<std::uint32_t>();
+        if (!size || *size > MaximumNativeInventoryImageBytes || (inventory && *size)) return false;
+        const auto image = reader.bytes(*size);
+        if (!image) return false;
+        nativeInventory.assign(image->begin(), image->end());
         return true;
     }
 
@@ -1609,7 +1616,7 @@ namespace
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
         const std::optional<CanonicalDurableActorState>& actors, const std::optional<CanonicalWorldState>& world,
-        const std::optional<CanonicalScriptState>& scriptState)
+        const std::optional<CanonicalScriptState>& scriptState, std::span<const std::byte> nativeInventory)
     {
         Writer writer;
         writer.fixed(stateVersion.value());
@@ -1620,7 +1627,7 @@ namespace
         writer.fixed(static_cast<std::uint32_t>(players.size()));
         for (const auto& player : players)
             writePlayer(writer, player);
-        writeDomains(writer, inventory, combat, objects, actors, world, scriptState);
+        writeDomains(writer, inventory, combat, objects, actors, world, scriptState, nativeInventory);
         writer.fixed(static_cast<std::uint32_t>(commands.size()));
         for (const auto order : commands)
             writeOrder(writer, order);
@@ -1813,16 +1820,18 @@ namespace TES3MP
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
         const std::optional<CanonicalDurableActorState>& actors, const std::optional<CanonicalWorldState>& world,
-        const std::optional<CanonicalScriptState>& scriptState) noexcept
+        const std::optional<CanonicalScriptState>& scriptState, std::span<const std::byte> nativeInventory) noexcept
     try
     {
+        if (nativeInventory.size() > MaximumNativeInventoryImageBytes || (inventory && !nativeInventory.empty()))
+            return CanonicalChecksum(0);
         Writer writer;
         writer.fixed(stateVersion.value());
         writer.fixed(checkpointTick.value());
         writer.fixed(static_cast<std::uint32_t>(players.size()));
         for (const auto& player : players)
             writePlayer(writer, player);
-        writeDomains(writer, inventory, combat, objects, actors, world, scriptState);
+        writeDomains(writer, inventory, combat, objects, actors, world, scriptState, nativeInventory);
         const auto& bytes = writer.view();
         return crc64Ecma182({ reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size() });
     }
@@ -1837,12 +1846,14 @@ namespace TES3MP
         CanonicalChecksum previousTransactionChecksum, const CanonicalInventoryWorld* inventory,
         const CanonicalCombatWorld* combat, const CanonicalInteractiveObjectWorld* objects,
         const CanonicalActorWorld* actors, const CanonicalWorldState* world,
-        const CanonicalScriptState* scriptState) noexcept
+        const CanonicalScriptState* scriptState, std::span<const std::byte> nativeInventory) noexcept
     {
+        if (nativeInventory.size() > MaximumNativeInventoryImageBytes || (inventory && !nativeInventory.empty()))
+            return std::nullopt;
         return create(stateVersion, canonicalRevision, checkpointTick, players, commands, previousTransactionChecksum,
             snapshotInventory(inventory, players), snapshotCombat(combat, players), snapshotObjects(objects),
             snapshotActors(actors), snapshotWorld(world, players),
-            scriptState ? std::optional<CanonicalScriptState>(*scriptState) : std::nullopt);
+            scriptState ? std::optional<CanonicalScriptState>(*scriptState) : std::nullopt, nativeInventory);
     }
 
     std::optional<CanonicalDurableTick> CanonicalDurableTick::create(CanonicalStateVersion stateVersion,
@@ -1851,10 +1862,11 @@ namespace TES3MP
         CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
         std::optional<CanonicalDurableCombatState> combat,
         std::optional<CanonicalDurableInteractiveObjectState> objects, std::optional<CanonicalDurableActorState> actors,
-        std::optional<CanonicalWorldState> world, std::optional<CanonicalScriptState> scriptState) noexcept
+        std::optional<CanonicalWorldState> world, std::optional<CanonicalScriptState> scriptState, std::span<const std::byte> nativeInventory) noexcept
     try
     {
-        if (players.size() > MaximumCanonicalPlayerEntities || commands.size() > MaximumPersistenceCommandsPerTick
+        if (nativeInventory.size() > MaximumNativeInventoryImageBytes || (inventory && !nativeInventory.empty())
+            || players.size() > MaximumCanonicalPlayerEntities || commands.size() > MaximumPersistenceCommandsPerTick
             || !validOrders(commands)
             || std::ranges::any_of(players,
                 [checkpointTick](const auto& player) { return player.lastSpatialChangeTick() > checkpointTick; })
@@ -1963,10 +1975,10 @@ namespace TES3MP
             }))
             return std::nullopt;
         const auto canonical = canonicalDurableStateChecksumV1(
-            stateVersion, checkpointTick, players, inventory, combat, objects, actors, world, scriptState);
+            stateVersion, checkpointTick, players, inventory, combat, objects, actors, world, scriptState, nativeInventory);
         auto material
             = transactionMaterial(stateVersion, canonicalRevision, checkpointTick, previousTransactionChecksum,
-                canonical, players, commands, inventory, combat, objects, actors, world, scriptState);
+                canonical, players, commands, inventory, combat, objects, actors, world, scriptState, nativeInventory);
         if (material.size() + sizeof(std::uint64_t) > MaximumPersistenceRecordBytes)
             return std::nullopt;
         const auto transaction
@@ -1974,7 +1986,8 @@ namespace TES3MP
         return CanonicalDurableTick(stateVersion, canonicalRevision, checkpointTick, previousTransactionChecksum,
             canonical, transaction, std::vector<CanonicalPlayerEntityState>(players.begin(), players.end()),
             std::vector<DurableCommandOrder>(commands.begin(), commands.end()), std::move(inventory), std::move(combat),
-            std::move(objects), std::move(actors), std::move(world), std::move(scriptState));
+            std::move(objects), std::move(actors), std::move(world), std::move(scriptState),
+            std::vector<std::byte>(nativeInventory.begin(), nativeInventory.end()));
     }
     catch (...)
     {
@@ -1991,16 +2004,20 @@ namespace TES3MP
         std::optional<ServerTick> priorTick;
         CanonicalStateVersion priorVersion = CanonicalStateVersion::initial();
         CanonicalRevision priorRevision = CanonicalRevision::initial();
+        bool nativeStarted = false;
+        bool legacyInventory = false;
         for (const auto& transaction : transactions)
         {
             if (transaction.previousTransactionChecksum() != prior
                 || (priorTick && transaction.checkpointTick() < *priorTick) || transaction.stateVersion() < priorVersion
-                || transaction.canonicalRevision() < priorRevision)
+                || transaction.canonicalRevision() < priorRevision
+                || (nativeStarted && transaction.nativeInventory().empty())
+                || (legacyInventory && !transaction.nativeInventory().empty()))
                 return std::nullopt;
             auto rebuilt = CanonicalDurableTick::create(transaction.stateVersion(), transaction.canonicalRevision(),
                 transaction.checkpointTick(), transaction.players(), transaction.commands(), prior,
                 transaction.inventory(), transaction.combat(), transaction.objects(), transaction.actors(),
-                transaction.world(), transaction.scriptState());
+                transaction.world(), transaction.scriptState(), transaction.nativeInventory());
             if (!rebuilt || rebuilt->transactionChecksum() != transaction.transactionChecksum()
                 || rebuilt->canonicalChecksum() != transaction.canonicalChecksum())
                 return std::nullopt;
@@ -2008,6 +2025,8 @@ namespace TES3MP
             priorTick = transaction.checkpointTick();
             priorVersion = transaction.stateVersion();
             priorRevision = transaction.canonicalRevision();
+            nativeStarted = !transaction.nativeInventory().empty();
+            legacyInventory = legacyInventory || transaction.inventory().has_value();
         }
         return CanonicalDurablePrefix(std::move(identity), std::move(transactions));
     }
@@ -2055,7 +2074,7 @@ namespace TES3MP
                 transaction.checkpointTick(), transaction.previousTransactionChecksum(),
                 transaction.canonicalChecksum(), transaction.players(), transaction.commands(), transaction.inventory(),
                 transaction.combat(), transaction.objects(), transaction.actors(), transaction.world(),
-                transaction.scriptState());
+                transaction.scriptState(), transaction.nativeInventory());
             writer.fixed(static_cast<std::uint32_t>(material.size() + sizeof(std::uint64_t)));
             writer.fixed(transaction.transactionChecksum().value());
             writer.bytes(material);
@@ -2201,7 +2220,8 @@ namespace TES3MP
             std::optional<CanonicalDurableActorState> actors;
             std::optional<CanonicalWorldState> world;
             std::optional<CanonicalScriptState> scriptState;
-            if (!readDomains(recordReader, inventory, combat, objects, actors, world, scriptState))
+            std::vector<std::byte> nativeInventory;
+            if (!readDomains(recordReader, inventory, combat, objects, actors, world, scriptState, nativeInventory))
                 return CanonicalPersistenceDecodeError::Malformed;
             const auto commandCount = recordReader.fixed<std::uint32_t>();
             if (!commandCount || *commandCount > MaximumPersistenceCommandsPerTick)
@@ -2226,7 +2246,7 @@ namespace TES3MP
                 return CanonicalPersistenceDecodeError::Malformed;
             auto transaction = CanonicalDurableTick::create(*stateVersion, *revision, *tick, players, commands,
                 CanonicalChecksum(*previousRaw), std::move(inventory), std::move(combat), std::move(objects),
-                std::move(actors), std::move(world), std::move(scriptState));
+                std::move(actors), std::move(world), std::move(scriptState), nativeInventory);
             if (!transaction || transaction->canonicalChecksum().value() != *canonicalRaw
                 || transaction->transactionChecksum().value() != *storedChecksum)
                 return CanonicalPersistenceDecodeError::Corrupted;
@@ -2256,11 +2276,12 @@ namespace TES3MP
         if (!checkpointPlayers
             || canonicalDurableStateChecksumV1(checkpoint->stateVersion(), checkpoint->checkpointTick(),
                    checkpoint->players(), checkpoint->inventory(), checkpoint->combat(), checkpoint->objects(),
-                   checkpoint->actors(), checkpoint->world(), checkpoint->scriptState())
+                   checkpoint->actors(), checkpoint->world(), checkpoint->scriptState(), checkpoint->nativeInventory())
                 != checkpoint->canonicalChecksum())
             return false;
         CanonicalReplayState state{ std::move(*checkpointPlayers), checkpoint->inventory(), checkpoint->combat(),
-            checkpoint->objects(), checkpoint->actors(), checkpoint->world(), checkpoint->scriptState() };
+            checkpoint->objects(), checkpoint->actors(), checkpoint->world(), checkpoint->scriptState(),
+            {checkpoint->nativeInventory().begin(), checkpoint->nativeInventory().end()} };
         for (const auto& transaction : prefix.journal())
         {
             auto replayed = step(state, transaction.commands(), transaction.checkpointTick());
@@ -2268,7 +2289,7 @@ namespace TES3MP
             if (!next || !next->players.activeSessions().empty()
                 || canonicalDurableStateChecksumV1(transaction.stateVersion(), transaction.checkpointTick(),
                        next->players.players(), next->inventory, next->combat, next->objects, next->actors, next->world,
-                       next->scriptState)
+                       next->scriptState, next->nativeInventory)
                     != transaction.canonicalChecksum())
                 return false;
             state = std::move(*next);

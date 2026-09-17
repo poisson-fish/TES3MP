@@ -344,6 +344,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/observability.hpp
     include/tes3mp/player_identity.hpp
     include/tes3mp/server_command_intake.hpp
+    include/tes3mp/native_inventory.hpp
     include/tes3mp/server_command_reducer.hpp
     include/tes3mp/server_authentication.hpp
     include/tes3mp/server_session.hpp

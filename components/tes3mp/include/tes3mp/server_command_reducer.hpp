@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
 #include "canonical_persistence.hpp"
+#include "native_inventory.hpp"
 #include "canonical_publication.hpp"
 #include "canonical_sinks.hpp"
 #include "combat_world.hpp"
@@ -132,6 +133,7 @@ namespace TES3MP
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
             CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
+            const PreparedNativeInventory* candidateNativeInventory() const noexcept { return mNativeInventory.get(); }
             const CommandBatchReductionResult& result() const noexcept { return mResult; }
             const std::optional<CanonicalInteractiveObjectWorld>& candidateInteractiveObjects() const noexcept
             {
@@ -177,6 +179,7 @@ namespace TES3MP
             std::vector<AuthoritativeMagicEffectEvent> mMagicEffectEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
+            std::unique_ptr<PreparedNativeInventory> mNativeInventory;
         };
 
         class PreparedJoin
@@ -255,10 +258,11 @@ namespace TES3MP
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
+        const NativeInventoryAuthority* nativeInventoryAuthority() const noexcept { return mNativeInventory; }
         bool configureDurability(CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory = nullptr,
             CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
             CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr,
-            CanonicalScriptState* scriptState = nullptr) noexcept;
+            CanonicalScriptState* scriptState = nullptr, NativeInventoryAuthority* nativeInventory = nullptr) noexcept;
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
@@ -342,6 +346,7 @@ namespace TES3MP
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
         CanonicalDurabilityPort* mDurability = nullptr;
+        NativeInventoryAuthority* mNativeInventory = nullptr;
         CanonicalInventoryWorld* mDurableInventory = nullptr;
         CanonicalCombatWorld* mDurableCombat = nullptr;
         CanonicalInteractiveObjectWorld* mDurableObjects = nullptr;

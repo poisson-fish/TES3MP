@@ -28,6 +28,7 @@ add_library(tes3mp_server_app STATIC
     interactive_object_interest_projection.cpp
     inventory_interest_projection.hpp
     inventory_interest_projection.cpp
+    native_inventory_service.hpp
     inventory_command_binding.hpp
     inventory_command_binding.cpp
     inventory_content.hpp
@@ -118,8 +119,15 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     target_link_libraries(tes3mp_server PRIVATE tes3mp_server_app tes3mp_transport_gns)
     set_target_properties(tes3mp_server PROPERTIES FOLDER "TES3MP")
     tes3mp_enable_runtime_safety(tes3mp_server)
-    tes3mp_verify_target_dependencies(tes3mp_server
-        ALLOWED tes3mp_server_app tes3mp_transport_gns)
+    if(BUILD_OPENMW OR BUILD_OPENMW_TESTS)
+        target_link_libraries(tes3mp_server PRIVATE tes3mp_native_inventory_host)
+        target_compile_definitions(tes3mp_server PRIVATE TES3MP_NATIVE_INVENTORY_ENABLED)
+        tes3mp_verify_target_dependencies(tes3mp_server
+            ALLOWED tes3mp_server_app tes3mp_transport_gns tes3mp_native_inventory_host)
+    else()
+        tes3mp_verify_target_dependencies(tes3mp_server
+            ALLOWED tes3mp_server_app tes3mp_transport_gns)
+    endif()
 endif()
 
 tes3mp_verify_target_dependencies(tes3mp_server_app

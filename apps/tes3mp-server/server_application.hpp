@@ -3,6 +3,7 @@
 
 #include "connection_session_coordinator.hpp"
 #include "server_config.hpp"
+#include "native_inventory_service.hpp"
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/combat_world.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
@@ -52,6 +53,7 @@ namespace TES3MP::ServerApp
         CanonicalWorldState* world = nullptr;
         const ServerScriptStateCatalog* scriptStateCatalog = nullptr;
         CanonicalScriptState* scriptState = nullptr;
+        NativeInventoryService* nativeInventory = nullptr;
     };
 
     class ServerApplication

@@ -223,9 +223,13 @@ namespace TES3MP::Native
             EquipmentBytes& bytes, FileFaults& faults);
         FileReadResult restartSession(const std::filesystem::path& path, std::span<const ESM::RefId> referenceIds,
             std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes, FileFaults& faults);
+        void restoreSession(EquipmentBytes image, std::span<const ESM::RefId> referenceIds,
+            std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes);
         FileReadResult restart(size_t actor, const std::filesystem::path& path,
             std::span<const ESM::RefId> referenceIds, std::unique_ptr<const PlainEquipmentValues>& output,
             EquipmentBytes& bytes, FileFaults& faults);
+    private:
+        PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
     };
 }
 #endif

@@ -38,6 +38,10 @@ namespace TES3MP::Native
     public:
         explicit Loadout(LoadoutOptions options);
         const MWWorld::ESMStore& store() const { return mStore; }
+        // Retained engine services for the app-owned multiplayer runtime.
+        MWWorld::ESMStore& store() { return mStore; }
+        ESM::ReadersCache& readers() { return mReaders; }
+        std::string contentFingerprint() const;
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;
         // Prepare completely before touching output. Stream/device write failure

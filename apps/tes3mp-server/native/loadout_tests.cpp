@@ -6221,6 +6221,16 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "inventory-application")
+        {
+            TES3MP::Native::Testing::checkInventoryApplication(root);
+            return;
+        }
+        if (filter == "inventory-canonical")
+        {
+            TES3MP::Native::Testing::checkCanonicalInventory(root);
+            return;
+        }
         if (filter == "inventory-service" || filter == "inventory-service-durability")
         {
             TES3MP::Native::Testing::checkInventoryService(root, filter == "inventory-service-durability");
@@ -6384,7 +6394,14 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 3, "Usage: tes3mp_native_loadout_tests FILTER SCRATCH_DIRECTORY");
+        if (argc == 4 && std::string_view(argv[1]) == "inventory-host")
+        {
+            TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])));
+            std::cout << "PASS inventory-host\n";
+            return 0;
+        }
+        require(argc == 3, "Usage: tes3mp_native_loadout_tests FILTER SCRATCH_DIRECTORY [OPENMW_CONFIG_FILE for inventory-host]");
         check(std::filesystem::absolute(std::filesystem::u8path(argv[2])), argv[1]);
         std::cout << "PASS " << argv[1] << '\n';
         return 0;

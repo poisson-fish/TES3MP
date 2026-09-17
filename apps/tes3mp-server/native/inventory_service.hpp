@@ -4,6 +4,7 @@
 #include "equipment_runtime.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
+#include "../native_inventory_service.hpp"
 
 namespace TES3MP::Native
 {
@@ -25,14 +26,14 @@ namespace TES3MP::Native
     // One long-lived engine service group per selected inventory domain. Loaded
     // content/readers outlive this object; registry/scripts precede the runtime
     // and die after it. There is no CanonicalInventoryWorld or shadow writer.
-    // Production composition is deliberately not enabled until the canonical
-    // acknowledgment and prepared image share one durability transaction.
-    class InventoryService
+    class InventoryService final : public ServerApp::NativeInventoryService
     {
         const InventoryServiceBinding mBinding;
         MWWorld::WorldModel mWorld;
         MWWorld::LocalScripts mScripts;
         EquipmentRuntime mRuntime;
+        EquipmentBytes mImage;
+        class Transaction;
         size_t actor(PlayerId player) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
 
@@ -58,10 +59,18 @@ namespace TES3MP::Native
             EquipmentBytes& bytes);
         FileReadResult recover(const std::filesystem::path& path, std::span<const ESM::RefId> references,
             EquipmentBytes& bytes, FileFaults& faults);
+        void recover(std::span<const std::byte> image, std::span<const ESM::RefId> references);
+        std::unique_ptr<PreparedNativeInventory> prepareInventory(
+            const CanonicalServerState& players, const ServerCommandProposal& command) override;
+        std::span<const std::byte> inventoryImage() const noexcept override;
+        std::optional<ServerApp::InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
+            SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedNativeInventory* candidate = nullptr) const override;
         // Direct projection to the existing owned wire values. No retained or
-        // writable mirror. Only installed state can produce a baseline.
+        // writable mirror. Candidate baselines stay staged until durable commit.
         std::optional<ServerApp::InventoryInterestDelivery> project(const CanonicalServerState& players,
-            SessionId target, ServerTick tick, CanonicalRevision revision) const;
+            SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedCommand* candidate = nullptr) const;
     };
 }
 #endif

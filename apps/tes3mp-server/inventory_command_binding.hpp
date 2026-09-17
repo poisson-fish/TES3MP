@@ -19,6 +19,10 @@ namespace TES3MP::ServerApp
         InventoryCommandBinding(PlayerId player, ServerCommandProposal proposal)
             : mPlayer(player), mProposal(std::move(proposal)) {}
     public:
+        // Reducer-only continuation of the authenticated proposal. Recheck the
+        // server-derived player, entity and generation before engine preparation.
+        static std::optional<InventoryCommandBinding> fromProposal(
+            const CanonicalServerState& state, const ServerCommandProposal& proposal);
         static std::optional<InventoryCommandBinding> resolve(const CanonicalServerState& state,
             SessionId connectionSession, SessionGeneration connectionGeneration,
             const ClientInventoryTransactionCommand& command);

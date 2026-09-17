@@ -2,6 +2,16 @@
 
 namespace TES3MP::ServerApp
 {
+    std::optional<InventoryCommandBinding> InventoryCommandBinding::fromProposal(
+        const CanonicalServerState& state, const ServerCommandProposal& proposal)
+    {
+        const auto* input = std::get_if<InventoryCommandProposal>(&proposal.payload());
+        const auto* session = state.findActiveSession(proposal.sessionId());
+        if (!input || !session || input->command().player != session->playerId()) return std::nullopt;
+        InventoryCommandBinding result(session->playerId(), proposal);
+        return result.current(state) ? std::optional{std::move(result)} : std::nullopt;
+    }
+
     std::optional<InventoryCommandBinding> InventoryCommandBinding::resolve(const CanonicalServerState& state,
         SessionId connectionSession, SessionGeneration connectionGeneration,
         const ClientInventoryTransactionCommand& command)

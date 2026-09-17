@@ -1,5 +1,8 @@
 #include "inventory_service_tests.hpp"
 #include "inventory_service.hpp"
+#include "inventory_host.hpp"
+#include "../canonical_persistence_file.hpp"
+#include <tes3mp/server_command_reducer.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/protocol_frame.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -7,7 +10,14 @@
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <iostream>
+#include <fstream>
+#include <iomanip>
 #include <stdexcept>
+
+namespace TES3MP::ServerApp::Testing
+{
+    void nativeInventoryApplication(NativeInventoryService&, CanonicalPersistenceFile&);
+}
 
 namespace TES3MP::Native::Testing
 {
@@ -52,7 +62,8 @@ namespace TES3MP::Native::Testing
         }
         struct Clock final : MonotonicClock
         {
-            MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(0); }
+            uint64_t value = 0;
+            MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(value); }
         };
         std::unique_ptr<ClientSessionStateMachine> client(Clock& clock, uint64_t session, SessionGeneration generation)
         {
@@ -142,6 +153,212 @@ namespace TES3MP::Native::Testing
             const auto decoded = std::get<ClientInventoryTransactionCommand>(decodeClientInventoryTransactionCommand(encodeClientInventoryTransactionCommand(input)));
             return ServerApp::InventoryCommandBinding::resolve(authority, input.sessionId, input.sessionGeneration, decoded).value();
         }
+    }
+
+    void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config)
+    {
+        require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
+        auto crypto = makeProductionCredentialCrypto();
+        require(bool(crypto), "Native host crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived;
+        derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter,
+            CharacterCreationPhase::Complete, "Native participant",
+            CharacterAppearance{id<RaceRecordId>(1), id<HeadRecordId>(1), id<HairRecordId>(1), CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)}, id<BirthsignRecordId>(1), derived, {}, id<CharacterProfileRevision>(2)).value();
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1, 2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            const auto zero = Turn32::fromValue(0);
+            CanonicalPlayerEntityState saved(id<PlayerId>(i), id<EntityId>(i), id<AppearanceId>(1),
+                Transform(CellId::interior(id<CellSpaceId>(7)), Position3(0, 0, 0), Orientation3(zero, zero, zero)),
+                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial());
+            records.push_back({{id<PlayerId>(i), id<EntityId>(i), id<AppearanceId>(1), testContentManifestId()}, digest, saved, profile});
+        }
+        auto registered = PlayerIdentityRegistry::create(*crypto, storage, records);
+        require(std::holds_alternative<std::unique_ptr<PlayerIdentityRegistry>>(registered), "Native host test identities invalid");
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(std::move(registered));
+        std::filesystem::create_directory(scratch / "openmw");
+        std::filesystem::copy_file(config, scratch / "openmw" / "openmw.cfg");
+        const auto descriptor = scratch / "native.txt";
+        {
+            std::ofstream out(descriptor);
+            out << "native-inventory-1\nmanifest ";
+            for (auto byte : testContentManifestId().bytes())
+                out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
+            out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"player\" 3 \"player\" 5\n"
+                   "shirt \"common_shirt_01\" 70\ncontainer \"barrel_01\" 90\ncell interior:7\nposition 0 0 0\n";
+        }
+        std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{1};
+        const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configuration).value(), {}, {}).value();
+        const auto path = scratch / "host.bin";
+        auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        std::vector<std::byte> committed;
+        {
+            InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+            ServerApp::Testing::nativeInventoryApplication(host.service(), *file);
+            committed.assign(host.service().inventoryImage().begin(), host.service().inventoryImage().end());
+        }
+        auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, opened->prefix().latest()->nativeInventory());
+        require(std::ranges::equal(committed, restored.service().inventoryImage()), "Real-loadout host recovery diverged");
+        ServerApp::Testing::nativeInventoryApplication(restored.service(), *opened);
+        std::cout << "real-loadout production host: player/player, common_shirt_01, barrel_01; synthetic transport, no desktop clients\n";
+    }
+
+    void checkInventoryApplication(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Native application scratch already exists");
+        Content content;
+        auto binding = content.binding();
+        binding.mPlayers = {id<PlayerId>(1), id<PlayerId>(2)};
+        InventoryService service(content.store, content.readers, binding);
+        std::array<std::byte, 32> configuration{};
+        configuration[0] = std::byte{1};
+        const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configuration).value(), {}, {}).value();
+        const auto path = scratch / "application.bin";
+        auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        ServerApp::Testing::nativeInventoryApplication(service, *file);
+        auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        InventoryService recovered(content.store, content.readers, binding, true);
+        const std::array references{content.actor, content.shirt};
+        recovered.recover(opened->prefix().latest()->nativeInventory(), references);
+        require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()),
+            "ServerApplication recovery did not restore both actors and container coherently");
+        ServerApp::Testing::nativeInventoryApplication(recovered, *opened);
+    }
+
+    void checkCanonicalInventory(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Canonical inventory scratch already exists");
+        Content content;
+        InventoryService service(content.store, content.readers, content.binding());
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(players(), observability);
+        const auto catalog = ServerScriptStateCatalog::create({}).value();
+        auto scripts = CanonicalScriptState::initial(catalog).value();
+        std::array<std::byte, 32> configuration{};
+        configuration[0] = std::byte{1};
+        const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+        const auto path = scratch / "canonical.bin";
+        auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        struct Port final : CanonicalDurabilityPort
+        {
+            ServerApp::CanonicalPersistenceFile& file;
+            InventoryService& service;
+            CanonicalCommandReducer& reducer;
+            bool reject = true;
+            size_t calls = 0;
+            Port(ServerApp::CanonicalPersistenceFile& f, InventoryService& s, CanonicalCommandReducer& r)
+                : file(f), service(s), reducer(r) {}
+            CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                CanonicalRevision revision, std::span<const DurableCommandOrder> commands,
+                const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat,
+                const CanonicalInteractiveObjectWorld* objects, const CanonicalActorWorld* actors,
+                const CanonicalWorldState* world, const CanonicalScriptState* scripts,
+                std::span<const std::byte> image) noexcept override
+            {
+                ++calls;
+                if (inventory || image.empty() || reducer.latestPublication() == candidate)
+                    return CanonicalDurabilityResult::Failed;
+                if (reject) return CanonicalDurabilityResult::Rejected;
+                return file.commit(candidate, revision, commands, inventory, combat, objects, actors, world, scripts, image);
+            }
+        } port(*file, service, reducer);
+        require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &service), "Native reducer composition failed");
+        Clock clock;
+        auto prepare = [&](const ServerCommandProposal& proposal, uint64_t tick, const ServerCommandProposal* second = nullptr) {
+            ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(tick), IngressOrdinal::initial());
+            require(intake.submit(proposal) == CommandSubmissionResult::Accepted, "Native intake rejected proposal");
+            if (second) require(intake.submit(*second) == CommandSubmissionResult::Accepted, "Native contender intake rejected");
+            clock.value += tick * 33'333'334;
+            auto pumped = intake.pump();
+            require(pumped && pumped.batches().size() == 1, "Native intake failed to pump");
+            return reducer.prepareTick(pumped.batches().front());
+        };
+        const auto input = bind(reducer.state(), wire(service, reducer.state(), 1, true, 2)).proposal();
+        const auto contender = bind(reducer.state(), wire(service, reducer.state(), 2, true, 1)).proposal();
+        const std::vector before(service.inventoryImage().begin(), service.inventoryImage().end());
+        const auto published = reducer.latestPublication();
+        auto prepared = prepare(input, 1, &contender);
+        auto stalePreparation = prepare(input, 1);
+        require(prepared.result().dispositions()[0].disposition() == CommandDisposition::Applied,
+            "Reducer did not prepare native inventory");
+        require(prepared.result().dispositions()[1].disposition() == CommandDisposition::InventoryTransactionRejected,
+            "Native same-tick contention was not rejected in ingress order");
+        auto candidate = service.projectInventory(prepared.candidateState(), id<SessionId>(1), id<ServerTick>(1),
+            prepared.candidateRevision(), prepared.candidateNativeInventory());
+        require(candidate && candidate->containers[0].stacks[0].count == 2, "Native candidate projection missing");
+        require(!reducer.commit(std::move(prepared)) && reducer.latestPublication() == published
+            && std::ranges::equal(before, service.inventoryImage()) && !file->prefix().latest(),
+            "Rejected joint durability installed or published");
+        port.reject = false;
+        require(reducer.commit(std::move(prepared)), "Native prepared durability retry failed");
+        require(!reducer.commit(std::move(prepared)), "Consumed canonical preparation committed twice");
+        const auto calls = port.calls;
+        require(!reducer.commit(std::move(stalePreparation)) && port.calls == calls,
+            "Stale canonical preparation reached durability");
+        const auto* latest = file->prefix().latest();
+        require(latest && !latest->inventory() && std::ranges::equal(latest->nativeInventory(), service.inventoryImage())
+            && latest->commands().size() == 2
+            && latest->commands()[0].disposition == static_cast<uint8_t>(CommandDisposition::Applied),
+            "Native image and command disposition were not persisted together");
+        require(file->commit(reducer.latestPublication(), reducer.canonicalRevision(), {}, nullptr, nullptr, nullptr,
+            nullptr, nullptr, &scripts) == CanonicalDurabilityResult::Rejected,
+            "Canonical durability silently dropped an installed native domain");
+        require(!CanonicalDurableTick::create(latest->stateVersion(), latest->canonicalRevision(), latest->checkpointTick(),
+            latest->players(), {}, CanonicalChecksum(0), std::optional{CanonicalDurableInventoryState{}}, std::nullopt,
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt, latest->nativeInventory()), "Dual inventory persistence accepted");
+        auto replay = prepare(input, 2);
+        require(replay.result().dispositions()[0].disposition() != CommandDisposition::Applied
+            && !replay.candidateNativeInventory() && reducer.commit(std::move(replay)), "Retry reapplied native mutation");
+        auto staleInput = wire(service, reducer.state(), 2, false, 1);
+        staleInput.commandSequence = *contender.commandSequence().next();
+        staleInput.commandId = id<CommandId>(contender.commandId().value() + 1);
+        staleInput.expectedInventoryRevision = InventoryRevision::initial();
+        auto stale = prepare(bind(reducer.state(), staleInput).proposal(), 3);
+        require(stale.result().dispositions()[0].disposition() == CommandDisposition::InventoryTransactionRejected
+            && reducer.commit(std::move(stale)), "Stale native input was not durably rejected");
+        auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(path, identity));
+        InventoryService recovered(content.store, content.readers, content.binding(), true);
+        const std::array references{content.actor, content.shirt};
+        recovered.recover(opened->prefix().latest()->nativeInventory(), references);
+        require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()), "Canonical recovery changed coherent image");
+        auto resumed = players(*SessionGeneration::initial().next());
+        struct Collision final : ServerCollisionQuery
+        {
+            std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest& request) noexcept override
+            { return ServerCollisionResult{request.currentRoot.position(), LinearVelocity3(0, 0, 0)}; }
+        } collision;
+        CanonicalCommandReducer continued(resumed, *opened->restoredStateVersion(), *opened->restoredCanonicalRevision(),
+            *opened->restoredCheckpointTick(), observability, {}, testContentManifest(), collision);
+        require(continued.configureDurability(*opened, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &recovered),
+            "Recovered reducer composition failed");
+        auto take = wire(recovered, resumed, 2, false, 1);
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(4), IngressOrdinal::initial());
+        require(intake.submit(bind(resumed, take).proposal()) == CommandSubmissionResult::Accepted, "Continuation intake failed");
+        clock.value += 4 * 33'333'334;
+        auto pumped = intake.pump();
+        auto next = continued.prepareTick(pumped.batches().front());
+        require(next.result().dispositions()[0].disposition() == CommandDisposition::Applied
+            && continued.commit(std::move(next)), "Recovered native continuation failed");
+        const auto view = recovered.project(continued.state(), id<SessionId>(2), id<ServerTick>(4), continued.canonicalRevision());
+        require(view && view->containers[0].stacks[0].count == 1, "Continuation lost shared container state");
+        std::cout << "synthetic canonical integration: owned preparation, retry/stale rejection, joint file recovery and continuation\n";
     }
 
     void checkInventoryService(const std::filesystem::path& scratch, bool durability)

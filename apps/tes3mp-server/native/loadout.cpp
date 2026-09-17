@@ -19,6 +19,8 @@
 #include <components/files/configurationmanager.hpp>
 #include <components/files/conversion.hpp>
 #include <components/files/openfile.hpp>
+#include <components/files/hash.hpp>
+#include <sstream>
 #include <components/misc/strings/lower.hpp>
 
 namespace TES3MP::Native
@@ -352,6 +354,22 @@ namespace TES3MP::Native
         mStore.validateRecords(mReaders);
         // World::ensureNeededRecords only supplies globals; movePlayerRecord
         // creates dynamic player state. Neither is part of these static stores.
+    }
+
+    std::string Loadout::contentFingerprint() const
+    {
+        // Same engine file fingerprints as the equipment probe, ordered by the
+        // actual resolved loadout. No ESM reinterpretation or second catalog.
+        std::ostringstream result;
+        result << mOptions.mEncoding << '\n';
+        for (size_t i = 0; i < mFiles.size(); ++i)
+        {
+            auto stream = Files::openBinaryInputFileStream(mFiles[i]);
+            const auto hash = Files::getHash(mOptions.mContent[i], *stream);
+            result << mOptions.mContent[i].size() << ':' << mOptions.mContent[i] << '\n'
+                << hash[0] << ':' << hash[1] << '\n';
+        }
+        return result.str();
     }
 
     void Loadout::enumerate(std::ostream& output) const
