@@ -12,6 +12,7 @@ int main(int argc, char** argv)
                      "  --content FILE --encoding win1252 --replace SETTING ...]\n"
                      "  [--sample | --inventory ID | --enchantment ID]\n"
                      "  [--equipment SHIRT --equipment-actors NPC_A NPC_B --equipment-save-dir NEW_DIR]\n"
+                     "  [--equipment-container CONT] (empty diagnostic container for plain-shirt drop/take)\n"
                      "Loads configured TES3 records through OpenMW; writes diagnostic TSV to stdout.\n"
                      "Record IDs use OpenMW's ASCII case folding; display names retain their spelling.\n"
                      "Uses the engine's local/global openmw.cfg and its config chain.\n"
@@ -25,9 +26,9 @@ int main(int argc, char** argv)
                      "  Limits: 256 bytes/ID, 32 effects, nonnegative effect fields/base cost/multiplier <= 1e6,\n"
                      "  and representable rounded cost/charge. This does not execute enchanted effects.\n"
                      "--equipment transfers two plain shirts, equips both actors in one owner, then recovers the pair.\n"
-                     "  Both actors continue with unequip and a return transfer through one coherent session file.\n"
-                     "  Supports plain shirts and the bounded constant Fortify Luck/script-locals operation.\n"
-                     "  Constant/scripted shirts exercise pair equipment/recovery; their transfer remains unsupported.\n"
+                     "  With --equipment-container CONT, A drops, B takes/equips, then all three owners recover.\n"
+                     "  Both actors continue; A takes the remaining shirt. One coherent session file.\n"
+                     "  Without a container, bounded constant/scripted shirts retain pair equipment/recovery.\n"
                      "No World, Environment, rendering, UI, or script instruction execution.\n";
         return 0;
     }

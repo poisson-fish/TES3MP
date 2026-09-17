@@ -162,11 +162,13 @@ namespace MWWorld
         // Content must still be the exact store used to construct the nodes.
         InventoryStore& installationCandidate(
             const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const;
+        ContainerStore& installationStorage(
+            const ESMStore& content, ESM::RefNum owner, ESM::RefNum counter) const;
 
     public:
         static RestoredPlainEquipment restore(
             const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
-            std::shared_ptr<const EquipmentScriptLocals> scripts = {});
+            std::shared_ptr<const EquipmentScriptLocals> scripts = {}, bool container = false);
         RestoredPlainEquipment(RestoredPlainEquipment&&) noexcept;
         RestoredPlainEquipment& operator=(RestoredPlainEquipment&&) noexcept;
         ~RestoredPlainEquipment();
@@ -192,7 +194,7 @@ namespace MWWorld
         explicit PreparedPlainEquipment(std::unique_ptr<State> state);
         // Only the runtime owner may stage installation. No public mutation
         // or persistence API: revalidate and require the exact receiving store.
-        InventoryStore& installationCandidate(const PlainEquipmentContext& context, const InventoryStore& target);
+        ContainerStore& installationCandidate(const PlainEquipmentContext& context, const ContainerStore& target);
         std::shared_ptr<EquipmentNpcStats>& installationNpcStats();
 
     public:
@@ -200,8 +202,9 @@ namespace MWWorld
         static PreparedPlainEquipment prepare(const ContainerStoreResolution& inventory, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRegistryRevision, bool equip,
             const PlainEquipmentContext& context);
-        // Plain, unequipped shirt transfer between these same protected stock
-        // inventories. No registration/script scope expansion. Both candidates
+        // Plain, unequipped shirt transfer between protected stock inventories
+        // or a base ContainerStore. Actor/player is the explicit initiator for
+        // a container; its owner comes from the resolution. Both candidates
         // share one generation counter and must be installed as a pair.
         static std::array<PreparedPlainEquipment, 2> prepareTransfer(
             const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,

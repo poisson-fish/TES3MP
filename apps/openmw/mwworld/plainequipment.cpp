@@ -511,7 +511,9 @@ namespace MWWorld
         ContainerStoreListener* mContainerListener;
         // Never copy an InventoryStore: it would retain live services, owner,
         // RefData aliases and iterators. Construct fresh storage and relocate slots.
-        InventoryStore mCandidate;
+        std::unique_ptr<ContainerStore> mStorage;
+        ContainerStore& candidate() { return *mStorage; }
+        const ContainerStore& candidate() const { return *mStorage; }
         PlainEquipmentResult mResult;
         std::shared_ptr<EquipmentNpcStats> mNpcStats;
         EquipmentNpcStatsValues mBeforeStats;
@@ -525,7 +527,7 @@ namespace MWWorld
         {
         }
 
-        static const InventoryStore& inventory(
+        static const ContainerStore& storage(
             const ContainerStoreResolution& resolution, const PlainEquipmentContext& context)
         {
             const auto lifetime = resolution.mLifetime.lock();
@@ -537,22 +539,29 @@ namespace MWWorld
             registered(resolution.mOwner, context.mWorldModel);
             registered(context.mActor, context.mWorldModel);
             registered(context.mPlayer, context.mWorldModel);
-            if (typeid(base) != typeid(InventoryStore) || !base.mResolved || !context.mActor.getClass().isNpc()
-                || !sameReference(context.mActor, context.mPlayer) || !sameReference(resolution.mOwner, context.mActor)
-                || !sameReference(base.getPtr(context.mWorldModel), context.mActor))
+            const auto* inventory = typeid(base) == typeid(InventoryStore) ? static_cast<const InventoryStore*>(&base) : nullptr;
+            const bool container = typeid(base) == typeid(ContainerStore);
+            if ((!inventory && !container) || !base.mResolved || !context.mActor.getClass().isNpc()
+                || !sameReference(context.mActor, context.mPlayer)
+                || !sameReference(base.getPtr(context.mWorldModel), resolution.mOwner)
+                || (inventory && !sameReference(resolution.mOwner, context.mActor))
+                || (container && (resolution.mOwner.getType() != ESM::Container::sRecordId
+                    || context.mNpcStats || !resolution.mOwner.getClass().getScript(resolution.mOwner).empty()
+                    || context.mStore.get<ESM::Container>().search(resolution.mOwner.getCellRef().getRefId())
+                        != resolution.mOwner.get<ESM::Container>()->mBase
+                    || resolution.mOwner.getRefData().getCustomData())))
                 throw std::invalid_argument("Equipment actor/player/resolved inventory mismatch");
             if (!context.mLocalScripts.usesStore(context.mStore))
                 throw std::invalid_argument("Equipment script content service mismatch");
-            const auto& inventory = static_cast<const InventoryStore&>(base);
             const auto& lists = base.mLists;
             if (!lists.mPotions.mList.empty() || !lists.mAppas.mList.empty() || !lists.mArmors.mList.empty()
                 || !lists.mBooks.mList.empty() || !lists.mIngreds.mList.empty() || !lists.mLights.mList.empty()
                 || !lists.mLockpicks.mList.empty() || !lists.mMiscItems.mList.empty() || !lists.mProbes.mList.empty()
                 || !lists.mRepairs.mList.empty() || !lists.mWeapons.mList.empty()
-                || lists.mClothes.mList.size() > MaxItems || !inventory.mUpdatesEnabled)
+                || lists.mClothes.mList.size() > MaxItems || (inventory && !inventory->mUpdatesEnabled))
                 throw std::invalid_argument(
                     "Equipment preparation requires bounded plain clothing storage and updates");
-            return inventory;
+            return base;
         }
 
         static ESM::RefNum position(const InventoryStore& store, const ContainerStoreIterator& selection)
@@ -568,7 +577,7 @@ namespace MWWorld
         }
 
         static void plain(
-            const LiveCellRef<ESM::Clothing>& node, const InventoryStore& store, const PlainEquipmentContext& context)
+            const LiveCellRef<ESM::Clothing>& node, const ContainerStore& store, const PlainEquipmentContext& context)
         {
             ConstPtr item(&node, nullptr);
             item.mContainerStore = &store;
@@ -595,17 +604,24 @@ namespace MWWorld
             MWMechanics::constantFortifyLuckMagnitude(context.mStore, node.mBase->mEnchant);
         }
 
-        void capture(const InventoryStore& source)
+        void capture(const ContainerStore& source)
         {
             mRegistry = mContext.mWorldModel.snapshotPtrRegistry();
             mScripts = mContext.mLocalScripts.snapshot();
-            mEquipmentListener = source.mInventoryListener;
             mContainerListener = source.mListener;
-            mShirt = position(source, source.mSlots[InventoryStore::Slot_Shirt]);
-            mSelected = position(source, source.mSelectedEnchantItem);
-            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
-                if (slot != InventoryStore::Slot_Shirt && source.mSlots[slot] != source.end())
-                    throw std::invalid_argument("Equipment preparation supports only the shirt slot");
+            const auto* inventory = dynamic_cast<const InventoryStore*>(&source);
+            if (inventory)
+            {
+                mStorage = std::make_unique<InventoryStore>();
+                mEquipmentListener = inventory->mInventoryListener;
+                mShirt = position(*inventory, inventory->mSlots[InventoryStore::Slot_Shirt]);
+                mSelected = position(*inventory, inventory->mSelectedEnchantItem);
+                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                    if (slot != InventoryStore::Slot_Shirt && inventory->mSlots[slot] != inventory->end())
+                        throw std::invalid_argument("Equipment preparation supports only the shirt slot");
+            }
+            else mStorage = std::make_unique<ContainerStore>();
+            auto& mCandidate = candidate();
             int64_t total = 0;
             for (const auto& ref : source.mLists.mClothes.mList)
             {
@@ -622,22 +638,22 @@ namespace MWWorld
                 {
                     if (node.mRef.getCount() != 1)
                         throw std::invalid_argument("Equipment shirt slot must contain one item");
-                    mCandidate.mSlots[InventoryStore::Slot_Shirt] = it;
+                    static_cast<InventoryStore&>(mCandidate).mSlots[InventoryStore::Slot_Shirt] = it;
                 }
                 if (node.mRef.getRefNum() == mSelected)
-                    mCandidate.mSelectedEnchantItem = it;
+                    static_cast<InventoryStore&>(mCandidate).mSelectedEnchantItem = it;
             }
             mCandidate.mResolved = true;
             if (mContext.mNpcStats)
             {
                 mContext.mNpcStats->validate(mContext.mActor, mContext.mStore);
                 const auto& stats = mContext.mNpcStats->stats();
-                stats.getActiveSpells().validateConstantFortifyLuck(mContext.mActor, source, mContext.mStore, stats);
+                stats.getActiveSpells().validateConstantFortifyLuck(mContext.mActor, *inventory, mContext.mStore, stats);
                 mBeforeStats = mContext.mNpcStats->values();
                 mNpcStats = std::make_shared<EquipmentNpcStats>(mContext.mActor, mContext.mStore);
-                mNpcStats->restore(mBeforeStats, mCandidate);
+                mNpcStats->restore(mBeforeStats, static_cast<InventoryStore&>(mCandidate));
             }
-            mResult.mActor = mContext.mActor.getCellRef().getRefNum();
+            mResult.mActor = mResolution.mOwner.getCellRef().getRefNum();
             mResult.mLastGenerated = mRegistry.mLastGenerated;
         }
 
@@ -650,22 +666,25 @@ namespace MWWorld
                 || (context.mNpcStats && context.mNpcStats->values() != mBeforeStats)
                 || !sameReference(context.mActor, mContext.mActor) || !sameReference(context.mPlayer, mContext.mPlayer))
                 throw std::invalid_argument("Equipment preparation context/service changed");
-            const auto& source = inventory(mResolution, context);
+            const auto& source = storage(mResolution, context);
+            const auto* inventory = dynamic_cast<const InventoryStore*>(&source);
             if (context.mNpcStats)
             {
                 context.mNpcStats->validate(context.mActor, context.mStore);
                 const auto& stats = context.mNpcStats->stats();
-                stats.getActiveSpells().validateConstantFortifyLuck(context.mActor, source, context.mStore, stats);
+                stats.getActiveSpells().validateConstantFortifyLuck(context.mActor, *inventory, context.mStore, stats);
             }
             if (context.mWorldModel.snapshotPtrRegistry() != mRegistry || context.mLocalScripts.snapshot() != mScripts
-                || source.mInventoryListener != mEquipmentListener || source.mListener != mContainerListener
-                || position(source, source.mSlots[InventoryStore::Slot_Shirt]) != mShirt
-                || position(source, source.mSelectedEnchantItem) != mSelected
+                || source.mListener != mContainerListener
+                || (inventory && (inventory->mInventoryListener != mEquipmentListener
+                    || position(*inventory, inventory->mSlots[InventoryStore::Slot_Shirt]) != mShirt
+                    || position(*inventory, inventory->mSelectedEnchantItem) != mSelected))
                 || source.mLists.mClothes.mList.size() != mBefore.size())
                 throw std::invalid_argument("Equipment preparation source state changed");
-            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
-                if (slot != InventoryStore::Slot_Shirt && source.mSlots[slot] != source.end())
-                    throw std::invalid_argument("Equipment preparation other slot changed");
+            if (inventory)
+                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                    if (slot != InventoryStore::Slot_Shirt && inventory->mSlots[slot] != inventory->end())
+                        throw std::invalid_argument("Equipment preparation other slot changed");
             size_t index = 0;
             for (const auto& ref : source.mLists.mClothes.mList)
             {
@@ -689,6 +708,7 @@ namespace MWWorld
 
         void run(ESM::RefNum identity, bool equip)
         {
+            auto& mCandidate = static_cast<InventoryStore&>(candidate());
             auto item = mCandidate.begin();
             while (item != mCandidate.end() && item->getCellRef().getRefNum() != identity)
                 ++item;
@@ -719,7 +739,7 @@ namespace MWWorld
                         if (removal.mFullRemoval)
                             throw std::logic_error("Equipment split unexpectedly removed a whole stack");
                         original.getCellRef() = original.getCellRef().copyWithCount(removal.mRemainingCount);
-                        mCandidate.flagAsModified();
+                        candidate().flagAsModified();
                         effect(Kind::InventoryUpdated);
                         if (mContainerListener)
                             effect(Kind::ItemRemoved, original, removal.mRemoved);
@@ -760,8 +780,12 @@ namespace MWWorld
         void finish()
         {
             mResult.mItems.clear();
-            mResult.mShirt = position(mCandidate, mCandidate.mSlots[InventoryStore::Slot_Shirt]);
-            mResult.mSelected = position(mCandidate, mCandidate.mSelectedEnchantItem);
+            const auto& mCandidate = candidate();
+            if (const auto* inventory = dynamic_cast<const InventoryStore*>(&mCandidate))
+            {
+                mResult.mShirt = position(*inventory, inventory->mSlots[InventoryStore::Slot_Shirt]);
+                mResult.mSelected = position(*inventory, inventory->mSelectedEnchantItem);
+            }
             for (const auto& ref : mCandidate.mLists.mClothes.mList)
             {
                 if (ref.mWorldModel || ref.mData.getBaseNode() || ref.mData.getLuaScripts()
@@ -784,7 +808,9 @@ namespace MWWorld
         const ConstPtr& item, ESM::RefNum expectedIdentity, size_t expectedRegistryRevision, bool equip,
         const PlainEquipmentContext& context)
     {
-        const auto& source = State::inventory(inventory, context);
+        const auto& source = State::storage(inventory, context);
+        if (typeid(source) != typeid(InventoryStore))
+            throw std::invalid_argument("Equipment requires an actor inventory");
         if (context.mWorldModel.getPtrRegistryRevision() != expectedRegistryRevision)
             throw std::invalid_argument("Equipment request registry revision changed");
         registered(item, context.mWorldModel);
@@ -807,21 +833,23 @@ namespace MWWorld
         ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
         const std::array<PlainEquipmentContext, 2>& contexts)
     {
-        const auto& source = State::inventory(inventories[0], contexts[0]);
-        const auto& destination = State::inventory(inventories[1], contexts[1]);
+        const auto& source = State::storage(inventories[0], contexts[0]);
+        const auto& destination = State::storage(inventories[1], contexts[1]);
         const auto& world = contexts[0].mWorldModel;
         registered(item, world);
-        if (&source == &destination || contexts[0].mActor == contexts[1].mActor
+        if (&source == &destination || sameReference(inventories[0].mOwner, inventories[1].mOwner)
             || &world != &contexts[1].mWorldModel || &contexts[0].mStore != &contexts[1].mStore
             || &contexts[0].mLocalScripts != &contexts[1].mLocalScripts
             || expectedRevision != world.getPtrRegistryRevision()
             || item.getContainerStore() != &source || item.getCellRef().getRefNum() != expectedIdentity
             || item.getType() != ESM::Clothing::sRecordId || count <= 0
             || count > std::abs(static_cast<int64_t>(item.getCellRef().getCount(false)))
-            || State::position(source, source.mSlots[InventoryStore::Slot_Shirt]) == expectedIdentity
+            || (dynamic_cast<const InventoryStore*>(&source)
+                && State::position(static_cast<const InventoryStore&>(source),
+                    static_cast<const InventoryStore&>(source).mSlots[InventoryStore::Slot_Shirt]) == expectedIdentity)
             || !item.getClass().getScript(item).empty()
             || !item.getClass().getEnchantment(item).empty())
-            throw std::invalid_argument("Transfer requires a current unequipped plain shirt and distinct actors");
+            throw std::invalid_argument("Transfer requires a current unequipped plain shirt and distinct owners");
         const auto generated = world.getLastGeneratedRefNum();
         if (expectedRevision >= std::numeric_limits<size_t>::max() - 1
             || generated.mContentFile != -1 || generated.mIndex == std::numeric_limits<uint32_t>::max())
@@ -838,17 +866,17 @@ namespace MWWorld
         states[1]->capture(destination);
         auto& from = *states[0];
         auto& to = *states[1];
-        auto origin = from.mCandidate.begin();
-        while (origin != from.mCandidate.end() && origin->getCellRef().getRefNum() != expectedIdentity)
+        auto origin = from.candidate().begin();
+        while (origin != from.candidate().end() && origin->getCellRef().getRefNum() != expectedIdentity)
             ++origin;
-        if (origin == from.mCandidate.end())
+        if (origin == from.candidate().end())
             throw std::invalid_argument("Transfer source is dormant or foreign");
         auto incoming = detached(*origin->get<ESM::Clothing>());
         incoming.mRef.unsetRefNum();
         incoming.mRef.setCount(count);
         // Exactly the stock add selection, signed count arithmetic and equipped
         // stack exclusion. The protected copy owns RefData and no live service.
-        auto added = to.mCandidate.addImp(ConstPtr(&incoming), count, contexts[0].mStore);
+        auto added = to.candidate().addImp(ConstPtr(&incoming), count, contexts[0].mStore);
         if (!added->getCellRef().getRefNum().isSet())
             added->getRefData() = incoming.mData.copyForContainerTransfer();
         auto counter = world.getLastGeneratedRefNum();
@@ -859,8 +887,9 @@ namespace MWWorld
         normalizeContainerAddReference(added->getCellRef());
         const auto removal = ContainerStore::prepareRemoveCount(origin->getCellRef(), count);
         origin->getCellRef() = origin->getCellRef().copyWithCount(removal.mRemainingCount);
-        if (removal.mFullRemoval && from.mCandidate.mSelectedEnchantItem == origin)
-            from.mCandidate.mSelectedEnchantItem = from.mCandidate.end();
+        if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate());
+            inventory && removal.mFullRemoval && inventory->mSelectedEnchantItem == origin)
+            inventory->mSelectedEnchantItem = inventory->end();
         from.mResult.mLastGenerated = to.mResult.mLastGenerated = counter;
         from.mResult.mTransferred = expectedIdentity;
         to.mResult.mTransferred = destinationId;
@@ -895,13 +924,13 @@ namespace MWWorld
         return mState->mResult;
     }
 
-    InventoryStore& PreparedPlainEquipment::installationCandidate(
-        const PlainEquipmentContext& context, const InventoryStore& target)
+    ContainerStore& PreparedPlainEquipment::installationCandidate(
+        const PlainEquipmentContext& context, const ContainerStore& target)
     {
         validate(context);
         if (mState->mResolution.mStore != &target)
             throw std::invalid_argument("Equipment installation target changed");
-        return mState->mCandidate;
+        return mState->candidate();
     }
 
     std::shared_ptr<EquipmentNpcStats>& PreparedPlainEquipment::installationNpcStats()
@@ -916,7 +945,7 @@ namespace MWWorld
         PlainEquipmentValues staged{ result.mActor, result.mShirt, result.mSelected, result.mLastGenerated, {} };
         if (mState->mNpcStats)
             staged.mNpcStats = mState->mNpcStats->values();
-        serialize(mState->mCandidate.mLists.mClothes.mList, staged, context.mStore, context.mScriptLocals.get());
+        serialize(mState->candidate().mLists.mClothes.mList, staged, context.mStore, context.mScriptLocals.get());
         validateValues(staged, context.mStore, result.mActor, context.mScriptLocals.get());
         validate(context);
         output.swap(staged);
@@ -924,7 +953,7 @@ namespace MWWorld
 
     struct RestoredPlainEquipment::State
     {
-        InventoryStore mInventory;
+        std::unique_ptr<ContainerStore> mStorage;
         ESM::RefNum mActor, mLastGenerated;
         const ESMStore* mContent = nullptr;
         std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
@@ -941,8 +970,10 @@ namespace MWWorld
 
     RestoredPlainEquipment RestoredPlainEquipment::restore(
         const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
-        std::shared_ptr<const EquipmentScriptLocals> scripts)
+        std::shared_ptr<const EquipmentScriptLocals> scripts, bool container)
     {
+        if (container && (input.mShirt.isSet() || input.mSelected.isSet() || input.mNpcStats))
+            throw std::invalid_argument("Container restore cannot contain equipment or stats");
         validateValues(input, content, expectedActor, scripts.get());
         auto staged = std::make_unique<State>();
         staged->mActor = input.mActor;
@@ -950,7 +981,9 @@ namespace MWWorld
         staged->mContent = &content;
         staged->mScriptLocals = std::move(scripts);
         staged->mNpcStats = input.mNpcStats;
-        auto& inventory = staged->mInventory;
+        if (container) staged->mStorage = std::make_unique<ContainerStore>();
+        else staged->mStorage = std::make_unique<InventoryStore>();
+        auto& inventory = *staged->mStorage;
         for (const auto& object : input.mObjects)
         {
             auto& node = inventory.mLists.mClothes.mList.emplace_back(
@@ -962,9 +995,9 @@ namespace MWWorld
             ConstPtr witness(&node, nullptr);
             const auto it = ContainerStoreIterator(&inventory, std::prev(inventory.mLists.mClothes.mList.end()));
             if (object.mRef.mRefNum == input.mShirt)
-                inventory.mSlots[InventoryStore::Slot_Shirt] = it;
+                static_cast<InventoryStore&>(inventory).mSlots[InventoryStore::Slot_Shirt] = it;
             if (object.mRef.mRefNum == input.mSelected)
-                inventory.mSelectedEnchantItem = it;
+                static_cast<InventoryStore&>(inventory).mSelectedEnchantItem = it;
         }
         inventory.mResolved = true;
         return RestoredPlainEquipment(std::move(staged));
@@ -973,32 +1006,39 @@ namespace MWWorld
     InventoryStore& RestoredPlainEquipment::installationCandidate(
         const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const
     {
+        return dynamic_cast<InventoryStore&>(installationStorage(content, actor, counter));
+    }
+
+    ContainerStore& RestoredPlainEquipment::installationStorage(
+        const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const
+    {
         if (!mState || mState->mContent != &content || mState->mActor != actor || mState->mLastGenerated != counter)
             throw std::invalid_argument("Restored equipment content, actor or saved counter binding changed");
-        for (const auto& node : mState->mInventory.mLists.mClothes.mList)
+        for (const auto& node : mState->mStorage->mLists.mClothes.mList)
             if (content.get<ESM::Clothing>().search(node.mRef.getRefId()) != node.mBase)
                 throw std::invalid_argument("Restored equipment base record binding changed");
-        return mState->mInventory;
+        return *mState->mStorage;
     }
 
     void RestoredPlainEquipment::exportValues(PlainEquipmentValues& output) const
     {
         if (!mState)
             throw std::invalid_argument("Restored equipment was moved");
-        const auto& inventory = mState->mInventory;
+        const auto& inventory = *mState->mStorage;
         const auto identity = [&](const ContainerStoreIterator& selection) {
-            if (selection == inventory.end())
-                return ESM::RefNum{};
-            // Dereferencing an iterator constructs Ptr and can allocate a lazy
-            // lifetime token in the node. Export must not mutate retained storage.
+            if (selection == inventory.end()) return ESM::RefNum{};
+            // Inspect current raw membership without allocating a Ptr witness.
             const auto& nodes = inventory.mLists.mClothes.mList;
             for (auto it = nodes.begin(); it != nodes.end(); ++it)
-                if (ConstContainerStoreIterator(&inventory, it) == selection)
-                    return it->mRef.getRefNum();
+                if (ConstContainerStoreIterator(&inventory, it) == selection) return it->mRef.getRefNum();
             throw std::logic_error("Restored equipment selection lost its member");
         };
-        PlainEquipmentValues staged{ mState->mActor, identity(inventory.mSlots[InventoryStore::Slot_Shirt]),
-            identity(inventory.mSelectedEnchantItem), mState->mLastGenerated, {} };
+        PlainEquipmentValues staged{ mState->mActor, {}, {}, mState->mLastGenerated, {} };
+        if (const auto* actor = dynamic_cast<const InventoryStore*>(&inventory))
+        {
+            staged.mShirt = identity(actor->mSlots[InventoryStore::Slot_Shirt]);
+            staged.mSelected = identity(actor->mSelectedEnchantItem);
+        }
         staged.mNpcStats = mState->mNpcStats;
         serialize(inventory.mLists.mClothes.mList, staged, *mState->mContent, mState->mScriptLocals.get());
         output.swap(staged);

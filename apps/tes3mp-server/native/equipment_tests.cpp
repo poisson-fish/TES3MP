@@ -99,6 +99,10 @@ namespace MWWorld::Testing
             shirt.mId = ESM::RefId::stringRefId("equipment_shirt");
             shirt.mData.mType = ESM::Clothing::Shirt;
             mContentStore.insertStatic(shirt);
+            ESM::Container container;
+            container.blank();
+            container.mId = ESM::RefId::stringRefId("equipment_container");
+            mContentStore.insertStatic(container);
         }
     };
 
@@ -138,10 +142,11 @@ namespace MWWorld::Testing
             std::cout << "protected shirt transfer: 3/-5 -> 1/-7; live actors unchanged\n";
         }
 
-        static void checkConnected(const std::filesystem::path& scratch)
+        static void checkConnected(const std::filesystem::path& scratch, bool shared = false)
         {
             EquipmentScratch directory(scratch);
             EquipmentContentFixture content;
+            const auto container = shared ? ESM::RefId::stringRefId("equipment_container") : ESM::RefId{};
             const auto base = ESM::RefId::stringRefId("equipment_actor");
             const auto shirt = ESM::RefId::stringRefId("equipment_shirt");
             const std::array<EquipmentActorBinding, 2> actors{{ { base, shirt, 3 }, { base, shirt, -5 } }};
@@ -149,18 +154,21 @@ namespace MWWorld::Testing
             EquipmentBytes bytes;
             FileFaults faults;
             std::array<PlainEquipmentValues, 2> committed;
-            InventoryInstanceId received;
+            InventoryInstanceId received, sharedItem;
+            PlainEquipmentValues committedContainer;
             uint64_t revision = 0;
             {
                 WorldModel world(content.mContentStore, content.mReaders, 1);
                 LocalScripts scripts(content.mContentStore);
                 EquipmentRuntime runtime(content.mContentStore, world, scripts, "synthetic-connected-1",
-                    { 1, 2, 3 }, actors, {}, nullptr, {}, true);
+                    { 1, 2, 3 }, actors, {}, nullptr, {}, true, container);
                 EquipmentFileSink sink(path, true);
                 const auto before = runtime.installedValues(0), other = runtime.installedValues(1);
                 auto command = runtime.transferCommand(0, runtime.command(0, true).mItem, 2);
+                if (shared) command = runtime.containerCommand(0, true, command.mItem, 2);
+                const auto beforeContainer = shared ? runtime.installedValues(2) : PlainEquipmentValues{};
                 std::unique_ptr<const InventoryTransferSuccess> transferred;
-                for (int test = 0; test < 6; ++test)
+                for (int test = 0; test < (shared ? 8 : 6); ++test)
                 {
                     auto wrong = command;
                     auto caller = InventoryTransferCaller{ command.mInitiator };
@@ -170,12 +178,15 @@ namespace MWWorld::Testing
                     if (test == 3) wrong.mQuantity = 0;
                     if (test == 4) wrong.mQuantity = 4;
                     if (test == 5) wrong.mDestinationOwner = command.mSourceOwner;
+                    if (test == 6) wrong.mInitiator = caller.mInitiator = runtime.command(1, true).mActor;
+                    if (test == 7) wrong.mInitiator = caller.mInitiator = command.mDestinationOwner;
                     bool rejected = false;
                     try { runtime.execute(caller, wrong, sink, transferred, bytes, faults); }
                     catch (const std::invalid_argument&) { rejected = true; }
                     require(rejected && !transferred && bytes.empty() && !std::filesystem::exists(path)
                         && EquipmentRuntime::sameValues(before, runtime.installedValues(0))
-                        && EquipmentRuntime::sameValues(other, runtime.installedValues(1)),
+                        && EquipmentRuntime::sameValues(other, runtime.installedValues(1))
+                        && (!shared || EquipmentRuntime::sameValues(beforeContainer, runtime.installedValues(2))),
                         "Connected transfer command guard was not atomic");
                 }
                 Allocations::Trace trace;
@@ -185,10 +196,30 @@ namespace MWWorld::Testing
                     result = runtime.execute({ command.mInitiator }, command, sink, transferred, bytes, faults);
                 }
                 require(result == PersistenceResult::Accepted && transferred->mSourceCount == 1
-                    && transferred->mDestinationCount == -7, "Connected transfer failed");
+                    && transferred->mDestinationCount == (shared ? 2 : -7), "Connected transfer failed");
                 require(trace.allocations(Allocations::Phase::Installation) == 0
                     && trace.allocations(Allocations::Phase::Publication) == 0,
                     "Connected install/publication allocated after durability");
+                if (shared)
+                {
+                    auto unchangedOther = other;
+                    unchangedOther.mLastGenerated = world.getLastGeneratedRefNum();
+                    require(typeid(runtime.mContainerStore) == typeid(ContainerStore)
+                        && EquipmentRuntime::sameValues(unchangedOther, runtime.installedValues(1)),
+                        "Drop changed the other actor or used an inventory as the container");
+                    sharedItem = transferred->mDestinationItem;
+                    const auto take = runtime.containerCommand(1, false, sharedItem, 1);
+                    require(runtime.execute({ take.mInitiator }, take, sink, transferred, bytes, faults) == PersistenceResult::Accepted
+                        && transferred->mSourceCount == 1 && transferred->mDestinationCount == -6,
+                        "Shared take failed stock signed stacking");
+                    const auto* priorResult = transferred.get();
+                    const auto priorBytes = bytes;
+                    bool rejected = false;
+                    try { runtime.execute({ take.mInitiator }, take, sink, transferred, bytes, faults); }
+                    catch (const std::invalid_argument&) { rejected = true; }
+                    require(rejected && priorResult == transferred.get() && bytes == priorBytes
+                        && runtime.mContainerStore.count(shirt) == 1, "Stale container contention duplicated a take");
+                }
                 received = transferred->mDestinationItem;
                 std::unique_ptr<const EquipmentSuccess> equipped;
                 auto equip = runtime.command(1, true);
@@ -199,6 +230,7 @@ namespace MWWorld::Testing
                 require(runtime.execute({ donor.mActor }, donor, sink, equipped, bytes, faults) == PersistenceResult::Accepted,
                     "Donor could not continue through same owner");
                 committed = { runtime.installedValues(0), runtime.installedValues(1) };
+                if (shared) committedContainer = runtime.installedValues(2);
                 revision = world.getPtrRegistryRevision();
                 require(committed[0].mShirt.isSet() && committed[1].mShirt.isSet(), "Connected actors were not both equipped");
                 // Per-actor persistence cannot fork a connected session.
@@ -212,16 +244,45 @@ namespace MWWorld::Testing
             WorldModel world(content.mContentStore, content.mReaders, 1);
             LocalScripts scripts(content.mContentStore);
             EquipmentRuntime fresh(content.mContentStore, world, scripts, "synthetic-connected-1", { 1, 2, 3 },
-                actors, {}, nullptr, 2, true);
+                actors, {}, nullptr, 2, true, container);
             std::unique_ptr<const EquipmentSessionValues> restored;
             EquipmentBytes accepted;
             const std::array ids{ base, shirt };
+            if (shared)
+            {
+                const auto envelope = fresh.expectedEnvelope(committedContainer.mActor);
+                const EquipmentBindings binding{ envelope, content.mContentStore, ids, {} };
+                const auto registry = world.snapshotPtrRegistry();
+                for (bool slot : { false, true })
+                {
+                    auto wrong = committedContainer;
+                    if (slot) wrong.mShirt = wrong.mObjects[0].mRef.mRefNum;
+                    else wrong.mObjects[0].mRef.mRefNum = committed[0].mObjects[0].mRef.mRefNum;
+                    EquipmentBytes original, corrupted;
+                    encodeEquipment(committedContainer, binding, original);
+                    encodeEquipment(wrong, binding, corrupted);
+                    require(original.size() == corrupted.size(), "Shared corruption fixture changed frame lengths");
+                    auto broken = bytes;
+                    std::copy(corrupted.begin(), corrupted.end(), broken.end() - corrupted.size());
+                    writeEquipmentInput(scratch / "broken.bin", broken);
+                    bool rejected = false;
+                    try { fresh.restartSession(scratch / "broken.bin", ids, restored, accepted, faults); }
+                    catch (const std::invalid_argument&) { rejected = true; }
+                    require(rejected && !restored && accepted.empty() && world.snapshotPtrRegistry() == registry
+                        && fresh.mContainerStore.begin() == fresh.mContainerStore.end(),
+                        "Shared recovery accepted duplicate identity/slot or partially installed");
+                }
+            }
             require(fresh.restartSession(path, ids, restored, accepted, faults) == FileReadResult::Read
                 && accepted == bytes && restored->mRevision == revision, "Connected fresh pair recovery failed");
             for (size_t i = 0; i < 2; ++i)
                 require(EquipmentRuntime::sameValues(committed[i], fresh.installedValues(i))
                     && fresh.mActorEffects[i].mListener.mCalls == 0 && fresh.mActorEffects[i].mNotifications.empty(),
                     "Pair recovery lost a committed actor or replayed effects");
+            if (shared) require(restored->mContainer
+                && EquipmentRuntime::sameValues(committedContainer, fresh.installedValues(2))
+                && fresh.mContainerEffects.mListener.mCalls == 0 && fresh.mContainerEffects.mNotifications.empty(),
+                "Shared recovery lost container state or replayed effects");
             EquipmentFileSink sink(path, true);
             std::unique_ptr<const EquipmentSuccess> equipped;
             for (size_t i = 0; i < 2; ++i)
@@ -231,18 +292,33 @@ namespace MWWorld::Testing
                     "Recovered actor could not continue");
             }
             auto command = fresh.transferCommand(1, fresh.command(1, true).mItem, 1);
+            if (shared) command = fresh.containerCommand(0, false, sharedItem, 1);
             std::unique_ptr<const InventoryTransferSuccess> transferred;
             require(fresh.execute({ command.mInitiator }, command, sink, transferred, bytes, faults) == PersistenceResult::Accepted
-                && transferred->mSourceCount == -6 && transferred->mDestinationCount == 2,
+                && transferred->mSourceCount == (shared ? 0 : -6) && transferred->mDestinationCount == 2,
                 "Recovered return transfer lost or duplicated committed items");
-            std::cout << "connected runtime: transfer -> recipient equip -> donor equip -> destroyed-owner pair recovery"
+            if (shared)
+            {
+                require(fresh.mContainerStore.count(shirt) == 0 && fresh.mInventories[0].count(shirt) == 2
+                    && fresh.mInventories[1].count(shirt) == 6, "Shared recovery lost or duplicated shirts");
+                for (size_t i = 0; i < 2; ++i)
+                {
+                    const auto equip = fresh.command(i, true);
+                    require(fresh.execute({ equip.mActor }, equip, sink, equipped, bytes, faults) == PersistenceResult::Accepted,
+                        "Both actors could not equip again after recovered take");
+                }
+                std::cout << "shared container: drop 2 -> take 1 -> both equip -> fresh three-owner recovery"
+                             " -> both unequip -> take remaining -> both equip; total=8; 9 command/2 recovery guards\n";
+            }
+            else std::cout << "connected runtime: transfer -> recipient equip -> donor equip -> destroyed-owner pair recovery"
                          " -> both unequip -> return transfer; 6 atomic guards; no install/publication allocations\n";
         }
 
-        static void checkConnectedRecovery(const std::filesystem::path& scratch)
+        static void checkConnectedRecovery(const std::filesystem::path& scratch, bool shared = false)
         {
             EquipmentScratch directory(scratch);
             EquipmentContentFixture content;
+            const auto container = shared ? ESM::RefId::stringRefId("equipment_container") : ESM::RefId{};
             const auto base = ESM::RefId::stringRefId("equipment_actor");
             const auto shirt = ESM::RefId::stringRefId("equipment_shirt");
             const std::array<EquipmentActorBinding, 2> actors{{ { base, shirt, 3 }, { base, shirt, -1 } }};
@@ -259,17 +335,26 @@ namespace MWWorld::Testing
                     WorldModel world(content.mContentStore, content.mReaders, 1);
                     LocalScripts scripts(content.mContentStore);
                     EquipmentRuntime runtime(content.mContentStore, world, scripts, "synthetic-connected-1", { 1, 2, 3 },
-                        actors, {}, nullptr, {}, true);
+                        actors, {}, nullptr, {}, true, container);
                     EquipmentFileSink sink(path, true);
                     std::unique_ptr<const EquipmentSuccess> equipped;
                     const auto first = runtime.command(1, true);
                     require(runtime.execute({ first.mActor }, first, sink, equipped, bytes, faults) == PersistenceResult::Accepted,
                         "Connected recovery setup equip failed");
-                    prior = { runtime.installedValues(0), runtime.installedValues(1) };
-                    const auto previousBytes = bytes;
-                    const auto registry = world.snapshotPtrRegistry();
                     std::unique_ptr<const InventoryTransferSuccess> transferred;
                     auto command = runtime.transferCommand(0, runtime.command(0, true).mItem, 3);
+                    if (shared)
+                    {
+                        const auto drop = runtime.containerCommand(0, true, command.mItem, 3);
+                        require(runtime.execute({ drop.mInitiator }, drop, sink, transferred, bytes, faults) == PersistenceResult::Accepted,
+                            "Shared recovery setup drop failed");
+                        command = runtime.containerCommand(1, false, transferred->mDestinationItem, 3);
+                        transferred.reset();
+                    }
+                    prior = { runtime.installedValues(0), runtime.installedValues(1) };
+                    const auto beforeContainer = shared ? runtime.installedValues(2) : PlainEquipmentValues{};
+                    const auto previousBytes = bytes;
+                    const auto registry = world.snapshotPtrRegistry();
                     faults = { fail, 7 };
                     const auto outcome = runtime.execute({ command.mInitiator }, command, sink, transferred, bytes, faults);
                     if (fail == FileFault::None)
@@ -290,7 +375,8 @@ namespace MWWorld::Testing
                         require(outcome == (uncertain ? PersistenceResult::Uncertain : PersistenceResult::Rejected)
                             && !transferred && bytes == previousBytes && world.snapshotPtrRegistry() == registry
                             && EquipmentRuntime::sameValues(prior[0], runtime.installedValues(0))
-                            && EquipmentRuntime::sameValues(prior[1], runtime.installedValues(1)),
+                            && EquipmentRuntime::sameValues(prior[1], runtime.installedValues(1))
+                            && (!shared || EquipmentRuntime::sameValues(beforeContainer, runtime.installedValues(2))),
                             "Failed pair transfer mutated one actor, registry, bytes or success");
                         faults = {};
                         if (uncertain)
@@ -315,7 +401,7 @@ namespace MWWorld::Testing
                 WorldModel world(content.mContentStore, content.mReaders, 1);
                 LocalScripts scripts(content.mContentStore);
                 EquipmentRuntime fresh(content.mContentStore, world, scripts, "synthetic-connected-1", { 1, 2, 3 },
-                    actors, {}, nullptr, 2, true);
+                    actors, {}, nullptr, 2, true, container);
                 std::unique_ptr<const EquipmentSessionValues> restored;
                 EquipmentBytes accepted;
                 faults = {};
@@ -327,8 +413,9 @@ namespace MWWorld::Testing
                     for (const auto& object : actor.mObjects) count += std::abs(object.mRef.mCount);
                     return count;
                 };
-                require(total(restored->mActors[0]) == (oldImage ? 3 : 0)
-                    && total(restored->mActors[1]) == (oldImage ? 1 : 4),
+                require(total(restored->mActors[0]) == (!shared && oldImage ? 3 : 0)
+                    && total(restored->mActors[1]) == (oldImage ? 1 : 4)
+                    && (!shared || (restored->mContainer && total(*restored->mContainer) == (oldImage ? 3 : 0))),
                     "Fresh recovery combined independently durable actors or lost/duplicated items");
                 for (size_t actor = 0; actor < 2; ++actor)
                     require(fresh.mActorEffects[actor].mListener.mCalls == 0
@@ -338,23 +425,32 @@ namespace MWWorld::Testing
                 const auto unequip = fresh.command(1, false);
                 require(fresh.execute({ unequip.mActor }, unequip, sink, equipped, bytes, faults) == PersistenceResult::Accepted,
                     "Recovered recipient could not unequip");
-                const auto command = fresh.transferCommand(1, fresh.command(1, true).mItem, 1);
+                auto command = fresh.transferCommand(1, fresh.command(1, true).mItem, 1);
                 std::unique_ptr<const InventoryTransferSuccess> transferred;
+                if (shared)
+                {
+                    const auto drop = fresh.containerCommand(1, true, command.mItem, 1);
+                    require(fresh.execute({ drop.mInitiator }, drop, sink, transferred, bytes, faults) == PersistenceResult::Accepted,
+                        "Recovered actor could not drop into shared container");
+                    command = fresh.containerCommand(0, false, transferred->mDestinationItem, 1);
+                }
                 require(fresh.execute({ command.mInitiator }, command, sink, transferred, bytes, faults) == PersistenceResult::Accepted,
                     "Recovered empty donor could not receive return transfer");
                 const auto equip = fresh.command(0, true);
                 require(fresh.execute({ equip.mActor }, equip, sink, equipped, bytes, faults) == PersistenceResult::Accepted
-                    && total(fresh.installedValues(0)) + total(fresh.installedValues(1)) == 4,
+                    && total(fresh.installedValues(0)) + total(fresh.installedValues(1))
+                        + (shared ? total(fresh.installedValues(2)) : 0) == 4,
                     "Recovered donor could not equip returned shirt without loss/duplication");
             }
-            std::cout << "connected pair recovery: " << cases << " cases; full transfer, equipped-stack exclusion, safe retries,"
+            std::cout << (shared ? "shared container recovery: " : "connected pair recovery: ") << cases << " cases; full transfer, equipped-stack exclusion, safe retries,"
                          " uncertain closure, empty-donor return/equip; total conserved=4\n";
         }
 
-        static void checkConnectedState(const std::filesystem::path& scratch)
+        static void checkConnectedState(const std::filesystem::path& scratch, bool shared = false)
         {
             EquipmentScratch directory(scratch);
             PlainEquipmentFixture content;
+            const auto container = shared ? ESM::RefId::stringRefId("equipment_container") : ESM::RefId{};
             content.enableLuck(false);
             content.enableScript();
             ESM::Clothing plain;
@@ -376,7 +472,7 @@ namespace MWWorld::Testing
                 WorldModel world(content.mStore, content.mReaders, 1);
                 LocalScripts scripts(content.mStore);
                 EquipmentRuntime runtime(content.mStore, world, scripts, "synthetic-connected-1", { 1, 2, 3 },
-                    actors, content.mScriptLocals, &declarations, {}, true);
+                    actors, content.mScriptLocals, &declarations, {}, true, container);
                 // Synthetic initial state only; all commands/install/restart use runtime code.
                 ManualRef initial(content.mStore, plain.mId);
                 auto item = *runtime.mInventories[0].addNewStack(initial.getPtr(), 2);
@@ -403,8 +499,15 @@ namespace MWWorld::Testing
                     && success->mSkipped && calls == runtime.mActorEffects[0].mListener.mCalls,
                     "Connected PCSkipEquip lost equipment or published a change");
                 const std::array before{ runtime.installedValues(0), runtime.installedValues(1) };
-                const auto command = runtime.transferCommand(0, sourceItem, 1);
+                auto command = runtime.transferCommand(0, sourceItem, 1);
                 std::unique_ptr<const InventoryTransferSuccess> transferred;
+                if (shared)
+                {
+                    const auto drop = runtime.containerCommand(0, true, sourceItem, 1);
+                    require(runtime.execute({ drop.mInitiator }, drop, file, transferred, bytes, faults) == PersistenceResult::Accepted,
+                        "Plain drop beside scripted equipment failed");
+                    command = runtime.containerCommand(1, false, transferred->mDestinationItem, 1);
+                }
                 require(runtime.execute({ command.mInitiator }, command, file, transferred, bytes, faults) == PersistenceResult::Accepted,
                     "Connected plain transfer beside scripted equipment failed");
                 for (size_t i = 0; i < 2; ++i)
@@ -427,7 +530,7 @@ namespace MWWorld::Testing
             WorldModel world(content.mStore, content.mReaders, 1);
             LocalScripts scripts(content.mStore);
             EquipmentRuntime fresh(content.mStore, world, scripts, "synthetic-connected-1", { 1, 2, 3 },
-                actors, content.mScriptLocals, &declarations, 2, true);
+                actors, content.mScriptLocals, &declarations, 2, true, container);
             const auto empty = world.snapshotPtrRegistry();
             std::unique_ptr<const EquipmentSessionValues> restored;
             EquipmentBytes accepted;
@@ -463,23 +566,25 @@ namespace MWWorld::Testing
                 require(fresh.execute({ command.mActor }, command, file, success, bytes, faults) == PersistenceResult::Accepted,
                     "Recovered scripted/plain pair could not continue");
             }
-            std::cout << "connected plain transfer beside scripted shirts: PCSkipEquip, abilities, spells, unrelated stats,"
+            std::cout << (shared ? "shared drop/take: " : "pair transfer: ") << "connected plain transfer beside scripted shirts: PCSkipEquip, abilities, spells, unrelated stats,"
                          " isolated locals, exact pair recovery/continuation; truncated pair rejected atomically\n";
         }
 
-        static void checkConnectedAllocations(const std::filesystem::path& scratch)
+        static void checkConnectedAllocations(const std::filesystem::path& scratch, bool shared = false)
         {
             using namespace Allocations;
             EquipmentScratch directory(scratch);
             EquipmentContentFixture content;
+            const auto container = shared ? ESM::RefId::stringRefId("equipment_container") : ESM::RefId{};
             const auto base = ESM::RefId::stringRefId("equipment_actor");
             const auto shirt = ESM::RefId::stringRefId("equipment_shirt");
             const std::array<EquipmentActorBinding, 2> actors{{ { base, shirt, 3 }, { base, shirt, -1 } }};
             const std::array ids{ base, shirt };
             const auto path = scratch / "session.bin";
             size_t failures = 0;
-            for (bool recovery : { false, true })
+            for (int operation = 0; operation < (shared ? 3 : 2); ++operation)
             {
+                const bool recovery = operation == (shared ? 2 : 1);
                 size_t allocations = 0;
                 for (size_t fail = 0; fail <= allocations; ++fail)
                 {
@@ -487,7 +592,7 @@ namespace MWWorld::Testing
                     LocalScripts scripts(content.mContentStore);
                     auto runtime = std::make_unique<EquipmentRuntime>(content.mContentStore, *world, scripts,
                         "synthetic-connected-1", std::array<unsigned char, 32>{ 1, 2, 3 }, actors,
-                        nullptr, nullptr, std::optional<size_t>{}, true);
+                        nullptr, nullptr, std::optional<size_t>{}, true, container);
                     EquipmentFileSink sink(path, true);
                     EquipmentBytes bytes;
                     FileFaults faults;
@@ -497,6 +602,16 @@ namespace MWWorld::Testing
                         "Allocation pair setup equip failed");
                     auto command = runtime->transferCommand(0, runtime->command(0, true).mItem, 2);
                     std::unique_ptr<const InventoryTransferSuccess> transferred;
+                    if (shared)
+                    {
+                        command = runtime->containerCommand(0, true, command.mItem, 3);
+                        if (operation != 0)
+                        {
+                            require(runtime->execute({ command.mInitiator }, command, sink, transferred, bytes, faults)
+                                == PersistenceResult::Accepted, "Allocation setup drop failed");
+                            command = runtime->containerCommand(1, false, transferred->mDestinationItem, 2);
+                        }
+                    }
                     if (recovery)
                     {
                         require(runtime->execute({ command.mInitiator }, command, sink, transferred, bytes, faults)
@@ -509,10 +624,11 @@ namespace MWWorld::Testing
                         world = std::make_unique<WorldModel>(content.mContentStore, content.mReaders, 1);
                         runtime = std::make_unique<EquipmentRuntime>(content.mContentStore, *world, scripts,
                             "synthetic-connected-1", std::array<unsigned char, 32>{ 1, 2, 3 }, actors,
-                            nullptr, nullptr, std::optional<size_t>{ 2 }, true);
+                            nullptr, nullptr, std::optional<size_t>{ 2 }, true, container);
                     }
                     transferred.reset();
                     const auto before = std::array{ runtime->installedValues(0), runtime->installedValues(1) };
+                    const auto beforeContainer = shared ? runtime->installedValues(2) : PlainEquipmentValues{};
                     const auto registry = world->snapshotPtrRegistry();
                     const auto persisted = bytes;
                     const auto* storage = bytes.data();
@@ -553,7 +669,8 @@ namespace MWWorld::Testing
                             && bytes == persisted && bytes.data() == storage && equipmentFileBytes(path) == persisted
                             && world->snapshotPtrRegistry() == registry
                             && EquipmentRuntime::sameValues(before[0], runtime->installedValues(0))
-                            && EquipmentRuntime::sameValues(before[1], runtime->installedValues(1)),
+                            && EquipmentRuntime::sameValues(before[1], runtime->installedValues(1))
+                            && (!shared || EquipmentRuntime::sameValues(beforeContainer, runtime->installedValues(2))),
                             "Connected allocation failure changed one actor, file, registry or publication");
                         ++failures;
                     }
@@ -562,7 +679,7 @@ namespace MWWorld::Testing
                             && trace.allocations(Phase::Retirement) == 0, "Connected success allocated after durability");
                 }
             }
-            std::cout << "connected transfer/pair restart allocation failures=" << failures
+            std::cout << (shared ? "shared drop/take/restart allocation failures=" : "connected transfer/pair restart allocation failures=") << failures
                       << "; atomic actors/file/output; zero retained allocations or allocations after acceptance\n";
         }
 
@@ -6588,6 +6705,26 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-container")
+        {
+            PlainEquipmentFixture::checkConnected(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-container-recovery")
+        {
+            PlainEquipmentFixture::checkConnectedRecovery(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-container-state")
+        {
+            PlainEquipmentFixture::checkConnectedState(scratch, true);
+            return;
+        }
+        if (filter == "inventory-equipment-container-allocations")
+        {
+            PlainEquipmentFixture::checkConnectedAllocations(scratch, true);
+            return;
+        }
         if (filter == "inventory-equipment-connected-allocations")
         {
             PlainEquipmentFixture::checkConnectedAllocations(scratch);

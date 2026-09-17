@@ -46,12 +46,13 @@ namespace TES3MP::Native
         return result;
     }
     PersistenceResult EquipmentFileSink::writeSession(const EquipmentSessionValues& values,
-        const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults)
+        const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults,
+        const EquipmentBindings* container)
     {
         if (mFile.failedClosed()) return PersistenceResult::Uncertain;
         if (!mSession) throw std::invalid_argument("Actor sink cannot commit a session");
         EquipmentBytes staged;
-        encodeEquipmentSession(values, bindings, staged);
+        encodeEquipmentSession(values, bindings, staged, container);
         const auto result = mFile.write(staged, faults);
         if (result == PersistenceResult::Accepted) output.swap(staged);
         return result;

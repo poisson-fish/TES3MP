@@ -24,6 +24,7 @@ namespace TES3MP::Native
         std::string mInventoryItem;
         std::string mEnchantment;
         std::string mEquipment;
+        std::string mEquipmentContainer;
         std::vector<std::string> mEquipmentActors;
         std::filesystem::path mEquipmentSaveDirectory;
     };

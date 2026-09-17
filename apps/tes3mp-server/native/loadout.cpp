@@ -260,6 +260,7 @@ namespace TES3MP::Native
             "enchantment", bpo::value<std::string>(), "Probe an enchantment's engine cast cost and charge")(
             "equipment", bpo::value<std::string>(), "Run durable shirt equipment and fresh restart")(
             "equipment-actors", bpo::value<std::vector<std::string>>()->multitoken(), "Two trusted NPC base IDs")(
+            "equipment-container", bpo::value<std::string>(), "Shared empty diagnostic container base ID")(
             "equipment-save-dir", bpo::value<std::string>(), "New private directory for equipment saves");
         bpo::variables_map variables;
         Files::parseArgs(argc, argv, variables, description);
@@ -300,10 +301,12 @@ namespace TES3MP::Native
                 throw std::runtime_error("--equipment requires --equipment-actors A B and --equipment-save-dir, alone");
             result.mEquipmentActors = variables["equipment-actors"].as<std::vector<std::string>>();
             result.mEquipmentSaveDirectory = variables["equipment-save-dir"].as<std::string>();
+            if (variables.count("equipment-container"))
+                result.mEquipmentContainer = variables["equipment-container"].as<std::string>();
             if (result.mEquipmentActors.size() != 2 || result.mEquipmentSaveDirectory.empty())
                 throw std::runtime_error("Equipment requires exactly two NPC bases and a save directory");
         }
-        else if (variables.count("equipment-actors") || variables.count("equipment-save-dir"))
+        else if (variables.count("equipment-actors") || variables.count("equipment-save-dir") || variables.count("equipment-container"))
             throw std::runtime_error("Equipment bindings require --equipment");
         return result;
     }

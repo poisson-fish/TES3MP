@@ -101,6 +101,7 @@ namespace MWWorld
     {
         friend class ContainerStore;
         friend class PreparedPlainEquipment;
+        friend class TES3MP::Native::EquipmentRuntime;
         struct Lifetime
         {
             const ContainerStore* mStore;

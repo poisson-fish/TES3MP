@@ -27,7 +27,8 @@ OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
 Networking stays engine-independent. An app-local OpenMW runtime now owns bounded
-plain-shirt transfer and equipment commands, coherent pair installation and recovery; the native loadout
+plain-shirt transfer, shared-container drop/take and equipment commands, coherent
+installation and recovery; the native loadout
 probe and synthetic tests share it. Production server integration is still
 unfinished. The existing server
 and desktop adapter remain the working migration base; each subsystem changes

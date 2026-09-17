@@ -46,6 +46,8 @@ namespace TES3MP::Native
         const std::array<unsigned char, 32> mContent;
         std::array<std::unique_ptr<ManualRef>, 2> mActors;
         std::array<InventoryStore, 2> mInventories;
+        std::unique_ptr<ManualRef> mContainer;
+        ContainerStore mContainerStore;
         std::array<Ptr, 2> mItems;
         // The runtime is the sole writer of each bound stock NPC stat context.
         // No NPC custom-data or global player is installed alongside it.
@@ -60,6 +62,7 @@ namespace TES3MP::Native
             std::vector<ESM::RefNum> mNotifications;
         };
         std::array<ActorEffects, 2> mActorEffects;
+        ActorEffects mContainerEffects;
         bool mFailedClosed = false;
         const bool mConnected;
         // Actor diagnostics recover 0 or 1; a connected session uses 2 to
@@ -81,7 +84,7 @@ namespace TES3MP::Native
             ContainerStoreIterator mShirt, mSelected;
             Ptr mItem;
 
-            Installation(PreparedPlainEquipment prepared, InventoryStore& target)
+            Installation(PreparedPlainEquipment prepared, ContainerStore& target)
                 : mPrepared(std::move(prepared))
                 , mShirt(target.end())
                 , mSelected(target.end())
@@ -102,6 +105,7 @@ namespace TES3MP::Native
             std::array<std::shared_ptr<const EquipmentNpcStats>, 2> mNpcStats;
             std::array<std::optional<EquipmentNpcStatsValues>, 2> mStatValues;
             std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
+            std::optional<ContainerStoreResolution> mContainer;
         };
 
         struct RestartInstallation
@@ -125,7 +129,14 @@ namespace TES3MP::Native
 
         void installInventory(size_t actor, InventoryStore& candidate, ContainerStoreIterator shirt,
             ContainerStoreIterator selected, const Ptr& item, std::shared_ptr<EquipmentNpcStats>& stats, bool replaceStorage = false) noexcept;
-        void installPrepared(size_t actor, Installation& staged, InventoryStore& candidate) noexcept;
+        void installStorage(ContainerStore& live, ContainerStore& candidate, bool replaceStorage) noexcept;
+        void installPrepared(size_t owner, Installation& staged, ContainerStore& candidate) noexcept;
+        ContainerStore& storage(size_t owner);
+        const ContainerStore& storage(size_t owner) const;
+        Ptr ownerPtr(size_t owner) const;
+        ActorEffects& effects(size_t owner);
+        const ActorEffects& effects(size_t owner) const;
+        size_t registryBound() const { return (mContainer ? 3 : 2) * (PlainEquipmentValues::MaxItems + 1); }
         PersistenceResult persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
             EquipmentBytes& bytes, FileFaults& faults) const;
         void bindEffects(size_t actor);
@@ -143,12 +154,13 @@ namespace TES3MP::Native
         FileReadResult restartEquipment(size_t actor, const Ptr& caller, const std::filesystem::path& path,
             const EquipmentBindings& bindings, const RestartBindings& fresh,
             std::unique_ptr<const PlainEquipmentValues>& output, EquipmentBytes& bytes, FileFaults& faults);
-        std::unique_ptr<Installation> stageInstallation(size_t actor, const Ptr& caller, PreparedPlainEquipment input);
+        std::unique_ptr<Installation> stageInstallation(size_t actor, const Ptr& caller, PreparedPlainEquipment input,
+            size_t initiator = 0);
         PersistenceResult commitEquipment(size_t actor, const Ptr& caller, PreparedPlainEquipment input,
             EquipmentFileSink& file, const EquipmentBindings& bindings,
             std::unique_ptr<const PlainEquipmentResult>& output, EquipmentBytes& bytes, FileFaults& faults);
         PlainEquipmentValues installedValues(size_t actor) const;
-        PlainEquipmentContext preparationContext(size_t actor) const;
+        PlainEquipmentContext preparationContext(size_t owner, size_t initiator = 0) const;
         static auto cellValues(const ESM::CellRef& ref);
         static bool sameObject(const ESM::ObjectState& a, const ESM::ObjectState& b);
         static bool sameValues(const PlainEquipmentValues& a, const PlainEquipmentValues& b);
@@ -162,14 +174,16 @@ namespace TES3MP::Native
 
     public:
         // connected fixes this owner's persistence mode for its lifetime. Both
-        // transfer and equipment then require a pair sink; restartActor=2 means
-        // fresh pair recovery, with commands blocked until both actors install.
+        // transfer and equipment then require a session sink; restartActor=2 means
+        // fresh coherent recovery, with commands blocked until all owners install.
+        // A supplied container base binds one empty diagnostic ContainerStore;
+        // base inventory lists, placed-reference access and scripts are not loaded.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,
             const std::array<EquipmentActorBinding, 2>& actors,
             std::shared_ptr<const EquipmentScriptLocals> locals = {},
             MWBase::ScriptManager* declarations = nullptr,
-            std::optional<size_t> restartActor = {}, bool connected = false);
+            std::optional<size_t> restartActor = {}, bool connected = false, ESM::RefId container = {});
         EquipmentRuntime(const EquipmentRuntime&) = delete;
         EquipmentRuntime& operator=(const EquipmentRuntime&) = delete;
 
@@ -179,6 +193,7 @@ namespace TES3MP::Native
             EquipmentFileSink& file, std::unique_ptr<const EquipmentSuccess>& output,
             EquipmentBytes& bytes, FileFaults& faults);
         InventoryTransferCommand transferCommand(size_t source, InventoryInstanceId item, int quantity) const;
+        InventoryTransferCommand containerCommand(size_t actor, bool drop, InventoryInstanceId item, int quantity) const;
         PersistenceResult execute(InventoryTransferCaller caller, InventoryTransferCommand command,
             EquipmentFileSink& file, std::unique_ptr<const InventoryTransferSuccess>& output,
             EquipmentBytes& bytes, FileFaults& faults);

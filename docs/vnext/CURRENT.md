@@ -4,101 +4,98 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). One non-test runtime now supports
-  plain-shirt transfer, recipient equip, both actors' continuation and coherent
-  fresh recovery. Production server/network integration and M2 remain incomplete.
-- **Next action:** extend this same owner with one shared plain-shirt container:
-  actor drop into it, the other actor take/equip, then recover the affected
-  inventories together and continue. Start by inspecting the stock ContainerStore
-  versus InventoryStore preparation boundary; reuse existing mechanics and identity.
-- **Session scope:** complete 2–3 related bounded slices sequentially. Inspect code
-  and git status, preserve one writer, verify narrowly, review and commit. Replace
+- **Milestone:** M2 in [PLAN.md](PLAN.md). One connected runtime now supports
+  plain-shirt drop into a shared container, the other actor's take/equip, coherent
+  fresh recovery of all three owners, and both actors' continuation. M2 and
+  production server/network integration remain incomplete.
+- **Next action:** allow a currently equipped plain shirt to drop into this
+  shared container in one atomic command, using stock unequip/removal preparation;
+  have B take/equip it, recover all owners together and continue both actors.
+- **Session scope:** complete 2–3 related bounded slices sequentially. Inspect
+  code/status, preserve one writer, verify narrowly, review and commit. Replace
   this handoff and provide the next ready-to-paste prompt; no planning documents.
 - **Checkpoint:** 8850e745c298c6de629ef9a5a26bbdddf6aa56e3 preserves the migration
-  base before the engine-backed pivot.
+  base before the engine-backed pivot. This slice continues dc30d976d7.
 
 ## Implemented behavior
 
-[EquipmentRuntime](../../apps/tes3mp-server/native/equipment_runtime.hpp) owns both
-stock actor inventories, identities, stat contexts and effects. Connected commands,
-installation and recovery are compiled into `tes3mp_native_equipment_runtime`,
-outside components/tes3mp. Trusted content, exclusive WorldModel/LocalScripts and
-optional declaration services outlive the runtime; serialized access remains required.
+[EquipmentRuntime](../../apps/tes3mp-server/native/equipment_runtime.hpp) owns two
+stock InventoryStores and an optional shared base ContainerStore, their stable
+identities, actor stats and owned effects. Trusted content, exclusive WorldModel,
+LocalScripts and optional declaration services outlive the serialized runtime.
+Networking remains independent; the runtime target is outside components/tes3mp.
 
-The [connected implementation](../../apps/tes3mp-server/native/connected_runtime.cpp)
-uses protected equipment capture for two candidate inventories. Stock removal
-counts, add/stack selection, equipped-stack exclusion and addition normalization
-supply transfer mechanics. Equipment, transfer and recovery share one canonical
-inventory installer. Neither a disposable rehearsal nor another authoritative
-inventory owner participates in the connected sequence.
+[Protected clothing preparation](../../apps/openmw/mwworld/plainequipment.cpp)
+shares detached node capture, stock add/stack selection, signed removal counts,
+addition normalization and field serialization across both store types. Slots,
+selection and NPC stats remain InventoryStore concerns. The
+[connected implementation](../../apps/tes3mp-server/native/connected_runtime.cpp)
+uses the same installation owner for transfer, drop/take, equipment and recovery.
+No disposable rehearsal, fixture command implementation or second writer is used.
 
-Owned transfer intent checks, results and notification delivery moved into the
-non-test target; retained MISC migration tests use those functions. The MISC-only
-ContainerStore preparation/rehearsal and transfer-v4 recovery remain separate
-legacy tests, not the connected owner. Scripted/enchanted transfer remains unsupported.
+Drop/take accepts unequipped plain shirts. The trusted initiator must match the
+participating actor, current source ownership and registry revision. Partial and
+full moves preserve signed counts, dormant source identities and equipped-stack
+exclusion. An emptied donor can receive and equip again after recovery. Adjacent
+scripted equipment preserves PCSkipEquip, constant effects, passive abilities,
+initialized spells, unrelated stats and isolated locals. No executing registration
+or script instruction support was added.
 
-Trusted callers must match current actor roles, item ownership and revision.
-Partial/full transfers preserve signed counts and stable stack identities, including
-dormant source nodes. An empty donor can receive and equip after recovery.
-Plain transfers alongside equipped scripted shirts preserve isolated locals,
-PCSkipEquip, constant effects, passive ability ownership, initialized spells and
-unrelated stats. No script instructions or executing registrations were added.
+Every connected command persists one complete session file before installation
+or success publication. Shared-session framing includes both actors and the
+required container, common content/runtime bindings, generation counter and
+registry revision. It reuses equipment field codecs 1/5/6 and existing file
+durability. Existing pair framing remains unchanged. Bounds, owner relationships,
+duplicate identities and forbidden container equipment/stats are validated.
+Fresh recovery stages all owners before nonthrowing installation without replaying
+effects. Per-actor sinks are rejected; safe failures allow retry and uncertainty
+blocks the entire runtime even with another sink.
 
-Every connected transfer/equipment commit writes **one pair file** before either
-candidate installs or owned success publishes. Pair framing embeds the existing
-stock equipment codecs (1/5/6), common content/runtime bindings, generation counter
-and registry revision. Bounds, duplicate identities and actor relationships are
-validated. Fresh recovery stages both inventories, registry and stats before
-nonthrowing installation; it replays no effects. Connected owners reject per-actor
-sinks. Safe failures permit retry; uncertainty blocks both actors even with a new
-sink. LocalScripts lifetime identity is bound at startup, avoiding lazy mutation
-on a rejected restart. Legacy single-actor diagnostic APIs remain isolated by mode.
+The [native caller](../../apps/tes3mp-server/native/equipment_probe.cpp) accepts
+`--equipment-container CONT` with the existing equipment options. It creates an
+empty diagnostic container from that content base, drops two shirts from A,
+lets B take one, equips both, destroys the runtime, recovers the session, unequips
+both, lets A take the remaining shirt and equips both again.
 
 ## Verification
 
 Windows MSVC, `scripts/setup_msvc_env.ps1 -PreferLatest`, RelWithDebInfo,
-`build/vnext-product`, 2026-09-16. Requested targets both build with exit **0**:
+`build/vnext-product`, 2026-09-16. Both requested targets build with exit **0**:
 `tes3mp_native_loadout_tests`, `tes3mp_native_loadout_probe`; logs
-`connected-reviewed-tests-build.log`, `connected-reviewed-probe-build.log` in
-`build/logs`.
+`container-tests-final-build.log`, `container-probe-final-build.log` in `build/logs`.
 
-Individually run synthetic filters, all exit **0**. Prefix below is
-`inventory-equipment-`; log names are in `build/logs`:
+Individual synthetic filters, all exit **0**. Prefix is `inventory-equipment-`;
+all logs are in `build/logs`:
 
 | Suffix | Evidence | Log |
 |---|---|---|
-| transfer-preparation | stock signed stacking, untouched live pair | connected-preparation.log |
-| connected | transfer/equip/both continue/recover/return, 6 guards | connected-runtime-reviewed.log |
-| connected-recovery | 8 durable/fault cases; empty donor continuation | connected-recovery-reviewed.log |
-| connected-state | scripted/ability/stat/local preservation, truncated pair rejection | connected-state.log |
-| connected-allocations | 536 atomic failures, zero retained/post-acceptance allocations | connected-allocations.log |
-| scripted | 6 commits, 2 restarts, equipped/unequipped skips | connected-scripted.log |
-| scripted-durability | 12 failures and fresh continuations | connected-scripted-durability.log |
-| scripted-allocations | 874 failures, 8 successes, zero retained allocations | connected-scripted-allocations.log |
-| enchanted | preserved Luck 40/49 and ability 72/81 | connected-enchanted.log |
-| command-guards / restart-guards | 96 / 94 atomic rejections | connected-command-guards.log / connected-restart-guards.log |
+| container | complete shared sequence, total 8; 9 command/2 recovery guards | container-runtime-final.log |
+| container-recovery | 8 durability cases, retries/closure, empty donor continuation | container-recovery.log |
+| container-state | scripted/ability/stat/local preservation; truncated session rejection | container-state.log |
+| container-allocations | 1,014 atomic failures; zero retained/post-acceptance allocations | container-allocations.log |
+| connected | direct transfer/equip/recovery continuation preserved | container-direct-transfer.log |
+| transfer-preparation | stock signed stacking; live actors unchanged | container-preparation.log |
+| command-guards / restart-guards | 96 / 94 atomic rejections | container-command-guards.log / container-restart-guards.log |
+| scripted-allocations | 878 failures, 8 successes, zero retained allocations | container-scripted-allocations.log |
 
-`inventory-transfer-command`: exit **0**, 48 existing MISC cases plus failure,
-allocation and delivery checks; `connected-legacy-transfer.log`.
+**Real-loadout evidence:** local Morrowind.esm, common_shirt_01, barrel_01 and two
+distinct `player` instances, with diagnostic starting inventories. The complete
+shared sequence above exits **0**; `container-real-plain-final.log`. One
+`session.equipment` file. No placed-world container, real scripted transfer,
+Tamriel Rebuilt or live clients were tested.
 
-**Real-loadout evidence:** local Morrowind.esm, common_shirt_01, two distinct
-`player` instances with diagnostic starting inventories: transfer 2, recipient
-and donor equip, destroyed-owner pair recovery, both unequip, return transfer 1;
-exit **0**, `connected-real-plain-reviewed.log`. One `session.equipment` file.
-No real-loadout scripted operation, Tamriel Rebuilt or live clients ran.
-
-Build failures (exit 2: const slot lookup, test header imports) and allocation
-failure (exit 1: lazy script lifetime) were fixed and rerun successfully.
+Earlier failures were fixed and rerun: build exit **2** from omitted shell MSVC
+initialization; filter exit **1** from the temporary container envelope binding
+and an isolation assertion that incorrectly required the shared counter unchanged.
 Individual documentation budget/local-link checks exit **0**: `docs-budget.log`,
-`docs-links.log`. Valid verification was reused; no complete suites, expensive
-gates or upstream baseline tests ran.
+`docs-links.log`. Valid verification was reused; no full suites or expensive gates.
 
 ## Limits
 
-Connected transfer accepts unequipped plain shirts only. Other equipment categories,
-shared containers/take/drop, executing script registrations, production networking,
-broader scripts and complete world saves remain unfinished. Equipment still supports
-its existing bounded constant/scripted shirts. Inherited limits: 64-node preparation,
-65-node actor saves, bounded pending effects, actor-scoped active-spell IDs, no durable
-request/notification deduplication, private save directories, rejected postponed
+Equipped-shirt drop, scripted/enchanted transfer, other item categories,
+placed-container access/capacity/crime services, executing registrations, broader
+scripts, production networking and complete world saves remain unfinished.
+Container base inventory lists are not loaded. Inherited limits include 64-node
+preparation/65-node saves, bounded pending effects, actor-scoped active-spell IDs,
+no durable request deduplication, private save directories, rejected postponed
 physics, broad headless linking/provenance debt and calling-thread allocation evidence.

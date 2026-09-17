@@ -33,7 +33,8 @@ namespace TES3MP::Native
         explicit EquipmentFileSink(const std::filesystem::path& path, bool session = false);
         bool session() const noexcept { return mSession; }
         PersistenceResult writeSession(const EquipmentSessionValues& values,
-            const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults);
+            const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output, FileFaults& faults,
+        const EquipmentBindings* container = nullptr);
         // Encode and validate before any I/O. Accepted publishes complete owned
         // bytes by nonthrowing swap. Rejection/exception/uncertainty preserves
         // prior output storage/value. Uncertainty blocks further writes, even
