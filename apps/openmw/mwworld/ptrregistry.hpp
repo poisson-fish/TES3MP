@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace TES3MP::Native { class EquipmentRuntime; }
+
 namespace MWWorld
 {
     namespace Testing
@@ -146,6 +148,7 @@ namespace MWWorld
         friend class ContainerStore;
         friend class Testing::DisposableTransferRehearsal;
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         static std::unique_ptr<PreparedStorage> prepareStorage(
             const Snapshot& relocated, const std::vector<std::pair<ESM::RefNum, Ptr>>& nodes)
         {

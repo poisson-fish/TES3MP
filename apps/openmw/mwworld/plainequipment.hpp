@@ -62,6 +62,7 @@ namespace MWWorld
     {
         friend class PreparedPlainEquipment;
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         const Ptr mActor;
         const ESM::RefNum mIdentity;
         const ESMStore& mContent;
@@ -151,10 +152,11 @@ namespace MWWorld
     class RestoredPlainEquipment
     {
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         struct State;
         std::unique_ptr<State> mState;
         explicit RestoredPlainEquipment(std::unique_ptr<State> state);
-        // Only fresh test-owned restart composition may relocate this storage.
+        // Only fresh runtime restart composition may relocate this storage.
         // Content must still be the exact store used to construct the nodes.
         InventoryStore& installationCandidate(
             const ESMStore& content, ESM::RefNum actor, ESM::RefNum counter) const;
@@ -182,10 +184,11 @@ namespace MWWorld
     class PreparedPlainEquipment
     {
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         struct State;
         std::unique_ptr<State> mState;
         explicit PreparedPlainEquipment(std::unique_ptr<State> state);
-        // Only the test-owned fixture may stage installation. No public mutation
+        // Only the runtime owner may stage installation. No public mutation
         // or persistence API: revalidate and require the exact receiving store.
         InventoryStore& installationCandidate(const PlainEquipmentContext& context, const InventoryStore& target);
         std::shared_ptr<EquipmentNpcStats>& installationNpcStats();

@@ -1,6 +1,8 @@
 #ifndef TES3MP_NATIVE_TEST_ALLOCATIONS_H
 #define TES3MP_NATIVE_TEST_ALLOCATIONS_H
 
+#include "runtime_phases.hpp"
+
 #include <array>
 #include <cstddef>
 
@@ -8,24 +10,8 @@ namespace MWWorld::Testing::Allocations
 {
     // Linked only into tes3mp_native_loadout_tests. Observe C++ allocations on
     // the calling thread; fixture construction, assertions and logging stay outside.
-    enum class Phase
-    {
-        Outside,
-        Preparation,
-        Result,
-        ConsumerCopy,
-        Validation,
-        Setup,
-        Exchange,
-        Rollback,
-        Revalidation,
-        Persistence,
-        Installation,
-        Retirement,
-        Publication,
-        Delivery,
-        Count
-    };
+    using TES3MP::Native::Allocations::Phase;
+    using TES3MP::Native::Allocations::InPhase;
     struct Trace
     {
         std::array<std::size_t, static_cast<std::size_t>(Phase::Count)> mAllocations{}, mVisits{};
@@ -46,17 +32,6 @@ namespace MWWorld::Testing::Allocations
         ~Observe();
         Observe(const Observe&) = delete;
         Observe& operator=(const Observe&) = delete;
-    };
-    class InPhase
-    {
-        Phase mPrevious;
-
-    public:
-        explicit InPhase(Phase phase) noexcept;
-        ~InPhase();
-        void set(Phase phase) noexcept;
-        InPhase(const InPhase&) = delete;
-        InPhase& operator=(const InPhase&) = delete;
     };
 }
 

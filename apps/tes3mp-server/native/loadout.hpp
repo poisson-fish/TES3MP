@@ -23,6 +23,9 @@ namespace TES3MP::Native
         bool mSample = false;
         std::string mInventoryItem;
         std::string mEnchantment;
+        std::string mEquipment;
+        std::vector<std::string> mEquipmentActors;
+        std::filesystem::path mEquipmentSaveDirectory;
     };
 
     LoadoutOptions readLoadoutOptions(int argc, const char* const argv[]);
@@ -44,6 +47,9 @@ namespace TES3MP::Native
         void writeInventoryProbe(std::ostream& output, std::string_view itemId);
         // Bounded, staged cost/charge diagnostics using the retained engine store.
         void writeEnchantmentProbe(std::ostream& output, std::string_view enchantmentId) const;
+        // Durable equipment command, fresh owner recovery and continuation.
+        // Retains bounded per-actor saves in a new private directory.
+        void writeEquipmentProbe(std::ostream& output);
 
     private:
         LoadoutOptions mOptions;

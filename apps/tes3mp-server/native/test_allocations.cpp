@@ -14,7 +14,8 @@ namespace
     using namespace MWWorld::Testing::Allocations;
     thread_local Trace* sTrace = nullptr;
     thread_local std::size_t sFailAt = 0;
-    thread_local Phase sPhase = Phase::Outside;
+    using TES3MP::Native::Allocations::currentPhase;
+    using TES3MP::Native::Allocations::visitPhase;
     thread_local std::array<void*, 8192> sBlocks{};
 
     void trackAllocation(void* value) noexcept
@@ -44,11 +45,11 @@ namespace
     {
         if (!sTrace)
             return;
-        ++sTrace->mAllocations[static_cast<std::size_t>(sPhase)];
+        ++sTrace->mAllocations[static_cast<std::size_t>(currentPhase)];
         if (++sTrace->mTotal == sFailAt)
         {
             ++sTrace->mFailures;
-            sTrace->mFailedPhase = sPhase;
+            sTrace->mFailedPhase = currentPhase;
             throw std::bad_alloc();
         }
     }
@@ -98,31 +99,18 @@ namespace MWWorld::Testing::Allocations
 {
     Observe::Observe(Trace& trace, std::size_t failAt) noexcept
     {
-        if (sTrace || sPhase != Phase::Outside)
+        if (sTrace || currentPhase != Phase::Outside)
             std::abort(); // Nested instrumentation would hide allocations.
         trace = {};
         sTrace = &trace;
+        visitPhase = [](Phase phase) noexcept { ++sTrace->mVisits[static_cast<std::size_t>(phase)]; };
         sFailAt = failAt;
     }
     Observe::~Observe()
     {
+        visitPhase = nullptr;
         sTrace = nullptr;
         sFailAt = 0;
-    }
-    InPhase::InPhase(Phase phase) noexcept
-        : mPrevious(sPhase)
-    {
-        set(phase);
-    }
-    InPhase::~InPhase()
-    {
-        sPhase = mPrevious;
-    }
-    void InPhase::set(Phase phase) noexcept
-    {
-        sPhase = phase;
-        if (sTrace)
-            ++sTrace->mVisits[static_cast<std::size_t>(phase)];
     }
 }
 

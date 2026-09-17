@@ -15,7 +15,7 @@
 #include <unistd.h>
 #endif
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
     namespace
     {
@@ -259,16 +259,16 @@ namespace MWWorld::Testing
         mTemporary += ".tmp";
     }
 
-    TestPersistenceResult BoundedFileSink::write(std::span<const char> bytes, FileFaults& faults) noexcept
+    PersistenceResult BoundedFileSink::write(std::span<const char> bytes, FileFaults& faults) noexcept
     {
         if (mFailedClosed)
-            return TestPersistenceResult::Uncertain;
+            return PersistenceResult::Uncertain;
         if (bytes.empty() || bytes.size() > mMaximum)
-            return TestPersistenceResult::Rejected;
+            return PersistenceResult::Rejected;
         File file;
         faults.mReached = FileFault::Create;
         if (faults.mFail == FileFault::Create || !file.open(mTemporary, true))
-            return TestPersistenceResult::Rejected;
+            return PersistenceResult::Rejected;
         struct Cleanup
         {
             File& mFile;
@@ -283,22 +283,22 @@ namespace MWWorld::Testing
         for (size_t offset = 0; offset < bytes.size();)
         {
             if (faults.mFail == FileFault::Write && faults.mWrites != 0)
-                return TestPersistenceResult::Rejected;
+                return PersistenceResult::Rejected;
             size_t count = 0;
             ++faults.mWrites;
             if (!file.write(bytes.data() + offset,
                     std::min(bytes.size() - offset, std::clamp(faults.mChunk, size_t{ 1 }, size_t{ 4096 })), count)
                 || count == 0)
-                return TestPersistenceResult::Rejected;
+                return PersistenceResult::Rejected;
             offset += count;
         }
         faults.mReached = FileFault::Flush;
         if (faults.mFail == FileFault::Flush || !file.flush())
-            return TestPersistenceResult::Rejected;
+            return PersistenceResult::Rejected;
         faults.mReached = FileFault::Close;
         const bool closed = file.close();
         if (!closed || faults.mFail == FileFault::Close || faults.mFail == FileFault::Replace)
-            return TestPersistenceResult::Rejected;
+            return PersistenceResult::Rejected;
 
         // Conservative even on an OS replace error: do not infer from a failure
         // return that the namespace was untouched. No fallible C++ work follows.
@@ -306,14 +306,14 @@ namespace MWWorld::Testing
         faults.mReached = FileFault::Replace;
         if (faults.mFail == FileFault::ReplaceError || !replace(mTemporary, mPath, faults)
             || faults.mFail == FileFault::AfterReplace)
-            return TestPersistenceResult::Uncertain;
+            return PersistenceResult::Uncertain;
         faults.mReached = FileFault::Barrier;
         if (faults.mFail == FileFault::Barrier || !barrier(mParent))
-            return TestPersistenceResult::Uncertain;
+            return PersistenceResult::Uncertain;
         faults.mReached = FileFault::Read;
         if (!verifyFile(mPath, bytes, mMaximum, faults))
-            return TestPersistenceResult::Uncertain;
+            return PersistenceResult::Uncertain;
         mFailedClosed = false;
-        return TestPersistenceResult::Accepted;
+        return PersistenceResult::Accepted;
     }
 }

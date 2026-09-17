@@ -1,26 +1,25 @@
 #ifndef TES3MP_NATIVE_INVENTORY_TRANSFER_COMMAND_H
 #define TES3MP_NATIVE_INVENTORY_TRANSFER_COMMAND_H
 
+#include "inventory_identity.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 
+namespace TES3MP::Native { struct FileFaults; }
+
 namespace MWWorld::Testing
 {
     class DisposableTransferRehearsal;
     class TransferFileSink;
     struct SaveBindings;
-    struct FileFaults;
+    using TES3MP::Native::FileFaults;
 
     // Owned app-local values, not a wire protocol or a durable request identity.
-    struct InventoryInstanceId
-    {
-        std::uint32_t mIndex = 0;
-        std::int32_t mContentFile = -1;
-        bool operator==(const InventoryInstanceId&) const = default;
-    };
+    using TES3MP::Native::InventoryInstanceId;
 
     struct InventoryTransferCommand
     {

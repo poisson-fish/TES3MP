@@ -1,16 +1,16 @@
 #ifndef TES3MP_NATIVE_BOUNDED_FILE_H
 #define TES3MP_NATIVE_BOUNDED_FILE_H
 
-#include "test_persistence.hpp"
+#include "persistence.hpp"
 
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <vector>
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
-    // Test-target-only OS fault seams. Short successful reads/writes are real
+    // App-local OS fault seams. Short successful reads/writes are real
     // I/O; failures occur at the named boundary without replacing the protocol.
     enum class FileFault
     {
@@ -68,10 +68,18 @@ namespace MWWorld::Testing
 
         // No allocation or exceptions, including cleanup and post-replacement
         // verification. Uncertainty is sticky; recovery needs a new composition
-        // after validated restart, never an in-place retry of this fixture.
-        TestPersistenceResult write(std::span<const char> bytes, FileFaults& faults) noexcept;
+        // after validated restart, never an in-place retry of this runtime.
+        PersistenceResult write(std::span<const char> bytes, FileFaults& faults) noexcept;
         bool failedClosed() const noexcept { return mFailedClosed; }
     };
 }
 
+namespace MWWorld::Testing
+{
+    using TES3MP::Native::FileFault;
+    using TES3MP::Native::FileFaults;
+    using TES3MP::Native::FileReadResult;
+    using TES3MP::Native::readBoundedFile;
+    using TES3MP::Native::BoundedFileSink;
+}
 #endif

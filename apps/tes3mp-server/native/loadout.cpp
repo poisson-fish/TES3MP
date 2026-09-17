@@ -257,7 +257,10 @@ namespace TES3MP::Native
             "encoding", bpo::value<std::string>()->default_value("win1252"))(
             "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample")(
             "inventory", bpo::value<std::string>(), "Probe adding a MISC item to an engine ContainerStore")(
-            "enchantment", bpo::value<std::string>(), "Probe an enchantment's engine cast cost and charge");
+            "enchantment", bpo::value<std::string>(), "Probe an enchantment's engine cast cost and charge")(
+            "equipment", bpo::value<std::string>(), "Run durable shirt equipment and fresh restart")(
+            "equipment-actors", bpo::value<std::vector<std::string>>()->multitoken(), "Two trusted NPC base IDs")(
+            "equipment-save-dir", bpo::value<std::string>(), "New private directory for equipment saves");
         bpo::variables_map variables;
         Files::parseArgs(argc, argv, variables, description);
         Files::ConfigurationManager config(true);
@@ -288,6 +291,20 @@ namespace TES3MP::Native
                 throw std::runtime_error(
                     "--enchantment requires an ID and cannot be combined with --sample/--inventory");
         }
+        if (variables.count("equipment"))
+        {
+            result.mEquipment = variables["equipment"].as<std::string>();
+            if (result.mSample || !result.mInventoryItem.empty() || !result.mEnchantment.empty()
+                || result.mEquipment.empty() || !variables.count("equipment-actors")
+                || !variables.count("equipment-save-dir"))
+                throw std::runtime_error("--equipment requires --equipment-actors A B and --equipment-save-dir, alone");
+            result.mEquipmentActors = variables["equipment-actors"].as<std::vector<std::string>>();
+            result.mEquipmentSaveDirectory = variables["equipment-save-dir"].as<std::string>();
+            if (result.mEquipmentActors.size() != 2 || result.mEquipmentSaveDirectory.empty())
+                throw std::runtime_error("Equipment requires exactly two NPC bases and a save directory");
+        }
+        else if (variables.count("equipment-actors") || variables.count("equipment-save-dir"))
+            throw std::runtime_error("Equipment bindings require --equipment");
         return result;
     }
 
@@ -464,8 +481,11 @@ namespace TES3MP::Native
         const bool sample = options.mSample;
         const std::string inventoryItem = options.mInventoryItem;
         const std::string enchantment = options.mEnchantment;
+        const bool equipment = !options.mEquipment.empty();
         Loadout loadout(std::move(options));
-        if (!enchantment.empty())
+        if (equipment)
+            loadout.writeEquipmentProbe(output);
+        else if (!enchantment.empty())
             loadout.writeEnchantmentProbe(output, enchantment);
         else if (!inventoryItem.empty())
             loadout.writeInventoryProbe(output, inventoryItem);

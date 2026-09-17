@@ -41,6 +41,7 @@ namespace MWWorld
     class InventoryStore : public ContainerStore
     {
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         friend class PreparedPlainEquipment;
         friend class RestoredPlainEquipment;
     public:

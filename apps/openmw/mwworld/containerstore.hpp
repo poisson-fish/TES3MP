@@ -544,6 +544,7 @@ namespace MWWorld
         friend class ContainerStoreIteratorBase<ConstPtr>;
         friend class Testing::DisposableTransferRehearsal;
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         friend class PreparedPlainEquipment;
         friend class RestoredPlainEquipment;
     };
@@ -912,6 +913,7 @@ namespace MWWorld
         // Defined/linked only by the disposable native test target.
         friend class Testing::DisposableTransferRehearsal;
         friend class Testing::PlainEquipmentFixture;
+        friend class TES3MP::Native::EquipmentRuntime;
         friend class PreparedPlainEquipment;
         friend class RestoredPlainEquipment;
     };

@@ -6,9 +6,10 @@
 #include <array>
 #include <span>
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
-    // Test-target-only in-memory equipment format, independent of transfer v4.
+    using namespace MWWorld;
+    // App-local in-memory equipment format, independent of transfer v4.
     // Trusted caller supplies bindings; matching an actor is not authentication.
     struct EquipmentEnvelope
     {

@@ -1,7 +1,7 @@
 #ifndef TES3MP_NATIVE_TRANSFER_REHEARSAL_H
 #define TES3MP_NATIVE_TRANSFER_REHEARSAL_H
 
-#include "test_persistence.hpp"
+#include "persistence.hpp"
 
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>

@@ -12,8 +12,9 @@
 #include <limits>
 #include <sstream>
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
+    using namespace MWWorld;
     namespace
     {
         static_assert(std::endian::native == std::endian::little);

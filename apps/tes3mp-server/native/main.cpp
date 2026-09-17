@@ -11,6 +11,7 @@ int main(int argc, char** argv)
         std::cout << "tes3mp_native_loadout_probe [OpenMW --config DIR --data DIR --data-local DIR\n"
                      "  --content FILE --encoding win1252 --replace SETTING ...]\n"
                      "  [--sample | --inventory ID | --enchantment ID]\n"
+                     "  [--equipment SHIRT --equipment-actors NPC_A NPC_B --equipment-save-dir NEW_DIR]\n"
                      "Loads configured TES3 records through OpenMW; writes diagnostic TSV to stdout.\n"
                      "Record IDs use OpenMW's ASCII case folding; display names retain their spelling.\n"
                      "Uses the engine's local/global openmw.cfg and its config chain.\n"
@@ -23,7 +24,11 @@ int main(int argc, char** argv)
                      "--enchantment stages native cast cost (before skill adjustment) and maximum charge.\n"
                      "  Limits: 256 bytes/ID, 32 effects, nonnegative effect fields/base cost/multiplier <= 1e6,\n"
                      "  and representable rounded cost/charge. This does not execute enchanted effects.\n"
-                     "No World, Environment, rendering, UI, equipment, or script execution.\n";
+                     "--equipment commits equip, destroys the owner, restores, then commits unequip for each actor.\n"
+                     "  Uses the app-local runtime and stock InventoryStore; retains bounded actor saves.\n"
+                     "  Supports plain shirts and the bounded constant Fortify Luck/script-locals operation.\n"
+                     "  Each recovery restores one actor beside the other actor's startup state, not a world save.\n"
+                     "No World, Environment, rendering, UI, or script instruction execution.\n";
         return 0;
     }
     // OpenMW Log writes to cout. Keep diagnostics off the record report even

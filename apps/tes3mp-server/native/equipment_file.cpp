@@ -1,7 +1,8 @@
 #include "equipment_file.hpp"
 
-namespace MWWorld::Testing
+namespace TES3MP::Native
 {
+    using namespace MWWorld;
     FileReadResult readEquipmentFile(const std::filesystem::path& path, EquipmentBytes& output, FileFaults& faults)
     {
         return readBoundedFile(path, MaxEquipmentBytes, output, faults);
@@ -30,15 +31,15 @@ namespace MWWorld::Testing
     {
     }
 
-    TestPersistenceResult EquipmentFileSink::write(const PlainEquipmentValues& values,
+    PersistenceResult EquipmentFileSink::write(const PlainEquipmentValues& values,
         const EquipmentBindings& bindings, EquipmentBytes& output, FileFaults& faults)
     {
         if (mFile.failedClosed())
-            return TestPersistenceResult::Uncertain;
+            return PersistenceResult::Uncertain;
         EquipmentBytes staged;
         encodeEquipment(values, bindings, staged);
         const auto result = mFile.write(staged, faults);
-        if (result == TestPersistenceResult::Accepted)
+        if (result == PersistenceResult::Accepted)
             output.swap(staged);
         return result;
     }
