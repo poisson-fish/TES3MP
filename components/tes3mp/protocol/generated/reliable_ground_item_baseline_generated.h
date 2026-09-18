@@ -27,6 +27,8 @@ struct GroundItem;
 struct GroundItemBaselineHeader;
 struct GroundItemBaselineHeaderBuilder;
 
+struct ItemPresentation;
+
 struct ReliableGroundItemBaseline;
 struct ReliableGroundItemBaselineBuilder;
 
@@ -244,6 +246,47 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) GroundItem FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(GroundItem, 80);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ItemPresentation FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t stack_id_;
+  float rx_;
+  float ry_;
+  float rz_;
+  float scale_;
+
+ public:
+  ItemPresentation()
+      : stack_id_(0),
+        rx_(0),
+        ry_(0),
+        rz_(0),
+        scale_(0) {
+  }
+  ItemPresentation(uint64_t _stack_id, float _rx, float _ry, float _rz, float _scale)
+      : stack_id_(::flatbuffers::EndianScalar(_stack_id)),
+        rx_(::flatbuffers::EndianScalar(_rx)),
+        ry_(::flatbuffers::EndianScalar(_ry)),
+        rz_(::flatbuffers::EndianScalar(_rz)),
+        scale_(::flatbuffers::EndianScalar(_scale)) {
+  }
+  uint64_t stack_id() const {
+    return ::flatbuffers::EndianScalar(stack_id_);
+  }
+  float rx() const {
+    return ::flatbuffers::EndianScalar(rx_);
+  }
+  float ry() const {
+    return ::flatbuffers::EndianScalar(ry_);
+  }
+  float rz() const {
+    return ::flatbuffers::EndianScalar(rz_);
+  }
+  float scale() const {
+    return ::flatbuffers::EndianScalar(scale_);
+  }
+};
+FLATBUFFERS_STRUCT_END(ItemPresentation, 24);
+
 struct GroundItemBaselineHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GroundItemBaselineHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -341,7 +384,10 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
     VT_CELL = 6,
-    VT_ITEMS = 8
+    VT_ITEMS = 8,
+    VT_NATIVE_PLACEMENTS = 10,
+    VT_PRESENTATION = 12,
+    VT_NATIVE_WORLD = 14
   };
   const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *>(VT_HEADER);
@@ -352,6 +398,15 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *> *items() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *> *>(VT_ITEMS);
   }
+  const ::flatbuffers::Vector<uint64_t> *native_placements() const {
+    return GetPointer<const ::flatbuffers::Vector<uint64_t> *>(VT_NATIVE_PLACEMENTS);
+  }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *> *presentation() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *> *>(VT_PRESENTATION);
+  }
+  bool native_world() const {
+    return GetField<uint8_t>(VT_NATIVE_WORLD, 0) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -360,6 +415,11 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
            VerifyField<TES3MP::Protocol::Schema::GroundItemBaseline::Cell>(verifier, VT_CELL, 8) &&
            VerifyOffset(verifier, VT_ITEMS) &&
            verifier.VerifyVector(items()) &&
+           VerifyOffset(verifier, VT_NATIVE_PLACEMENTS) &&
+           verifier.VerifyVector(native_placements()) &&
+           VerifyOffset(verifier, VT_PRESENTATION) &&
+           verifier.VerifyVector(presentation()) &&
+           VerifyField<uint8_t>(verifier, VT_NATIVE_WORLD, 1) &&
            verifier.EndTable();
   }
 };
@@ -377,6 +437,15 @@ struct ReliableGroundItemBaselineBuilder {
   void add_items(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *>> items) {
     fbb_.AddOffset(ReliableGroundItemBaseline::VT_ITEMS, items);
   }
+  void add_native_placements(::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> native_placements) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_NATIVE_PLACEMENTS, native_placements);
+  }
+  void add_presentation(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *>> presentation) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_PRESENTATION, presentation);
+  }
+  void add_native_world(bool native_world) {
+    fbb_.AddElement<uint8_t>(ReliableGroundItemBaseline::VT_NATIVE_WORLD, static_cast<uint8_t>(native_world), 0);
+  }
   explicit ReliableGroundItemBaselineBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -392,11 +461,17 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader> header = 0,
     const TES3MP::Protocol::Schema::GroundItemBaseline::Cell *cell = nullptr,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *>> items = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *>> items = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> native_placements = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *>> presentation = 0,
+    bool native_world = false) {
   ReliableGroundItemBaselineBuilder builder_(_fbb);
+  builder_.add_presentation(presentation);
+  builder_.add_native_placements(native_placements);
   builder_.add_items(items);
   builder_.add_cell(cell);
   builder_.add_header(header);
+  builder_.add_native_world(native_world);
   return builder_.Finish();
 }
 
@@ -404,13 +479,21 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader> header = 0,
     const TES3MP::Protocol::Schema::GroundItemBaseline::Cell *cell = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem> *items = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem> *items = nullptr,
+    const std::vector<uint64_t> *native_placements = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation> *presentation = nullptr,
+    bool native_world = false) {
   auto items__ = items ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem>(*items) : 0;
+  auto native_placements__ = native_placements ? _fbb.CreateVector<uint64_t>(*native_placements) : 0;
+  auto presentation__ = presentation ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation>(*presentation) : 0;
   return TES3MP::Protocol::Schema::GroundItemBaseline::CreateReliableGroundItemBaseline(
       _fbb,
       header,
       cell,
-      items__);
+      items__,
+      native_placements__,
+      presentation__,
+      native_world);
 }
 
 inline const TES3MP::Protocol::Schema::GroundItemBaseline::ReliableGroundItemBaseline *GetReliableGroundItemBaseline(const void *buf) {

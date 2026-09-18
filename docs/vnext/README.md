@@ -27,28 +27,18 @@ OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
 Networking stays engine-independent. An app-local OpenMW runtime owns bounded
-inventory transfer across all TES3 item record types, shared-container take/put,
-and coherent installation/recovery. OpenMW loads fixed and leveled base loot;
-both endpoints derive item identities from loaded content. Authenticated intake,
-joint command/image durability and client baselines include join/resume/resync.
-Two actual desktop clients verify stocked-chest GUI take/put, late join, reconnect
-and durable restart. Whole-interior bootstrap now discovers bounded shared
-inventories, with real-content headless verification of nine placements.
-Character bootstrap can load each player's winning NPC inventory, including
-fixed/leveled starting items, with stable identities and recovery without refill.
-Ordinary clothing, armor and weapons support authoritative equip/unequip across
-all 19 slots, coherent saves and private/public replication. Fresh characters
-auto-equip ordinary starting gear using stock NPC selection; recovery preserves
-saved slots. Selected enchanted gear rejects until its services exist. Chargen
-and script-driven initialization remain pending.
-V6 also binds unscripted placed NPC/creature inventories and ordinary equipment,
-with authoritative take/put from content-defined corpses and recovery without
-refill. Bulk Take All commits every container/corpse stack atomically. Living actors replicate public equipment while keeping inventories private.
-Living/companion access and dynamic death remain pending.
-Scripts, locks/traps, respawn and dynamic world activation remain unfinished. The server and desktop adapter remain the migration
-base; each subsystem changes authority exactly once. Broad compatibility is the
-destination, reached through
-small playable slices rather than an engine-wide rewrite before the first test.
+inventory transfers, equipment, shared containers and placed actor inventories,
+corpse loot, bulk Take All, and ordinary world pickup/drop. The same durable image
+covers inventories and active world items. Clients submit authenticated intent
+and present committed baselines; recovery never refills looted content.
+
+Existing desktop evidence covers containers, corpse loot, public equipment and
+world pickup/drop, including reconnect/restart in a generated Morrowind test cell.
+[CURRENT.md](CURRENT.md) names exact evidence, limitations and the
+next concrete action. Scripts, AI/combat, dynamic activation
+and general campaign recovery remain unfinished. Stock stationary placement has
+automated v8 evidence and user-confirmed live behavior. Each subsystem changes authority
+once, through small playable slices; broad mod compatibility remains the destination.
 
 ## Product boundaries
 

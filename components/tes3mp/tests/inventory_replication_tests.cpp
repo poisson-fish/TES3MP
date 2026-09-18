@@ -1,3 +1,4 @@
+#include <limits>
 #include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_frame.hpp>
 #include <tes3mp/protocol_handshake.hpp>
@@ -131,6 +132,38 @@ int main()
     assert(encodeReliableGroundItemBaseline(std::get<ReliableGroundItemBaseline>(maximumGroundBaseline)).size()
         <= ReliableOperationMaximumPayloadBytes);
 
+    auto nativeGround = std::get<ReliableGroundItemBaseline>(ReliableGroundItemBaseline::create(header(), cell,
+        std::span(maximumGround).first(64)));
+    nativeGround.nativeWorld = true;
+    for (size_t i = 0; i < 64; ++i)
+    {
+        nativeGround.nativePlacements.push_back((uint64_t{1} << 63) | (i + 1));
+        nativeGround.presentation.push_back({nativeGround.items[i].stack.stackId, {.1f, .2f, .3f}, 1.25f});
+    }
+    const auto nativeBytes = encodeReliableGroundItemBaseline(nativeGround);
+    assert(nativeBytes.size() <= ReliableOperationMaximumPayloadBytes);
+    assert(decodeReliableGroundItemBaseline(nativeBytes) == GroundItemBaselineDecodeResult(nativeGround));
+    for (size_t i = 0; i < nativeBytes.size(); ++i)
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(std::span(nativeBytes).first(i))));
+    for (int invalid = 0; invalid < 8; ++invalid)
+    {
+        auto bad = nativeGround;
+        switch (invalid)
+        {
+            case 0: bad.nativePlacements[1] = bad.nativePlacements[0]; break;
+            case 1: bad.nativePlacements.push_back(UINT64_MAX); break;
+            case 2: bad.presentation.pop_back(); break;
+            case 3: bad.presentation[0].scale = 0; break;
+            case 4: bad.presentation[0].rotation[0] = std::numeric_limits<float>::infinity(); break;
+            case 5: bad.presentation[0].stack = bad.presentation[1].stack; break;
+            case 6: bad.header.chunkCount = 2; break;
+            case 7: bad.nativeWorld = false; break;
+        }
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(bad))));
+    }
+    nativeGround.items.clear(); nativeGround.presentation.clear();
+    assert(decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(nativeGround)) == GroundItemBaselineDecodeResult(nativeGround));
+
     const ClientInventoryTransactionCommand command{ .sessionId = id<SessionId>(1),
         .sessionGeneration = SessionGeneration::initial(),
         .commandSequence = id<CommandSequence>(1),
@@ -146,6 +179,39 @@ int main()
         .interactionOrigin = Position3(1, 2, 3) };
     const auto commandBytes = encodeClientInventoryTransactionCommand(command);
     assert(decodeClientInventoryTransactionCommand(commandBytes) == InventoryTransactionCommandDecodeResult(command));
+    auto placement = command;
+    placement.kind = InventoryTransactionKind::DropItem;
+    placement.containerId.reset();
+    placement.expectedContainerRevision.reset();
+    placement.placement.emplace();
+    for (size_t i = 0; i < 16; ++i)
+    {
+        placement.placement->view[i] = double(i) + 0.125;
+        placement.placement->projection[i] = -double(i) - 0.25;
+    }
+    placement.placement->cursorX = 0.375f;
+    const auto placementBytes = encodeClientInventoryTransactionCommand(placement);
+    assert(placementBytes.size() <= ReliableOperationMaximumPayloadBytes);
+    assert(decodeClientInventoryTransactionCommand(placementBytes) == InventoryTransactionCommandDecodeResult(placement));
+    for (size_t size = 0; size < placementBytes.size(); ++size)
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeClientInventoryTransactionCommand(std::span(placementBytes).first(size))));
+    for (int invalid = 0; invalid < 7; ++invalid)
+    {
+        auto malformed = placement;
+        switch (invalid)
+        {
+            case 0: malformed.placement->view[0] = std::numeric_limits<double>::quiet_NaN(); break;
+            case 1: malformed.placement->projection[3] = std::numeric_limits<double>::infinity(); break;
+            case 2: malformed.placement->cursorX = -0.01f; break;
+            case 3: malformed.placement->cursorY = 1.01f; break;
+            case 4: malformed.placement->cursorY = std::numeric_limits<float>::quiet_NaN(); break;
+            case 5: malformed.placement->view[12] = 1e10; break;
+            case 6: malformed = command; malformed.placement.emplace(); break;
+        }
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeClientInventoryTransactionCommand(encodeClientInventoryTransactionCommand(malformed))));
+    }
     auto bulk = command;
     bulk.kind = InventoryTransactionKind::TakeAllFromContainer;
     const auto bulkBytes = encodeClientInventoryTransactionCommand(bulk);

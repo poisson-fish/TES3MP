@@ -618,7 +618,7 @@ namespace TES3MP
         InventoryRevision expectedInventoryRevision, Position3 interactionOrigin,
         std::optional<ContainerId> containerId, std::optional<EquipmentSlot> slot,
         std::optional<ContainerRevision> expectedContainerRevision,
-        std::optional<WorldItemRevision> expectedWorldItemRevision)
+        std::optional<WorldItemRevision> expectedWorldItemRevision, std::optional<DropPlacementView> placement)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
@@ -637,7 +637,7 @@ namespace TES3MP
         const ClientInventoryTransactionCommand command{ *sessionId, snapshot->header().targetSessionGeneration(),
             *sequence, *commandId, snapshot->header().canonicalRevision(), kind, containerId, prototypeId, stackId,
             count, slot, expectedInventoryRevision, expectedContainerRevision, expectedWorldItemRevision,
-            interactionOrigin };
+            interactionOrigin, std::move(placement) };
         const auto encoded = encodeClientInventoryTransactionCommand(command);
         if (encoded.empty())
             return { ClientRuntimeResult::EncodeRejected, std::nullopt };

@@ -47,10 +47,21 @@ table GroundItemBaselineHeader {
   chunk_count:uint (id: 5);
 }
 
+struct ItemPresentation {
+  stack_id:ulong;
+  rx:float;
+  ry:float;
+  rz:float;
+  scale:float;
+}
+
 table ReliableGroundItemBaseline {
   header:GroundItemBaselineHeader (id: 0);
   cell:Cell (id: 1);
   items:[GroundItem] (id: 2);
+  native_placements:[ulong] (id: 3);
+  presentation:[ItemPresentation] (id: 4);
+  native_world:bool (id: 5);
 }
 
 root_type ReliableGroundItemBaseline;

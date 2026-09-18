@@ -3,6 +3,8 @@
 #include "inventory_service_tests.hpp"
 #include "transfer_rehearsal.hpp"
 
+namespace TES3MP::Native::Testing { void checkItemPlacement(); }
+
 #include <cmath>
 #include <fstream>
 #include <functional>
@@ -6221,6 +6223,26 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "item-placement")
+        {
+            TES3MP::Native::Testing::checkItemPlacement();
+            return;
+        }
+        if (filter == "placed-items")
+        {
+            TES3MP::Native::Testing::checkPlacedItems(root);
+            return;
+        }
+        if (filter == "world-items")
+        {
+            TES3MP::Native::Testing::checkWorldItems(root);
+            return;
+        }
+        if (filter == "world-items-canonical")
+        {
+            TES3MP::Native::Testing::checkCanonicalInventory(root, false, false, true);
+            return;
+        }
         if (filter == "bulk-take-all")
         {
             TES3MP::Native::Testing::checkBulkTakeAll(root);
@@ -6449,13 +6471,21 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 4 && std::string_view(argv[1]) == "world-item-placement-host")
+        {
+            TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])),true,true,true,true,true);
+            std::cout << "PASS " << argv[1] << '\n';
+            return 0;
+        }
         if (argc == 4 && (std::string_view(argv[1]) == "inventory-host" || std::string_view(argv[1]) == "cell-inventory-host"
-            || std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host"))
+            || std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host" || std::string_view(argv[1]) == "world-item-host"))
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
                 std::filesystem::absolute(std::filesystem::u8path(argv[3])), std::string_view(argv[1]) != "inventory-host",
-                std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host",
-                std::string_view(argv[1]) == "world-actor-host");
+                std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host" || std::string_view(argv[1]) == "world-item-host",
+                std::string_view(argv[1]) == "world-actor-host" || std::string_view(argv[1]) == "world-item-host",
+                std::string_view(argv[1]) == "world-item-host");
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }

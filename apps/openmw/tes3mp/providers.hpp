@@ -97,6 +97,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<EquipmentSlot> slot;
         std::optional<ContainerRevision> expectedContainerRevision;
         std::optional<WorldItemRevision> expectedWorldItemRevision;
+        std::optional<DropPlacementView> placement;
     };
 
     struct MeleeAttackCapture

@@ -672,7 +672,12 @@ namespace TES3MP
         auto header = mPendingGroundItems->header;
         header.chunkIndex = 0;
         header.chunkCount = 1;
-        auto created = ReliableGroundItemBaseline::create(header, mPendingGroundItems->cell, items);
+        if (mPendingGroundItems->chunks.size() != 1 && std::ranges::any_of(mPendingGroundItems->chunks,
+                [](const auto& chunk) { return chunk->nativeWorld || !chunk->nativePlacements.empty() || !chunk->presentation.empty(); }))
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        const auto& native = *mPendingGroundItems->chunks.front();
+        auto created = ReliableGroundItemBaseline::create(header, mPendingGroundItems->cell, items,
+            native.nativePlacements, native.presentation, native.nativeWorld);
         auto* complete = std::get_if<ReliableGroundItemBaseline>(&created);
         if (!complete)
             return InventoryReplicationReceiveResult::InvalidChunkSequence;

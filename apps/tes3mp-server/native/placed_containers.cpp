@@ -3,6 +3,8 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
 #include <apps/openmw/mwworld/placedrefid.hpp>
+#include <apps/openmw/mwworld/containerstore.hpp>
+#include <apps/openmw/mwworld/class.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadclot.hpp>
@@ -17,6 +19,39 @@
 
 namespace TES3MP::Native
 {
+    std::vector<Loadout::PlacedInventory> Loadout::placedItems(std::string_view cell, size_t limit)
+    {
+        if (cell.empty() || cell.size() > 256 || limit > 64)
+            throw std::invalid_argument("Native world item discovery bound invalid");
+        MWClass::registerClasses();
+        MWWorld::WorldModel world(mStore, mReaders, 1);
+        auto& loaded = world.getInterior(cell);
+        std::vector<PlacedInventory> result;
+        loaded.forEach([&](const MWWorld::Ptr& ptr) {
+            if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
+            if (ptr.getType() == ESM::ItemLevList::sRecordId)
+                throw std::invalid_argument("Native world leveled-item spawning requires services");
+            if (!MWWorld::ContainerStore::isStorableType(ptr.getType())) return true;
+            // Fixed lighting is scene content, not a pickup reference.
+            if (ptr.getType() == ESM::Light::sRecordId
+                && !(ptr.get<ESM::Light>()->mBase->mData.mFlags & ESM::Light::Carry)) return true;
+            if (result.size() == limit || !ptr.getClass().getScript(ptr).empty())
+                throw std::invalid_argument("Native world item is scripted or exceeds the placement budget");
+            ESM::ObjectState state;
+            ptr.getCellRef().writeState(state);
+            const auto id = MWWorld::placedRefId(state.mRef.mRefNum, mOptions.mContent);
+            if (!id || state.mRef.mCount <= 0 || state.mRef.mCount > 1000000)
+                throw std::invalid_argument("Native world item identity or count invalid");
+            for (float value : state.mRef.mPos.pos)
+                if (!std::isfinite(value) || std::abs(double(value)) >= double(INT64_MAX) / 1024)
+                    throw std::invalid_argument("Native world position outside wire range");
+            result.push_back({state.mRef, *id, mOptions.mContent.at(state.mRef.mRefNum.mContentFile), false, false});
+            return true;
+        });
+        std::ranges::sort(result, {}, &PlacedInventory::mIdentity);
+        return result;
+    }
+
     std::vector<Loadout::PlacedInventory> Loadout::placedContainers(std::string_view cell)
     {
         if (cell.empty() || cell.size() > 256)

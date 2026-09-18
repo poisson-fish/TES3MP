@@ -256,6 +256,7 @@ namespace TES3MP::Native
             "data", bpo::value<Files::MaybeQuotedPathContainer>()->default_value({}, "")->multitoken()->composing())(
             "data-local", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""))(
             "content", bpo::value<std::vector<std::string>>()->default_value({}, "")->multitoken()->composing())(
+            "fallback-archive", bpo::value<std::vector<std::string>>()->default_value({}, "")->multitoken()->composing())(
             "encoding", bpo::value<std::string>()->default_value("win1252"))(
             "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample")(
             "containers", bpo::value<std::string>(), "List placed containers in one interior using OpenMW")(
@@ -281,6 +282,7 @@ namespace TES3MP::Native
         config.filterOutNonExistingPaths(result.mDataPaths);
         result.mContent = variables["content"].as<std::vector<std::string>>();
         result.mEncoding = variables["encoding"].as<std::string>();
+        result.mArchives = variables["fallback-archive"].as<std::vector<std::string>>();
         result.mSample = variables["sample"].as<bool>();
         if (variables.count("containers")) result.mContainerCell = variables["containers"].as<std::string>();
         if (variables.count("inventory"))

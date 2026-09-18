@@ -1,4 +1,5 @@
 #include "inventory_host.hpp"
+#include "placement_scene.hpp"
 #include "inventory_service.hpp"
 #include "loadout.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
@@ -32,6 +33,8 @@ namespace TES3MP::Native
             uint32_t index;
             CellId wireCell;
             bool worldActors = false;
+            bool worldItems = false;
+            bool stockPlacement = false;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -51,9 +54,9 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
-                && version != "native-inventory-6")
+                && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6";
+            const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8";
             const bool wholeInterior = version != "native-inventory-3";
             key("manifest");
             std::string identity; in >> identity;
@@ -119,14 +122,17 @@ namespace TES3MP::Native
                 << actorA << ':' << countA << '\n' << actorB << ':' << countB << '\n'
                 << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
-                version == "native-inventory-6"};
+                version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8",
+                version == "native-inventory-7" || version == "native-inventory-8", version == "native-inventory-8"};
         }
     }
     struct InventoryHost::Impl
     {
         Loadout loadout;
+        std::unique_ptr<PlacementScene> scene;
         InventoryService inventory;
-        static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto)
+        static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
+            std::unique_ptr<PlacementScene>& scene)
         {
             auto references = start.plugin.empty()
                 ? (start.worldActors ? loadout.placedContainers(start.cell) : loadout.resolveContainers(start.cell, MaxEquipmentContainers))
@@ -136,7 +142,7 @@ namespace TES3MP::Native
                 const auto actors = loadout.resolveActors(start.cell, MaxEquipmentContainers);
                 references.insert(references.end(), actors.begin(), actors.end());
                 std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
-                if (references.empty() || references.size() > MaxEquipmentContainers)
+                if ((!start.worldItems && references.empty()) || references.size() > MaxEquipmentContainers)
                     throw std::invalid_argument("Native interior shared inventory count is empty or exceeds the startup budget");
                 for (const auto& ref : references)
                     if (ref.mScripted || ref.mRef.mIsLocked || !ref.mRef.mTrap.empty())
@@ -155,6 +161,24 @@ namespace TES3MP::Native
                     << ':' << placed.mIdentity << ':' << placed.mRef.mRefID << ':'
                     << position.x() << ':' << position.y() << ':' << position.z();
             }
+            if (start.worldItems)
+            {
+                start.binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{start.wireCell, {}});
+                for (const auto& item : loadout.placedItems(start.cell, PreparedPlainEquipment::MaxItems))
+                {
+                    start.binding.mWorldItems->mPlacements.emplace_back(item.mIdentity, item.mRef);
+                    placement << "\nworld-item:" << item.mIdentity << ':' << item.mRef.mRefID;
+                }
+            }
+            if (start.stockPlacement)
+            {
+                std::vector<ESM::CellRef> domain;
+                for (const auto& [id, ref] : start.binding.mWorldItems->mPlacements) domain.push_back(ref);
+                scene = std::make_unique<PlacementScene>(loadout, start.cell, domain);
+                placement << scene->fingerprint();
+                start.binding.mWorldItems->mPlacement = [query = scene.get()](const auto& actor, const auto& item,
+                    const auto& view, auto world) { return query->resolve(actor, item, view, world); };
+            }
             // Re-resolve before recovery. The image envelope binds resolved
             // placement plus actual ordered file bytes, encoding and player roles.
             auto material = start.text + placement.str() + '\n' + loadout.contentFingerprint();
@@ -167,7 +191,7 @@ namespace TES3MP::Native
         }
         Impl(Startup start, CredentialCrypto& crypto, std::span<const std::byte> restored)
             : loadout(std::move(start.options)),
-              inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto), !restored.empty())
+              inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scene), !restored.empty())
         {
             if (!restored.empty())
             {
@@ -175,6 +199,10 @@ namespace TES3MP::Native
                 for (const auto& shared : start.binding.mContainers) references.push_back(shared.mBase);
                 for (const auto& [id, record] : MWWorld::inventoryRecords(loadout.store())) references.push_back(record);
                 for (const auto& [id, record] : MWWorld::inventorySoulRecords(loadout.store())) references.push_back(record);
+                if (start.binding.mWorldItems)
+                    for (const auto& [identity, ref] : start.binding.mWorldItems->mPlacements)
+                        for (auto id : {ref.mRefID, ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap})
+                            if (!id.empty()) references.push_back(id);
                 inventory.recover(restored, references);
             }
         }

@@ -29,6 +29,15 @@ namespace TES3MP::Native
         std::vector<InventoryContainerBinding> mContainers;
         int mLootLevel = 1;
         uint32_t mLootSeed = 0;
+        struct WorldItems
+        {
+            CellId mCell;
+            std::vector<std::pair<uint64_t, ESM::CellRef>> mPlacements;
+            // Trusted composition. The query reads the committed world and never mutates it.
+            std::function<ESM::Position(const ESM::Position&, const MWWorld::Ptr&,
+                const DropPlacementView&, std::span<const ESM::ObjectState>)> mPlacement;
+        };
+        std::optional<WorldItems> mWorldItems;
     };
 
     // One long-lived engine service group for all shared inventories. Loaded
@@ -44,6 +53,7 @@ namespace TES3MP::Native
         EquipmentBytes mImage;
         class Transaction;
         class EquipmentTransaction;
+        class WorldTransaction;
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
@@ -83,7 +93,8 @@ namespace TES3MP::Native
         std::optional<ServerApp::InventoryInterestDelivery> project(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedCommand* candidate = nullptr,
-            const EquipmentRuntime::PreparedEquipment* equipment = nullptr) const;
+            const EquipmentRuntime::PreparedEquipment* equipment = nullptr,
+            const EquipmentRuntime::PreparedWorldTransfer* world = nullptr) const;
     };
 }
 #endif

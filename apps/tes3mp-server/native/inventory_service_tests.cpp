@@ -1,3 +1,5 @@
+#include "placement_tests.hpp"
+#include <components/esm3/loadstat.hpp>
 #include "inventory_service_tests.hpp"
 #include "inventory_service.hpp"
 #include "inventory_host.hpp"
@@ -21,6 +23,8 @@
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
 #include <iostream>
+#include <bit>
+#include <apps/openmw/mwworld/placedrefid.hpp>
 #include <fstream>
 #include <iomanip>
 #include <stdexcept>
@@ -216,6 +220,209 @@ namespace TES3MP::Native::Testing
                         == CanonicalDurabilityResult::Committed, "Fixture starting equipment could not be removed");
                 }
         }
+    }
+
+    namespace
+    {
+        ClientInventoryTransactionCommand worldWire(InventoryService& service, const CanonicalServerState& state,
+            uint64_t session, bool pickup, size_t index = 0, uint32_t count = 1)
+        {
+            const auto view = service.projectInventory(state, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+            const auto& inventory = view.playerInventory.front();
+            const auto& ground = view.groundItems.front();
+            const auto& stack = pickup ? ground.items.at(index).stack : inventory.stacks.at(index);
+            return {id<SessionId>(session), state.findActiveSession(id<SessionId>(session))->sessionGeneration(),
+                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                pickup ? InventoryTransactionKind::PickupItem : InventoryTransactionKind::DropItem,
+                {}, stack.prototypeId, stack.stackId, pickup ? stack.count : count, {}, inventory.revision, {},
+                pickup ? std::optional{ground.items.at(index).revision} : std::nullopt, Position3(0, 0, 0)};
+        }
+    }
+    void checkWorldItems(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "World item scratch already exists");
+        Content content;
+        const auto soul = ESM::RefId::stringRefId("world_soul");
+        ESM::Creature creature; creature.blank(); creature.mId = soul; content.store.insertStatic(creature);
+        ESM::Miscellaneous gem; gem.blank(); gem.mId = ESM::RefId::stringRefId("world_gem"); content.store.insertStatic(gem);
+        auto binding = content.binding();
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{binding.mContainers[0].mCell, {}});
+        auto ref = ESM::makeBlankCellRef();
+        ref.mRefID = gem.mId; ref.mRefNum = {0, 0}; ref.mCount = 3;
+        ref.mSoul = soul; ref.mChargeInt = 17; ref.mChargeIntRemainder = .375f;
+        ref.mEnchantmentCharge = 12.25f; ref.mScale = 1.25f;
+        ref.mPos.pos[0] = 10; ref.mPos.rot[2] = .75f;
+        binding.mWorldItems->mPlacements.emplace_back(MWWorld::PlacedRefTag, ref);
+        const std::array references{content.actor, content.shirt, gem.mId, soul};
+        // These synthetic legacy owners bind at 1, 3 and 5 before world items;
+        // decode through the production field codec to inspect non-wire fields.
+        const std::array envelopes{EquipmentEnvelope{"native-inventory-1/11/22/70/90", binding.mContent, {1, -1}},
+            EquipmentEnvelope{"native-inventory-1/11/22/70/90", binding.mContent, {3, -1}},
+            EquipmentEnvelope{"native-inventory-1/11/22/70/90", binding.mContent, {5, -1}}};
+        const std::array<EquipmentBindings, 2> actorBindings{{{envelopes[0], content.store, references, {}},
+            {envelopes[1], content.store, references, {}}}};
+        const std::array<EquipmentBindings, 1> containerBindings{{{envelopes[2], content.store, references, {}}}};
+        const auto decode = [&](std::span<const std::byte> bytes) {
+            EquipmentSessionValues values;
+            decodeEquipmentSession({reinterpret_cast<const char*>(bytes.data()), bytes.size()}, actorBindings,
+                values, containerBindings, &actorBindings[0]);
+            return values;
+        };
+        auto authority = players();
+        InventoryService service(content.store, content.readers, binding);
+        Clock clock;
+        Delivery delivery(clock, SessionGeneration::initial());
+        publish(service, authority, delivery, 1);
+        require(delivery.clients[0]->confirmedGroundItemBaseline()->items.size() == 1
+            && delivery.clients[0]->confirmedGroundItemBaseline()->nativePlacements.size() == 1
+            && delivery.clients[0]->confirmedGroundItemBaseline()->presentation.front().scale == 1.25f,
+            "Native ground projection omitted placement domain or visual fields");
+        const auto pickup = worldWire(service, authority, 1, true);
+        for (int test = 0; test < 7; ++test)
+        {
+            auto bad = pickup;
+            switch (test)
+            {
+                case 0: bad.count = 2; break;
+                case 1: bad.prototypeId = id<ItemPrototypeId>(123); break;
+                case 2: bad.stackId = id<ItemStackId>(999); break;
+                case 3: bad.expectedInventoryRevision = InventoryRevision::initial(); break;
+                case 4: bad.expectedWorldItemRevision = WorldItemRevision::initial(); break;
+                case 5: bad.interactionOrigin = Position3(999999999, 0, 0); break;
+                case 6: bad.sessionGeneration = *SessionGeneration::initial().next(); break;
+            }
+            const auto bound = ServerApp::InventoryCommandBinding::resolve(authority, bad.sessionId, bad.sessionGeneration, bad);
+            require(!bound || !service.prepareInventory(authority, bound->proposal()), "Invalid native pickup admitted");
+        }
+        const std::vector before(service.inventoryImage().begin(), service.inventoryImage().end());
+        auto first = service.prepareInventory(authority, bind(authority, pickup).proposal());
+        auto second = service.prepareInventory(authority, bind(authority, worldWire(service, authority, 2, true)).proposal());
+        require(first && second, "Native pickup preparation failed");
+        for (uint64_t session : {1, 2})
+        {
+            auto candidate = service.projectInventory(authority, id<SessionId>(session), id<ServerTick>(2), id<CanonicalRevision>(2), first.get());
+            require(candidate && candidate->groundItems.front().items.empty()
+                && candidate->playerInventory.front().stacks.size() == (session == 1 ? 2 : 1),
+                "World pickup candidate is not coherent across observers");
+        }
+        require(first->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+            && std::ranges::equal(before, service.inventoryImage()), "Rejected pickup changed world or inventory");
+        require(first->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+            "Pickup retry after safe rejection failed");
+        size_t calls = 0;
+        require(second->commit([&](auto) { ++calls; return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected
+            && calls == 0, "Simultaneous pickup granted the item twice");
+        require(!service.prepareInventory(authority, bind(authority, pickup).proposal()), "Pickup replay admitted");
+        publish(service, authority, delivery, 2);
+        for (const auto& client : delivery.clients)
+            require(client->confirmedGroundItemBaseline()->items.empty()
+                && client->confirmedGroundItemBaseline()->nativePlacements.size() == 1, "Pickup not removed for both clients");
+        const auto resumed = players(*SessionGeneration::initial().next());
+        Delivery reconnect(clock, *SessionGeneration::initial().next());
+        publish(service, resumed, reconnect, 3);
+        require(reconnect.clients[1]->confirmedGroundItemBaseline()->items.empty(), "Reconnect respawned placed item");
+        InventoryService recovered(content.store, content.readers, binding, true);
+        recovered.recover(service.inventoryImage(), references);
+        require(recovered.projectInventory(resumed, id<SessionId>(1), id<ServerTick>(3), id<CanonicalRevision>(3))
+            ->groundItems.front().items.empty(), "Restart refilled picked world placement");
+        auto view = recovered.projectInventory(resumed, id<SessionId>(1), id<ServerTick>(3), id<CanonicalRevision>(3)).value();
+        const auto itemIndex = size_t(std::ranges::find(view.playerInventory.front().stacks,
+            id<ItemPrototypeId>(MWWorld::inventoryRecordId(gem.mId)), &CanonicalItemStack::prototypeId) - view.playerInventory.front().stacks.begin());
+        const auto picked = view.playerInventory.front().stacks.at(itemIndex);
+        require(picked.count == 3 && picked.condition == std::bit_cast<uint32_t>(ref.mChargeInt)
+            && picked.enchantmentCharge == std::bit_cast<uint32_t>(ref.mEnchantmentCharge)
+            && picked.soulPrototype == id<ActorPrototypeId>(MWWorld::inventoryRecordId(soul)), "Pickup lost item properties");
+        auto dropInput = worldWire(recovered, resumed, 1, false, itemIndex, 2);
+        auto drop = recovered.prepareInventory(resumed, bind(resumed, dropInput).proposal());
+        require(drop && drop->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+            "Partial world drop failed");
+        auto dropped = recovered.projectInventory(resumed, id<SessionId>(2), id<ServerTick>(4), id<CanonicalRevision>(4)).value();
+        require(dropped.groundItems[0].items[0].stack.count == 2
+            && dropped.groundItems[0].items[0].position == Position3(0, 0, 0)
+            && dropped.groundItems[0].items[0].stack.stackId != picked.stackId,
+            "Drop did not split at server position with a fresh identity");
+        const auto droppedState = decode(recovered.inventoryImage());
+        const auto& droppedRef = droppedState.mWorldItems->mObjects.front().mRef;
+        require(droppedRef.mChargeIntRemainder == ref.mChargeIntRemainder && droppedRef.mScale == ref.mScale
+            && droppedRef.mSoul == ref.mSoul && droppedRef.mChargeInt == ref.mChargeInt
+            && droppedRef.mEnchantmentCharge == ref.mEnchantmentCharge, "World loop lost saved instance fields");
+        // Invalid restore remains unpublished and cannot fall back to base loot.
+        auto corrupt = droppedState;
+        corrupt.mWorldItems->mObjects[0].mRef.mRefNum = corrupt.mActors[0].mObjects[0].mRef.mRefNum;
+        EquipmentBytes invalid;
+        bool rejected = false;
+        try { encodeEquipmentSession(corrupt, actorBindings, invalid, containerBindings, &actorBindings[0]); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected && invalid.empty(), "World/inventory alias admitted into coherent image");
+        InventoryService malformed(content.store, content.readers, binding, true);
+        rejected = false;
+        try { malformed.recover(recovered.inventoryImage().first(recovered.inventoryImage().size() - 1), references); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected && malformed.inventoryImage().empty(), "Truncated world restore published or refilled");
+        InventoryService afterDrop(content.store, content.readers, binding, true);
+        afterDrop.recover(recovered.inventoryImage(), references);
+        for (size_t round = 0; round < 70; ++round)
+        {
+            auto take = afterDrop.prepareInventory(resumed, bind(resumed, worldWire(afterDrop, resumed, 2, true)).proposal());
+            require(take && take->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Dropped item pickup failed or identities exhausted");
+            if (round == 69) break;
+            const auto current = afterDrop.projectInventory(resumed, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5)).value();
+            const auto& items = current.playerInventory[0].stacks;
+            const auto index = size_t(std::ranges::find(items, picked.prototypeId, &CanonicalItemStack::prototypeId) - items.begin());
+            auto put = afterDrop.prepareInventory(resumed, bind(resumed, worldWire(afterDrop, resumed, 2, false, index, 2)).proposal());
+            require(put && put->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Repeated world drop failed");
+        }
+        const auto final = afterDrop.projectInventory(resumed, id<SessionId>(2), id<ServerTick>(6), id<CanonicalRevision>(6)).value();
+        require(final.groundItems[0].items.empty(), "Drop/pickup loop left a world duplicate");
+        auto fullBinding = binding;
+        fullBinding.mWorldItems->mPlacements.clear();
+        for (uint32_t i = 0; i < 64; ++i)
+        {
+            auto placed = ref; placed.mRefNum.mIndex = 501 + i;
+            fullBinding.mWorldItems->mPlacements.emplace_back(MWWorld::PlacedRefTag | (501 + i), placed);
+        }
+        InventoryService fullWorld(content.store, content.readers, fullBinding);
+        const auto fullImage = std::vector(fullWorld.inventoryImage().begin(), fullWorld.inventoryImage().end());
+        require(!fullWorld.prepareInventory(authority, bind(authority, worldWire(fullWorld, authority, 1, false)).proposal())
+            && std::ranges::equal(fullImage, fullWorld.inventoryImage()), "World capacity rejection changed inventory");
+        auto foreign = worldWire(fullWorld, authority, 1, false);
+        foreign.stackId = worldWire(fullWorld, authority, 2, false).stackId;
+        require(!fullWorld.prepareInventory(authority, bind(authority, foreign).proposal()), "Foreign inventory drop admitted");
+        // Full inventory: 64 distinct records, no partial pickup or removal.
+        auto fullNpc = *content.store.get<ESM::NPC>().find(content.actor);
+        for (int i = 0; i < 64; ++i)
+        {
+            ESM::Miscellaneous item; item.blank(); item.mId = ESM::RefId::stringRefId("full_world_" + std::to_string(i));
+            content.store.insertStatic(item); fullNpc.mInventory.mList.push_back({1, item.mId});
+        }
+        content.store.overrideRecord(fullNpc);
+        auto fullInventoryBinding = binding; fullInventoryBinding.mShirt.reset();
+        for (auto& actor : fullInventoryBinding.mActors) actor = {content.actor, {}, 0, false, true};
+        InventoryService fullInventory(content.store, content.readers, fullInventoryBinding);
+        require(!fullInventory.prepareInventory(authority, bind(authority, worldWire(fullInventory, authority, 1, true)).proposal())
+            && fullInventory.projectInventory(authority, id<SessionId>(2), id<ServerTick>(1), id<CanonicalRevision>(1))
+                ->groundItems.front().items.size() == 1, "Inventory capacity failure removed the world item");
+        auto emptyBinding = binding;
+        emptyBinding.mContainers.clear(); emptyBinding.mWorldItems->mPlacements.clear();
+        InventoryService emptyWorld(content.store, content.readers, emptyBinding);
+        const auto empty = emptyWorld.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+        require(empty && empty->containers.empty() && empty->groundItems.front().items.empty()
+            && empty->groundItems.front().nativeWorld, "Empty native world omitted its domain marker");
+        auto emptyDrop = emptyWorld.prepareInventory(authority, bind(authority, worldWire(emptyWorld, authority, 1, false)).proposal());
+        require(emptyDrop && emptyDrop->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+            "Drop into an empty world-only domain failed");
+        InventoryService emptyRestored(content.store, content.readers, emptyBinding, true);
+        emptyRestored.recover(emptyWorld.inventoryImage(), references);
+        require(std::ranges::equal(emptyWorld.inventoryImage(), emptyRestored.inventoryImage()), "Empty-domain world recovery changed image");
+        // Uncertain durability closes both projection and mutation until recovery.
+        InventoryService uncertain(content.store, content.readers, binding);
+        auto pending = uncertain.prepareInventory(authority, bind(authority, worldWire(uncertain, authority, 1, true)).proposal());
+        require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && uncertain.inventoryImage().empty() && !uncertain.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1)),
+            "Uncertain world durability left service open");
+        std::cout << "synthetic world items: coherent two-client pickup, contention, fields, retry/reconnect/restart, partial drop and repeated pickup\n";
     }
 
     void checkBulkTakeAll(const std::filesystem::path& scratch)
@@ -1506,7 +1713,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior, bool baseInventory, bool worldActors)
+        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement)
     {
         require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
         auto crypto = makeProductionCredentialCrypto();
@@ -1538,6 +1745,7 @@ namespace TES3MP::Native::Testing
         // not evidence for an arbitrary published mod or its script behavior.
         std::array<ESM::NPC, 2> startingCharacters;
         ESM::Creature startingCreature;
+        if (stockPlacement) writePlacementFixtureModels(scratch);
         const auto writeStartingPlugin = [&](int gold) {
             std::ofstream stream(scratch / "StartingInventories.esp", std::ios::binary);
             ESM::ESMWriter out;
@@ -1558,6 +1766,23 @@ namespace TES3MP::Native::Testing
                 npc.mId = ESM::RefId::stringRefId("vnext_living_actor"); npc.mNpdt.mHealth = 40;
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
                 out.startRecord(ESM::Creature::sRecordId, 0); startingCreature.save(out); out.endRecord(ESM::Creature::sRecordId);
+                if (stockPlacement)
+                {
+                    for (auto name : {"placement-floor", "placement-table"})
+                    {
+                        ESM::Static mesh; mesh.blank(); mesh.mId = ESM::RefId::stringRefId(name);
+                        mesh.mModel = std::string(name) + ".osgt";
+                        out.startRecord(ESM::Static::sRecordId,0); mesh.save(out); out.endRecord(ESM::Static::sRecordId);
+                    }
+                    ESM::Weapon dagger; dagger.blank(); dagger.mId = ESM::RefId::stringRefId("iron dagger");
+                    dagger.mModel = "placement-item.osgt"; dagger.mName = "Placement test dagger";
+                    dagger.mData.mType = ESM::Weapon::ShortBladeOneHand;
+                    dagger.mData.mHealth = 100;
+                    out.startRecord(ESM::Weapon::sRecordId,0); dagger.save(out); out.endRecord(ESM::Weapon::sRecordId);
+                    ESM::Miscellaneous pile; pile.blank(); pile.mId = ESM::RefId::stringRefId("gold_025");
+                    pile.mModel = "placement-gold.osgt"; pile.mData.mValue = 25;
+                    out.startRecord(ESM::Miscellaneous::sRecordId,0); pile.save(out); out.endRecord(ESM::Miscellaneous::sRecordId);
+                }
                 ESM::Cell cell; cell.blank(); cell.mName = "vNext actor inventory test";
                 cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
                 out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
@@ -1566,6 +1791,26 @@ namespace TES3MP::Native::Testing
                 {
                     ESM::CellRef placement; placement.blank(); placement.mRefNum = {++index, 0}; placement.mRefID = base;
                     placement.save(out);
+                }
+                if (worldItems)
+                    for (auto base : {ESM::RefId::stringRefId("iron dagger"), ESM::RefId::stringRefId("gold_100")})
+                    {
+                        ESM::CellRef placement; placement.blank(); placement.mRefNum = {++index, 0}; placement.mRefID = base;
+                        placement.mPos.pos[0] = 16;
+                        if (stockPlacement && base == "iron dagger") placement.mCount = 5;
+                        placement.save(out);
+                    }
+                if (stockPlacement)
+                {
+                    for (int surface = 0; surface < 4; ++surface)
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index,0};
+                        placed.mRefID = ESM::RefId::stringRefId(surface == 0 ? "placement-floor" : "placement-table");
+                        placed.mPos.pos[0] = surface == 0 ? 0.f : surface == 1 ? 80.f : surface == 2 ? 200.f : -200.f;
+                        placed.mPos.pos[2] = surface == 0 ? -20.f : 40.f;
+                        if (surface >= 2) placed.mPos.rot[1] = osg::DegreesToRadians(surface == 2 ? 31.f : 29.f);
+                        placed.save(out);
+                    }
                 }
                 out.endRecord(ESM::Cell::sRecordId);
             }
@@ -1596,7 +1841,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
+            out << (stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
             const auto manifestId = testContentManifestId();
             for (auto byte : manifestId.bytes())
                 out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
@@ -1623,6 +1868,138 @@ namespace TES3MP::Native::Testing
                 && before.equipment->actors[0].slots[InventoryStore::Slot_CarriedRight]
                     == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron dagger"))),
                 "Real content living actor public slots missing");
+            if (worldItems)
+            {
+                const auto& starting = before.playerInventory.front();
+                const auto equipped = starting.equipment.front().stackId;
+                const auto gearIndex = size_t(std::ranges::find(starting.stacks, equipped, &CanonicalItemStack::stackId) - starting.stacks.begin());
+                require(!service.prepareInventory(authority, bind(authority, worldWire(service, authority, 1, false, gearIndex)).proposal()),
+                    "Equipped player item dropped without authoritative unequip");
+                require(before.groundItems.front().items.size() == 2 && before.groundItems.front().nativePlacements.size() == 2,
+                    "V7 host omitted placed world items");
+                for (int i = 0; i < 2; ++i)
+                {
+                    auto take = service.prepareInventory(authority, bind(authority, worldWire(service, authority, 2, true)).proposal());
+                    require(take && take->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                        "Real placed item pickup failed");
+                }
+                auto current = service.project(authority, id<SessionId>(2), id<ServerTick>(2), id<CanonicalRevision>(2)).value();
+                const auto& stacks = current.playerInventory.front().stacks;
+                const auto gold = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("gold_001")));
+                const auto dagger = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron dagger")));
+                require(std::ranges::find(stacks, gold, &CanonicalItemStack::prototypeId)->count == 107,
+                    "World gold denomination did not use stock pickup conversion");
+                const auto index = size_t(std::ranges::find(stacks, dagger, &CanonicalItemStack::prototypeId) - stacks.begin());
+                if (stockPlacement)
+                {
+                    auto proposed = worldWire(service, authority, 2, false, index, 2);
+                    proposed.placement = placementTestView(80,40);
+                    const std::vector beforeDrop(service.inventoryImage().begin(),service.inventoryImage().end());
+                    for (int invalid = 0; invalid < 7; ++invalid)
+                    {
+                        auto bad = proposed;
+                        if (invalid == 0) bad.placement.reset();
+                        if (invalid == 1) bad.placement->view[0] = std::numeric_limits<double>::quiet_NaN();
+                        if (invalid == 2) bad.placement->projection.fill(0);
+                        if (invalid == 3) bad.placement->cursorX = 2;
+                        if (invalid == 4) bad.placement->view.fill(0);
+                        if (invalid == 5) bad.count = 6;
+                        if (invalid == 6) bad.placement->view[0] *= 0.1;
+                        // Bypass the wire decoder to also exercise the native boundary's checks.
+                        const auto bound = ServerApp::InventoryCommandBinding::resolve(authority,
+                            bad.sessionId,bad.sessionGeneration,bad).value();
+                        require(!service.prepareInventory(authority, bound.proposal())
+                            && std::ranges::equal(beforeDrop,service.inventoryImage()), "Invalid placement changed durable state");
+                    }
+                    for (auto [x, expectedZ] : {std::pair{200.f,-22.f}, std::pair{-200.f,38.f}})
+                    {
+                        auto slope = proposed; slope.placement = placementTestView(x,40);
+                        auto candidate = service.prepareInventory(authority,bind(authority,slope).proposal());
+                        require(bool(candidate),"Stock slope query failed");
+                        const auto placed = service.projectInventory(authority,id<SessionId>(2),id<ServerTick>(2),
+                            id<CanonicalRevision>(2),candidate.get()).value();
+                        require(placed.groundItems[0].items[0].position.z() == int64_t(expectedZ*1024),
+                            "Server slope selection did not preserve stock ground fallback");
+                    }
+                    auto rejected = service.prepareInventory(authority,bind(authority,proposed).proposal());
+                    require(rejected && rejected->commit([](auto){return CanonicalDurabilityResult::Rejected;})
+                        == CanonicalDurabilityResult::Rejected && std::ranges::equal(beforeDrop,service.inventoryImage()),
+                        "Rejected placement durability changed inventory or world");
+                    auto accepted = service.prepareInventory(authority,bind(authority,proposed).proposal());
+                    require(accepted && accepted->commit([](auto){return CanonicalDurabilityResult::Committed;})
+                        == CanonicalDurabilityResult::Committed,"Table placement failed");
+                    const auto table = service.projectInventory(authority,id<SessionId>(2),id<ServerTick>(3),id<CanonicalRevision>(3)).value();
+                    require(table.groundItems[0].items[0].position == Position3(77*1024,-4*1024,38*1024)
+                        && table.groundItems[0].items[0].stack.count == 2,"Table placement transform/count incorrect");
+                    const auto remaining = std::ranges::find(table.playerInventory[0].stacks,dagger,&CanonicalItemStack::prototypeId);
+                    require(remaining != table.playerInventory[0].stacks.end() && remaining->count == 3,"Partial placement subtracted wrong count");
+                    const auto floorIndex = size_t(remaining - table.playerInventory[0].stacks.begin());
+                    auto floor = worldWire(service,authority,2,false,floorIndex);
+                    floor.placement = placementTestView(0,0,true);
+                    auto fallback = service.prepareInventory(authority,bind(authority,floor).proposal());
+                    require(fallback && fallback->commit([](auto){return CanonicalDurabilityResult::Committed;})
+                        == CanonicalDurabilityResult::Committed,"Cursor miss did not drop on floor");
+                    const auto saved = service.projectInventory(authority,id<SessionId>(2),id<ServerTick>(4),id<CanonicalRevision>(4)).value();
+                    require(saved.groundItems[0].items.back().position == Position3(-3*1024,-4*1024,-22*1024),
+                        "Committed floor transform differs");
+                    const auto coin = std::ranges::find(saved.playerInventory[0].stacks,gold,&CanonicalItemStack::prototypeId);
+                    auto coins = worldWire(service,authority,2,false,size_t(coin-saved.playerInventory[0].stacks.begin()),25);
+                    coins.placement = placementTestView(80,46);
+                    auto pile = service.prepareInventory(authority,bind(authority,coins).proposal());
+                    require(pile && pile->commit([](auto){return CanonicalDurabilityResult::Committed;})
+                        == CanonicalDurabilityResult::Committed,"Gold pile placement failed");
+                    const auto goldView = service.projectInventory(authority,id<SessionId>(2),id<ServerTick>(4),id<CanonicalRevision>(4)).value();
+                    const auto& droppedPile = goldView.groundItems[0].items.back();
+                    require(droppedPile.stack.prototypeId == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("gold_025")))
+                        && droppedPile.stack.count == 25 && droppedPile.position == Position3(72*1024,-10*1024,44*1024),
+                        "Gold placement did not use stock pile bounds or committed supporting item");
+                    Clock clock; Delivery both(clock,SessionGeneration::initial()); publish(service,authority,both,4);
+                    require(both.clients[0]->confirmedGroundItemBaseline()->items
+                        == both.clients[1]->confirmedGroundItemBaseline()->items,"Clients received different placement results");
+                    const std::vector image(service.inventoryImage().begin(),service.inventoryImage().end());
+                    InventoryHost restarted(descriptor,testContentManifest(),*registry,*crypto,image);
+                    auto& restored = dynamic_cast<InventoryService&>(restarted.service());
+                    require(std::ranges::equal(image,restored.inventoryImage()),"Restart changed placement image");
+                    auto rejoined = players(*SessionGeneration::initial().next(),1,2);
+                    Delivery reconnect(clock,*SessionGeneration::initial().next()); publish(restored,rejoined,reconnect,5);
+                    require(reconnect.clients[1]->confirmedGroundItemBaseline()->items
+                        == both.clients[0]->confirmedGroundItemBaseline()->items,"Reconnect moved or duplicated placements");
+                    for (int i=0;i<3;++i)
+                    {
+                        auto pickup = restored.prepareInventory(rejoined,bind(rejoined,worldWire(restored,rejoined,1,true)).proposal());
+                        require(pickup && pickup->commit([](auto){return CanonicalDurabilityResult::Committed;})
+                            == CanonicalDurabilityResult::Committed,"Placed item pickup after restart failed");
+                    }
+                    std::ofstream changedMesh(scratch/"meshes"/"placement-table.osgt",std::ios::app); changedMesh << "\n# changed\n"; changedMesh.close();
+                    bool mismatch = false;
+                    try { InventoryHost changed(descriptor,testContentManifest(),*registry,*crypto,image); }
+                    catch (const std::exception&) { mismatch = true; }
+                    require(mismatch,"Changed placement mesh recovered an incompatible campaign");
+                    std::cout << "stock placement host: real records, synthetic meshes, table/floor/slopes, invalid input, partial stacks, atomic rejection, two clients, reconnect/restart and mesh binding\n";
+                    return;
+                }
+                auto drop = service.prepareInventory(authority, bind(authority, worldWire(service, authority, 2, false, index)).proposal());
+                require(drop && drop->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                    "Real dagger drop failed");
+                const std::vector image(service.inventoryImage().begin(), service.inventoryImage().end());
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, image);
+                auto& restored = dynamic_cast<InventoryService&>(restart.service());
+                auto pickup = restored.prepareInventory(authority, bind(authority, worldWire(restored, authority, 1, true)).proposal());
+                require(pickup && pickup->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                    "Real dropped dagger pickup after restart failed");
+                Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(restored, authority, delivery, 3);
+                for (const auto& client : delivery.clients)
+                    require(client->confirmedGroundItemBaseline()->items.empty()
+                        && client->confirmedGroundItemBaseline()->nativePlacements.size() == 2,
+                        "Real world loop refilled original placements");
+                writeStartingPlugin(26);
+                bool rejected = false;
+                try { InventoryHost changed(descriptor, testContentManifest(), *registry, *crypto, image); }
+                catch (const std::exception&) { rejected = true; }
+                require(rejected, "Changed world loadout recovered an incompatible campaign");
+                std::cout << "real Morrowind.esm plus generated cell: v7 pickup, stock gold denomination, drop/restart/pickup; synthetic clients\n";
+                return;
+            }
             EquipmentFileSink file(scratch / "actors.equipment", true);
             FileFaults faults; EquipmentFileCommitter sink(file, faults);
             EquipmentBytes bytes; std::unique_ptr<const InventoryTransferSuccess> success;
@@ -1888,7 +2265,7 @@ namespace TES3MP::Native::Testing
         ServerApp::Testing::nativeInventoryApplication(recovered, *opened);
     }
 
-    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment, bool takeAll)
+    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment, bool takeAll, bool worldItems)
     {
         require(std::filesystem::create_directory(scratch), "Canonical inventory scratch already exists");
         Content content;
@@ -1900,7 +2277,14 @@ namespace TES3MP::Native::Testing
             chest.mInventory.mList = {{2, content.shirt}, {3, extra}};
             content.store.overrideRecord(chest);
         }
-        InventoryService service(content.store, content.readers, content.binding());
+        auto binding = content.binding();
+        if (worldItems)
+        {
+            auto placed = ESM::makeBlankCellRef(); placed.mRefNum = {500, 0}; placed.mRefID = content.shirt; placed.mCount = 2;
+            binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{binding.mContainers[0].mCell,
+                {{MWWorld::PlacedRefTag | 500, placed}}});
+        }
+        InventoryService service(content.store, content.readers, binding);
         NullMetricSink metrics;
         NullStructuredEventSink events;
         Observability observability(metrics, events);
@@ -1949,6 +2333,7 @@ namespace TES3MP::Native::Testing
             return reducer.prepareTick(pumped.batches().front());
         };
         const auto action = [&](InventoryService& current, const CanonicalServerState& state, uint64_t session, bool put, uint32_t count) {
+            if (worldItems) return worldWire(current, state, session, put);
             auto input = wire(current, state, session, equipment || (takeAll ? !put : put), equipment ? 1 : count);
             if (takeAll && put)
             {
@@ -1974,7 +2359,7 @@ namespace TES3MP::Native::Testing
             "Native same-tick contention was not rejected in ingress order");
         auto candidate = service.projectInventory(prepared.candidateState(), id<SessionId>(1), id<ServerTick>(1),
             prepared.candidateRevision(), prepared.candidateNativeInventory());
-        require(candidate && (equipment ? candidate->playerInventory[0].equipment.size() == 1
+        require(candidate && (worldItems ? candidate->groundItems[0].items.empty() : equipment ? candidate->playerInventory[0].equipment.size() == 1
             : takeAll ? candidate->containers[0].stacks.empty() && candidate->playerInventory[0].stacks.size() == 2
             : candidate->containers[0].stacks[0].count == 2), "Native candidate projection missing");
         require(!reducer.commit(std::move(prepared)) && reducer.latestPublication() == published
@@ -2009,7 +2394,7 @@ namespace TES3MP::Native::Testing
             && reducer.commit(std::move(stale)), "Stale native input was not durably rejected");
         auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
             ServerApp::CanonicalPersistenceFile::open(path, identity));
-        InventoryService recovered(content.store, content.readers, content.binding(), true);
+        InventoryService recovered(content.store, content.readers, binding, true);
         std::vector references{content.actor, content.shirt};
         if (takeAll) references.push_back(extra);
         recovered.recover(opened->prefix().latest()->nativeInventory(), references);
@@ -2033,7 +2418,7 @@ namespace TES3MP::Native::Testing
         require(next.result().dispositions()[0].disposition() == CommandDisposition::Applied
             && continued.commit(std::move(next)), "Recovered native continuation failed");
         const auto view = recovered.project(continued.state(), id<SessionId>(2), id<ServerTick>(4), continued.canonicalRevision());
-        require(view && (equipment ? view->playerInventory[0].equipment.size() == 1
+        require(view && (worldItems ? view->groundItems[0].items.size() == 1 : equipment ? view->playerInventory[0].equipment.size() == 1
             : view->containers[0].stacks[0].count == 1), "Continuation lost native state");
         std::cout << (equipment ? "equipment" : "inventory")
             << " synthetic canonical integration: owned preparation, retry/stale rejection, joint file recovery and continuation\n";

@@ -8,7 +8,7 @@ namespace TES3MP::Native
 {
     // Owns loaded content/readers before the persistent inventory service.
     // The trusted startup descriptor is bounded text, in this exact order:
-    // native-inventory-6
+    // native-inventory-8
     // manifest HEX
     // config "OpenMW configuration directory"
     // players PLAYER_ID PLAYER_ID (already registered established characters)
@@ -16,6 +16,16 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V7 also binds 0..64 winning unscripted placed items. Their complete active
+    // membership shares the inventory image; recovery never reloads placements.
+    // Pickup consumes a whole world reference; drops split unequipped inventory
+    // stacks. V8 resolves stock cursor/floor queries and item bounds on a headless
+    // OpenMW scene, then commits the stationary position with the inventory image.
+    // Model bytes join the saved content binding; camera input is bounded, without
+    // additional reach, supporting-surface or overlap rules. The scene contains
+    // initial unscripted non-actor geometry and committed world items in one interior.
+    // V7 retains its earlier drop at the authoritative player position.
+    // V7 permits an interior without shared stores; V6 retains its old domain.
     // V6 discovers winning containers, NPCs and creatures in one interior
     // (1..32 total shared inventories), sorted together by stable identity.
     // NPCs and weapon-bearing creatures auto-equip ordinary gear. Content-defined

@@ -1,4 +1,5 @@
 #include "worldimp.hpp"
+#include "itemplacement.hpp"
 
 #include <charconv>
 #include <limits>
@@ -1941,23 +1942,10 @@ namespace MWWorld
 
     MWWorld::Ptr World::placeObject(const MWWorld::Ptr& object, float cursorX, float cursorY, int amount, bool copy)
     {
-        const float maxDist = 200.f;
-
-        MWRender::RenderingManager::RayResult result
-            = mRendering->castCameraToViewportRay(cursorX, cursorY, maxDist, true, true);
-
+        const auto result = mRendering->castCameraToViewportRay(cursorX, cursorY, ItemPlacementDistance, true, true);
         CellStore* cell = getPlayerPtr().getCell();
-
-        ESM::Position pos = getPlayerPtr().getRefData().getPosition();
-        if (result.mHit)
-        {
-            pos.pos[0] = result.mHitPointWorld.x();
-            pos.pos[1] = result.mHitPointWorld.y();
-            pos.pos[2] = result.mHitPointWorld.z();
-        }
-        // We want only the Z part of the player's rotation
-        pos.rot[0] = 0;
-        pos.rot[1] = 0;
+        const ESM::Position pos = cursorItemPlacement(getPlayerPtr().getRefData().getPosition(),
+            {result.mHit, result.mHitPointWorld, result.mHitNormalWorld});
 
         // copy the object and set its count
         Ptr dropped
@@ -1971,21 +1959,8 @@ namespace MWWorld
 
     bool World::canPlaceObject(float cursorX, float cursorY)
     {
-        const float maxDist = 200.f;
-        MWRender::RenderingManager::RayResult result
-            = mRendering->castCameraToViewportRay(cursorX, cursorY, maxDist, true, true);
-
-        if (result.mHit)
-        {
-            // check if the wanted position is on a flat surface, and not e.g. against a vertical wall
-            if (std::acos((result.mHitNormalWorld / result.mHitNormalWorld.length()) * osg::Vec3f(0, 0, 1))
-                >= osg::DegreesToRadians(30.f))
-                return false;
-
-            return true;
-        }
-        else
-            return false;
+        const auto result = mRendering->castCameraToViewportRay(cursorX, cursorY, ItemPlacementDistance, true, true);
+        return canPlaceItem({result.mHit, result.mHitPointWorld, result.mHitNormalWorld});
     }
 
     Ptr World::copyObjectToCell(const ConstPtr& object, CellStore* cell, ESM::Position pos, int count, bool adjustPos)
@@ -2042,23 +2017,10 @@ namespace MWWorld
 
         if (!object.getClass().isActor() && adjustPos && object.getRefData().getBaseNode())
         {
-            // Adjust position so the location we wanted ends up in the middle of the object bounding box
-            osg::ComputeBoundsVisitor computeBounds;
-            computeBounds.setTraversalMask(~MWRender::Mask_ParticleSystem);
-            object.getRefData().getBaseNode()->accept(computeBounds);
-            osg::BoundingBox bounds = computeBounds.getBoundingBox();
-            if (bounds.valid())
-            {
-                ESM::Position pos = object.getRefData().getPosition();
-                bounds.set(bounds._min - pos.asVec3(), bounds._max - pos.asVec3());
-
-                osg::Vec3f adjust(
-                    (bounds.xMin() + bounds.xMax()) / 2, (bounds.yMin() + bounds.yMax()) / 2, bounds.zMin());
-                pos.pos[0] -= adjust.x();
-                pos.pos[1] -= adjust.y();
-                pos.pos[2] -= adjust.z();
-                moveObject(object, pos.asVec3());
-            }
+            const auto position = adjustItemPlacement(object.getRefData().getPosition(),
+                *object.getRefData().getBaseNode());
+            if (position)
+                moveObject(object, position->asVec3());
         }
     }
 
@@ -2066,20 +2028,11 @@ namespace MWWorld
     {
         MWWorld::CellStore* cell = actor.getCell();
 
-        ESM::Position pos = actor.getRefData().getPosition();
-        // We want only the Z part of the actor's rotation
-        pos.rot[0] = 0;
-        pos.rot[1] = 0;
-
-        osg::Vec3f orig = pos.asVec3();
-        orig.z() += 20;
-        osg::Vec3f dir(0, 0, -1);
-
-        float len = 1000000.0;
-
-        MWRender::RenderingManager::RayResult result = mRendering->castRay(orig, orig + dir * len, true, true);
-        if (result.mHit)
-            pos.pos[2] = result.mHitPointWorld.z();
+        const ESM::Position pos = groundItemPlacement(actor.getRefData().getPosition(),
+            [&](const osg::Vec3f& from, const osg::Vec3f& to) {
+                const auto hit = mRendering->castRay(from, to, true, true);
+                return ItemPlacementHit{hit.mHit, hit.mHitPointWorld, hit.mHitNormalWorld};
+            });
 
         // copy the object and set its count
         Ptr dropped

@@ -4,82 +4,71 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M3 in [PLAN.md](PLAN.md). Shared inventories cover containers,
-  placed actors, corpse loot and living public equipment. Bulk Take All uses
-  the coherent writer.
-- **Next action (recommended):** authoritative pickup of ordinary unscripted
-  placed items in the current interior, with atomic inventory transfer and
-  persistent removal from the world.
+- **Milestone:** M3 in [PLAN.md](PLAN.md). Shared inventories, actor equipment,
+  corpse loot, Take All and stationary world pickup/drop use one writer.
+- **Placement status:** user verified live dropping works and accepted this slice.
+- **Next action:** inspect stock non-teleport door activation, motion and saved
+  state; identify the smallest native-authority integration for one unscripted
+  door in the bound interior.
 
 ## Implemented behavior
 
 The [native host](../../apps/tes3mp-server/native/inventory_host.hpp) accepts
-**native-inventory-6**. It discovers winning NPC, creature and container placements,
-including overrides/deletions and repeated bases, sorted by stable identity.
-The domain is 1–32 shared inventories and may contain only actors. Scripted actors/items,
-leveled actor spawning, locks/traps and excessive inventories reject startup.
-V3/v4/v5 retain their meanings and saved bindings; switching descriptors requires
-explicit migration or a new campaign.
+**native-inventory-8**. Stock OpenMW cursor/floor rays and rendered bounds now have
+shared query helpers used by single-player and a headless server scene. Clients
+send bounded camera/cursor input before inventory mutation. The server resolves
+the stock 200-unit camera query; misses or slopes >=30 degrees use the original
+downward ground fallback. Bounds center the actual dropped model, including gold
+piles. No additional reach, supporting-surface or overlap rules were added.
 
-NPCs/creatures use stock storage and equipment selection. Owners bind before
-loot consumes IDs; fresh campaigns use one fixed/leveled stream in player-role
-order, then placement order.
-Selected enchanted equipment remains unsupported.
+Resolved stationary position, partial-stack subtraction and fresh world identity
+commit in one durable image. Both clients install the committed position without
+snapping it again. Safe write rejection leaves inventory/world state unchanged;
+uncertain writes close service. Recovery never reloads looted placements or loot.
 
-Among actors, only content-defined corpses admit take/put. Living access rejects
-at both service and runtime boundaries. Living actors expose placed identity and
-all 19 public equipment prototypes, including empty appearances. Clients validate
-presentation copies without registering transfer identities; identical snapshots
-reuse them and later snapshots reconcile local drift. Private stacks, counts and
-transfer revisions stay server-side.
-Equipped corpse items can be looted: complete removal clears the slot,
-partial ammunition removal retains it, and putting items into a corpse does not
-select replacement equipment. Player-equipped source items remain protected.
-Authentication, ownership, cell/reach, revision and durability checks still apply.
-All owners share one registry/counter and image; uncertain writes close service.
+V8 adds resolved model bytes to saved content identity. Older descriptors retain
+their meanings; v7 still drops at the player position. Changing versions requires
+matching builds and a new campaign or explicit migration, never an automatic reset.
 
-Recovery validates storage type and preserves saved contents and slots without
-rerolling. Desktop baselines retain distinct stacks; quick deposits resolve
-proxies, player transfers request authoritative unequip, and inventory replacement
-cancels borrowed drags. Corpse disposal stays disabled.
-Take All now submits one revision-bound intent covering the entire source. Detached
-stock transfers preserve instance fields, merge eligible stacks and clear emptied
-corpse slots. One durable image precedes installation and publication; capacity,
-stale input or save failure cannot transfer a prefix. The window stays open and
-refreshes from committed baselines. Empty sources submit no command.
-Committed notifications and ordinary empty nodes are retired without recycling
-IDs, preventing exhaustion during repeated exchanges.
-Living equipment and bulk Take All desktop visuals are user-confirmed.
-Bulk commands require matching updated server and desktop builds;
-existing v6 campaign images remain readable.
-
-Chargen demonstrations still use the older runtime.
+Inherited: up to 64 active world references, two players and 32 shared inventories
+in one interior; winning placement overrides/deletions, whole-reference pickup,
+stock instance fields and gold conversion, starting equipment/all 19 slots,
+container/corpse transfers and atomic Take All. Complete ground baselines suppress
+the original item domain. Authentication, stale-state checks and coherent recovery
+remain in the same canonical writer.
 
 ## Verification
 
-Windows MSVC `scripts/setup_msvc_env.ps1 -PreferLatest`, RelWithDebInfo,
-`build/vnext-product`. Individual targets and filters only; logs in `build/logs`.
+Windows MSVC RelWithDebInfo, `build/vnext-product`; focused logs in `build/logs`.
 
 | Filter/check | Evidence | Log |
 |---|---|---|
-| desktop GUI | corpse exchanges, living equipment and bulk Take All user-confirmed | user evidence; manual-bulk-test-20260917 |
-| bulk-take-all | containers/NPCs/armed creatures, stock merging and slots, 64 stacks, capacity rejection without partial transfer, contention, failed/uncertain writes, recovery | bulk-take-all.log |
-| bulk-canonical | same-tick contention, joint command/image durability, replay/stale rejection, file recovery and continuation | bulk-canonical.log |
-| world-actor-inventories | NPC/creature public slots, empty appearances, private loot exclusion, appearance validation, interest/reconnect/stale-session guards, saved slots; inherited corpse regressions pass | bulk-actors.log |
-| inventory replication | bulk command round trip, truncation and malformed-shape rejection; inherited equipment/baseline checks | bulk-protocol.log |
-| builds | native tests, openmw, tes3mp_server | bulk-native-build.log / bulk-desktop-build.log / bulk-server-build.log |
-| guards | GUI interception, patch registry, document budget/links | bulk-ui-contract.log / bulk-registry.log / docs-budget.log / docs-links.log |
+| item-placement | stock distance/fallback, slope threshold, upright yaw, scaled bounds and particle exclusion | placement-query.log |
+| world-item-placement-host | real Morrowind records plus synthetic meshes: floor/table/slopes, malformed cameras, partial stacks/gold, committed-item support, atomic rejection, two synthetic clients, reconnect/restart and resource mismatch | placement-host.log |
+| inventory replication | camera payload round trip, truncation and invalid-field rejection | placement-protocol.log |
+| world-items / world-items-canonical | inherited contention, atomic durability and recovery regressions | placement-world-items-regression.log / placement-world-items-canonical.log |
+| builds | native tests, desktop and adjacent tes3mp_server-placement.exe | placement-final-build.log / placement-desktop-build.log / placement-server-build.log |
+| guards | UI interception and patch coverage | placement-ui-contract.log / placement-registry.log |
 
-Headless clients/transport are synthetic. No published-mod, TR or full-suite proof
-is claimed.
+Live v8: user confirmed dropping works and accepted stationary placement as done.
+The focused automated logs above supply the case-by-case placement evidence.
+
+Earlier live v7 evidence used Morrowind.esm plus generated ManualWorldItems.esp,
+"vNext World Items Test", `build/manual-world-items-v7-20260917`. User confirmed
+pickup/drop presentation; both clients rejoined at revision 33 before/after restart
+with an identical 3,588-byte image. Logs: `build/logs/manual-world-items-v7-20260917`.
+Container/corpse, equipment and Take All visuals are also inherited user-confirmed
+evidence. No published-mod, TR or complete-suite proof is claimed.
 
 ## Limits
 
-One interior, two players, 32 combined shared stores in v6, 64 nodes per store,
-bounded loot expansion and a 1 MiB image. Living actor access,
-companion sharing, theft/ownership rules, AI/combat/death and corpse disposal,
-chargen/rewards, world items, item use, general scripts/Lua/custom records,
-locks/traps, merchants/restocking/respawn, persistent time/RNG and cell scheduling
-remain unfinished. Ownership and fractional wear persist but are not fully
-projected. General campaign recovery and broad desktop/mod compatibility remain
-unproven.
+The server placement scene covers initial unscripted non-actor geometry and
+committed world items in one interior. Animated geometry and changed doors are
+not simulated. Matching client/server model resources remain a deployment
+requirement; camera/movement authority is inherited. Optional placement preview
+is not implemented. Ordinary drops remain stationary; tumbling/bumping is excluded.
+
+Dynamic cells, script/Lua/custom records, ownership/theft, living/companion access,
+AI/combat/death, item use, locks/traps, merchants/respawn, chargen/rewards and
+persistent time/RNG remain unfinished. General campaign recovery and broad
+mod compatibility remain unproven.

@@ -990,8 +990,11 @@ namespace Resource
                 mMinFilter, mMagFilter, mMaxAnisotropy);
             loaded->accept(setFilterSettingsControllerVisitor);
 
-            osg::ref_ptr<Shader::ShaderVisitor> shaderVisitor(createShaderVisitor());
-            loaded->accept(*shaderVisitor);
+            if (mShaderGenerationEnabled)
+            {
+                osg::ref_ptr<Shader::ShaderVisitor> shaderVisitor(createShaderVisitor());
+                loaded->accept(*shaderVisitor);
+            }
 
             if (canOptimize(path.value()))
             {

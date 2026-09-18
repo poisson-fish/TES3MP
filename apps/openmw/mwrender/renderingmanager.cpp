@@ -793,144 +793,6 @@ namespace MWRender
         return osg::Vec2f(0.5f, 0.f);
     }
 
-    RenderingManager::RayResult getIntersectionResult(osgUtil::LineSegmentIntersector* intersector,
-        const osg::ref_ptr<osgUtil::IntersectionVisitor>& visitor, std::span<const MWWorld::Ptr> ignoreList = {})
-    {
-        constexpr auto nonObjectWorldMask = Mask_Terrain | Mask_Water;
-        RenderingManager::RayResult result;
-        result.mHit = false;
-        result.mRatio = 0;
-
-        if (!intersector->containsIntersections())
-            return result;
-
-        auto test = [&](const osgUtil::LineSegmentIntersector::Intersection& intersection) {
-            PtrHolder* ptrHolder = nullptr;
-            std::vector<RefnumMarker*> refnumMarkers;
-            bool hitNonObjectWorld = false;
-            for (osg::Node* node : intersection.nodePath)
-            {
-                const auto& nodeMask = node->getNodeMask();
-                if (!hitNonObjectWorld)
-                    hitNonObjectWorld = nodeMask & nonObjectWorldMask;
-
-                osg::UserDataContainer* userDataContainer = node->getUserDataContainer();
-                if (!userDataContainer)
-                    continue;
-                for (unsigned int i = 0; i < userDataContainer->getNumUserObjects(); ++i)
-                {
-                    if (PtrHolder* p = dynamic_cast<PtrHolder*>(userDataContainer->getUserObject(i)))
-                    {
-                        if (std::find(ignoreList.begin(), ignoreList.end(), p->mPtr) == ignoreList.end())
-                        {
-                            ptrHolder = p;
-                        }
-                    }
-                    if (RefnumMarker* r = dynamic_cast<RefnumMarker*>(userDataContainer->getUserObject(i)))
-                    {
-                        refnumMarkers.push_back(r);
-                    }
-                }
-            }
-
-            if (ptrHolder)
-                result.mHitObject = ptrHolder->mPtr;
-
-            unsigned int vertexCounter = 0;
-            for (unsigned int i = 0; i < refnumMarkers.size(); ++i)
-            {
-                unsigned int intersectionIndex = intersection.indexList.empty() ? 0 : intersection.indexList[0];
-                if (!refnumMarkers[i]->mNumVertices
-                    || (intersectionIndex >= vertexCounter
-                        && intersectionIndex < vertexCounter + refnumMarkers[i]->mNumVertices))
-                {
-                    auto it = std::find_if(
-                        ignoreList.begin(), ignoreList.end(), [target = refnumMarkers[i]->mRefnum](const auto& ptr) {
-                            return target == ptr.getCellRef().getRefNum();
-                        });
-
-                    if (it == ignoreList.end())
-                    {
-                        result.mHitRefnum = refnumMarkers[i]->mRefnum;
-                    }
-
-                    break;
-                }
-                vertexCounter += refnumMarkers[i]->mNumVertices;
-            }
-
-            if (!result.mHitObject.isEmpty() || result.mHitRefnum.isSet() || hitNonObjectWorld)
-            {
-                result.mHit = true;
-                result.mHitPointWorld = intersection.getWorldIntersectPoint();
-                result.mHitNormalWorld = intersection.getWorldIntersectNormal();
-                result.mRatio = static_cast<float>(intersection.ratio);
-            }
-        };
-
-        if (ignoreList.empty() || intersector->getIntersectionLimit() != osgUtil::LineSegmentIntersector::NO_LIMIT)
-        {
-            test(intersector->getFirstIntersection());
-        }
-        else
-        {
-            for (const auto& intersection : intersector->getIntersections())
-            {
-                test(intersection);
-
-                if (result.mHit)
-                {
-                    break;
-                }
-            }
-        }
-
-        return result;
-    }
-
-    class IntersectionVisitorWithIgnoreList : public osgUtil::IntersectionVisitor
-    {
-    public:
-        bool skipTransform(osg::Transform& transform)
-        {
-            if (mContainsPagedRefs)
-                return false;
-
-            osg::UserDataContainer* userDataContainer = transform.getUserDataContainer();
-            if (!userDataContainer)
-                return false;
-
-            for (unsigned int i = 0; i < userDataContainer->getNumUserObjects(); ++i)
-            {
-                if (PtrHolder* p = dynamic_cast<PtrHolder*>(userDataContainer->getUserObject(i)))
-                {
-                    if (std::find(mIgnoreList.begin(), mIgnoreList.end(), p->mPtr) != mIgnoreList.end())
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        void apply(osg::Transform& transform) override
-        {
-            if (skipTransform(transform))
-            {
-                return;
-            }
-            osgUtil::IntersectionVisitor::apply(transform);
-        }
-
-        void setIgnoreList(std::span<const MWWorld::Ptr> ignoreList) { mIgnoreList = ignoreList; }
-        void setContainsPagedRefs(bool contains) { mContainsPagedRefs = contains; }
-
-    private:
-        std::span<const MWWorld::Ptr> mIgnoreList;
-        bool mContainsPagedRefs = false;
-    };
-
     osg::ref_ptr<osgUtil::IntersectionVisitor> RenderingManager::getIntersectionVisitor(
         osgUtil::Intersector* intersector, bool ignorePlayer, bool ignoreActors,
         std::span<const MWWorld::Ptr> ignoreList)
@@ -956,16 +818,13 @@ namespace MWRender
         mIntersectionVisitor->setFrameStamp(mViewer->getFrameStamp());
         mIntersectionVisitor->setIntersector(intersector);
 
-        unsigned int mask = ~0u;
-        mask &= ~(Mask_RenderToTexture | Mask_Sky | Mask_Debug | Mask_Effect | Mask_Water | Mask_SimpleWater
-            | Mask_Groundcover | Mask_ReplicatedActor);
-        if (ignorePlayer)
-            mask &= ~(Mask_Player);
-        if (ignoreActors)
-            mask &= ~(Mask_Actor | Mask_Player);
-
-        mIntersectionVisitor->setTraversalMask(mask);
+        mIntersectionVisitor->setTraversalMask(sceneQueryMask(ignorePlayer, ignoreActors));
         return mIntersectionVisitor;
+    }
+
+    const osg::Camera& RenderingManager::getSceneCamera() const
+    {
+        return *mViewer->getCamera();
     }
 
     RenderingManager::RayResult RenderingManager::castRay(const osg::Vec3f& origin, const osg::Vec3f& dest,
@@ -977,27 +836,17 @@ namespace MWRender
 
         mRootNode->accept(*getIntersectionVisitor(intersector, ignorePlayer, ignoreActors, ignoreList));
 
-        return getIntersectionResult(intersector, mIntersectionVisitor, ignoreList);
+        return getIntersectionResult(intersector, ignoreList);
     }
 
     RenderingManager::RayResult RenderingManager::castCameraToViewportRay(
         const float nX, const float nY, float maxDistance, bool ignorePlayer, bool ignoreActors)
     {
-        osg::ref_ptr<osgUtil::LineSegmentIntersector> intersector(new osgUtil::LineSegmentIntersector(
-            osgUtil::LineSegmentIntersector::PROJECTION, nX * 2.f - 1.f, nY * (-2.f) + 1.f));
-
-        osg::Vec3d dist(0.f, 0.f, -maxDistance);
-
-        dist = dist * mViewer->getCamera()->getProjectionMatrix();
-
-        osg::Vec3d end = intersector->getEnd();
-        end.z() = dist.z();
-        intersector->setEnd(end);
-        intersector->setIntersectionLimit(osgUtil::LineSegmentIntersector::LIMIT_NEAREST);
+        auto intersector = cameraRayIntersector(mViewer->getCamera()->getProjectionMatrix(), nX, nY, maxDistance);
 
         mViewer->getCamera()->accept(*getIntersectionVisitor(intersector, ignorePlayer, ignoreActors));
 
-        return getIntersectionResult(intersector, mIntersectionVisitor);
+        return getIntersectionResult(intersector);
     }
 
     void RenderingManager::updatePtr(const MWWorld::Ptr& old, const MWWorld::Ptr& updated)

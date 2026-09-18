@@ -2,6 +2,7 @@
 #define OPENMW_MWRENDER_RENDERINGMANAGER_H
 
 #include "objects.hpp"
+#include "scenequery.hpp"
 #include "renderinginterface.hpp"
 #include "rendermode.hpp"
 
@@ -168,15 +169,7 @@ namespace MWRender
         /// Take a screenshot of w*h onto the given image, not including the GUI.
         void screenshot(osg::Image* image, int w, int h);
 
-        struct RayResult
-        {
-            bool mHit;
-            osg::Vec3f mHitNormalWorld;
-            osg::Vec3f mHitPointWorld;
-            MWWorld::Ptr mHitObject;
-            ESM::RefNum mHitRefnum;
-            float mRatio;
-        };
+        using RayResult = SceneRayResult;
 
         RayResult castRay(const osg::Vec3f& origin, const osg::Vec3f& dest, bool ignorePlayer,
             bool ignoreActors = false, std::span<const MWWorld::Ptr> ignoreList = {});
@@ -237,6 +230,7 @@ namespace MWRender
 
         // camera stuff
         Camera* getCamera() { return mCamera.get(); }
+        const osg::Camera& getSceneCamera() const;
 
         /// temporarily override the field of view with given value.
         void overrideFieldOfView(float val);

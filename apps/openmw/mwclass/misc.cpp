@@ -170,7 +170,7 @@ namespace MWClass
         return info;
     }
 
-    static MWWorld::Ptr createGold(MWWorld::CellStore& cell, int goldAmount)
+    ESM::RefId Miscellaneous::goldPileRecord(int goldAmount)
     {
         std::string_view base = "gold_001";
         if (goldAmount >= 100)
@@ -182,8 +182,13 @@ namespace MWClass
         else if (goldAmount >= 5)
             base = "gold_005";
 
+        return ESM::RefId::stringRefId(base);
+    }
+
+    static MWWorld::Ptr createGold(MWWorld::CellStore& cell, int goldAmount)
+    {
         const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
-        MWWorld::ManualRef newRef(store, ESM::RefId::stringRefId(base));
+        MWWorld::ManualRef newRef(store, Miscellaneous::goldPileRecord(goldAmount));
         const MWWorld::LiveCellRef<ESM::Miscellaneous>* ref = newRef.getPtr().get<ESM::Miscellaneous>();
 
         MWWorld::Ptr ptr(cell.insert(ref), &cell);

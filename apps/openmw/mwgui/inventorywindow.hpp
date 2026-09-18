@@ -70,6 +70,8 @@ namespace MWGui
         void useItem(const MWWorld::Ptr& ptr, bool force = false);
         static void setUseItemInterceptor(UseItemInterceptor interceptor);
         static void clearUseItemInterceptor() noexcept;
+        static void setPickupItemInterceptor(UseItemInterceptor interceptor);
+        static void clearPickupItemInterceptor() noexcept;
 
         void setGuiMode(GuiMode mode);
 

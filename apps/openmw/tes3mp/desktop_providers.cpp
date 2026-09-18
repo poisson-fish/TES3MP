@@ -18,6 +18,7 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwrender/replicatedactor.hpp"
+#include "../mwrender/renderingmanager.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
@@ -504,6 +505,9 @@ namespace TES3MP::OpenMWAdapter
                         self->mImpl->pendingInventoryTransaction = std::move(*capture);
                     }
                 });
+                MWGui::InventoryWindow::setPickupItemInterceptor([self](const MWWorld::Ptr& item) {
+                    return self->handleActivation(item, MWWorld::Ptr{});
+                });
                 MWGui::InventoryWindow::setUseItemInterceptor([self](const MWWorld::Ptr& item) {
                     auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
                     if (!presentation)
@@ -545,6 +549,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 MWGui::ItemModel::clearTransferInterceptor();
                 MWGui::InventoryWindow::clearUseItemInterceptor();
+                MWGui::InventoryWindow::clearPickupItemInterceptor();
                 MWMechanics::Security::clearAttemptInterceptor();
             }
             catch (...)
@@ -592,14 +597,14 @@ namespace TES3MP::OpenMWAdapter
             auto* presentation = dynamic_cast<const DesktopPresentation*>(mImpl->presentation);
             auto capture = presentation ? presentation->inventoryPickup(toActivate) : std::nullopt;
             if (!capture)
-                return false;
+                return MWWorld::ContainerStore::isStorableType(toActivate.getType());
             if (!mImpl->pendingInventoryTransaction)
                 mImpl->pendingInventoryTransaction = std::move(*capture);
             return true;
         }
         catch (...)
         {
-            return false;
+            return !toActivate.isEmpty() && MWWorld::ContainerStore::isStorableType(toActivate.getType());
         }
     }
 
@@ -2016,8 +2021,8 @@ namespace TES3MP::OpenMWAdapter
             if (!world)
                 return ProviderResult::PresentationFailed;
 
-            if (nativeItemRecords.empty() && std::ranges::any_of(containers,
-                    [](const auto& container) { return (container.container.value() & MWWorld::PlacedRefTag) != 0; }))
+            if (nativeItemRecords.empty() && (groundItems.nativeWorld || std::ranges::any_of(containers,
+                    [](const auto& container) { return (container.container.value() & MWWorld::PlacedRefTag) != 0; })))
             {
                 nativeItemRecords = MWWorld::inventoryRecords(*MWBase::Environment::get().getESMStore());
                 nativeSoulRecords = MWWorld::inventorySoulRecords(*MWBase::Environment::get().getESMStore());
@@ -2196,14 +2201,32 @@ namespace TES3MP::OpenMWAdapter
                 auto* cell = resolveCell(groundItems.cell, *mapping);
                 if (!cell)
                     return ProviderResult::ContentMappingFailed;
+                // The complete bound placement domain suppresses original content
+                // references on initial entry, reconnect and restart, even if empty.
+                std::vector<MWWorld::Ptr> originals;
+                cell->forEach([&](const MWWorld::Ptr& ptr) {
+                    if (!MWWorld::ContainerStore::isStorableType(ptr.getType())) return true;
+                    const auto placed = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
+                    if (placed && std::ranges::binary_search(groundItems.nativePlacements, *placed))
+                        originals.push_back(ptr);
+                    return true;
+                });
+                for (const auto& ptr : originals) world->deleteObject(ptr);
                 for (const auto& member : groundItems.items)
                 {
                     ESM::Position position{};
+                    const auto visual = std::ranges::find(groundItems.presentation, member.stack.stackId,
+                        &GroundItemPresentation::stack);
+                    if (visual != groundItems.presentation.end())
+                        std::copy(visual->rotation.begin(), visual->rotation.end(), position.rot);
                     position.pos[0] = static_cast<float>(member.position.x()) / static_cast<float>(PositionScale);
                     position.pos[1] = static_cast<float>(member.position.y()) / static_cast<float>(PositionScale);
                     position.pos[2] = static_cast<float>(member.position.z()) / static_cast<float>(PositionScale);
                     auto local = materializeItem(
-                        member.stack, [&](const MWWorld::Ptr& ptr) { return world->placeObject(ptr, cell, position); });
+                        member.stack, [&](const MWWorld::Ptr& ptr) {
+                            if (visual != groundItems.presentation.end()) ptr.getCellRef().setScale(visual->scale);
+                            return world->placeObject(ptr, cell, position);
+                        });
                     if (!local)
                         return ProviderResult::ContentMappingFailed;
                     auto ptr = *local;
@@ -2267,9 +2290,16 @@ namespace TES3MP::OpenMWAdapter
                     result.expectedContainerRevision = revision->second;
                     return result;
                 }
-                if (dynamic_cast<MWGui::WorldItemModel*>(&targetModel))
+                if (auto* drop = dynamic_cast<MWGui::WorldItemModel*>(&targetModel))
                 {
                     result.kind = InventoryTransactionKind::DropItem;
+                    const auto& camera = MWBase::Environment::get().getWorld()->getRenderingManager()->getSceneCamera();
+                    auto& placement = result.placement.emplace();
+                    std::copy_n(camera.getViewMatrix().ptr(), 16, placement.view.begin());
+                    std::copy_n(camera.getProjectionMatrix().ptr(), 16, placement.projection.begin());
+                    placement.cursorX = drop->cursorX();
+                    placement.cursorY = drop->cursorY();
+                    if (!validDropPlacementView(placement)) return std::nullopt;
                     return result;
                 }
             }

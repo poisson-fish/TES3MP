@@ -54,6 +54,9 @@ namespace TES3MP::Native::Testing
                 ESM::CreatureLevList leveled; leveled.blank(); leveled.mId = ESM::RefId::stringRefId("leveled_actor"); write(out, leveled);
                 ESM::Clothing shirt; shirt.blank(); shirt.mId = ESM::RefId::stringRefId("shirt");
                 shirt.mData.mType = ESM::Clothing::Shirt; write(out, shirt);
+                shirt.mId = ESM::RefId::stringRefId("scripted_item"); shirt.mScript = script.mId; write(out, shirt);
+                ESM::Light fixed; fixed.blank(); fixed.mId = ESM::RefId::stringRefId("fixed_light"); write(out, fixed);
+                ESM::ItemLevList items; items.blank(); items.mId = ESM::RefId::stringRefId("leveled_item"); write(out, items);
             }
             ESM::Cell cell; cell.blank(); cell.mName = "Placed test"; cell.mData.mFlags = ESM::Cell::Interior;
             cell.updateId();
@@ -77,6 +80,23 @@ namespace TES3MP::Native::Testing
                 ref.save(out, false, false, patch && i == 8);
             }
             out.endRecord(ESM::REC_CELL);
+            for (const auto* name : {"World items", "Scripted world items", "Leveled world items"})
+            {
+                cell.mName = name; cell.updateId();
+                out.startRecord(ESM::REC_CELL, 0); cell.save(out);
+                for (uint32_t i : {204, 203, 201, 202})
+                {
+                    ESM::CellRef ref; ref.blank(); ref.mRefNum = {i, patch ? 1 : 0};
+                    ref.mRefID = ESM::RefId::stringRefId(std::string_view(name) == "Scripted world items" ? "scripted_item"
+                        : std::string_view(name) == "Leveled world items" ? "leveled_item" : "shirt");
+                    ref.mPos.pos[0] = patch ? float(i * 2) : float(i);
+                    ref.mCount = 2;
+                    ref.save(out, false, false, patch && i == 204);
+                }
+                ESM::CellRef fixed; fixed.blank(); fixed.mRefNum = {205, patch ? 1 : 0};
+                fixed.mRefID = ESM::RefId::stringRefId("fixed_light"); fixed.save(out);
+                out.endRecord(ESM::REC_CELL);
+            }
             for (const auto* name : {"Actor test", "Scripted actor test", "Leveled actor test"})
             {
                 cell.mName = name; cell.updateId();
@@ -92,6 +112,26 @@ namespace TES3MP::Native::Testing
                 out.endRecord(ESM::REC_CELL);
             }
             out.close();
+        }
+    }
+
+    void checkPlacedItems(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Placed item scratch already exists");
+        plugin(scratch / "Base.esm", false); plugin(scratch / "Patch.esp", true);
+        LoadoutOptions options; options.mDataPaths = {scratch};
+        options.mContent = {"Base.esm", "Patch.esp"}; options.mEncoding = "win1252";
+        Loadout loadout(options);
+        const auto items = loadout.placedItems("World items", 64);
+        require(items.size() == 3 && items[0].mRef.mRefNum.mIndex == 201 && items[2].mRef.mRefNum.mIndex == 203
+            && items[0].mRef.mPos.pos[0] == 402 && items[0].mRef.mCount == 2,
+            "World discovery lost winning overrides, deletion, sorting or repeated bases");
+        for (const auto name : {"Scripted world items", "Leveled world items", "World items"})
+        {
+            bool rejected = false;
+            try { loadout.placedItems(name, std::string_view(name) == "World items" ? 2 : 64); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "World discovery silently skipped scripts/spawns or exceeded capacity");
         }
     }
 

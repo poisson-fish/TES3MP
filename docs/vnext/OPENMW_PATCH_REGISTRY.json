@@ -3,10 +3,34 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M3-006",
+      "slice": "stock stationary item placement",
+      "owner": "OpenMW server runtime and desktop adapter",
+      "purpose": "Extract stock cursor and floor rays, slope eligibility and rendered bounds adjustment for single-player and a headless interior scene. Capture bounded camera/cursor input before inventory mutation; use the actual stock gold-pile model. Commit resolved stationary position, stack subtraction and world identity together; replicated clients install the exact result. Scene model bytes bind v8 recovery. No new reach/support/overlap rules or dynamic drop physics.",
+      "paths": [
+        "apps/openmw/mwworld/itemplacement.cpp",
+        "apps/openmw/mwworld/itemplacement.hpp",
+        "apps/openmw/mwrender/scenequery.cpp",
+        "apps/openmw/mwrender/scenequery.hpp",
+        "apps/openmw/mwrender/renderingmanager.hpp",
+        "apps/openmw/mwgui/worlditemmodel.hpp",
+        "apps/openmw/mwclass/misc.cpp",
+        "apps/openmw/mwclass/misc.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests item-placement",
+        "tes3mp_native_loadout_tests world-item-placement-host",
+        "tes3mp_inventory_replication_tests",
+        "openmw RelWithDebInfo link"
+      ],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit placement queries and authoritative drop integration"
+    },
+    {
       "id": "M3-005",
       "slice": "placed actor inventories and corpse looting",
       "owner": "OpenMW server runtime",
-      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Retire unselected ordinary empty stacks during staged transfers and replace registry membership atomically. Project corpse stacks and living public equipment without local selection or script execution; validate complete appearance records/slots before replacement and keep presentation items outside transferable identity maps. Explicit cleanup services avoid borrowing a global world. Bulk Take All uses the same detached stock transfer preparation for every source stack, validates aggregate bounds, and commits both stores once.",
+      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Retire unselected ordinary empty stacks during staged transfers and replace registry membership atomically. Project corpse stacks and living public equipment without local selection or script execution; validate complete appearance records/slots before replacement and keep presentation items outside transferable identity maps. Explicit cleanup services avoid borrowing a global world. Bulk Take All uses the same detached stock transfer preparation for every source stack, validates aggregate bounds, and commits both stores once. Ordinary world pickup/drop stages stock inventory add/remove with owned ObjectState fields under the same durability boundary. Dropped gold shares stock pile selection before placement bounds; placement resolves on detached state before coherent image encoding.",
       "paths": [
         "apps/openmw/mwclass/creature.cpp",
         "apps/openmw/mwclass/creature.hpp",
@@ -18,12 +42,16 @@
         "apps/openmw/mwworld/plainequipment.hpp"
       ],
       "tests": [
+        "tes3mp_native_loadout_tests world-items",
+        "tes3mp_native_loadout_tests world-items-canonical",
         "tes3mp_native_loadout_tests bulk-take-all",
         "tes3mp_native_loadout_tests world-actor-inventories",
         "tes3mp_native_loadout_tests placed-actors",
         "tes3mp_native_loadout_tests world-actor-host",
         "tes3mp_native_loadout_tests equipment-slots",
-        "tes3mp_inventory_replication_tests"
+        "tes3mp_inventory_replication_tests",
+        "tes3mp_native_loadout_tests item-placement",
+        "tes3mp_native_loadout_tests world-item-placement-host"
       ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit actor inventory preparation and authoritative presentation interfaces"
@@ -288,13 +316,15 @@
       "id": "P8-003",
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",
-      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge.",
+      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement and scene-query helpers.",
       "paths": [
         "apps/openmw/CMakeLists.txt"
       ],
       "tests": [
         "scripts/tests/test_tes3mp_target_boundaries.py",
-        "scripts/tests/test_openmw_patch_registry.py"
+        "scripts/tests/test_openmw_patch_registry.py",
+        "tes3mp_native_loadout_tests item-placement",
+        "tes3mp_native_loadout_tests world-item-placement-host"
       ],
       "disposition": "local product build wiring",
       "removal_condition": "The adapter becomes an independently loaded supported module without this build edge"
@@ -303,7 +333,7 @@
       "id": "P8-004",
       "slice": "8.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body.",
+      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body. Rendering queries share their masks, intersection traversal and camera ray calculation with the headless placement scene.",
       "paths": [
         "apps/openmw/mwrender/actorutil.cpp",
         "apps/openmw/mwrender/actorutil.hpp",
@@ -327,7 +357,9 @@
         "openmw-tests ReplicatedActor.RootStaysUprightWhenLookingAround",
         "openmw_tes3mp_adapter_tests",
         "content-backed two-client desktop flow/reconnect/soak",
-        "openmw RelWithDebInfo link"
+        "openmw RelWithDebInfo link",
+        "tes3mp_native_loadout_tests item-placement",
+        "tes3mp_native_loadout_tests world-item-placement-host"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"
@@ -455,7 +487,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers now use the shared cursor/floor and bounds helpers without changing their mutation order.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -467,7 +499,9 @@
         "scripts/tests/test_openmw_patch_registry.py",
         "openmw_tes3mp_adapter_tests",
         "openmw RelWithDebInfo link",
-        "authoritative enchanted-item desktop capture"
+        "authoritative enchanted-item desktop capture",
+        "tes3mp_native_loadout_tests item-placement",
+        "tes3mp_native_loadout_tests world-item-placement-host"
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"

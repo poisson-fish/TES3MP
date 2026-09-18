@@ -24,6 +24,13 @@ table ClientCommandHeader {
   observed_canonical_revision:ulong (id: 4);
 }
 
+table DropPlacementView {
+  view:[double] (id: 0);
+  projection:[double] (id: 1);
+  cursor_x:float = 0.5 (id: 2);
+  cursor_y:float = 0.5 (id: 3);
+}
+
 table ClientInventoryTransactionCommand {
   header:ClientCommandHeader (id: 0);
   kind:InventoryTransactionKind (id: 1);
@@ -41,6 +48,7 @@ table ClientInventoryTransactionCommand {
   expected_container_revision:ulong (id: 13);
   has_world_item_revision:bool (id: 14);
   expected_world_item_revision:ulong (id: 15);
+  placement:DropPlacementView (id: 16);
 }
 
 root_type ClientInventoryTransactionCommand;

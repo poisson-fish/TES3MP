@@ -57,6 +57,8 @@ namespace MWGui
         }
 
         bool usesContainer(const MWWorld::Ptr&) override { return false; }
+        float cursorX() const { return mCursorX; }
+        float cursorY() const { return mCursorY; }
 
     protected:
         MWWorld::Ptr addItem(const ItemStack& item, size_t count, bool /*allowAutoEquip*/) override

@@ -117,7 +117,8 @@ namespace TES3MP
             Position3 interactionOrigin, std::optional<ContainerId> containerId = std::nullopt,
             std::optional<EquipmentSlot> slot = std::nullopt,
             std::optional<ContainerRevision> expectedContainerRevision = std::nullopt,
-            std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt);
+            std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt,
+            std::optional<DropPlacementView> placement = std::nullopt);
         ClientRuntimeQueueResult queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
             CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision, MeleeAttackType attackType,
             float attackStrength);

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_frame.hpp>
 
@@ -196,6 +197,9 @@ namespace
 
     std::optional<Error> validateCommandShape(const TES3MP::ClientInventoryTransactionCommand& command) noexcept
     {
+        if (command.placement && (command.kind != TES3MP::InventoryTransactionKind::DropItem
+            || !TES3MP::validDropPlacementView(*command.placement)))
+            return error(Code::InvalidCommandShape);
         const bool transfer = command.kind == TES3MP::InventoryTransactionKind::TakeFromContainer
             || command.kind == TES3MP::InventoryTransactionKind::PutIntoContainer
             || command.kind == TES3MP::InventoryTransactionKind::TakeAllFromContainer;
@@ -231,6 +235,18 @@ namespace
 
 namespace TES3MP
 {
+    bool validDropPlacementView(const DropPlacementView& input) noexcept
+    {
+        // Representation bounds, not additional gameplay reach or collision rules.
+        if (!std::isfinite(input.cursorX) || !std::isfinite(input.cursorY)
+            || input.cursorX < 0 || input.cursorX > 1 || input.cursorY < 0 || input.cursorY > 1)
+            return false;
+        for (const auto& matrix : {input.view, input.projection})
+            for (double value : matrix)
+                if (!std::isfinite(value) || std::abs(value) > 1e9) return false;
+        return true;
+    }
+
     std::variant<ReliablePlayerInventoryBaseline, InventoryReplicationDecodeError>
     ReliablePlayerInventoryBaseline::create(InventoryBaselineHeader header, PlayerId player, InventoryRevision revision,
         std::span<const CanonicalItemStack> stacks, std::span<const EquipmentBinding> equipment)
@@ -283,7 +299,8 @@ namespace TES3MP
     }
 
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
-        InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items)
+        InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
+        std::span<const uint64_t> nativePlacements, std::span<const GroundItemPresentation> presentation, bool nativeWorld)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
@@ -297,7 +314,20 @@ namespace TES3MP
                 return error(Code::EntriesNotStrictlySorted, items[index].stack.stackId.value(),
                     items[index - 1].stack.stackId.value(), index);
         }
-        return ReliableGroundItemBaseline{ header, std::move(cell), { items.begin(), items.end() } };
+        if (nativePlacements.size() > 64 || presentation.size() > 64
+            || (nativeWorld && (header.chunkCount != 1 || presentation.size() != items.size()))
+            || (!nativeWorld && (!nativePlacements.empty() || !presentation.empty())))
+            return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < nativePlacements.size(); ++i)
+            if (!nativePlacements[i] || (i && nativePlacements[i - 1] >= nativePlacements[i]))
+                return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < presentation.size(); ++i)
+            if (presentation[i].stack != items[i].stack.stackId || !std::isfinite(presentation[i].scale)
+                || presentation[i].scale <= 0 || std::ranges::any_of(presentation[i].rotation,
+                    [](float value) { return !std::isfinite(value); }))
+                return error(Code::InvalidCommandShape);
+        return ReliableGroundItemBaseline{ header, std::move(cell), { items.begin(), items.end() },
+            {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld };
     }
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
@@ -375,7 +405,11 @@ namespace TES3MP
                 item.stack.soulPrototype ? item.stack.soulPrototype->value() : 0,
                 static_cast<std::uint8_t>(item.stack.soulPrototype.has_value()), 0, 0, item.position.x(),
                 item.position.y(), item.position.z(), item.revision.value());
-        const auto root = GroundSchema::CreateReliableGroundItemBaselineDirect(builder, header, &cell, &items);
+        std::vector<GroundSchema::ItemPresentation> presentation;
+        for (const auto& item : input.presentation)
+            presentation.emplace_back(item.stack.value(), item.rotation[0], item.rotation[1], item.rotation[2], item.scale);
+        const auto root = GroundSchema::CreateReliableGroundItemBaselineDirect(builder, header, &cell, &items,
+            &input.nativePlacements, &presentation, input.nativeWorld);
         GroundSchema::FinishSizePrefixedReliableGroundItemBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -419,6 +453,12 @@ namespace TES3MP
             input.observedCanonicalRevision.value());
         const CommandSchema::Position3 origin(
             input.interactionOrigin.x(), input.interactionOrigin.y(), input.interactionOrigin.z());
+        flatbuffers::Offset<CommandSchema::DropPlacementView> placement;
+        if (input.placement)
+            placement = CommandSchema::CreateDropPlacementView(builder,
+                builder.CreateVector(input.placement->view.data(), input.placement->view.size()),
+                builder.CreateVector(input.placement->projection.data(), input.placement->projection.size()),
+                input.placement->cursorX, input.placement->cursorY);
         const auto root = CommandSchema::CreateClientInventoryTransactionCommand(builder, header,
             static_cast<CommandSchema::InventoryTransactionKind>(input.kind), input.prototypeId.value(), input.count,
             input.expectedInventoryRevision.value(), &origin, input.containerId.has_value(),
@@ -427,7 +467,7 @@ namespace TES3MP
             input.slot ? static_cast<std::uint8_t>(*input.slot) : 0, input.expectedContainerRevision.has_value(),
             input.expectedContainerRevision ? input.expectedContainerRevision->value() : 0,
             input.expectedWorldItemRevision.has_value(),
-            input.expectedWorldItemRevision ? input.expectedWorldItemRevision->value() : 0);
+            input.expectedWorldItemRevision ? input.expectedWorldItemRevision->value() : 0, placement);
         CommandSchema::FinishSizePrefixedClientInventoryTransactionCommandBuffer(builder, root);
         return take(builder);
     }
@@ -591,8 +631,26 @@ namespace TES3MP
                     Position3(current.x(), current.y(), current.z()), *value(revision) });
             }
         }
+        std::vector<uint64_t> placements;
+        std::vector<GroundItemPresentation> presentation;
+        if (const auto* encoded = root->native_placements())
+        {
+            if (encoded->size() > 64) return error(Code::TooManyEntries);
+            placements.assign(encoded->begin(), encoded->end());
+        }
+        if (const auto* encoded = root->presentation())
+        {
+            if (encoded->size() > 64) return error(Code::TooManyEntries);
+            for (size_t i = 0; i < encoded->size(); ++i)
+            {
+                const auto current = copyStruct(encoded, i);
+                const auto stack = ItemStackId::fromValue(current.stack_id());
+                if (!stack) return error(Code::InvalidCommandShape);
+                presentation.push_back({*stack, {current.rx(), current.ry(), current.rz()}, current.scale()});
+            }
+        }
         return ReliableGroundItemBaseline::create(
-            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items);
+            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world());
     }
 
     EquipmentSnapshotDecodeResult decodeLatestWinsEquipmentSnapshot(std::span<const std::byte> payload)
@@ -751,6 +809,17 @@ namespace TES3MP
             if (const auto* failure = std::get_if<Error>(&decoded))
                 return *failure;
             command.expectedWorldItemRevision = *value(decoded);
+        }
+        if (const auto* placement = root->placement())
+        {
+            if (!placement->view() || placement->view()->size() != 16
+                || !placement->projection() || placement->projection()->size() != 16)
+                return error(Code::InvalidCommandShape);
+            auto& view = command.placement.emplace();
+            std::copy(placement->view()->begin(), placement->view()->end(), view.view.begin());
+            std::copy(placement->projection()->begin(), placement->projection()->end(), view.projection.begin());
+            view.cursorX = placement->cursor_x();
+            view.cursorY = placement->cursor_y();
         }
         if (const auto failure = validateCommandShape(command))
             return *failure;

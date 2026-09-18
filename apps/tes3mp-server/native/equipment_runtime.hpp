@@ -82,6 +82,9 @@ namespace TES3MP::Native
         };
         // Stable addresses keep registry pointers and listener bindings valid.
         std::vector<std::unique_ptr<SharedInventory>> mContainers;
+        std::optional<PlainEquipmentValues> mWorldItems;
+        std::vector<ESM::CellRef> mPlacedItems;
+        void validateWorldItems(const EquipmentSessionValues& values) const;
         bool mFailedClosed = false;
         const bool mConnected;
         const std::shared_ptr<const void> mLifetime = std::make_shared<const char>(0);
@@ -189,6 +192,7 @@ namespace TES3MP::Native
         PlainEquipmentValues installedValues(size_t actor) const;
         PlainEquipmentContext preparationContext(size_t owner, size_t initiator = 0) const;
         static auto cellValues(const ESM::CellRef& ref);
+        static bool sameCellRef(const ESM::CellRef& a, const ESM::CellRef& b);
         static bool sameObject(const ESM::ObjectState& a, const ESM::ObjectState& b);
         static bool sameValues(const PlainEquipmentValues& a, const PlainEquipmentValues& b);
         static InventoryInstanceId ownedId(ESM::RefNum id);
@@ -200,6 +204,23 @@ namespace TES3MP::Native
         EquipmentEnvelope expectedEnvelope(ESM::RefNum actor) const;
 
     public:
+        class PreparedWorldTransfer
+        {
+            friend class EquipmentRuntime;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit PreparedWorldTransfer(std::unique_ptr<State> state);
+        public:
+            PreparedWorldTransfer(PreparedWorldTransfer&&) noexcept;
+            ~PreparedWorldTransfer();
+            std::span<const char> image() const;
+            uint64_t revision() const;
+        };
+        PreparedWorldTransfer prepareWorldTransfer(size_t actor, InventoryInstanceId item, int count,
+            bool pickup, ESM::Position dropPosition, uint64_t expectedRevision,
+            const std::function<ESM::Position(const ESM::ObjectState&)>& placement = {});
+        PersistenceResult commit(PreparedWorldTransfer& prepared, EquipmentSessionCommitter& durability,
+            EquipmentBytes& bytes);
         // Detached preparation is not a published success. Content/services must
         // outlive it. No engine views escape; commit rechecks its exact runtime
         // lifetime and current state before calling the trusted durability port.
@@ -249,7 +270,8 @@ namespace TES3MP::Native
             std::shared_ptr<const EquipmentScriptLocals> locals = {},
             MWBase::ScriptManager* declarations = nullptr,
             std::optional<size_t> restartActor = {}, bool connected = false,
-            std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0);
+            std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0,
+            std::optional<std::vector<ESM::CellRef>> worldItems = {});
         // Diagnostic convenience; delegates to the same multi-owner runtime.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,
@@ -278,6 +300,8 @@ namespace TES3MP::Native
             std::span<const ESM::RefId> referenceIds, std::unique_ptr<const PlainEquipmentValues>& output,
             EquipmentBytes& bytes, FileFaults& faults);
     private:
+        PlainEquipmentValues preparedValues(const PreparedWorldTransfer& prepared, size_t owner) const;
+        const PlainEquipmentValues& worldValues(const PreparedWorldTransfer* prepared = nullptr) const;
         PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
         PlainEquipmentValues preparedValues(const PreparedEquipment& prepared, size_t owner) const;
     };

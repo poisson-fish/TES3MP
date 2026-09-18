@@ -104,7 +104,7 @@ prototype mappings and binds explicit initial-loot level/seed. Older descriptors
 require explicit migration; never reset their campaigns automatically.
 Placed reference IDs use record-plugin order; script lists still participate in
 content fingerprints but their reader slots do not shift reference identity.
-Descriptor v4 discovers 1–32 winning container placements in one configured interior,
+Descriptor v4 discovers 1â€“32 winning container placements in one configured interior,
 ordered by stable identity, and binds the complete domain into the content digest.
 These stores stay loaded for the host lifetime; dynamic activation and respawn are
 not inferred from a client's scene. Any unsupported placement rejects this bootstrap.
@@ -148,6 +148,27 @@ in stock order. Stock stacking and corpse slot removal run on detached stores.
 Capacity, access, stale state or durability failure cannot transfer a prefix.
 One coherent image commits before installation/publication; retries cannot refill
 or duplicate loot. This adds no living-actor access or corpse disposal.
+
+**World items share inventory durability.** Descriptor v7 adds up to 64 active
+ordinary world references in the bound interior. Native ObjectState fields and
+inventory stores commit together in session format 4; absent original placements
+never reload during recovery. Stock add/remove preserves instance fields with
+stock pickup normalization and gold conversion. Drops split unequipped stacks
+with fresh counter identities; v7 retains drops at the server's player position. Full ground baselines suppress the complete
+bound content-placement domain and present only committed items, including after
+reconnect. Scripts and leveled spawning reject bootstrap. Earlier descriptors
+and session encodings retain their meanings; changing domains requires explicit
+migration or a new campaign and matching desktop/server builds.
+
+**Stationary drops use stock OpenMW placement.** V8 shares extracted cursor/floor
+scene queries and rendered bounds with stock callers. Preserve cursor eligibility
+and ground fallback; add no reach/support/overlap rules. Bounded camera/cursor
+intent uses inherited camera/movement authority. A headless scene supplies initial
+unscripted geometry and committed items; scripts, animation and door changes need
+their own services. Resolved model bytes join saved identity, requiring migration
+or a fresh campaign when changed. Commit transform, inventory removal and reference
+creation together; clients install that transform without repositioning. Optional
+preview cannot commit. Dynamic tumbling/bumping remains outside scope.
 
 **Equipment is part of the coherent inventory image.** Retain all 19 engine slots
 by item identity, including stackable ammunition. Full slot format 7 carries an

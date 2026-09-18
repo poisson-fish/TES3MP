@@ -98,6 +98,17 @@ namespace TES3MP
         TakeAllFromContainer,
     };
 
+    // Fixed-size presentation input for the stock camera query, never a final item transform.
+    struct DropPlacementView
+    {
+        std::array<double, 16> view{};
+        std::array<double, 16> projection{};
+        float cursorX = 0.5f;
+        float cursorY = 0.5f;
+        friend bool operator==(const DropPlacementView&, const DropPlacementView&) noexcept = default;
+    };
+    bool validDropPlacementView(const DropPlacementView& view) noexcept;
+
     struct InventoryTransactionCommand
     {
         PlayerId player;
@@ -111,6 +122,7 @@ namespace TES3MP
         std::optional<ContainerRevision> expectedContainerRevision = std::nullopt;
         std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt;
         Position3 interactionOrigin;
+        std::optional<DropPlacementView> placement;
 
         friend bool operator==(const InventoryTransactionCommand&, const InventoryTransactionCommand&) noexcept
             = default;

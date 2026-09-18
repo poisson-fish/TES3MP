@@ -20,7 +20,7 @@ namespace TES3MP::Native
         const std::array<EquipmentActorBinding, 2>& actors,
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
         std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
-        int lootLevel, uint32_t lootSeed)
+        int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
         , mScriptLocals(std::move(locals)), mConnected(connected)
     {
@@ -145,6 +145,26 @@ namespace TES3MP::Native
             ContainerStoreResolution witness(store, ptr);
             store.setContListener(&shared.mEffects.mListener);
             if (auto* inventory = inventoryStorage(i + 2)) inventory->setInvListener(&shared.mEffects.mListener);
+        }
+        if (worldItems)
+        {
+            if (!connected || worldItems->size() > PreparedPlainEquipment::MaxItems)
+                throw std::invalid_argument("World item domain exceeds its bound");
+            mPlacedItems = std::move(*worldItems);
+            mWorldItems.emplace();
+            mWorldItems->mActor = ownerPtr(0).getCellRef().getRefNum();
+            mWorldItems->mLastGenerated = world.getLastGeneratedRefNum();
+            for (const auto& placed : mPlacedItems)
+            {
+                if (!placed.mRefNum.hasContentFile() || !placements.insert(placed.mRefNum).second
+                    || placed.mCount <= 0 || !inventoryItemRecord(content, placed.mRefID).mScript.empty())
+                    throw std::invalid_argument("World item placement invalid or scripted");
+                ESM::ObjectState object; object.blank(); object.mRef = placed;
+                object.mPosition = placed.mPos;
+                object.mHasCustomState = false;
+                if (!restartActor) mWorldItems->mObjects.push_back(std::move(object));
+            }
+            mWorldItems->validate(content, mWorldItems->mActor);
         }
         if (restartActor)
         {
@@ -752,6 +772,11 @@ namespace TES3MP::Native
             ref.mFaction, ref.mFactionRank, ref.mChargeInt, ref.mChargeIntRemainder, ref.mEnchantmentCharge,
             ref.mCount, ref.mTeleport, ref.mDoorDest, ref.mDestCell, ref.mLockLevel, ref.mIsLocked, ref.mKey,
             ref.mTrap, ref.mReferenceBlocked, ref.mPos);
+    }
+
+    bool EquipmentRuntime::sameCellRef(const ESM::CellRef& a, const ESM::CellRef& b)
+    {
+        return cellValues(a) == cellValues(b);
     }
 
     bool EquipmentRuntime::sameObject(const ESM::ObjectState& a, const ESM::ObjectState& b)

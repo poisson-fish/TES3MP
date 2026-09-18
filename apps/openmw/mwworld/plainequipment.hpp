@@ -225,6 +225,12 @@ namespace MWWorld
             ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
             const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource = false,
             bool takeAll = false);
+        // Ordinary world pickup/drop uses the same protected stock inventory.
+        // The runtime owns the world ObjectState and atomically installs the
+        // returned world state with this candidate. Null pickup means drop.
+        static std::pair<PreparedPlainEquipment, ESM::ObjectState> prepareWorldTransfer(
+            const ContainerStoreResolution& inventory, ESM::RefNum item, size_t expectedRevision,
+            int count, const ESM::ObjectState* pickup, const PlainEquipmentContext& context);
         PreparedPlainEquipment(PreparedPlainEquipment&&) noexcept;
         PreparedPlainEquipment& operator=(PreparedPlainEquipment&&) noexcept;
         ~PreparedPlainEquipment();

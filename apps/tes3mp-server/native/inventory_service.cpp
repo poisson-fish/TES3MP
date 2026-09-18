@@ -1,3 +1,4 @@
+#include <numbers>
 #include "inventory_service.hpp"
 #include "actor_inventory.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
+#include <cmath>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -18,7 +20,7 @@ namespace TES3MP::Native
     {
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
         {
-            if (binding.mPlayers[0] == binding.mPlayers[1] || binding.mContainers.empty()
+            if (binding.mPlayers[0] == binding.mPlayers[1] || (binding.mContainers.empty() && !binding.mWorldItems)
                 || binding.mContainers.size() > MaxEquipmentContainers
                 || binding.mActors[0].mBaseInventory != binding.mActors[1].mBaseInventory)
                 throw std::invalid_argument("Native inventory requires distinct trusted players, bounded containers and one initialization mode");
@@ -32,7 +34,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Base actor inventories cannot override an item identity");
                 return "native-inventory-2/" + std::to_string(binding.mPlayers[0].value()) + "/"
                     + std::to_string(binding.mPlayers[1].value()) + "/"
-                    + std::to_string(binding.mContainers.front().mId.value());
+                    + std::to_string(binding.mContainers.empty() ? 0 : binding.mContainers.front().mId.value());
             }
             if (!binding.mShirt || binding.mActors[0].mShirt != binding.mActors[1].mShirt)
                 throw std::invalid_argument("Legacy native inventory requires one seed shirt");
@@ -41,7 +43,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native inventory wire projection supports the plain shirt only");
             return "native-inventory-1/" + std::to_string(binding.mPlayers[0].value()) + "/"
                 + std::to_string(binding.mPlayers[1].value()) + "/" + std::to_string(binding.mShirt->value())
-                + "/" + std::to_string(binding.mContainers.front().mId.value());
+                + "/" + std::to_string(binding.mContainers.empty() ? 0 : binding.mContainers.front().mId.value());
         }
         std::vector<EquipmentContainerBinding> containers(const InventoryServiceBinding& binding)
         {
@@ -51,16 +53,44 @@ namespace TES3MP::Native
             for (const auto& shared : binding.mContainers) result.push_back({shared.mBase, shared.mPlacement});
             return result;
         }
+        std::optional<std::vector<ESM::CellRef>> worldItems(const InventoryServiceBinding& binding)
+        {
+            if (!binding.mWorldItems) return {};
+            if (binding.mWorldItems->mPlacements.size() > PreparedPlainEquipment::MaxItems)
+                throw std::invalid_argument("Native world placement budget exceeded");
+            std::vector<ESM::CellRef> result;
+            uint64_t previous = 0;
+            for (const auto& [id, ref] : binding.mWorldItems->mPlacements)
+            {
+                if (!id || id <= previous) throw std::invalid_argument("Native world identities not sorted");
+                previous = id;
+                result.push_back(ref);
+            }
+            return result;
+        }
+        Position3 worldPosition(const ESM::CellRef& ref)
+        {
+            return Position3(std::llround(double(ref.mPos.pos[0]) * 1024),
+                std::llround(double(ref.mPos.pos[1]) * 1024), std::llround(double(ref.mPos.pos[2]) * 1024));
+        }
         ItemStackId wireId(ESM::RefNum id)
         {
             return ItemStackId::fromValue((uint64_t(std::bit_cast<uint32_t>(id.mContentFile)) << 32) | id.mIndex).value();
+        }
+        ItemStackId worldId(ESM::RefNum ref, const InventoryServiceBinding::WorldItems& domain)
+        {
+            if (!ref.hasContentFile()) return wireId(ref);
+            for (const auto& [id, placed] : domain.mPlacements)
+                if (placed.mRefNum == ref) return ItemStackId::fromValue(id).value();
+            throw std::invalid_argument("World reference outside the bound placement domain");
         }
         InventoryInstanceId nativeId(ItemStackId id)
         {
             return { uint32_t(id.value()), std::bit_cast<int32_t>(uint32_t(id.value() >> 32)) };
         }
         std::vector<CanonicalItemStack> stacks(const MWWorld::PlainEquipmentValues& values,
-            const std::map<ESM::RefId, ItemPrototypeId>& items, const MWWorld::ESMStore& content)
+            const std::map<ESM::RefId, ItemPrototypeId>& items, const MWWorld::ESMStore& content,
+            const InventoryServiceBinding::WorldItems* world = nullptr)
         {
             std::vector<CanonicalItemStack> result;
             result.reserve(values.mObjects.size());
@@ -86,7 +116,7 @@ namespace TES3MP::Native
                 // Native record IDs carry the exact engine charge bit patterns,
                 // including the untouched -1 sentinel and fractional light time.
                 const bool native = id.value() == MWWorld::inventoryRecordId(object.mRef.mRefID);
-                result.push_back({ wireId(object.mRef.mRefNum), id, uint32_t(std::abs(count)),
+                result.push_back({ world ? worldId(object.mRef.mRefNum, *world) : wireId(object.mRef.mRefNum), id, uint32_t(std::abs(count)),
                     native ? std::bit_cast<uint32_t>(object.mRef.mChargeInt) : condition,
                     native ? std::bit_cast<uint32_t>(charge) : 0, soul });
             }
@@ -99,7 +129,7 @@ namespace TES3MP::Native
         InventoryServiceBinding binding, bool recovering)
         : mBinding(std::move(binding)), mWorld(content, readers, 1), mScripts(content),
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
-              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed)
+              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding))
     {
         for (const auto& [id, record] : MWWorld::inventoryRecords(content))
             mItemIds.emplace(record, ItemPrototypeId::fromValue(id).value());
@@ -134,6 +164,47 @@ namespace TES3MP::Native
         if (!bound.current(players)) throw std::invalid_argument("Inventory session binding is no longer current");
         (void)actor(bound.player());
         const auto& command = bound.transaction();
+        if (command.placement && (command.kind != InventoryTransactionKind::DropItem
+            || !validDropPlacementView(*command.placement)))
+            throw std::invalid_argument("Invalid placement command shape");
+        const bool pickup = command.kind == InventoryTransactionKind::PickupItem;
+        const bool drop = command.kind == InventoryTransactionKind::DropItem;
+        if (pickup || drop)
+        {
+            const auto* player = players.findPlayer(bound.player());
+            if (!mBinding.mWorldItems || !player || !command.stackId || command.containerId || command.slot
+                || command.expectedContainerRevision || command.player != bound.player() || command.count == 0
+                || command.count > MaximumTransferCount
+                || command.expectedInventoryRevision.value() != mWorld.getPtrRegistryRevision()
+                || player->transform().cell() != mBinding.mWorldItems->mCell
+                || !positionsWithinReach(player->transform().position(), command.interactionOrigin, ReachQuanta))
+                throw std::invalid_argument("World item command shape, cell or revision invalid");
+            if (pickup)
+            {
+                const auto& items = mRuntime.worldValues().mObjects;
+                const auto object = std::ranges::find_if(items, [&](const auto& value) {
+                    return worldId(value.mRef.mRefNum, *mBinding.mWorldItems) == command.stackId;
+                });
+                if (object == items.end() || !command.expectedWorldItemRevision
+                    || command.expectedWorldItemRevision->value() != mWorld.getPtrRegistryRevision()
+                    || command.count != object->mRef.mCount || mItemIds.at(object->mRef.mRefID) != command.prototypeId
+                    || !positionsWithinReach(player->transform().position(), worldPosition(object->mRef), ReachQuanta)
+                    || !positionsWithinReach(command.interactionOrigin, worldPosition(object->mRef), ReachQuanta))
+                    throw std::invalid_argument("World pickup missing, stale or out of reach");
+            }
+            else
+            {
+                if (mBinding.mWorldItems->mPlacement && !command.placement)
+                    throw std::invalid_argument("Stock drop requires placement view input");
+                const auto native = nativeId(*command.stackId);
+                const auto item = mWorld.getPtr({native.mIndex, native.mContentFile});
+                if (command.expectedWorldItemRevision || item.isEmpty()
+                    || item.getContainerStore() != &mRuntime.storage(actor(bound.player()))
+                    || mItemIds.at(item.getCellRef().getRefId()) != command.prototypeId)
+                    throw std::invalid_argument("World drop ownership or prototype invalid");
+            }
+            return;
+        }
         const auto item = command.stackId ? mWorld.getPtr({uint32_t(command.stackId->value()),
             std::bit_cast<int32_t>(uint32_t(command.stackId->value() >> 32))}) : MWWorld::Ptr{};
         const auto prototype = item.isEmpty() ? mItemIds.end() : mItemIds.find(item.getCellRef().getRefId());
@@ -311,6 +382,45 @@ namespace TES3MP::Native
         catch (...) { return CanonicalDurabilityResult::Rejected; }
     };
 
+    class InventoryService::WorldTransaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        CanonicalServerState players;
+        ServerApp::InventoryCommandBinding binding;
+        EquipmentRuntime::PreparedWorldTransfer prepared;
+        WorldTransaction(InventoryService& owner, const CanonicalServerState& state,
+            ServerApp::InventoryCommandBinding bound, EquipmentRuntime::PreparedWorldTransfer candidate)
+            : service(owner), players(state), binding(std::move(bound)), prepared(std::move(candidate)) {}
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        try
+        {
+            service.validate(players, binding);
+            EquipmentBytes retained(prepared.image().begin(), prepared.image().end());
+            struct Sink final : EquipmentSessionCommitter
+            {
+                const NativeInventoryCommit& persist;
+                explicit Sink(const NativeInventoryCommit& value) : persist(value) {}
+                PersistenceResult commit(std::span<const char> image) noexcept override
+                {
+                    const auto result = persist(std::as_bytes(image));
+                    return result == CanonicalDurabilityResult::Committed ? PersistenceResult::Accepted
+                        : result == CanonicalDurabilityResult::Rejected ? PersistenceResult::Rejected : PersistenceResult::Uncertain;
+                }
+            } sink(persist);
+            EquipmentBytes bytes;
+            const auto result = service.mRuntime.commit(prepared, sink, bytes);
+            if (result == PersistenceResult::Accepted)
+            {
+                service.mImage.swap(retained);
+                service.retireCommittedEffects();
+            }
+            return result == PersistenceResult::Accepted ? CanonicalDurabilityResult::Committed
+                : result == PersistenceResult::Rejected ? CanonicalDurabilityResult::Rejected : CanonicalDurabilityResult::Failed;
+        }
+        catch (...) { return CanonicalDurabilityResult::Rejected; }
+    };
+
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareInventory(
         const CanonicalServerState& players, const ServerCommandProposal& proposal)
     {
@@ -319,6 +429,40 @@ namespace TES3MP::Native
         try
         {
             const auto& input = binding->transaction();
+            if (input.kind == InventoryTransactionKind::PickupItem || input.kind == InventoryTransactionKind::DropItem)
+            {
+                validate(players, *binding);
+                const auto& origin = players.findPlayer(binding->player())->transform().position();
+                ESM::Position position{};
+                position.pos[0] = float(double(origin.x()) / 1024);
+                position.pos[1] = float(double(origin.y()) / 1024);
+                position.pos[2] = float(double(origin.z()) / 1024);
+                std::function<ESM::Position(const ESM::ObjectState&)> placement;
+                if (input.kind == InventoryTransactionKind::DropItem && mBinding.mWorldItems->mPlacement)
+                {
+                    const auto& transform = players.findPlayer(binding->player())->transform();
+                    position.rot[2] = -float(double(transform.orientation().z().value()) / 4294967296.0 * 2 * std::numbers::pi);
+                    placement = [&](const ESM::ObjectState& state) {
+                        // Query the actual resulting world model (including stock gold piles),
+                        // after detached inventory preparation and before image encoding.
+                        MWWorld::ManualRef reference(mRuntime.mStore, state.mRef.mRefID);
+                        auto ptr = reference.getPtr();
+                        ptr.getCellRef() = MWWorld::CellRef(state.mRef);
+                        return mBinding.mWorldItems->mPlacement(position,ptr,*input.placement,mRuntime.worldValues().mObjects);
+                    };
+                }
+                auto item = nativeId(*input.stackId);
+                if (input.kind == InventoryTransactionKind::PickupItem)
+                    for (const auto& object : mRuntime.worldValues().mObjects)
+                        if (worldId(object.mRef.mRefNum, *mBinding.mWorldItems) == input.stackId)
+                            item = EquipmentRuntime::ownedId(object.mRef.mRefNum);
+                auto prepared = mRuntime.prepareWorldTransfer(actor(binding->player()), item,
+                    int(input.count), input.kind == InventoryTransactionKind::PickupItem, position,
+                    input.expectedInventoryRevision.value(), placement);
+                if (prepared.image().size() > MaximumNativeInventoryImageBytes)
+                    throw std::invalid_argument("Native world image exceeds canonical budget");
+                return std::make_unique<WorldTransaction>(*this, players, *binding, std::move(prepared));
+            }
             if (input.kind == InventoryTransactionKind::EquipItem || input.kind == InventoryTransactionKind::UnequipItem)
             {
                 validate(players, *binding);
@@ -359,15 +503,16 @@ namespace TES3MP::Native
     {
         const auto* transaction = dynamic_cast<const Transaction*>(candidate);
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(candidate);
-        if (candidate && ((!transaction && !equipment) || (transaction && &transaction->service != this)
+        const auto* world = dynamic_cast<const WorldTransaction*>(candidate);
+        if (candidate && ((!transaction && !equipment && !world) || (world && &world->service != this) || (transaction && &transaction->service != this)
                 || (equipment && &equipment->service != this))) return std::nullopt;
         return project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
-            equipment ? &equipment->prepared : nullptr);
+            equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr);
     }
 
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::project(const CanonicalServerState& players,
         SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedCommand* candidate,
-        const EquipmentRuntime::PreparedEquipment* equipped) const
+        const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -376,6 +521,7 @@ namespace TES3MP::Native
         if (!player) return std::nullopt;
         const auto index = actor(player->playerId());
         const auto values = [&](size_t owner) {
+            if (world) return mRuntime.preparedValues(*world, owner);
             if (equipped) return mRuntime.preparedValues(*equipped, owner);
             return candidate ? mRuntime.preparedValues(candidate->mTransfer, owner) : mRuntime.installedValues(owner);
         };
@@ -386,7 +532,7 @@ namespace TES3MP::Native
         for (int slot = 0; slot < InventoryStore::Slots; ++slot)
             if (installed.mSlots[slot].isSet())
                 equipment.push_back({static_cast<EquipmentSlot>(slot), wireId(installed.mSlots[slot])});
-        const auto version = equipped ? equipped->candidate().mRevision
+        const auto version = world ? world->revision() : equipped ? equipped->candidate().mRevision
             : candidate ? candidate->candidate().mRevision : mWorld.getPtrRegistryRevision();
         const InventoryBaselineHeader header{ target, session->sessionGeneration(), tick, revision, 0, 1 };
         ServerApp::InventoryInterestDelivery result{ .targetSession = target };
@@ -430,7 +576,24 @@ namespace TES3MP::Native
             if (!std::holds_alternative<ReliableContainerInventoryBaseline>(baseline)) return std::nullopt;
             result.containers.push_back(std::get<ReliableContainerInventoryBaseline>(std::move(baseline)));
         }
-        auto ground = ReliableGroundItemBaseline::create(header, player->transform().cell(), {});
+        std::vector<GroundItemInterestMember> groundItems;
+        std::vector<uint64_t> placements;
+        std::vector<GroundItemPresentation> presentation;
+        if (mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell)
+        {
+            for (const auto& [id, ref] : mBinding.mWorldItems->mPlacements) placements.push_back(id);
+            const auto& state = mRuntime.worldValues(world);
+            for (const auto& stack : stacks(state, mItemIds, mRuntime.mStore, &*mBinding.mWorldItems))
+            {
+                const auto& ref = std::ranges::find_if(state.mObjects, [&](const auto& value) {
+                    return worldId(value.mRef.mRefNum, *mBinding.mWorldItems) == stack.stackId;
+                })->mRef;
+                groundItems.push_back({stack, worldPosition(ref), WorldItemRevision::fromValue(version).value()});
+                presentation.push_back({stack.stackId, {ref.mPos.rot[0], ref.mPos.rot[1], ref.mPos.rot[2]}, ref.mScale});
+            }
+        }
+        auto ground = ReliableGroundItemBaseline::create(header, player->transform().cell(), groundItems, placements, presentation,
+            mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell);
         if (!std::holds_alternative<ReliableGroundItemBaseline>(ground)) return std::nullopt;
         result.groundItems.push_back(std::get<ReliableGroundItemBaseline>(std::move(ground)));
         std::vector<PublicEquipmentMember> visible;

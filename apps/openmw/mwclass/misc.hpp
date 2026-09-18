@@ -12,6 +12,8 @@ namespace MWClass
         Miscellaneous();
 
     public:
+        // Stock world-pile selection, also used by detached authoritative drops.
+        static ESM::RefId goldPileRecord(int goldAmount);
         MWWorld::Ptr copyToCell(const MWWorld::ConstPtr& ptr, MWWorld::CellStore& cell, int count) const override;
         MWWorld::Ptr moveToCell(const MWWorld::Ptr& ptr, MWWorld::CellStore& cell) const override;
 

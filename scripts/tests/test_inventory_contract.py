@@ -27,6 +27,8 @@ class InventoryContractTests(unittest.TestCase):
         cases = (
             ("itemmodel.cpp", "MWWorld::Ptr ItemModel::moveItem",
              "interceptTransfer(item, count", "removeItem(item, count);"),
+            ("inventorywindow.cpp", "void InventoryWindow::pickUpObject",
+             "sPickupItemInterceptor(object)", "breakInvisibility(player)"),
             ("inventorywindow.cpp", "void InventoryWindow::useItem",
              "sUseItemInterceptor", "ptr.getClass().use"),
             ("inventorywindow.cpp", "bool InventoryWindow::ensureSelectedItemUnequipped",

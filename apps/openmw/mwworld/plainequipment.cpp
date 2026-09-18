@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "class.hpp"
+#include "../mwclass/misc.hpp"
 #include "containeradd.hpp"
 #include "esmstore.hpp"
 #include "inventorystore.hpp"
@@ -1001,6 +1002,101 @@ namespace MWWorld
             state->check(state->mContext);
         }
         return { PreparedPlainEquipment(std::move(states[0])), PreparedPlainEquipment(std::move(states[1])) };
+    }
+
+    std::pair<PreparedPlainEquipment, ESM::ObjectState> PreparedPlainEquipment::prepareWorldTransfer(
+        const ContainerStoreResolution& inventory, ESM::RefNum identity, size_t expectedRevision,
+        int count, const ESM::ObjectState* pickup, const PlainEquipmentContext& context)
+    {
+        const auto& live = State::storage(inventory, context);
+        const auto counter = context.mWorldModel.getLastGeneratedRefNum();
+        if (!dynamic_cast<const InventoryStore*>(&live) || count <= 0
+            || expectedRevision != context.mWorldModel.getPtrRegistryRevision()
+            || expectedRevision >= std::numeric_limits<size_t>::max() - 1
+            || counter.mContentFile != -1 || counter.mIndex == UINT32_MAX)
+            throw std::invalid_argument("World transfer inventory, count or revision invalid");
+        auto state = std::make_unique<State>(inventory, context);
+        state->capture(live, true);
+        auto& candidate = static_cast<InventoryStore&>(state->candidate());
+        ESM::ObjectState world;
+        using Kind = PlainEquipmentResult::EffectKind;
+        if (pickup)
+        {
+            if (pickup->mRef.mRefNum != identity || pickup->mRef.mCount != count)
+                throw std::invalid_argument("World pickup requires the entire current reference");
+            PlainEquipmentValues checked{inventory.mOwner.getCellRef().getRefNum(), {}, {}, counter, {*pickup}};
+            checked.validate(context.mStore, checked.mActor);
+            ManualRef reference(context.mStore, pickup->mRef.mRefID);
+            auto incoming = reference.getPtr();
+            if (incoming.getType() == ESM::Light::sRecordId
+                && !(incoming.get<ESM::Light>()->mBase->mData.mFlags & ESM::Light::Carry))
+                throw std::invalid_argument("Fixed world lighting cannot be picked up");
+            incoming.getCellRef() = CellRef(pickup->mRef);
+            incoming.getRefData() = RefData::restore(*pickup, {}, {});
+            int64_t transferred = count;
+            if (incoming.getClass().isGold(incoming)) transferred *= incoming.getClass().getValue(incoming);
+            if (transferred <= 0 || transferred > INT_MAX)
+                throw std::invalid_argument("World pickup count conversion overflow");
+            int64_t quantity = transferred;
+            candidate.forEachStored([&](const auto& node, auto) {
+                quantity += std::abs(static_cast<int64_t>(node.mRef.getCount(false)));
+            });
+            if (quantity > INT_MAX || quantity <= 0)
+                throw std::invalid_argument("World pickup destination count overflow");
+            const int addedCount = static_cast<int>(transferred);
+            incoming.getCellRef().unsetRefNum();
+            auto added = candidate.addImp(incoming, addedCount, context.mStore);
+            if (!added->getCellRef().getRefNum().isSet())
+                added->getRefData() = incoming.getRefData().copyForContainerTransfer();
+            state->mResult.mTransferred = added->getCellRef().getOrAssignRefNum(state->mResult.mLastGenerated);
+            normalizeContainerAddReference(added->getCellRef());
+            state->effect(Kind::RegisterSplit, *added);
+            if (state->mContainerListener) state->effect(Kind::ItemAdded, *added, addedCount);
+            world = *pickup;
+            world.mRef.mCount = 0;
+        }
+        else
+        {
+            auto item = candidate.begin();
+            while (item != candidate.end() && item->getCellRef().getRefNum() != identity) ++item;
+            if (item == candidate.end() || !item->getClass().getScript(*item).empty()
+                || std::ranges::find(state->mSlots, identity) != state->mSlots.end()
+                || count > std::abs(static_cast<int64_t>(item->getCellRef().getCount(false))))
+                throw std::invalid_argument("World drop requires an owned unequipped ordinary stack");
+            world.blank();
+            item->getCellRef().writeState(world);
+            item->getRefData().write(world, Compiler::Locals{});
+            world.mHasCustomState = false;
+            int worldCount = count;
+            if (item->getClass().isGold(*item))
+            {
+                const int64_t amount = int64_t(item->getClass().getValue(*item)) * count;
+                if (amount <= 0 || amount > 1000000)
+                    throw std::invalid_argument("World gold drop count conversion overflow");
+                worldCount = int(amount);
+                ManualRef pile(context.mStore, MWClass::Miscellaneous::goldPileRecord(worldCount));
+                pile.getPtr().getCellRef().writeState(world);
+            }
+            CellRef dropped(world.mRef);
+            dropped.unsetRefNum();
+            dropped.setCount(worldCount);
+            dropped.getOrAssignRefNum(state->mResult.mLastGenerated);
+            dropped.writeState(world);
+            const auto removal = ContainerStore::prepareRemoveCount(item->getCellRef(), count);
+            item->getCellRef() = item->getCellRef().copyWithCount(removal.mRemainingCount);
+            if (removal.mFullRemoval && candidate.mSelectedEnchantItem == item)
+                candidate.mSelectedEnchantItem = candidate.end();
+            state->mResult.mTransferred = identity;
+            if (state->mContainerListener) state->effect(Kind::ItemRemoved, *item, count);
+            // World insertion advances the same registry revision/counter.
+            state->effect(Kind::RegisterSplit);
+        }
+        if (candidate.storedSize() > MaxItems)
+            throw std::invalid_argument("World transfer inventory node budget exceeded");
+        state->effect(Kind::InventoryUpdated);
+        state->finish();
+        state->check(context);
+        return {PreparedPlainEquipment(std::move(state)), std::move(world)};
     }
 
     void PreparedPlainEquipment::validate(const PlainEquipmentContext& context) const

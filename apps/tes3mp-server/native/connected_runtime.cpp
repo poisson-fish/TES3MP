@@ -104,6 +104,7 @@ namespace TES3MP::Native
             for (size_t i = 2; i < ownerCount(); ++i) values.mContainers.push_back(installedValues(i));
         if (values.mContainers.size() != mContainers.size())
             throw std::invalid_argument("Session container count changed");
+        if (!values.mWorldItems) values.mWorldItems = mWorldItems;
         auto counter = values.mActors[0].mLastGenerated;
         const auto other = values.mActors[1].mLastGenerated;
         if (other.mContentFile < counter.mContentFile
@@ -130,6 +131,15 @@ namespace TES3MP::Native
                          object.mRef.mFaction, object.mRef.mKey, object.mRef.mTrap })
                     if (!id.empty()) ids.push_back(id);
         }
+        if (values.mWorldItems)
+        {
+            values.mWorldItems->mLastGenerated = counter;
+            for (const auto& object : values.mWorldItems->mObjects)
+                for (auto id : {object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul,
+                         object.mRef.mFaction, object.mRef.mKey, object.mRef.mTrap})
+                    if (!id.empty()) ids.push_back(id);
+        }
+        validateWorldItems(values);
         const std::array envelopes{ expectedEnvelope(values.mActors[0].mActor), expectedEnvelope(values.mActors[1].mActor) };
         const std::array<EquipmentBindings, 2> bindings{{
             { envelopes[0], mStore, ids, mScriptLocals }, { envelopes[1], mStore, ids, mScriptLocals } }};
@@ -139,7 +149,7 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        encodeEquipmentSession(values, bindings, bytes, containerBindings);
+        encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &bindings[0] : nullptr);
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -499,9 +509,10 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, referenceIds, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        decodeEquipmentSession(accepted, bindings, values, containerBindings);
+        decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &bindings[0] : nullptr);
+        validateWorldItems(values);
         EquipmentBytes canonical;
-        encodeEquipmentSession(values, bindings, canonical, containerBindings);
+        encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &bindings[0] : nullptr);
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;
@@ -544,6 +555,7 @@ namespace TES3MP::Native
             });
         }
         phase.set(Phase::Result);
+        auto restoredWorld = values.mWorldItems;
         auto saved = std::make_unique<const EquipmentSessionValues>(std::move(values));
         phase.set(Phase::Revalidation);
         for (size_t i = 0; i < 2; ++i) validateRestart(i, mActors[i]->getPtr(), bindings[i], fresh);
@@ -563,6 +575,7 @@ namespace TES3MP::Native
             }
             mWorld.mPtrRegistry.mRevision = saved->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = fresh.mSavedCounter;
+            mWorldItems.swap(restoredWorld);
             mRestartActor.reset();
             phase.set(Phase::Publication);
             output.swap(saved);

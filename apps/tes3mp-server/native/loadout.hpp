@@ -20,6 +20,7 @@ namespace TES3MP::Native
         std::vector<std::filesystem::path> mConfigPaths;
         std::vector<std::filesystem::path> mDataPaths;
         std::vector<std::string> mContent;
+        std::vector<std::string> mArchives;
         std::string mEncoding;
         bool mSample = false;
         std::string mInventoryItem;
@@ -43,6 +44,8 @@ namespace TES3MP::Native
         // Retained engine services for the app-owned multiplayer runtime.
         MWWorld::ESMStore& store() { return mStore; }
         ESM::ReadersCache& readers() { return mReaders; }
+        const LoadoutOptions& options() const { return mOptions; }
+        const ToUTF8::StatelessUtf8Encoder& encoder() const { return mEncoder.getStatelessEncoder(); }
         std::string contentFingerprint() const;
         struct PlacedInventory
         {
@@ -60,6 +63,7 @@ namespace TES3MP::Native
         // NPC and creature placements use the same stable reference namespace.
         std::vector<PlacedInventory> placedActors(std::string_view cell);
         std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit);
+        std::vector<PlacedInventory> placedItems(std::string_view cell, size_t limit);
         void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;

@@ -195,6 +195,10 @@ namespace Resource
         /// @param mask The node mask to apply to loaded particle system nodes.
         void setParticleSystemMask(unsigned int mask);
 
+        // Configure before loading models. Headless scene queries need the same
+        // geometry/optimization but do not consume generated rendering programs.
+        void setShaderGenerationEnabled(bool enabled) { mShaderGenerationEnabled = enabled; }
+
         /// @warning It is unsafe to call this method while the draw thread is using textures! call
         /// Viewer::stopThreading first.
         void setFilterSettings(
@@ -249,6 +253,7 @@ namespace Resource
         osg::Texture::FilterMode mMagFilter;
         float mMaxAnisotropy;
 
+        bool mShaderGenerationEnabled = true;
         unsigned int mParticleSystemMask;
         SceneUtil::LightingMethod mLightingMethod;
         SceneUtil::LightManager::SupportedMethods mSupportedLightingMethods;

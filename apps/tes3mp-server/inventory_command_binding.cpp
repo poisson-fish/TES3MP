@@ -28,7 +28,7 @@ namespace TES3MP::ServerApp
             .expectedInventoryRevision = command.expectedInventoryRevision,
             .expectedContainerRevision = command.expectedContainerRevision,
             .expectedWorldItemRevision = command.expectedWorldItemRevision,
-            .interactionOrigin = command.interactionOrigin };
+            .interactionOrigin = command.interactionOrigin, .placement = command.placement };
         return InventoryCommandBinding(session->playerId(), ServerCommandProposal(connectionSession,
             connectionGeneration, command.commandSequence, command.commandId, command.observedCanonicalRevision,
             EntityPrecondition(session->entityId(), player->entityRevision(), player->authorityEpoch()),

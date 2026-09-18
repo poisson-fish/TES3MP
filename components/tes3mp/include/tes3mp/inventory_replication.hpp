@@ -109,14 +109,27 @@ namespace TES3MP
         friend bool operator==(const GroundItemInterestMember&, const GroundItemInterestMember&) noexcept = default;
     };
 
+    struct GroundItemPresentation
+    {
+        ItemStackId stack;
+        std::array<float, 3> rotation{};
+        float scale = 1;
+        friend bool operator==(const GroundItemPresentation&, const GroundItemPresentation&) noexcept = default;
+    };
     struct ReliableGroundItemBaseline
     {
         InventoryBaselineHeader header;
         CellId cell;
         std::vector<GroundItemInterestMember> items;
+        // Native world domain: suppress these content placements even when the
+        // active item list is empty. Bounded, complete, single-chunk snapshots.
+        std::vector<uint64_t> nativePlacements;
+        std::vector<GroundItemPresentation> presentation;
+        bool nativeWorld = false;
 
         static std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> create(
-            InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items);
+            InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
+            std::span<const uint64_t> nativePlacements = {}, std::span<const GroundItemPresentation> presentation = {}, bool nativeWorld = false);
         friend bool operator==(const ReliableGroundItemBaseline&, const ReliableGroundItemBaseline&) noexcept = default;
     };
 
@@ -169,6 +182,7 @@ namespace TES3MP
         std::optional<ContainerRevision> expectedContainerRevision;
         std::optional<WorldItemRevision> expectedWorldItemRevision;
         Position3 interactionOrigin;
+        std::optional<DropPlacementView> placement;
         friend bool operator==(
             const ClientInventoryTransactionCommand&, const ClientInventoryTransactionCommand&) noexcept = default;
     };

@@ -684,7 +684,7 @@ namespace TES3MP::OpenMWAdapter
                             = mRuntime->queueInventoryTransaction(transaction->kind, transaction->prototypeId,
                                 transaction->stackId, transaction->count, transaction->expectedInventoryRevision,
                                 transaction->interactionOrigin, transaction->containerId, transaction->slot,
-                                transaction->expectedContainerRevision, transaction->expectedWorldItemRevision);
+                                transaction->expectedContainerRevision, transaction->expectedWorldItemRevision, transaction->placement);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);

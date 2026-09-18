@@ -23,6 +23,9 @@ struct Position3;
 struct ClientCommandHeader;
 struct ClientCommandHeaderBuilder;
 
+struct DropPlacementView;
+struct DropPlacementViewBuilder;
+
 struct ClientInventoryTransactionCommand;
 struct ClientInventoryTransactionCommandBuilder;
 
@@ -182,6 +185,96 @@ inline ::flatbuffers::Offset<ClientCommandHeader> CreateClientCommandHeader(
   return builder_.Finish();
 }
 
+struct DropPlacementView FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef DropPlacementViewBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VIEW = 4,
+    VT_PROJECTION = 6,
+    VT_CURSOR_X = 8,
+    VT_CURSOR_Y = 10
+  };
+  const ::flatbuffers::Vector<double> *view() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_VIEW);
+  }
+  const ::flatbuffers::Vector<double> *projection() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_PROJECTION);
+  }
+  float cursor_x() const {
+    return GetField<float>(VT_CURSOR_X, 0.5f);
+  }
+  float cursor_y() const {
+    return GetField<float>(VT_CURSOR_Y, 0.5f);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VIEW) &&
+           verifier.VerifyVector(view()) &&
+           VerifyOffset(verifier, VT_PROJECTION) &&
+           verifier.VerifyVector(projection()) &&
+           VerifyField<float>(verifier, VT_CURSOR_X, 4) &&
+           VerifyField<float>(verifier, VT_CURSOR_Y, 4) &&
+           verifier.EndTable();
+  }
+};
+
+struct DropPlacementViewBuilder {
+  typedef DropPlacementView Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_view(::flatbuffers::Offset<::flatbuffers::Vector<double>> view) {
+    fbb_.AddOffset(DropPlacementView::VT_VIEW, view);
+  }
+  void add_projection(::flatbuffers::Offset<::flatbuffers::Vector<double>> projection) {
+    fbb_.AddOffset(DropPlacementView::VT_PROJECTION, projection);
+  }
+  void add_cursor_x(float cursor_x) {
+    fbb_.AddElement<float>(DropPlacementView::VT_CURSOR_X, cursor_x, 0.5f);
+  }
+  void add_cursor_y(float cursor_y) {
+    fbb_.AddElement<float>(DropPlacementView::VT_CURSOR_Y, cursor_y, 0.5f);
+  }
+  explicit DropPlacementViewBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<DropPlacementView> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<DropPlacementView>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<DropPlacementView> CreateDropPlacementView(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> view = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> projection = 0,
+    float cursor_x = 0.5f,
+    float cursor_y = 0.5f) {
+  DropPlacementViewBuilder builder_(_fbb);
+  builder_.add_cursor_y(cursor_y);
+  builder_.add_cursor_x(cursor_x);
+  builder_.add_projection(projection);
+  builder_.add_view(view);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<DropPlacementView> CreateDropPlacementViewDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<double> *view = nullptr,
+    const std::vector<double> *projection = nullptr,
+    float cursor_x = 0.5f,
+    float cursor_y = 0.5f) {
+  auto view__ = view ? _fbb.CreateVector<double>(*view) : 0;
+  auto projection__ = projection ? _fbb.CreateVector<double>(*projection) : 0;
+  return TES3MP::Protocol::Schema::InventoryCommand::CreateDropPlacementView(
+      _fbb,
+      view__,
+      projection__,
+      cursor_x,
+      cursor_y);
+}
+
 struct ClientInventoryTransactionCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ClientInventoryTransactionCommandBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -200,7 +293,8 @@ struct ClientInventoryTransactionCommand FLATBUFFERS_FINAL_CLASS : private ::fla
     VT_HAS_CONTAINER_REVISION = 28,
     VT_EXPECTED_CONTAINER_REVISION = 30,
     VT_HAS_WORLD_ITEM_REVISION = 32,
-    VT_EXPECTED_WORLD_ITEM_REVISION = 34
+    VT_EXPECTED_WORLD_ITEM_REVISION = 34,
+    VT_PLACEMENT = 36
   };
   const TES3MP::Protocol::Schema::InventoryCommand::ClientCommandHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::InventoryCommand::ClientCommandHeader *>(VT_HEADER);
@@ -250,6 +344,9 @@ struct ClientInventoryTransactionCommand FLATBUFFERS_FINAL_CLASS : private ::fla
   uint64_t expected_world_item_revision() const {
     return GetField<uint64_t>(VT_EXPECTED_WORLD_ITEM_REVISION, 0);
   }
+  const TES3MP::Protocol::Schema::InventoryCommand::DropPlacementView *placement() const {
+    return GetPointer<const TES3MP::Protocol::Schema::InventoryCommand::DropPlacementView *>(VT_PLACEMENT);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -270,6 +367,8 @@ struct ClientInventoryTransactionCommand FLATBUFFERS_FINAL_CLASS : private ::fla
            VerifyField<uint64_t>(verifier, VT_EXPECTED_CONTAINER_REVISION, 8) &&
            VerifyField<uint8_t>(verifier, VT_HAS_WORLD_ITEM_REVISION, 1) &&
            VerifyField<uint64_t>(verifier, VT_EXPECTED_WORLD_ITEM_REVISION, 8) &&
+           VerifyOffset(verifier, VT_PLACEMENT) &&
+           verifier.VerifyTable(placement()) &&
            verifier.EndTable();
   }
 };
@@ -326,6 +425,9 @@ struct ClientInventoryTransactionCommandBuilder {
   void add_expected_world_item_revision(uint64_t expected_world_item_revision) {
     fbb_.AddElement<uint64_t>(ClientInventoryTransactionCommand::VT_EXPECTED_WORLD_ITEM_REVISION, expected_world_item_revision, 0);
   }
+  void add_placement(::flatbuffers::Offset<TES3MP::Protocol::Schema::InventoryCommand::DropPlacementView> placement) {
+    fbb_.AddOffset(ClientInventoryTransactionCommand::VT_PLACEMENT, placement);
+  }
   explicit ClientInventoryTransactionCommandBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -354,7 +456,8 @@ inline ::flatbuffers::Offset<ClientInventoryTransactionCommand> CreateClientInve
     bool has_container_revision = false,
     uint64_t expected_container_revision = 0,
     bool has_world_item_revision = false,
-    uint64_t expected_world_item_revision = 0) {
+    uint64_t expected_world_item_revision = 0,
+    ::flatbuffers::Offset<TES3MP::Protocol::Schema::InventoryCommand::DropPlacementView> placement = 0) {
   ClientInventoryTransactionCommandBuilder builder_(_fbb);
   builder_.add_expected_world_item_revision(expected_world_item_revision);
   builder_.add_expected_container_revision(expected_container_revision);
@@ -362,6 +465,7 @@ inline ::flatbuffers::Offset<ClientInventoryTransactionCommand> CreateClientInve
   builder_.add_container_id(container_id);
   builder_.add_expected_inventory_revision(expected_inventory_revision);
   builder_.add_prototype_id(prototype_id);
+  builder_.add_placement(placement);
   builder_.add_interaction_origin(interaction_origin);
   builder_.add_count(count);
   builder_.add_header(header);

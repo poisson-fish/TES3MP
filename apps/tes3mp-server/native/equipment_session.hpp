@@ -15,18 +15,22 @@ namespace TES3MP::Native
         std::array<PlainEquipmentValues, 2> mActors;
         uint64_t mRevision = 0;
         std::vector<PlainEquipmentValues> mContainers;
+        // Complete active world membership; absent placed references stay removed.
+        // Uses the first actor solely as the field-codec envelope anchor.
+        std::optional<PlainEquipmentValues> mWorldItems;
         void swap(EquipmentSessionValues& other) noexcept
         {
             for (size_t i = 0; i < 2; ++i) mActors[i].swap(other.mActors[i]);
             std::swap(mRevision, other.mRevision);
             mContainers.swap(other.mContainers);
+            mWorldItems.swap(other.mWorldItems);
         }
     };
     void encodeEquipmentSession(const EquipmentSessionValues& values,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
-        std::span<const EquipmentBindings> containers = {});
+        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr);
     void decodeEquipmentSession(std::span<const char> bytes,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
-        std::span<const EquipmentBindings> containers = {});
+        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr);
 }
 #endif

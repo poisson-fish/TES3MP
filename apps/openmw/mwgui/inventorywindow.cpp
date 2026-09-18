@@ -67,6 +67,7 @@ namespace MWGui
     namespace
     {
         InventoryWindow::UseItemInterceptor sUseItemInterceptor;
+        InventoryWindow::UseItemInterceptor sPickupItemInterceptor;
     }
     namespace
     {
@@ -816,6 +817,16 @@ namespace MWGui
         dirtyPreview();
     }
 
+    void InventoryWindow::setPickupItemInterceptor(UseItemInterceptor interceptor)
+    {
+        sPickupItemInterceptor = std::move(interceptor);
+    }
+
+    void InventoryWindow::clearPickupItemInterceptor() noexcept
+    {
+        sPickupItemInterceptor = {};
+    }
+
     void InventoryWindow::pickUpObject(MWWorld::Ptr object)
     {
         // If the inventory is not yet enabled, don't pick anything up
@@ -832,6 +843,9 @@ namespace MWGui
 
         // An object that can be picked up must have a tooltip.
         if (!object.getClass().hasToolTip(object))
+            return;
+
+        if (sPickupItemInterceptor && sPickupItemInterceptor(object))
             return;
 
         int count = object.getCellRef().getCount();

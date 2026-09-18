@@ -4,7 +4,7 @@
 # headless packaging. Do not relax components/tes3mp's independent boundaries.
 add_library(tes3mp_native_equipment_runtime STATIC
     equipment_runtime.cpp equipment_runtime.hpp equipment_command.hpp inventory_identity.hpp actor_inventory.hpp
-    connected_runtime.cpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
+    connected_runtime.cpp world_items.cpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
     equipment_codec.cpp equipment_codec.hpp equipment_file.cpp equipment_file.hpp
     bounded_file.cpp bounded_file.hpp persistence.hpp runtime_phases.hpp session_commit.hpp)
 target_compile_features(tes3mp_native_equipment_runtime PUBLIC cxx_std_20)
@@ -24,6 +24,15 @@ tes3mp_verify_target_includes(tes3mp_native_loadout
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/loadout-dependencies-$<CONFIG>.txt"
     CONTENT "Probe direct: tes3mp_native_loadout\nLoadout direct: $<TARGET_PROPERTY:tes3mp_native_loadout,LINK_LIBRARIES>\nEquipment runtime direct: $<TARGET_PROPERTY:tes3mp_native_equipment_runtime,LINK_LIBRARIES>\nOpenMW direct: $<TARGET_PROPERTY:openmw-lib,LINK_LIBRARIES>\nComponents direct: $<TARGET_PROPERTY:components,LINK_LIBRARIES>\nInitialized: ConfigurationManager, Utf8Encoder, ReadersCache, EsmLoader, ESMStore\nInventory mode additionally initializes: engine classes, WorldModel (one-entry cache), ManualRef, base ContainerStore, CompilerContext/extensions, ScriptManager (declarations only), LocalScripts\nEquipment mode additionally initializes: EquipmentRuntime, two actor InventoryStores, owned effects, plain-shirt transfer/drop/take and coherent session persistence/restart with an optional shared base ContainerStore; NPC stats and declaration locals when requested\nNot constructed: World, Environment, renderer, UI, audio, Lua runtime\nNot exercised: script instructions, live-world compiler queries, global script startup\n")
 
+# Read-only stock OpenMW scene queries. No graphics context or gameplay writer.
+add_library(tes3mp_native_placement_scene STATIC placement_scene.cpp placement_scene.hpp)
+target_compile_features(tes3mp_native_placement_scene PUBLIC cxx_std_20)
+target_link_libraries(tes3mp_native_placement_scene PRIVATE tes3mp_native_loadout tes3mp_server_app openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_placement_scene
+    ALLOWED tes3mp_native_loadout tes3mp_server_app openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_placement_scene
+    FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwphysics")
+
 # Concrete application adapter; engine/network types meet only in this leaf.
 add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
@@ -36,9 +45,9 @@ tes3mp_verify_target_includes(tes3mp_native_inventory_service
 add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp)
 target_compile_features(tes3mp_native_inventory_host PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_host PUBLIC tes3mp_native_inventory_service
-    PRIVATE tes3mp_native_loadout openmw-lib)
+    PRIVATE tes3mp_native_loadout tes3mp_native_placement_scene openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_inventory_host
-    ALLOWED tes3mp_native_inventory_service tes3mp_native_loadout openmw-lib)
+    ALLOWED tes3mp_native_inventory_service tes3mp_native_loadout tes3mp_native_placement_scene openmw-lib)
 tes3mp_verify_target_includes(tes3mp_native_inventory_host
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
@@ -50,7 +59,7 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
     ../server_app_tests.cpp
     inventory_service_tests.cpp inventory_service_tests.hpp
-    placed_container_tests.cpp
+    placed_container_tests.cpp placement_tests.cpp
     equipment_tests.cpp equipment_tests.hpp equipment_command.hpp
     transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
     transfer_save_codec.cpp transfer_save_codec.hpp
