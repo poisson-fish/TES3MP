@@ -591,6 +591,8 @@ namespace TES3MP::Native
         auto staged = std::make_unique<Installation>(std::move(input), live);
         staged->mPrepared.exportValues(context, staged->mSaved);
         staged->mRegistry = mWorld.mPtrRegistry.mIndex;
+        // Replace this owner's membership, including retirement of empty nodes.
+        live.forEachStored([&](const auto& ref, auto) { staged->mRegistry.erase(ref.mRef.getRefNum()); });
         staged->mRevision = mWorld.getPtrRegistryRevision();
         staged->mEffects = pending;
         std::fill(staged->mSlots.begin(), staged->mSlots.end(), live.end());

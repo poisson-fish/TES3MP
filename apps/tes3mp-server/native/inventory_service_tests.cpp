@@ -9,6 +9,8 @@
 #include <tes3mp/protocol_frame.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
+#include <apps/openmw/mwgui/inventoryitemmodel.hpp>
+#include <apps/openmw/mwgui/sortfilteritemmodel.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadnpc.hpp>
@@ -237,9 +239,14 @@ namespace TES3MP::Native::Testing
         creature.mData.mHealth = 0; creature.mInventory.mList = {{4, arrow.mId}}; content.store.insertStatic(creature);
         auto armed = creature; armed.mId = ref("corpse_armed_creature"); armed.mFlags |= ESM::Creature::Weapon;
         armed.mData.mCombat = 30; armed.mInventory.mList = {{1, bow.mId}, {4, arrow.mId}}; content.store.insertStatic(armed);
+        auto liveArmed = armed; liveArmed.mId = ref("living_armed_creature"); liveArmed.mData.mHealth = 40;
+        content.store.insertStatic(liveArmed);
+        auto liveUnarmed = creature; liveUnarmed.mId = ref("living_unarmed_creature"); liveUnarmed.mData.mHealth = 40;
+        content.store.insertStatic(liveUnarmed);
+        auto bare = live; bare.mId = ref("living_bare_npc"); bare.mInventory.mList.clear(); content.store.insertStatic(bare);
         auto binding = content.binding(); binding.mShirt.reset();
         binding.mActors = {{{content.actor, {}, 0, false, true}, {content.actor, {}, 0, false, true}}};
-        for (auto base : {dead.mId, live.mId, creature.mId, armed.mId})
+        for (auto base : {dead.mId, live.mId, creature.mId, armed.mId, liveArmed.mId, liveUnarmed.mId, bare.mId})
         {
             const auto index = static_cast<uint32_t>(binding.mContainers.size());
             ESM::CellRef placement; placement.blank(); placement.mRefNum = {index, 0}; placement.mRefID = base;
@@ -247,7 +254,7 @@ namespace TES3MP::Native::Testing
                 Position3(0, 0, 0), base, placement});
         }
         std::vector<ESM::RefId> references{content.actor, content.shirt, content.container, bow.mId, arrow.mId,
-            dead.mId, live.mId, creature.mId, armed.mId};
+            dead.mId, live.mId, creature.mId, armed.mId, liveArmed.mId, liveUnarmed.mId, bare.mId};
         auto authority = players();
         const auto view = [&](InventoryService& service, uint64_t session = 1) {
             return service.project(authority, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
@@ -265,6 +272,30 @@ namespace TES3MP::Native::Testing
             && shared(service, 94).equipment.size() == 2 && shared(service, 93).equipment.empty(),
             "NPC/creature storage or stock equipment selection incorrect, or living loot published");
         require(shared(service, 91).stacks.size() == 4, "NPC equipment split or leveled loot lost");
+        const auto publicActors = view(service).equipment->actors;
+        const auto prototype = [](const ESM::RefId& record) { return id<ItemPrototypeId>(MWWorld::inventoryRecordId(record)); };
+        require(publicActors.size() == 4 && publicActors[0].actor == id<ContainerId>(92)
+            && publicActors[0].slots[InventoryStore::Slot_Shirt] == prototype(content.shirt)
+            && publicActors[0].slots[InventoryStore::Slot_CarriedRight] == prototype(bow.mId)
+            && publicActors[0].slots[InventoryStore::Slot_Ammunition] == prototype(arrow.mId)
+            && publicActors[1].actor == id<ContainerId>(95)
+            && publicActors[1].slots[InventoryStore::Slot_CarriedRight] == prototype(bow.mId)
+            && publicActors[1].slots[InventoryStore::Slot_Ammunition] == prototype(arrow.mId)
+            && std::ranges::none_of(publicActors[2].slots, [](auto slot) { return slot.has_value(); })
+            && std::ranges::none_of(publicActors[3].slots, [](auto slot) { return slot.has_value(); })
+            && view(service, 2).equipment->actors == publicActors,
+            "Living NPC/creature public slots differ between clients or expose non-equipped loot");
+        auto elsewhere = binding;
+        for (auto& owner : elsewhere.mContainers) owner.mCell = CellId::interior(id<CellSpaceId>(8));
+        InventoryService outOfInterest(content.store, content.readers, elsewhere);
+        require(view(outOfInterest).equipment->actors.empty() && view(outOfInterest).containers.empty(),
+            "Out-of-cell actor equipment was broadcast");
+        {
+            auto model = std::make_unique<MWGui::InventoryItemModel>(MWWorld::Ptr{});
+            auto* owner = model.get();
+            MWGui::SortFilterItemModel view(std::make_unique<MWGui::SortFilterItemModel>(std::move(model)));
+            require(&view.getTransferTarget() == owner, "Quick-transfer proxies lost their inventory owner");
+        }
         // Exercise the exact engine presentation helpers used by the desktop
         // adapter, without constructing a renderer, scripts or global player.
         {
@@ -289,6 +320,30 @@ namespace TES3MP::Native::Testing
             const auto repeatedSecond = *local.addAuthoritative(source.getPtr(), 1, localWorld);
             require(repeatedFirst == first && repeatedSecond == second && local.count(content.shirt) == 2,
                 "Repeated baseline leaked retired presentation nodes");
+            const std::array appearance{std::pair{InventoryStore::Slot_Shirt, content.shirt},
+                std::pair{InventoryStore::Slot_CarriedRight, bow.mId},
+                std::pair{InventoryStore::Slot_Ammunition, arrow.mId}};
+            local.applyAuthoritativeAppearance(appearance, content.store, localScripts, localWorld);
+            require(local.count(content.shirt) == 1 && local.count(arrow.mId) == 1
+                && local.getSlot(InventoryStore::Slot_Ammunition) != local.end(),
+                "Public appearance retained local private loot or lost ammunition");
+            const auto displayed = *local.getSlot(InventoryStore::Slot_Shirt);
+            local.applyAuthoritativeAppearance(appearance, content.store, localScripts, localWorld);
+            require(*local.getSlot(InventoryStore::Slot_Shirt) == displayed, "Identical public appearance replaced nodes");
+            for (const auto& invalid : std::vector<std::vector<std::pair<int, ESM::RefId>>>{
+                    {{InventoryStore::Slot_Shirt, content.shirt}, {InventoryStore::Slot_Shirt, content.shirt}},
+                    {{InventoryStore::Slot_Shirt, content.shirt}, {InventoryStore::Slot_Helmet, arrow.mId}},
+                    {{InventoryStore::Slot_Shirt, content.shirt}, {InventoryStore::Slot_Helmet, ref("missing")}}})
+            {
+                rejected = false;
+                try { local.applyAuthoritativeAppearance(invalid, content.store, localScripts, localWorld); }
+                catch (const std::exception&) { rejected = true; }
+                require(rejected && local.count(arrow.mId) == 1 && *local.getSlot(InventoryStore::Slot_Shirt) == displayed,
+                    "Malformed public appearance partially installed");
+            }
+            local.applyAuthoritativeAppearance({}, content.store, localScripts, localWorld);
+            require(local.begin() == local.end() && local.getSlot(InventoryStore::Slot_Shirt) == local.end(),
+                "Empty public appearance kept local equipment");
         }
         const auto intent = [&](InventoryService& current, uint64_t session, uint64_t owner, CanonicalItemStack item,
             bool put = false, uint32_t count = 0) {
@@ -346,10 +401,49 @@ namespace TES3MP::Native::Testing
             }
         for (uint64_t owner : {91, 93, 94})
             require(shared(service, owner).stacks.empty() && shared(service, owner).equipment.empty(), "Corpse did not empty");
+        for (uint64_t owner : {92, 95, 96, 97})
+            for (uint64_t session : {1, 2})
+            {
+                auto put = intent(service, session, owner, view(service, session).playerInventory.front().stacks.front(), true);
+                require(!service.prepareInventory(authority, bind(authority, put).proposal()), "Public appearance granted living inventory access");
+            }
         const auto received = view(service).playerInventory.front().stacks.front();
         auto put = service.prepare(authority, bind(authority, intent(service, 1, 91, received, true)));
         require(service.commit(authority, put, sink, success, bytes) == PersistenceResult::Accepted
             && shared(service, 91).equipment.empty(), "Put into corpse incorrectly selected replacement gear");
+        // A small live inventory must survive more exchanges than the storage
+        // and pending-effect budgets. Retired stacks are not carried loot.
+        for (unsigned exchange = 0; exchange < 512; ++exchange)
+        {
+            try
+            {
+                const bool putBack = exchange % 2 != 0;
+                const auto item = putBack ? view(service).playerInventory.front().stacks.front()
+                                          : shared(service, 91).stacks.front();
+                auto next = service.prepare(authority, bind(authority, intent(service, 1, 91, item, putBack)));
+                if (exchange == 80)
+                {
+                    const std::vector prior(service.inventoryImage().begin(), service.inventoryImage().end());
+                    faults = {FileFault::Flush};
+                    require(service.commit(authority, next, sink, success, bytes) == PersistenceResult::Rejected
+                        && std::ranges::equal(prior, service.inventoryImage()), "Failed retirement changed the saved inventory");
+                    faults = {};
+                }
+                require(service.commit(authority, next, sink, success, bytes) == PersistenceResult::Accepted,
+                    "Repeated corpse exchange did not commit");
+                const auto contents = putBack ? shared(service, 91).stacks : view(service).playerInventory.front().stacks;
+                require(contents.size() == 1 && contents.front().count == received.count
+                    && contents.front().stackId != item.stackId,
+                    "Repeated corpse exchange changed the live stack count");
+                auto stale = intent(service, 1, 91, item, putBack);
+                require(!service.prepareInventory(authority, bind(authority, stale).proposal()),
+                    "Retired stack identity was accepted with fresh revisions");
+            }
+            catch (const std::exception& error)
+            {
+                throw std::runtime_error("Corpse exchange " + std::to_string(exchange) + ": " + error.what());
+            }
+        }
         const std::vector saved(service.inventoryImage().begin(), service.inventoryImage().end());
         InventoryService broken(content.store, content.readers, binding, true);
         bool rejected = false;
@@ -371,15 +465,29 @@ namespace TES3MP::Native::Testing
         // Recovery must not load any actor loot or auto-select equipment.
         const_cast<ESM::NPC*>(content.store.get<ESM::NPC>().find(dead.mId))->mInventory.mList = {{1, ref("missing_loot")}};
         const_cast<ESM::Creature*>(content.store.get<ESM::Creature>().find(armed.mId))->mInventory.mList = {{1, ref("missing_loot")}};
+        const_cast<ESM::NPC*>(content.store.get<ESM::NPC>().find(live.mId))->mInventory.mList = {{1, ref("missing_loot")}};
+        const_cast<ESM::Creature*>(content.store.get<ESM::Creature>().find(liveArmed.mId))->mInventory.mList = {{1, ref("missing_loot")}};
         InventoryService restored(content.store, content.readers, binding, true);
         restored.recover(saved, references);
         require(std::ranges::equal(saved, restored.inventoryImage()) && shared(restored, 91).equipment.empty()
             && shared(restored, 94).stacks.empty(), "Recovery rerolled actor loot or equipment");
         Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(restored, authority, delivery, 2);
         for (const auto& client : delivery.clients)
-            require(client->confirmedContainerInventoryBaselines().size() == 4, "Late join lost corpse baselines");
+            require(client->confirmedContainerInventoryBaselines().size() == 4
+                && client->confirmedEquipmentSnapshot()->actors == publicActors, "Late join lost public equipment or exposed living loot");
         authority = players(SessionGeneration::initial().next().value());
         Delivery reconnect(clock, SessionGeneration::initial().next().value()); publish(restored, authority, reconnect, 3);
+        for (auto& client : reconnect.clients)
+        {
+            const auto current = *client->confirmedEquipmentSnapshot();
+            require(current.actors == publicActors, "Reconnect lost saved living equipment");
+            auto stale = current; stale.serverTick = id<ServerTick>(2); stale.actors.clear();
+            require(client->receiveLatestWinsEquipmentSnapshot(stale) == InventoryReplicationReceiveResult::StaleTick,
+                "Stale equipment replaced living appearance");
+            stale = current; stale.targetSessionGeneration = SessionGeneration::initial();
+            require(client->receiveLatestWinsEquipmentSnapshot(stale) == InventoryReplicationReceiveResult::GenerationMismatch
+                && client->confirmedEquipmentSnapshot()->actors == publicActors, "Old session replaced living appearance");
+        }
         // The actual protocol/client path must preserve occupied slots too.
         Delivery equipped(clock, SessionGeneration::initial()); publish(twin, players(), equipped, 1);
         require(equipped.clients[0]->confirmedContainerInventoryBaselines()[1].equipment == initial.equipment,
@@ -389,8 +497,9 @@ namespace TES3MP::Native::Testing
             initial.header, initial.container, initial.cell, initial.position, initial.revision, 0, initial.stacks, malformed)),
             "Duplicate corpse equipment identity accepted by protocol");
         std::cout << "world actors: NPC/creature loot, stock equipment, leveled/split identities, live/reach/foreign guards, "
-            "equipped and partial-ammo looting, failed durability/retry, corpse put, exact recovery without refill, "
-            "equipment wire/client assembly, late join/reconnect; synthetic transport\n";
+            "equipped and partial-ammo looting, failed durability/retry, 512 corpse exchanges, quick-transfer proxies, exact recovery without refill, "
+            "public living NPC/creature slots without private loot, appearance replacement/validation, equipment wire/client assembly, "
+            "late join/reconnect and stale-session rejection; synthetic transport\n";
     }
 
     void checkEquipmentSlots(const std::filesystem::path& scratch)
@@ -1339,6 +1448,14 @@ namespace TES3MP::Native::Testing
             auto before = service.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
             require(before.containers.size() == 2 && before.containers[0].equipment.size() == 3,
                 "Real content host did not bind corpse inventories/equipment or exposed living loot");
+            require(before.equipment->actors.size() == 1
+                && before.equipment->actors[0].slots[InventoryStore::Slot_Shirt]
+                    == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("common_shirt_01")))
+                && before.equipment->actors[0].slots[InventoryStore::Slot_Pants]
+                    == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("common_pants_01")))
+                && before.equipment->actors[0].slots[InventoryStore::Slot_CarriedRight]
+                    == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron dagger"))),
+                "Real content living actor public slots missing");
             EquipmentFileSink file(scratch / "actors.equipment", true);
             FileFaults faults; EquipmentFileCommitter sink(file, faults);
             EquipmentBytes bytes; std::unique_ptr<const InventoryTransferSuccess> success;
@@ -1360,8 +1477,12 @@ namespace TES3MP::Native::Testing
             require(std::ranges::equal(image, restored.inventoryImage()), "Real actor restart changed image");
             Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(restored, authority, delivery, 2);
             for (const auto& client : delivery.clients)
+            {
+                require(client->confirmedEquipmentSnapshot()->actors == before.equipment->actors,
+                    "Real actor restart/late join lost living equipment");
                 for (const auto& corpse : client->confirmedContainerInventoryBaselines())
                     require(corpse.stacks.empty() && corpse.equipment.empty(), "Real actor restart/late join refilled corpse");
+            }
             writeStartingPlugin(26);
             bool rejected = false;
             try { InventoryHost changed(descriptor, testContentManifest(), *registry, *crypto, image); }

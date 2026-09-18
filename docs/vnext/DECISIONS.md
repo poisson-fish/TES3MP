@@ -137,6 +137,10 @@ services exist. Shared equipment uses the existing slot codec with trusted stora
 shape checks and optional equipment in container baselines. Actor loot/equipment
 never reruns during recovery. V6 changes the bound domain and requires migration
 or a new campaign; older descriptor meanings are preserved.
+Living actors publish only placed-owner identity and the 19 equipped record IDs,
+including empty appearances, in the bounded equipment snapshot. Private stacks,
+counts and transfer revisions stay server-side. Desktop appearance items are
+presentation copies and never enter the inventory-command identity map.
 
 **Equipment is part of the coherent inventory image.** Retain all 19 engine slots
 by item identity, including stackable ammunition. Full slot format 7 carries an

@@ -199,8 +199,27 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native inventory image exceeds canonical record budget");
         EquipmentBytes retained(image.begin(), image.end());
         const auto result = mRuntime.commit(command.mTransfer, durability, success, bytes);
-        if (result == PersistenceResult::Accepted) mImage.swap(retained);
+        if (result == PersistenceResult::Accepted)
+        {
+            mImage.swap(retained);
+            retireCommittedEffects();
+        }
         return result;
+    }
+
+    void InventoryService::retireCommittedEffects() noexcept
+    {
+        // This service publishes the committed image as baselines. The runtime's
+        // diagnostic notifications have no further consumer here; retaining them
+        // would turn the per-command bound into a lifetime transfer limit.
+        for (size_t owner = 0; owner < mRuntime.ownerCount(); ++owner)
+        {
+            auto& effects = mRuntime.effects(owner);
+            effects.mListener.mCalls = 0;
+            effects.mListener.mRemovals.clear();
+            effects.mInventoryUpdates = 0;
+            effects.mNotifications.clear();
+        }
     }
 
     FileReadResult InventoryService::recover(const std::filesystem::path& path, std::span<const ESM::RefId> references,
@@ -278,7 +297,11 @@ namespace TES3MP::Native
             std::unique_ptr<const EquipmentSuccess> success;
             EquipmentBytes bytes;
             const auto result = service.mRuntime.commit(prepared, sink, success, bytes);
-            if (result == PersistenceResult::Accepted) service.mImage.swap(retained);
+            if (result == PersistenceResult::Accepted)
+            {
+                service.mImage.swap(retained);
+                service.retireCommittedEffects();
+            }
             return result == PersistenceResult::Accepted ? CanonicalDurabilityResult::Committed
                 : result == PersistenceResult::Rejected ? CanonicalDurabilityResult::Rejected : CanonicalDurabilityResult::Failed;
         }
@@ -368,15 +391,32 @@ namespace TES3MP::Native
             InventoryRevision::fromValue(version).value(), items, equipment);
         if (!std::holds_alternative<ReliablePlayerInventoryBaseline>(inventory)) return std::nullopt;
         result.playerInventory.push_back(std::get<ReliablePlayerInventoryBaseline>(std::move(inventory)));
+        const auto publicSlots = [&](const PlainEquipmentValues& state) {
+            std::array<std::optional<ItemPrototypeId>, static_cast<size_t>(EquipmentSlot::Count)> slots{};
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (state.mSlots[slot].isSet())
+                {
+                    const auto item = std::ranges::find(state.mObjects, state.mSlots[slot],
+                        [](const auto& object) { return object.mRef.mRefNum; });
+                    if (item == state.mObjects.end()) throw std::logic_error("Public equipment item missing");
+                    slots[slot] = mItemIds.at(item->mRef.mRefID);
+                }
+            return slots;
+        };
+        std::vector<PublicActorEquipmentMember> actors;
         for (size_t i = 0; i < mBinding.mContainers.size(); ++i)
         {
             const auto& shared = mBinding.mContainers[i];
             if (player->transform().cell() != shared.mCell) continue;
             const auto owner = mRuntime.ownerPtr(i + 2);
-            // Living actors need an actor/equipment baseline and an access policy;
-            // do not publish their private contents as freely accessible chests.
-            if (actorInventory(owner) && !initialCorpse(owner)) continue;
             const auto sharedValues = values(i + 2);
+            if (actorInventory(owner) && !initialCorpse(owner))
+            {
+                // Appearance only: no private stacks, counts or transfer revision.
+                // Empty slots also suppress any locally selected starting gear.
+                actors.push_back({shared.mId, publicSlots(sharedValues)});
+                continue;
+            }
             std::vector<EquipmentBinding> slots;
             for (int slot = 0; slot < InventoryStore::Slots; ++slot)
                 if (sharedValues.mSlots[slot].isSet())
@@ -395,19 +435,11 @@ namespace TES3MP::Native
             if (const auto* other = players.findPlayer(mBinding.mPlayers[i]);
                 other && other->transform().cell() == player->transform().cell())
             {
-                PublicEquipmentMember member{ .player = other->playerId() };
-                const auto actorValues = values(i);
-                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
-                    if (actorValues.mSlots[slot].isSet())
-                    {
-                        const auto equipped = std::ranges::find(actorValues.mObjects, actorValues.mSlots[slot],
-                            [](const auto& object) { return object.mRef.mRefNum; });
-                        member.slots[slot] = mItemIds.at(equipped->mRef.mRefID);
-                    }
-                visible.push_back(member);
+                visible.push_back({other->playerId(), publicSlots(values(i))});
             }
         std::ranges::sort(visible, {}, &PublicEquipmentMember::player);
-        auto publicEquipment = LatestWinsEquipmentSnapshot::create(target, session->sessionGeneration(), tick, revision, visible);
+        std::ranges::sort(actors, {}, &PublicActorEquipmentMember::actor);
+        auto publicEquipment = LatestWinsEquipmentSnapshot::create(target, session->sessionGeneration(), tick, revision, visible, actors);
         if (!std::holds_alternative<LatestWinsEquipmentSnapshot>(publicEquipment)) return std::nullopt;
         result.equipment = std::get<LatestWinsEquipmentSnapshot>(std::move(publicEquipment));
         return result;

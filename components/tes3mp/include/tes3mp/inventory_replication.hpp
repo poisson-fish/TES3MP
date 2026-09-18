@@ -16,6 +16,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumInventoryBaselineChunkStacks = 256;
     inline constexpr std::size_t MaximumGroundItemBaselineChunkItems = 192;
     inline constexpr std::size_t MaximumEquipmentSnapshotPlayers = 256;
+    inline constexpr std::size_t MaximumEquipmentSnapshotActors = 32;
 
     enum class InventoryReplicationDecodeErrorCode : std::uint8_t
     {
@@ -126,6 +127,15 @@ namespace TES3MP
         friend constexpr bool operator==(const PublicEquipmentMember&, const PublicEquipmentMember&) noexcept = default;
     };
 
+    // Placed actor identity shares the inventory-owner namespace, but this
+    // appearance-only entry grants no access and contains no stack identities.
+    struct PublicActorEquipmentMember
+    {
+        ContainerId actor;
+        std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)> slots{};
+        friend constexpr bool operator==(const PublicActorEquipmentMember&, const PublicActorEquipmentMember&) noexcept = default;
+    };
+
     struct LatestWinsEquipmentSnapshot
     {
         SessionId targetSessionId;
@@ -133,10 +143,11 @@ namespace TES3MP
         ServerTick serverTick;
         CanonicalRevision canonicalRevision;
         std::vector<PublicEquipmentMember> members;
+        std::vector<PublicActorEquipmentMember> actors;
 
         static std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> create(SessionId target,
             SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
-            std::span<const PublicEquipmentMember> members);
+            std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors = {});
         friend bool operator==(const LatestWinsEquipmentSnapshot&, const LatestWinsEquipmentSnapshot&) noexcept
             = default;
     };

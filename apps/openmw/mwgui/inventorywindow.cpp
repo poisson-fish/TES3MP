@@ -386,11 +386,15 @@ namespace MWGui
         mPendingControllerAction = ControllerAction::None;
     }
 
-    void InventoryWindow::ensureSelectedItemUnequipped(int count)
+    bool InventoryWindow::ensureSelectedItemUnequipped(int count)
     {
         const ItemStack& item = mTradeModel->getItem(mSelectedItem);
         if (item.mType == ItemStack::Type_Equipped)
         {
+            // Wait for the authoritative unequip baseline before transferring
+            // the item. Local unequip can split or merge its remote stack.
+            if (sUseItemInterceptor && sUseItemInterceptor(item.mBase))
+                return false;
             MWWorld::InventoryStore& invStore = mPtr.getClass().getInventoryStore(mPtr);
             MWWorld::Ptr newStack = *invStore.unequipItemQuantity(item.mBase, count);
 
@@ -417,25 +421,29 @@ namespace MWGui
                 mSelectedItem = newIndex;
             }
         }
+        return true;
     }
 
     void InventoryWindow::dragItem(MyGUI::Widget* /*sender*/, std::size_t count)
     {
-        ensureSelectedItemUnequipped(static_cast<int>(count));
+        if (!ensureSelectedItemUnequipped(static_cast<int>(count)))
+            return;
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
         notifyContentChanged();
     }
 
     void InventoryWindow::transferItem(MyGUI::Widget* /*sender*/, std::size_t count)
     {
-        ensureSelectedItemUnequipped(static_cast<int>(count));
+        if (!ensureSelectedItemUnequipped(static_cast<int>(count)))
+            return;
         mItemTransfer->apply(mTradeModel->getItem(mSelectedItem), count, *mItemView);
         notifyContentChanged();
     }
 
     void InventoryWindow::sellItem(MyGUI::Widget* /*sender*/, std::size_t count)
     {
-        ensureSelectedItemUnequipped(static_cast<int>(count));
+        if (!ensureSelectedItemUnequipped(static_cast<int>(count)))
+            return;
         const ItemStack& item = mTradeModel->getItem(mSelectedItem);
         const ESM::RefId& sound = item.mBase.getClass().getUpSoundId(item.mBase);
         MWBase::Environment::get().getWindowManager()->playSound(sound);
@@ -473,7 +481,8 @@ namespace MWGui
     void InventoryWindow::equipItem(std::size_t count)
     {
         const ItemStack& item = mTradeModel->getItem(mSelectedItem);
-        ensureSelectedItemUnequipped(static_cast<int>(count));
+        if (!ensureSelectedItemUnequipped(static_cast<int>(count)))
+            return;
         // Disable the pick up sound as the item will be used immediately
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count, false);
         notifyContentChanged();
@@ -487,6 +496,12 @@ namespace MWGui
         // This is needed when clicking on a stack of items; we only want to use the first item.
         if (mDragAndDrop->mIsOnDragAndDrop)
             mDragAndDrop->drop(mTradeModel, mItemView, wasEquipped);
+    }
+
+    void InventoryWindow::cancelDrag()
+    {
+        if (mDragAndDrop->mIsOnDragAndDrop)
+            mDragAndDrop->finish();
     }
 
     void InventoryWindow::updateItemView()

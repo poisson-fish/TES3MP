@@ -23,6 +23,29 @@ struct EquipmentMember {
   ammunition:ulong;
 }
 
+struct ActorEquipmentMember {
+  actor_id:ulong;
+  helmet:ulong;
+  cuirass:ulong;
+  greaves:ulong;
+  left_pauldron:ulong;
+  right_pauldron:ulong;
+  left_gauntlet:ulong;
+  right_gauntlet:ulong;
+  boots:ulong;
+  shirt:ulong;
+  pants:ulong;
+  skirt:ulong;
+  robe:ulong;
+  left_ring:ulong;
+  right_ring:ulong;
+  amulet:ulong;
+  belt:ulong;
+  carried_right:ulong;
+  carried_left:ulong;
+  ammunition:ulong;
+}
+
 table EquipmentSnapshotHeader {
   target_session_id:ulong (id: 0);
   target_session_generation:ulong (id: 1);
@@ -33,6 +56,7 @@ table EquipmentSnapshotHeader {
 table LatestWinsEquipmentSnapshot {
   header:EquipmentSnapshotHeader (id: 0);
   members:[EquipmentMember] (id: 1);
+  actors:[ActorEquipmentMember] (id: 2);
 }
 
 root_type LatestWinsEquipmentSnapshot;

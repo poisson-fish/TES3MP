@@ -96,6 +96,11 @@ namespace MWGui
         return std::exchange(sTransferIntercepted, false);
     }
 
+    bool ItemModel::hasTransferInterceptor() noexcept
+    {
+        return bool(sTransferInterceptor);
+    }
+
     bool ItemModel::allowedToUseItems() const
     {
         return true;

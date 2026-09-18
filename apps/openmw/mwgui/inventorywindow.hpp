@@ -61,6 +61,7 @@ namespace MWGui
         ItemModel* getModel();
 
         void updateItemView();
+        void cancelDrag();
 
         void updatePlayer();
 
@@ -167,7 +168,7 @@ namespace MWGui
 
         /// Unequips count items from mSelectedItem, if it is equipped, and then updates mSelectedItem in case the items
         /// were re-stacked
-        void ensureSelectedItemUnequipped(int count);
+        bool ensureSelectedItemUnequipped(int count);
     };
 }
 

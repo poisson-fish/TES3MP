@@ -6,7 +6,7 @@
       "id": "M3-005",
       "slice": "placed actor inventories and corpse looting",
       "owner": "OpenMW server runtime",
-      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Project corpse equipment and distinct remote stacks without local selection or script execution; explicit cleanup services avoid borrowing a global world.",
+      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Retire unselected ordinary empty stacks during staged transfers and replace registry membership atomically. Project corpse stacks and living public equipment without local selection or script execution; validate complete appearance records/slots before replacement and keep presentation items outside transferable identity maps. Explicit cleanup services avoid borrowing a global world.",
       "paths": [
         "apps/openmw/mwclass/creature.cpp",
         "apps/openmw/mwclass/creature.hpp",
@@ -353,7 +353,7 @@
       "id": "P15-001",
       "slice": "15.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide bounded inventory transfer and item-use interception seams so multiplayer UI actions become server-authoritative transaction proposals before stock single-player mutation.",
+      "purpose": "Provide bounded inventory transfer and item-use interception seams before stock mutation. Preserve authoritative slots during Take All and player drag/quick transfer, resolve proxy transfer owners, cancel borrowed drags before inventory rebuilding, and disable unsupported local corpse disposal while transfers are intercepted.",
       "paths": [
         "apps/openmw/mwgui/container.cpp",
         "apps/openmw/mwgui/containeritemmodel.hpp",

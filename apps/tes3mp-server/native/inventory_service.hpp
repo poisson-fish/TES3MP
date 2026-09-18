@@ -47,6 +47,7 @@ namespace TES3MP::Native
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
+        void retireCommittedEffects() noexcept;
 
     public:
         class PreparedCommand

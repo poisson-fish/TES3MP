@@ -178,6 +178,11 @@ namespace MWWorld
         // Apply committed ordinary equipment to presentation storage. No splits,
         // restacking, item scripts or gameplay selection; notify the model once.
         void applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment);
+        // Public actor appearance has one local presentation item per occupied
+        // slot, no private inventory or authoritative item identity/count.
+        // Validate the complete record/slot set before replacing local contents.
+        void applyAuthoritativeAppearance(std::span<const std::pair<int, ESM::RefId>> equipment,
+            const ESMStore& content, LocalScripts& scripts, WorldModel& world);
         ContainerStoreIterator unequipSlot(
             int slot, const InventoryStoreEquipmentContext& context, bool applyUpdates = true);
         ///< Unequip \a slot.

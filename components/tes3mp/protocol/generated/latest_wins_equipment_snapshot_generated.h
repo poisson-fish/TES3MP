@@ -20,6 +20,8 @@ namespace EquipmentSnapshot {
 
 struct EquipmentMember;
 
+struct ActorEquipmentMember;
+
 struct EquipmentSnapshotHeader;
 struct EquipmentSnapshotHeaderBuilder;
 
@@ -157,6 +159,137 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) EquipmentMember FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(EquipmentMember, 160);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorEquipmentMember FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t actor_id_;
+  uint64_t helmet_;
+  uint64_t cuirass_;
+  uint64_t greaves_;
+  uint64_t left_pauldron_;
+  uint64_t right_pauldron_;
+  uint64_t left_gauntlet_;
+  uint64_t right_gauntlet_;
+  uint64_t boots_;
+  uint64_t shirt_;
+  uint64_t pants_;
+  uint64_t skirt_;
+  uint64_t robe_;
+  uint64_t left_ring_;
+  uint64_t right_ring_;
+  uint64_t amulet_;
+  uint64_t belt_;
+  uint64_t carried_right_;
+  uint64_t carried_left_;
+  uint64_t ammunition_;
+
+ public:
+  ActorEquipmentMember()
+      : actor_id_(0),
+        helmet_(0),
+        cuirass_(0),
+        greaves_(0),
+        left_pauldron_(0),
+        right_pauldron_(0),
+        left_gauntlet_(0),
+        right_gauntlet_(0),
+        boots_(0),
+        shirt_(0),
+        pants_(0),
+        skirt_(0),
+        robe_(0),
+        left_ring_(0),
+        right_ring_(0),
+        amulet_(0),
+        belt_(0),
+        carried_right_(0),
+        carried_left_(0),
+        ammunition_(0) {
+  }
+  ActorEquipmentMember(uint64_t _actor_id, uint64_t _helmet, uint64_t _cuirass, uint64_t _greaves, uint64_t _left_pauldron, uint64_t _right_pauldron, uint64_t _left_gauntlet, uint64_t _right_gauntlet, uint64_t _boots, uint64_t _shirt, uint64_t _pants, uint64_t _skirt, uint64_t _robe, uint64_t _left_ring, uint64_t _right_ring, uint64_t _amulet, uint64_t _belt, uint64_t _carried_right, uint64_t _carried_left, uint64_t _ammunition)
+      : actor_id_(::flatbuffers::EndianScalar(_actor_id)),
+        helmet_(::flatbuffers::EndianScalar(_helmet)),
+        cuirass_(::flatbuffers::EndianScalar(_cuirass)),
+        greaves_(::flatbuffers::EndianScalar(_greaves)),
+        left_pauldron_(::flatbuffers::EndianScalar(_left_pauldron)),
+        right_pauldron_(::flatbuffers::EndianScalar(_right_pauldron)),
+        left_gauntlet_(::flatbuffers::EndianScalar(_left_gauntlet)),
+        right_gauntlet_(::flatbuffers::EndianScalar(_right_gauntlet)),
+        boots_(::flatbuffers::EndianScalar(_boots)),
+        shirt_(::flatbuffers::EndianScalar(_shirt)),
+        pants_(::flatbuffers::EndianScalar(_pants)),
+        skirt_(::flatbuffers::EndianScalar(_skirt)),
+        robe_(::flatbuffers::EndianScalar(_robe)),
+        left_ring_(::flatbuffers::EndianScalar(_left_ring)),
+        right_ring_(::flatbuffers::EndianScalar(_right_ring)),
+        amulet_(::flatbuffers::EndianScalar(_amulet)),
+        belt_(::flatbuffers::EndianScalar(_belt)),
+        carried_right_(::flatbuffers::EndianScalar(_carried_right)),
+        carried_left_(::flatbuffers::EndianScalar(_carried_left)),
+        ammunition_(::flatbuffers::EndianScalar(_ammunition)) {
+  }
+  uint64_t actor_id() const {
+    return ::flatbuffers::EndianScalar(actor_id_);
+  }
+  uint64_t helmet() const {
+    return ::flatbuffers::EndianScalar(helmet_);
+  }
+  uint64_t cuirass() const {
+    return ::flatbuffers::EndianScalar(cuirass_);
+  }
+  uint64_t greaves() const {
+    return ::flatbuffers::EndianScalar(greaves_);
+  }
+  uint64_t left_pauldron() const {
+    return ::flatbuffers::EndianScalar(left_pauldron_);
+  }
+  uint64_t right_pauldron() const {
+    return ::flatbuffers::EndianScalar(right_pauldron_);
+  }
+  uint64_t left_gauntlet() const {
+    return ::flatbuffers::EndianScalar(left_gauntlet_);
+  }
+  uint64_t right_gauntlet() const {
+    return ::flatbuffers::EndianScalar(right_gauntlet_);
+  }
+  uint64_t boots() const {
+    return ::flatbuffers::EndianScalar(boots_);
+  }
+  uint64_t shirt() const {
+    return ::flatbuffers::EndianScalar(shirt_);
+  }
+  uint64_t pants() const {
+    return ::flatbuffers::EndianScalar(pants_);
+  }
+  uint64_t skirt() const {
+    return ::flatbuffers::EndianScalar(skirt_);
+  }
+  uint64_t robe() const {
+    return ::flatbuffers::EndianScalar(robe_);
+  }
+  uint64_t left_ring() const {
+    return ::flatbuffers::EndianScalar(left_ring_);
+  }
+  uint64_t right_ring() const {
+    return ::flatbuffers::EndianScalar(right_ring_);
+  }
+  uint64_t amulet() const {
+    return ::flatbuffers::EndianScalar(amulet_);
+  }
+  uint64_t belt() const {
+    return ::flatbuffers::EndianScalar(belt_);
+  }
+  uint64_t carried_right() const {
+    return ::flatbuffers::EndianScalar(carried_right_);
+  }
+  uint64_t carried_left() const {
+    return ::flatbuffers::EndianScalar(carried_left_);
+  }
+  uint64_t ammunition() const {
+    return ::flatbuffers::EndianScalar(ammunition_);
+  }
+};
+FLATBUFFERS_STRUCT_END(ActorEquipmentMember, 160);
+
 struct EquipmentSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EquipmentSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -233,13 +366,17 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   typedef LatestWinsEquipmentSnapshotBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
-    VT_MEMBERS = 6
+    VT_MEMBERS = 6,
+    VT_ACTORS = 8
   };
   const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *>(VT_HEADER);
   }
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *> *members() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *> *>(VT_MEMBERS);
+  }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *> *actors() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *> *>(VT_ACTORS);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
@@ -248,6 +385,8 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            verifier.VerifyTable(header()) &&
            VerifyOffset(verifier, VT_MEMBERS) &&
            verifier.VerifyVector(members()) &&
+           VerifyOffset(verifier, VT_ACTORS) &&
+           verifier.VerifyVector(actors()) &&
            verifier.EndTable();
   }
 };
@@ -261,6 +400,9 @@ struct LatestWinsEquipmentSnapshotBuilder {
   }
   void add_members(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *>> members) {
     fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_MEMBERS, members);
+  }
+  void add_actors(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors) {
+    fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_ACTORS, actors);
   }
   explicit LatestWinsEquipmentSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -276,8 +418,10 @@ struct LatestWinsEquipmentSnapshotBuilder {
 inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipmentSnapshot(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *>> members = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *>> members = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors = 0) {
   LatestWinsEquipmentSnapshotBuilder builder_(_fbb);
+  builder_.add_actors(actors);
   builder_.add_members(members);
   builder_.add_header(header);
   return builder_.Finish();
@@ -286,12 +430,15 @@ inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipm
 inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipmentSnapshotDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
-    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember> *members = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember> *members = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember> *actors = nullptr) {
   auto members__ = members ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember>(*members) : 0;
+  auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember>(*actors) : 0;
   return TES3MP::Protocol::Schema::EquipmentSnapshot::CreateLatestWinsEquipmentSnapshot(
       _fbb,
       header,
-      members__);
+      members__,
+      actors__);
 }
 
 inline const TES3MP::Protocol::Schema::EquipmentSnapshot::LatestWinsEquipmentSnapshot *GetLatestWinsEquipmentSnapshot(const void *buf) {

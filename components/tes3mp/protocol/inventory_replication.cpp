@@ -299,7 +299,7 @@ namespace TES3MP
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
         SessionId target, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
-        std::span<const PublicEquipmentMember> members)
+        std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors)
     {
         if (members.size() > MaximumEquipmentSnapshotPlayers)
             return error(Code::TooManyEntries, members.size(), MaximumEquipmentSnapshotPlayers);
@@ -307,7 +307,14 @@ namespace TES3MP
             if (members[index - 1].player >= members[index].player)
                 return error(Code::EntriesNotStrictlySorted, members[index].player.value(),
                     members[index - 1].player.value(), index);
-        return LatestWinsEquipmentSnapshot{ target, generation, tick, revision, { members.begin(), members.end() } };
+        if (actors.size() > MaximumEquipmentSnapshotActors)
+            return error(Code::TooManyEntries, actors.size(), MaximumEquipmentSnapshotActors);
+        for (std::size_t index = 1; index < actors.size(); ++index)
+            if (actors[index - 1].actor >= actors[index].actor)
+                return error(Code::EntriesNotStrictlySorted, actors[index].actor.value(),
+                    actors[index - 1].actor.value(), index);
+        return LatestWinsEquipmentSnapshot{ target, generation, tick, revision,
+            { members.begin(), members.end() }, { actors.begin(), actors.end() } };
     }
 
     std::vector<std::byte> encodeReliablePlayerInventoryBaseline(const ReliablePlayerInventoryBaseline& input)
@@ -385,7 +392,18 @@ namespace TES3MP
                 slots[6], slots[7], slots[8], slots[9], slots[10], slots[11], slots[12], slots[13], slots[14],
                 slots[15], slots[16], slots[17], slots[18]);
         }
-        const auto root = EquipmentSchema::CreateLatestWinsEquipmentSnapshotDirect(builder, header, &members);
+        std::vector<EquipmentSchema::ActorEquipmentMember> actors;
+        for (const auto& actor : input.actors)
+        {
+            std::array<std::uint64_t, static_cast<std::size_t>(EquipmentSlot::Count)> slots{};
+            for (std::size_t index = 0; index < slots.size(); ++index)
+                slots[index] = actor.slots[index] ? actor.slots[index]->value() : 0;
+            actors.emplace_back(actor.actor.value(), slots[0], slots[1], slots[2], slots[3], slots[4], slots[5],
+                slots[6], slots[7], slots[8], slots[9], slots[10], slots[11], slots[12], slots[13], slots[14],
+                slots[15], slots[16], slots[17], slots[18]);
+        }
+        const auto root = EquipmentSchema::CreateLatestWinsEquipmentSnapshotDirect(
+            builder, header, &members, actors.empty() ? nullptr : &actors);
         EquipmentSchema::FinishSizePrefixedLatestWinsEquipmentSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -625,8 +643,36 @@ namespace TES3MP
                 members.push_back(std::move(member));
             }
         }
+        std::vector<PublicActorEquipmentMember> actors;
+        if (const auto* encoded = root->actors())
+        {
+            if (encoded->size() > MaximumEquipmentSnapshotActors)
+                return error(Code::TooManyEntries, encoded->size(), MaximumEquipmentSnapshotActors);
+            for (std::size_t index = 0; index < encoded->size(); ++index)
+            {
+                const auto current = copyStruct(encoded, index);
+                auto actor = strong<ContainerId>(current.actor_id(), index);
+                if (const auto* failure = std::get_if<Error>(&actor))
+                    return *failure;
+                PublicActorEquipmentMember member{ .actor = *value(actor) };
+                const std::array raw{ current.helmet(), current.cuirass(), current.greaves(),
+                    current.left_pauldron(), current.right_pauldron(), current.left_gauntlet(),
+                    current.right_gauntlet(), current.boots(), current.shirt(), current.pants(), current.skirt(),
+                    current.robe(), current.left_ring(), current.right_ring(), current.amulet(), current.belt(),
+                    current.carried_right(), current.carried_left(), current.ammunition() };
+                for (std::size_t slot = 0; slot < raw.size(); ++slot)
+                    if (raw[slot])
+                    {
+                        auto prototype = strong<ItemPrototypeId>(raw[slot], index);
+                        if (const auto* failure = std::get_if<Error>(&prototype))
+                            return *failure;
+                        member.slots[slot] = *value(prototype);
+                    }
+                actors.push_back(std::move(member));
+            }
+        }
         return LatestWinsEquipmentSnapshot::create(
-            *value(session), *value(generation), *value(tick), *value(revision), members);
+            *value(session), *value(generation), *value(tick), *value(revision), members, actors);
     }
 
     InventoryTransactionCommandDecodeResult decodeClientInventoryTransactionCommand(std::span<const std::byte> payload)

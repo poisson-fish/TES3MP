@@ -16,6 +16,7 @@
 
 #include "class.hpp"
 #include "esmstore.hpp"
+#include "manualref.hpp"
 
 void MWWorld::InventoryStore::copySlots(const InventoryStore& store)
 {
@@ -652,6 +653,40 @@ bool MWWorld::InventoryStore::unequipRemovedItem(const Ptr& item, const Inventor
     }
 
     return false;
+}
+
+void MWWorld::InventoryStore::applyAuthoritativeAppearance(std::span<const std::pair<int, ESM::RefId>> equipment,
+    const ESMStore& content, LocalScripts& scripts, WorldModel& world)
+{
+    if (equipment.size() > Slots) throw std::invalid_argument("Remote appearance exceeds slot budget");
+    std::vector<ManualRef> items;
+    items.reserve(equipment.size());
+    std::array<bool, Slots> occupied{};
+    bool unchanged = isResolved() && static_cast<size_t>(std::distance(begin(), end())) == equipment.size();
+    for (const auto& [slot, record] : equipment)
+    {
+        if (slot < 0 || slot >= Slots || occupied[slot])
+            throw std::invalid_argument("Remote appearance has an invalid or repeated slot");
+        occupied[slot] = true;
+        const auto item = items.emplace_back(content, record).getPtr();
+        const auto allowed = item.getClass().getEquipmentSlots(item);
+        if (std::ranges::find(allowed.first, slot) == allowed.first.end()
+            || !item.getClass().getScript(item).empty() || !item.getClass().getEnchantment(item).empty())
+            throw std::invalid_argument("Remote appearance has an unsupported record or slot");
+        const auto current = getSlot(slot);
+        if (current == end() || current->getCellRef().getRefId() != record || current->getCellRef().getCount() != 1)
+            unchanged = false;
+    }
+    for (int slot = 0; slot < Slots; ++slot)
+        if (!occupied[slot] && getSlot(slot) != end()) unchanged = false;
+    if (unchanged) return;
+
+    std::vector<std::pair<int, Ptr>> slots;
+    slots.reserve(equipment.size());
+    clearAuthoritative(scripts);
+    for (size_t i = 0; i < equipment.size(); ++i)
+        slots.emplace_back(equipment[i].first, *addAuthoritative(items[i].getPtr(), 1, world));
+    applyAuthoritativeEquipment(slots);
 }
 
 void MWWorld::InventoryStore::applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment)

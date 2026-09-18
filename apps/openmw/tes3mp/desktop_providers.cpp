@@ -975,6 +975,37 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot)
         {
+            auto world = MWBase::Environment::get().getWorld();
+            for (const auto& member : snapshot.actors)
+            {
+                const auto ref = MWWorld::localPlacedRef(member.actor.value(), world->getContentFiles());
+                if (!ref) return ProviderResult::ContentMappingFailed;
+                auto ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
+                // A not-yet-active reference is retried on subsequent snapshots.
+                if (ptr.isEmpty()) continue;
+                if (!ptr.getClass().isActor() || ptr.getCell() != world->getPlayerPtr().getCell()
+                    || ptr.getClass().getCreatureStats(ptr).isDead())
+                    return ProviderResult::ContentMappingFailed;
+                std::vector<std::pair<int, ESM::RefId>> records;
+                for (size_t slot = 0; slot < member.slots.size(); ++slot)
+                    if (member.slots[slot])
+                    {
+                        const auto record = nativeItemRecords.find(member.slots[slot]->value());
+                        if (record == nativeItemRecords.end()) return ProviderResult::ContentMappingFailed;
+                        records.emplace_back(static_cast<int>(slot), record->second);
+                    }
+                if (ptr.getClass().hasInventoryStore(ptr))
+                    ptr.getClass().getInventoryStore(ptr).applyAuthoritativeAppearance(records,
+                        *MWBase::Environment::get().getESMStore(), world->getLocalScripts(),
+                        *MWBase::Environment::get().getWorldModel());
+                else
+                {
+                    if (!records.empty()) return ProviderResult::ContentMappingFailed;
+                    ptr.getClass().getContainerStore(ptr).clearAuthoritative(world->getLocalScripts());
+                }
+                // Never register appearance items as observed inventory stacks
+                // or grant the living owner a container transfer revision.
+            }
             for (auto& [entity, remote] : remotes)
             {
                 (void)entity;
@@ -1984,6 +2015,9 @@ namespace TES3MP::OpenMWAdapter
                 auto playerPtr = world->getPlayerPtr();
                 auto& inventory = playerPtr.getClass().getInventoryStore(playerPtr);
                 const bool native = !nativeItemRecords.empty();
+                // Rebuilding can reuse a presentation node for a different
+                // remote stack. End any drag while its old identity still holds.
+                MWBase::Environment::get().getWindowManager()->getInventoryWindow()->cancelDrag();
                 // Stock add merges an equipped copy with a newly received copy
                 // while the slots are temporarily empty. A native baseline owns
                 // both stack identities and slots; install it without restacking.
@@ -2202,10 +2236,12 @@ namespace TES3MP::OpenMWAdapter
             {
                 // Corpse windows use InventoryItemModel for NPCs and armed
                 // creatures, and ContainerItemModel for other creatures/chests.
+                // Quick transfer supplies the view's SortFilterItemModel proxy.
+                auto& targetModel = target.getTransferTarget();
                 MWWorld::Ptr targetOwner;
-                if (auto* containerModel = dynamic_cast<MWGui::ContainerItemModel*>(&target))
+                if (auto* containerModel = dynamic_cast<MWGui::ContainerItemModel*>(&targetModel))
                     targetOwner = containerModel->primarySource();
-                else if (auto* inventoryModel = dynamic_cast<MWGui::InventoryItemModel*>(&target))
+                else if (auto* inventoryModel = dynamic_cast<MWGui::InventoryItemModel*>(&targetModel))
                     targetOwner = inventoryModel->actor();
                 if (!targetOwner.isEmpty())
                 {
@@ -2218,7 +2254,7 @@ namespace TES3MP::OpenMWAdapter
                     result.expectedContainerRevision = revision->second;
                     return result;
                 }
-                if (dynamic_cast<MWGui::WorldItemModel*>(&target))
+                if (dynamic_cast<MWGui::WorldItemModel*>(&targetModel))
                 {
                     result.kind = InventoryTransactionKind::DropItem;
                     return result;

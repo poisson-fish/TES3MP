@@ -622,7 +622,7 @@ namespace MWWorld
                 MWMechanics::constantFortifyLuckMagnitude(context.mStore, record.mEnchant);
         }
 
-        void capture(const ContainerStore& source)
+        void capture(const ContainerStore& source, bool retireEmpty = false)
         {
             mRegistry = mContext.mWorldModel.snapshotPtrRegistry();
             mScripts = mContext.mLocalScripts.snapshot();
@@ -648,6 +648,13 @@ namespace MWWorld
                 ConstPtr live(&ref, nullptr);
                 live.mContainerStore = &source;
                 mBefore.push_back({ live, ref.mRef, ref.mData.copyForContainerTransfer() });
+                // Keep every live node as a revalidation witness, but retired
+                // ordinary stacks need not occupy the next committed image.
+                // Never recycle their identities or discard selected/scripted nodes.
+                if (retireEmpty && ref.mRef.getCount(false) == 0 && ref.mRef.getRefNum() != mSelected
+                    && std::ranges::find(mSlots, ref.mRef.getRefNum()) == mSlots.end()
+                    && live.getClass().getScript(live).empty())
+                    return;
                 auto copy = detached(ref);
                 auto it = mCandidate.addNewStack(ConstPtr(&copy), ref.mRef.getCount(false));
                 auto& node = *it->getBase();
@@ -901,8 +908,8 @@ namespace MWWorld
             throw std::invalid_argument("Transfer destination count bound exceeded");
         std::array states{ std::make_unique<State>(inventories[0], contexts[0]),
             std::make_unique<State>(inventories[1], contexts[1]) };
-        states[0]->capture(source);
-        states[1]->capture(destination);
+        states[0]->capture(source, true);
+        states[1]->capture(destination, true);
         auto& from = *states[0];
         auto& to = *states[1];
         auto origin = from.candidate().begin();

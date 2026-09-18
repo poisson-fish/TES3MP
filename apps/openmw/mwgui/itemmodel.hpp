@@ -70,7 +70,10 @@ namespace MWGui
         bool interceptTransfer(const ItemStack& item, size_t count, ItemModel& otherModel);
         static void setTransferInterceptor(TransferInterceptor interceptor);
         static void clearTransferInterceptor() noexcept;
+        static bool hasTransferInterceptor() noexcept;
         static bool takeTransferIntercepted() noexcept;
+        // Proxies forward transfer ownership to their underlying model.
+        virtual ItemModel& getTransferTarget() noexcept { return *this; }
 
         /// Is the player allowed to use items from this item model? (default true)
         virtual bool allowedToUseItems() const;
@@ -114,6 +117,7 @@ namespace MWGui
         ModelIndex mapFromSource(ModelIndex index);
 
         bool usesContainer(const MWWorld::Ptr& container) override;
+        ItemModel& getTransferTarget() noexcept override { return mSourceModel->getTransferTarget(); }
 
     protected:
         MWWorld::Ptr addItem(const ItemStack& item, size_t count, bool allowAutoEquip = true) override;

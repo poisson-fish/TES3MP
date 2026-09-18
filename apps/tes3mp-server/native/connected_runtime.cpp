@@ -261,6 +261,7 @@ namespace TES3MP::Native
             const auto owner = owners[i];
             staged[i] = stageInstallation(owner, ownerPtr(owner), std::move(prepared[i]), initiator);
             (void)staged[i]->mPrepared.installationCandidate(contexts[i], storage(owner));
+            storage(owner).forEachStored([&](const auto& ref, auto) { registry.erase(ref.mRef.getRefNum()); });
             for (const auto& object : staged[i]->mSaved.mObjects)
                 registry.insert_or_assign(object.mRef.mRefNum, staged[i]->mRegistry.at(object.mRef.mRefNum));
             if (owner >= 2) values.mContainers[owner - 2] = staged[i]->mSaved;

@@ -179,7 +179,7 @@ namespace MWGui
             model = std::make_unique<ContainerItemModel>(container);
         }
 
-        mDisposeCorpseButton->setVisible(loot);
+        mDisposeCorpseButton->setVisible(loot && !ItemModel::hasTransferInterceptor());
         mModel = model.get();
         auto sortModel = std::make_unique<SortFilterItemModel>(std::move(model));
         mSortModel = sortModel.get();
@@ -240,8 +240,9 @@ namespace MWGui
         assert(mModel);
         mModel->update();
 
-        // unequip all items to avoid unequipping/reequipping
-        if (mPtr.getClass().hasInventoryStore(mPtr))
+        // Remote slots and stack identities must survive until the committed
+        // baseline arrives. Stock unequip may merge equipped and spare copies.
+        if (!ItemModel::hasTransferInterceptor() && mPtr.getClass().hasInventoryStore(mPtr))
         {
             MWWorld::InventoryStore& invStore = mPtr.getClass().getInventoryStore(mPtr);
             for (size_t i = 0; i < mModel->getItemCount(); ++i)
@@ -285,6 +286,9 @@ namespace MWGui
 
     void ContainerWindow::onDisposeCorpseButtonClicked(MyGUI::Widget* /*sender*/)
     {
+        // Disposal has no authoritative command yet, including for empty corpses.
+        if (ItemModel::hasTransferInterceptor())
+            return;
         if (mDragAndDrop == nullptr || !mDragAndDrop->mIsOnDragAndDrop)
         {
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCloseButton);

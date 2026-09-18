@@ -3,12 +3,22 @@
 #include <tes3mp/protocol_handshake.hpp>
 
 #include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <span>
 #include <vector>
 
 namespace
 {
     using namespace TES3MP;
+    void require(bool condition, int line)
+    {
+        if (condition) return;
+        std::cerr << "inventory_replication_tests assertion failed at line " << line << '\n';
+        std::abort();
+    }
+#undef assert
+#define assert(condition) require(static_cast<bool>(condition), __LINE__)
     template <class T>
     T id(std::uint64_t value)
     {
@@ -70,6 +80,37 @@ int main()
     assert(std::holds_alternative<LatestWinsEquipmentSnapshot>(equipment));
     const auto equipmentBytes = encodeLatestWinsEquipmentSnapshot(std::get<LatestWinsEquipmentSnapshot>(equipment));
     assert(decodeLatestWinsEquipmentSnapshot(equipmentBytes) == equipment);
+
+    auto publicActors = std::get<LatestWinsEquipmentSnapshot>(equipment);
+    for (std::size_t index = 0; index < MaximumEquipmentSnapshotActors; ++index)
+    {
+        PublicActorEquipmentMember actor{.actor = id<ContainerId>(100 + index)};
+        for (std::size_t slot = 0; slot < actor.slots.size(); ++slot)
+            actor.slots[slot] = id<ItemPrototypeId>(1000 + slot);
+        publicActors.actors.push_back(actor);
+    }
+    publicActors.actors.back().slots = {}; // Empty appearance is an explicit removal.
+    const auto actorEquipmentBytes = encodeLatestWinsEquipmentSnapshot(publicActors);
+    assert(decodeLatestWinsEquipmentSnapshot(actorEquipmentBytes) == EquipmentSnapshotDecodeResult(publicActors));
+    for (std::size_t size = 0; size < actorEquipmentBytes.size(); ++size)
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeLatestWinsEquipmentSnapshot(std::span(actorEquipmentBytes).first(size))));
+    auto invalidActors = publicActors;
+    invalidActors.actors[1].actor = invalidActors.actors[0].actor;
+    assert(std::holds_alternative<InventoryReplicationDecodeError>(
+        decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(invalidActors))));
+    invalidActors = publicActors;
+    std::swap(invalidActors.actors[0], invalidActors.actors[1]);
+    assert(std::holds_alternative<InventoryReplicationDecodeError>(
+        decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(invalidActors))));
+    invalidActors = publicActors;
+    invalidActors.actors.push_back({id<ContainerId>(999)});
+    assert(std::holds_alternative<InventoryReplicationDecodeError>(
+        decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(invalidActors))));
+    publicActors.members.clear();
+    for (std::size_t index = 0; index < MaximumEquipmentSnapshotPlayers; ++index)
+        publicActors.members.push_back({id<PlayerId>(index + 1), member.slots});
+    assert(encodeLatestWinsEquipmentSnapshot(publicActors).size() <= LatestWinsSnapshotMaximumPayloadBytes);
 
     std::vector<CanonicalItemStack> maximumStacks;
     maximumStacks.reserve(MaximumInventoryBaselineChunkStacks);
