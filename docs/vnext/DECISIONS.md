@@ -32,6 +32,7 @@ Clients submit authenticated intent and present committed results. Prediction
 cannot author damage, rewards or world mutations. Replace inherited movement
 authority with validation for combat. Schedule the union of player areas;
 one player's menu/scene cannot control the whole simulation.
+NPC simulation stays server-owned; no client ownership leases.
 
 **M3 doors:** server transactions own activation, reversal, angle, direction and
 persistence through shared OpenMW rules. Clients apply committed angles and report
@@ -48,6 +49,18 @@ clients. Pure visual replacements may vary; collision/bounds and script-affectin
 resources belong to gameplay identity. Reuse supported MWScript/Lua execution and
 semantic serialization with explicit context and resource limits. Never persist
 raw memory, process pointers, rendering objects or live sessions.
+
+**Movement smoothness (target).** Server NPC physics precedes player movement
+cutover. Interpolate timestamped remote snapshots with bounded extrapolation;
+use latest-wins movement snapshots and reliable durable events. Local players
+predict immediately using shared movement/collision rules and compatible fixed
+steps. Restore authoritative physics state at acknowledged input, then replay
+unacknowledged inputs. Define dynamic-obstacle timestamps/revisions and sufficient
+history for contact reconciliation. Separate collision correction from visual
+blending; reset history on teleports, respawns and cell transitions. Exercise
+latency/jitter/loss from the first NPC slice; require correction size/frequency
+and tick-overrun budgets before player cutover. Existing smoothing/input-history scaffolding
+does not establish OpenMW physics replay.
 
 ## Cooperative progression design
 

@@ -80,6 +80,7 @@ expiry/reversal/disconnect and latency; defer server physics/NPC obstruction.
 **Exit:** an actual Tamriel Rebuilt location works with two clients; a shared
 container/door change and regional weather transition converge after late join
 and reconnect. The test names the loadout and observes client presentation.
+Complete M3 integration/evidence before M4; deferred graphical testing leaves M3 open.
 
 **Retire:** hand-enumerated cells/reference catalogs and corresponding fixture-only
 production bootstrap for migrated paths. Keep small fixtures as fast tests.
@@ -89,12 +90,13 @@ production bootstrap for migrated paths. Keep small fixtures as fast tests.
 **Outcome:** two players engage the same actor, see consistent AI, hits, effects,
 death, equipment wear, and loot, with the server deciding gameplay outcomes.
 
-Reuse actor AI/combat/effects and selected physics/navigation services. Establish
-server validation of movement/contact/targeting; client-reported positions alone
-do not prove authoritative reach. Introduce movement correction/prediction as
-needed. Migrate one melee/effect path at a time, including spells/projectiles and
-enchantment lifecycle required by the chosen encounter. Account for missed
-attacks, resource use, friendly targeting, and retry/reconnect behavior.
+After M3, first prove one server-controlled NPC navigating/colliding in one
+interior, replicated smoothly to two clients and continuing when either disconnects.
+Retain current player movement until physics prediction/reconciliation meets
+[DECISIONS.md](DECISIONS.md)'s cutover requirements. Reuse OpenMW movement,
+navigation, AI, collision and combat/effects; extend to NPC-door contact, then one melee/effect
+path including spells/projectiles and enchantments. Validate authoritative reach,
+misses, resources, friendly targeting and retries/reconnect.
 
 Cover Travel AI beyond processing range, both players' cell boundaries, unload/restart,
 and preserved destinations/completion state. Define inactive travel policy and

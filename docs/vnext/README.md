@@ -1,19 +1,16 @@
 # Multiplayer modded OpenMW
 
-The product is cooperative multiplayer OpenMW: load a compatible modpack such
-as Tamriel Rebuilt, explore and fight together, and complete the game independently.
-Other players must not permanently close a character's quest paths. Preserve
-personal progression in a shared world, with NPC respawn restoring later access.
-Clients retain OpenMW graphics and compatible visual mods. This is the target,
-not a claim of implemented support.
+Build cooperative multiplayer OpenMW for compatible modpacks, including Tamriel
+Rebuilt. Players explore and fight together and complete campaigns independently;
+another's actions or absence must not permanently block their opportunities.
+Shared NPC respawn and personal progression define the target, not implemented
+support. Clients retain OpenMW graphics and compatible visual mods.
 
 ## Chosen route
 
-Build an OpenMW-backed authoritative dedicated server. Reuse and refactor
-OpenMW's content loading, world, inventory, mechanics, and scripting behavior.
-Separate simulation from presentation and give gameplay an explicit player
-context. Do not grow a second implementation of Morrowind behind manually
-selected item, spell, actor, or quest catalogs.
+Reuse and refactor OpenMW content, mechanics, world and scripting on an authoritative
+dedicated server. Separate simulation from presentation and make player context explicit.
+Do not create independent gameplay formulas, manual catalogs or a quest language.
 
 ```text
 Shared gameplay loadout
@@ -27,47 +24,36 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking stays engine-independent. The native runtime currently owns bounded
-inventory, equipment, container/corpse and world-item operations in one durable
-image. [CURRENT.md](CURRENT.md) names verified behavior, limitations and the next
-action. Each subsystem changes authority once, through small playable slices.
+Networking remains engine-independent. [CURRENT.md](CURRENT.md) names native runtime
+coverage, evidence, limitations and next action. Migrate one subsystem through
+small playable slices, preserving one canonical writer.
 
 ## Product boundaries
 
-- One authoritative shared world; individual characters and progression.
-  Cooperation must not require synchronized quest stages or attendance.
-- [Cooperative progression design](DECISIONS.md#cooperative-progression-design)
-  proposes shared NPC lives/respawn and personal story state through engine services.
-  Quest-specific adaptations cannot be required. Temporary NPC unavailability is
-  acceptable; personal worlds are not the default. M5 plans contextual scripts,
-  deferred unavailable dependencies and scoped permanent changes; item access
-  still needs generic replenishment/transfer rules.
-  Rewards must not duplicate when clients retry.
-- Match gameplay plugins, ordering, scripts, and gameplay-relevant resources.
-  Purely visual texture/shader/settings differences may remain client-local.
-- Target mods supported by the chosen OpenMW version. MWSE/native-engine-only
-  behavior is not automatically supported. OpenMW mod compatibility alone does
-  not prove multiplayer script compatibility.
-- Develop the first two-client proof on desktop using the existing toolchain.
-  Preserve portability and existing VR interfaces, but VR hardware, standalone
-  headsets, large public servers, and administration are not prerequisites for
-  proving the gameplay route.
+- Shared world, independent progression; no synchronized attendance or quest stages.
+  [Progression design](DECISIONS.md#cooperative-progression-design) proposes shared
+  NPC lives and personal story state. Temporary unavailability is acceptable;
+  private campaigns are not the default; quest adaptations cannot be required. M5 owns
+  contextual scripts, deferred dependencies and scoped permanent changes.
+  Generic item replenishment and access remain unresolved; retries cannot duplicate rewards.
+- Match gameplay plugins, ordering, scripts and relevant resources. Purely visual
+  texture/shader/settings differences may remain client-local.
+- Target supported OpenMW APIs. MWSE/native-engine-only support and multiplayer
+  script compatibility require evidence.
+- Prove two desktop clients first. Preserve portability and VR interfaces; VR hardware,
+  standalone headsets, public-server scale and administration are later concerns.
 
 ## Start and resume
 
-1. [CURRENT.md](CURRENT.md): actual state, active milestone, next concrete action.
-2. [DEVELOPMENT.md](DEVELOPMENT.md): session, migration, and verification rules.
-3. [PLAN.md](PLAN.md): ordered outcomes and acceptance criteria; read the active
-   milestone, not an invented expansion of the entire roadmap.
-4. [DECISIONS.md](DECISIONS.md): durable architecture and cooperative semantics.
+Read [CURRENT.md](CURRENT.md), [DEVELOPMENT.md](DEVELOPMENT.md), this overview and
+the active milestone in [PLAN.md](PLAN.md). Consult [DECISIONS.md](DECISIONS.md)
+for architecture and authority.
 
-The code baseline remains OpenMW 0.51.0 at
-`f4bec41444214a7903bebd178389ca22ca13f646`; this pivot does not upgrade it.
-[BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json) and
-[OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json) are tooling inputs.
-The existing `proofs/` sources remain because dependency tooling consumes them;
-they are not an active roadmap or a place to add implementation diaries.
+Keep OpenMW 0.51.0 baseline `f4bec41444214a7903bebd178389ca22ca13f646`.
+[BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json),
+[OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json) and existing `proofs/`
+serve dependency tooling, not planning.
 
-There are exactly five active documents and a 5,000-word combined ceiling.
-Replace stale material rather than accumulating history. Source and executable
-tests define implemented behavior; these documents define the intended change.
+Exactly five active documents share 5,000 words. Replace stale prose; add no
+diaries or duplicate roadmaps. Code and tests establish implementation; documents
+establish intended behavior.
