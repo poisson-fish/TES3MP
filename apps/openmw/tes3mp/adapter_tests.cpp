@@ -565,6 +565,7 @@ namespace
             lastInventoryRevision = player.revision;
             lastContainerCount = containers.size();
             lastGroundCount = ground.items.size();
+            lastGroundCell = ground.cell;
             lastEquipmentCount = equipment.members.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
@@ -628,6 +629,7 @@ namespace
         unsigned actors = 0;
         unsigned interactiveObjects = 0;
         unsigned inventories = 0;
+        std::optional<TES3MP::CellId> lastGroundCell;
         unsigned combats = 0;
         unsigned questJournals = 0;
         unsigned weathers = 0;
@@ -714,10 +716,94 @@ namespace
 
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
-int main()
+void teleportPresentation()
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    Input input; Presentation presentation; Status status;
+    auto transport = std::make_unique<IdleTransport>();
+    auto* wire = transport.get(); wire->acceptConnections = true;
+    auto clock = std::make_unique<Clock>();
+    const auto endpoint = *ConnectionEndpoint::create("127.0.0.1", 25560);
+    const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+    const auto outbound = *OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+    const ReconnectConfiguration reconnect{endpoint, timeouts, outbound, testContentManifestId()};
+    auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(
+        ClientSessionRuntime::create(*transport, *clock, timeouts, SessionGeneration::initial(), outbound));
+    const std::array capabilities{inventoryReplicationCapability()};
+    auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
+        std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1,2,2)), capabilities, {}));
+    const std::array passwordBytes{std::byte{1}};
+    require(runtime->start(endpoint, ClientHello::fromOffer(std::move(offer)),
+        AuthenticationRequest::join(*AuthenticationMaterial::create(passwordBytes))) == HeadlessClientResult::Accepted);
+    auto coordinator = makeCoordinator(std::move(transport), std::move(clock), std::move(runtime),
+        reconnect, input, presentation, status);
+    coordinator->frame(.01f);
+    wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false,false,false,true)), TransportChannel::ReliableOrdered);
+    coordinator->frame(.01f);
+    wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{7})), TransportChannel::ReliableOrdered);
+    const auto generation = SessionGeneration::initial();
+    const auto first = CellId::interior(value<CellSpaceId>(7)), second = CellId::interior(value<CellSpaceId>(8));
+    const auto sendSpatial = [&](uint64_t revision, CellId cell) {
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+            encodeReliableInterestBaseline(selfBaseline(generation, false, revision, revision)), TransportChannel::ReliableOrdered);
+        const auto original = selfSnapshot(generation, false, revision, revision);
+        const auto& self = original.view().entries()[0];
+        const std::array entries{SpatialEntitySnapshot(self.serverTick(), self.playerId(), self.entityId(), self.appearanceId(),
+            value<EntityRevision>(revision), value<AuthorityEpoch>(revision), Transform(cell, Position3(32 * 1024, 0, 0),
+                self.transform().orientation()), LinearVelocity3(0,0,0))};
+        wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(LatestWinsSnapshot(original.header(), std::get<SpatialWorldView>(SpatialWorldView::create(entries)))),
+            TransportChannel::LatestWins);
+    };
+    const auto sendInventory = [&](uint64_t revision, CellId cell) {
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+            encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(generation, revision, revision)), TransportChannel::ReliableOrdered);
+        auto ground = groundItemBaseline(generation, revision, revision);
+        ground.cell = cell; ground.nativeWorld = true; ground.teleportDoors = {(uint64_t(1) << 63) | revision};
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
+            encodeReliableGroundItemBaseline(ground), TransportChannel::ReliableOrdered);
+        wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+            encodeLatestWinsEquipmentSnapshot(equipmentSnapshot(generation, revision, revision)), TransportChannel::LatestWins);
+    };
+    sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
+    require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    // Spatial correction wins the race. The previous cell's complete inventory
+    // must not be reinstalled while the destination baseline is still in flight.
+    sendSpatial(2, second); coordinator->frame(.01f);
+    require(presentation.inventories == 1 && presentation.lastAllowLocalCellCorrection && input.clearCalls == 1);
+    const auto sent = wire->sentFrames.size();
+    input.nextTransition = CellTransitionCapture{ProviderResult::Accepted, CellTransition(second)};
+    sendInventory(2, second); coordinator->frame(.01f);
+    require(presentation.inventories == 2 && presentation.lastGroundCell == second);
+    for (size_t i = sent; i < wire->sentFrames.size(); ++i)
+    {
+        const auto decoded = std::get<DecodedFrame>(decodeProtocolFrame(wire->sentFrames[i]));
+        if (decoded.messageKind() != MessageKind::ReliableOperation) continue;
+        const auto command = std::get<ReliableOperation>(decodeReliableOperation(decoded.payload()));
+        require(!std::holds_alternative<CellTransition>(command.body()));
+    }
+    // Reverse order on return: the baseline cannot install before its committed
+    // spatial snapshot. Once both arrive the old activators are replaced.
+    sendInventory(3, first); coordinator->frame(.01f);
+    require(presentation.inventories == 2);
+    sendSpatial(3, first); coordinator->frame(.01f);
+    require(presentation.inventories == 3 && presentation.lastGroundCell == first && input.clearCalls == 2
+        && coordinator->multiplayerState() == MultiplayerState::Ready);
+    std::cout << "PASS teleport-presentation: delayed baselines and correction echo\n";
+}
+
+int main(int argc, char** argv)
+{
+    using namespace TES3MP;
+    using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "teleport-presentation")
+    {
+        teleportPresentation();
+        return 0;
+    }
 
     const auto credentialDirectory = std::filesystem::temp_directory_path() / "tes3mp-openmw-player-credential-test";
     std::filesystem::remove_all(credentialDirectory);

@@ -72,6 +72,7 @@ table ReliableGroundItemBaseline {
   presentation:[ItemPresentation] (id: 4);
   native_world:bool (id: 5);
   door:NativeDoor (id: 6);
+  teleport_doors:[ulong] (id: 7);
 }
 
 root_type ReliableGroundItemBaseline;

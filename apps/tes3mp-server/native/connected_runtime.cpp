@@ -105,6 +105,7 @@ namespace TES3MP::Native
         if (values.mContainers.size() != mContainers.size())
             throw std::invalid_argument("Session container count changed");
         if (!values.mWorldItems) values.mWorldItems = mWorldItems;
+        if (!values.mWorldCells) values.mWorldCells = mWorldCells;
         if (!values.mDoor) values.mDoor = mDoorState;
         auto counter = values.mActors[0].mLastGenerated;
         const auto other = values.mActors[1].mLastGenerated;
@@ -151,7 +152,7 @@ namespace TES3MP::Native
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
         encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr);
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -516,11 +517,11 @@ namespace TES3MP::Native
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, referenceIds, mScriptLocals, inventoryStorage(i + 2) != nullptr});
         decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr);
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
         validateWorldItems(values);
         EquipmentBytes canonical;
         encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr);
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;
@@ -564,6 +565,7 @@ namespace TES3MP::Native
         }
         phase.set(Phase::Result);
         auto restoredWorld = values.mWorldItems;
+        auto restoredCells = values.mWorldCells;
         auto restoredDoor = values.mDoor;
         auto saved = std::make_unique<const EquipmentSessionValues>(std::move(values));
         phase.set(Phase::Revalidation);
@@ -585,6 +587,7 @@ namespace TES3MP::Native
             mWorld.mPtrRegistry.mRevision = saved->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = fresh.mSavedCounter;
             mWorldItems.swap(restoredWorld);
+            mWorldCells.swap(restoredCells);
             mDoorState.swap(restoredDoor);
             mRestartActor.reset();
             phase.set(Phase::Publication);

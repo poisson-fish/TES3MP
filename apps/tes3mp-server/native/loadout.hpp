@@ -73,6 +73,9 @@ namespace TES3MP::Native
         // Select one winning ordinary door; unrelated teleport/scripted doors
         // are not silently brought into the supported domain.
         PlacedDoor resolveDoor(std::string_view cell, std::string_view plugin, uint32_t index);
+        // Winning, unscripted, unlocked, untrapped teleport placements whose
+        // destination resolves to the other bound OpenMW interior.
+        std::vector<PlacedDoor> teleportDoors(std::string_view cell, std::string_view destination);
         void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;

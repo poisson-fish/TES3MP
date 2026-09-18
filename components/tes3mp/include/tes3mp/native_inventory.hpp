@@ -17,6 +17,9 @@ namespace TES3MP
     {
     public:
         virtual ~PreparedNativeInventory() = default;
+        // A door may stage relocation of the authenticated requester. The
+        // reducer persists it with the unchanged native image before publication.
+        virtual std::optional<Transform> playerDestination() const { return {}; }
         virtual CanonicalDurabilityResult commit(const NativeInventoryCommit& durability) noexcept = 0;
     };
 
@@ -31,6 +34,7 @@ namespace TES3MP
         virtual std::span<const std::byte> inventoryImage() const noexcept = 0;
         virtual bool hasNativeDoor() const noexcept { return false; }
         virtual bool ownsNativeDoor(InteractiveObjectId) const noexcept { return false; }
+        virtual bool requiresDoorTraversal() const noexcept { return false; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(
             const CanonicalServerState&, const ServerCommandProposal&) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareDoorStep(

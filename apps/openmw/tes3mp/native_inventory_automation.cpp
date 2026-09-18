@@ -12,9 +12,14 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/placedrefid.hpp"
 #include "../mwworld/inventoryrecordid.hpp"
+#include "../mwworld/player.hpp"
+#include "../mwworld/manualref.hpp"
+#include <cmath>
+#include <iomanip>
 #include <bit>
 #include <map>
 #include <components/debug/debuglog.hpp>
+#include <components/esm3/loaddoor.hpp>
 
 #include <stdexcept>
 
@@ -115,6 +120,7 @@ namespace TES3MP::OpenMWAdapter
     bool DesktopAutomation::nativeInventoryRole() const noexcept
     {
         return mRole == DesktopAutomationRole::NativePut || mRole == DesktopAutomationRole::NativeTake
+            || mRole == DesktopAutomationRole::NativeTraversal
             || mRole == DesktopAutomationRole::NativeRecoverOne || mRole == DesktopAutomationRole::NativeRecoverTwo;
     }
 
@@ -160,6 +166,182 @@ namespace TES3MP::OpenMWAdapter
         mOutput << "}\n";
         mOutput.flush();
         ++mEvidenceEvents;
+    }
+
+    void DesktopAutomation::writeNativeTraversal(std::string_view event)
+    {
+        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || !mTraversalGround
+            || !mTraversalGround->cell.asInterior())
+            throw std::runtime_error("Traversal evidence unavailable or exhausted");
+        auto world = MWBase::Environment::get().getWorld();
+        const auto player = world->getPlayerPtr();
+        auto* cell = player.getCell();
+        const auto focus = world->getFocusObject();
+        std::map<uint64_t, uint64_t> visible, expected;
+        const auto add = [](auto& counts, const MWWorld::Ptr& ptr) {
+            // Stock gold copies become coin counts in the rendered world.
+            const bool gold = ptr.getClass().isGold(ptr);
+            const auto id = gold ? ESM::RefId::stringRefId("gold_001") : ptr.getCellRef().getRefId();
+            counts[MWWorld::inventoryRecordId(id)] += uint64_t(ptr.getCellRef().getCount())
+                * (gold ? ptr.getClass().getValue(ptr) : 1);
+        };
+        size_t originals = 0;
+        cell->forEach([&](const MWWorld::Ptr& ptr) {
+            if (!ptr.getRefData().getBaseNode() || !ptr.getRefData().isEnabled()
+                || ptr.getCellRef().getCount() <= 0 || !MWWorld::ContainerStore::isStorableType(ptr.getType()))
+                return true;
+            add(visible, ptr);
+            const auto placed = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
+            if (placed && std::ranges::binary_search(mTraversalGround->nativePlacements, *placed)) ++originals;
+            return true;
+        });
+        if (!mTraversalGround->items.empty())
+        {
+            const auto records = MWWorld::inventoryRecords(*MWBase::Environment::get().getESMStore());
+            for (const auto& item : mTraversalGround->items)
+            {
+                MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(),
+                    records.at(item.stack.prototypeId.value()), static_cast<int>(item.stack.count));
+                add(expected, ref.getPtr());
+            }
+        }
+        const auto& pos = player.getRefData().getPosition();
+        mOutput << "{\"event\":\"traversal_" << event << "\",\"sequence\":" << mTraversalSequence
+                << ",\"cell\":" << std::quoted(cell->getCell()->getId().toString())
+                << ",\"authority_cell\":" << (mSelfCell && mSelfCell->asInterior()
+                    ? mSelfCell->asInterior()->cellSpace().value() : 0)
+                << ",\"baseline_cell\":" << mTraversalGround->cell.asInterior()->cellSpace().value()
+                << ",\"resumes\":" << mResumes << ",\"position\":[" << pos.pos[0] << ',' << pos.pos[1] << ',' << pos.pos[2]
+                << "],\"focus\":" << std::quoted(focus.isEmpty() ? std::string{} : focus.getCellRef().getRefId().toString())
+                << ",\"ground_matches\":" << (visible == expected ? "true" : "false")
+                << ",\"visible_originals\":" << originals << ",\"ground\":[";
+        bool comma = false;
+        for (const auto& item : mTraversalGround->items)
+        {
+            if (comma) mOutput << ',';
+            comma = true;
+            mOutput << "{\"stack\":" << item.stack.stackId.value() << ",\"item\":"
+                    << item.stack.prototypeId.value() << ",\"count\":" << item.stack.count << '}';
+        }
+        mOutput << "],\"teleports\":" << mTraversalGround->teleportDoors.size();
+        if (mTraversalGround->door)
+        {
+            mOutput << ",\"door_angle\":" << mTraversalGround->door->angle
+                    << ",\"door_direction\":" << unsigned(mTraversalGround->door->direction)
+                    << ",\"door_blocked\":" << (mTraversalGround->door->blocked ? "true" : "false");
+            const auto ref = MWWorld::localPlacedRef(mTraversalGround->door->placement, world->getContentFiles());
+            cell->forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
+                if (ref && ptr.getCellRef().getRefNum() == *ref)
+                    mOutput << ",\"rendered_door_angle\":" << ptr.getRefData().getPosition().rot[2];
+                return true;
+            });
+        }
+        mOutput << "}\n";
+        mOutput.flush();
+        ++mEvidenceEvents;
+        writeNativeInventory("traversal_inventory");
+        if (event == "observe" && (visible != expected || originals != 0))
+            throw std::runtime_error("Traversal rendered ground differs from committed baseline");
+    }
+
+    void DesktopAutomation::advanceNativeTraversal(MonotonicInstant now)
+    {
+        // Test-build-only, bounded local control. Gameplay actions use the same
+        // Player activation and GUI delegates as a desktop user. Pose is explicit
+        // same-cell test setup; it never changes cell or mutates server state.
+        if (!mTraversalGround || !mNativePlayerCount || !mSnapshots || !mDesktopInput) return;
+        std::error_code error;
+        const auto size = std::filesystem::file_size(mTraversalControl, error);
+        if (error) return;
+        if (size > 256) throw std::runtime_error("Traversal control exceeds 256 bytes");
+        std::ifstream file(mTraversalControl);
+        std::uint64_t sequence;
+        std::string action;
+        if (!(file >> sequence >> action) || sequence <= mTraversalSequence) return;
+        if (sequence != mTraversalSequence + 1 || action.size() > 16)
+            throw std::runtime_error("Traversal control sequence/action invalid");
+        float x = 0, y = 0, z = 0, pitch = 0, yaw = 0;
+        std::string record, trailing;
+        if (action == "pose")
+        {
+            if (!(file >> x >> y >> z >> pitch >> yaw) || !std::isfinite(x) || !std::isfinite(y)
+                || !std::isfinite(z) || !std::isfinite(pitch) || !std::isfinite(yaw)
+                || std::abs(x) > 4096 || std::abs(y) > 4096 || std::abs(z) > 4096
+                || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
+                throw std::runtime_error("Traversal setup pose invalid");
+        }
+        else if (action == "activate" || action == "put")
+        {
+            if (!(file >> std::quoted(record)) || record.size() > 64)
+                throw std::runtime_error("Traversal record argument invalid");
+        }
+        if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
+        auto world = MWBase::Environment::get().getWorld();
+        auto wm = MWBase::Environment::get().getWindowManager();
+        if (action == "pose")
+        {
+            world->toggleVanityMode(false);
+            world->moveObject(world->getPlayerPtr(), osg::Vec3f(x,y,z));
+            world->rotateObject(world->getPlayerPtr(), osg::Vec3f(pitch,0,yaw));
+        }
+        else if (action == "activate")
+        {
+            if (wm->isGuiMode())
+                throw std::runtime_error("Traversal activation requires game focus");
+            const auto focus = world->getFocusObject();
+            if (focus.isEmpty() || focus.getCellRef().getRefId() != ESM::RefId::stringRefId(record))
+                throw std::runtime_error("Traversal activation focus differs from requested record");
+            world->getPlayer().activate();
+        }
+        else if (action == "open")
+        {
+            if (!mNativeContainerId) throw std::runtime_error("Traversal shared container not bound");
+            const auto ptr = placedContainer(*mNativeContainerId);
+            if (ptr.isEmpty()) throw std::runtime_error("Traversal shared container missing");
+            wm->pushGuiMode(MWGui::GM_Container, ptr);
+        }
+        else if (action == "takeall")
+        {
+            if (!wm->containsMode(MWGui::GM_Container)) throw std::runtime_error("Traversal loot window not open");
+            auto* button = containerWindow()->getWidget("TakeButton");
+            button->eventMouseButtonClick(button);
+        }
+        else if (action == "put")
+        {
+            if (!wm->containsMode(MWGui::GM_Container))
+                throw std::runtime_error("Traversal put requires loot window and record");
+            const auto id = MWWorld::inventoryRecordId(ESM::RefId::stringRefId(record));
+            const auto stack = std::ranges::find_if(mNativePlayerStacks, [&](const auto& s) { return s.prototypeId.value() == id; });
+            if (stack == mNativePlayerStacks.end()) throw std::runtime_error("Traversal put item missing");
+            MWGui::ItemView* view = nullptr;
+            wm->getInventoryWindow()->getWidget(view, "ItemView");
+            clickItem(*view, *stack);
+            containerWindow()->getItemView()->eventBackgroundClicked();
+        }
+        else if (action == "close")
+        {
+            if (wm->containsMode(MWGui::GM_Container)) wm->removeGuiMode(MWGui::GM_Container);
+            if (wm->containsMode(MWGui::GM_Inventory)) wm->removeGuiMode(MWGui::GM_Inventory);
+        }
+        else if (action == "reconnect")
+        {
+            mReadyToDisconnect = true;
+            mNextDisconnect = now;
+        }
+        else if (action == "observe")
+        {
+            if (wm->containsMode(MWGui::GM_Container))
+            {
+                MWGui::ItemView* view = nullptr;
+                wm->getInventoryWindow()->getWidget(view, "ItemView");
+                if (!matches(*view, mNativePlayerStacks)
+                    || !matches(*containerWindow()->getItemView(), mNativeContainerStacks))
+                    throw std::runtime_error("Traversal GUI differs from committed inventory");
+            }
+        }
+        else throw std::runtime_error("Unknown traversal control action");
+        mTraversalSequence = sequence;
+        writeNativeTraversal(action);
     }
 
     void DesktopAutomation::advanceNativeInventory(MonotonicInstant now)

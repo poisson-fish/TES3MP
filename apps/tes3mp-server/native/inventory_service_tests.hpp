@@ -4,6 +4,8 @@
 namespace TES3MP::Native::Testing
 {
     void checkDoorService(const std::filesystem::path& scratch);
+    void checkCellLifecycle(const std::filesystem::path& scratch);
+    void checkTeleportTraversal(const std::filesystem::path& scratch);
     void checkPlacedContainers(const std::filesystem::path& scratch);
     void checkPlacedActors(const std::filesystem::path& scratch);
     void checkStockedInventory(const std::filesystem::path& scratch);
@@ -20,6 +22,6 @@ namespace TES3MP::Native::Testing
     void checkInventoryApplication(const std::filesystem::path& scratch);
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
         bool wholeInterior = false, bool baseInventory = false, bool worldActors = false, bool worldItems = false,
-        bool stockPlacement = false, bool door = false);
+        bool stockPlacement = false, bool door = false, bool twoCells = false, bool teleports = false);
 }
 #endif

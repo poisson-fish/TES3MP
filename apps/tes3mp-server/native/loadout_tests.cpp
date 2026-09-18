@@ -6224,6 +6224,16 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "teleport-traversal")
+        {
+            TES3MP::Native::Testing::checkTeleportTraversal(root);
+            return;
+        }
+        if (filter == "cell-lifecycle")
+        {
+            TES3MP::Native::Testing::checkCellLifecycle(root);
+            return;
+        }
         if (filter == "ordinary-door")
         {
             TES3MP::Native::Testing::checkOrdinaryDoor();
@@ -6498,11 +6508,14 @@ int main(int argc, char** argv)
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }
-        if (argc == 4 && (std::string_view(argv[1]) == "world-item-placement-host" || std::string_view(argv[1]) == "door-session-host"))
+        if (argc == 4 && (std::string_view(argv[1]) == "world-item-placement-host" || std::string_view(argv[1]) == "door-session-host"
+                || std::string_view(argv[1]) == "cell-lifecycle-host" || std::string_view(argv[1]) == "teleport-host"))
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
                 std::filesystem::absolute(std::filesystem::u8path(argv[3])),true,true,true,true,true,
-                std::string_view(argv[1]) == "door-session-host");
+                std::string_view(argv[1]) != "world-item-placement-host",
+                std::string_view(argv[1]) == "cell-lifecycle-host" || std::string_view(argv[1]) == "teleport-host",
+                std::string_view(argv[1]) == "teleport-host");
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }

@@ -3,6 +3,7 @@
 
 #include "equipment_codec.hpp"
 #include "door_codec.hpp"
+#include <map>
 
 namespace TES3MP::Native
 {
@@ -22,6 +23,10 @@ namespace TES3MP::Native
         // Immutable detached stock state; the runtime installs it with the
         // other owners. No independently durable door file or live engine Ptr.
         std::shared_ptr<const ESM::DoorState> mDoor;
+        // V10's two interiors share the registry/image. Membership is keyed by
+        // reference identity, never object order or a live CellStore pointer.
+        using WorldCells = std::map<ESM::RefNum, uint8_t>;
+        std::optional<WorldCells> mWorldCells;
         void swap(EquipmentSessionValues& other) noexcept
         {
             for (size_t i = 0; i < 2; ++i) mActors[i].swap(other.mActors[i]);
@@ -29,15 +34,16 @@ namespace TES3MP::Native
             mContainers.swap(other.mContainers);
             mWorldItems.swap(other.mWorldItems);
             mDoor.swap(other.mDoor);
+            mWorldCells.swap(other.mWorldCells);
         }
     };
     void encodeEquipmentSession(const EquipmentSessionValues& values,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
         std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
-        const DoorBinding* door = nullptr);
+        const DoorBinding* door = nullptr, bool cells = false);
     void decodeEquipmentSession(std::span<const char> bytes,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
         std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
-        const DoorBinding* door = nullptr);
+        const DoorBinding* door = nullptr, bool cells = false);
 }
 #endif

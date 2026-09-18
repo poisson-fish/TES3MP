@@ -594,7 +594,12 @@ namespace TES3MP::OpenMWAdapter
                 return false;
 
             if (toActivate.getType() == ESM::Door::sRecordId)
-                return queueObjectActivation(toActivate);
+            {
+                // Unsupported native doors must never fall through to local
+                // teleport, unlocking or trap execution.
+                queueObjectActivation(toActivate);
+                return true;
+            }
             auto* presentation = dynamic_cast<const DesktopPresentation*>(mImpl->presentation);
             auto capture = presentation ? presentation->inventoryPickup(toActivate) : std::nullopt;
             if (!capture)
@@ -605,7 +610,8 @@ namespace TES3MP::OpenMWAdapter
         }
         catch (...)
         {
-            return !toActivate.isEmpty() && MWWorld::ContainerStore::isStorableType(toActivate.getType());
+            return !toActivate.isEmpty() && (toActivate.getType() == ESM::Door::sRecordId
+                || MWWorld::ContainerStore::isStorableType(toActivate.getType()));
         }
     }
 
@@ -2202,6 +2208,9 @@ namespace TES3MP::OpenMWAdapter
             }
             std::erase_if(observedContainerRevisions,
                 [&](const auto& value) { return !desiredContainers.contains(value.first); });
+            std::erase_if(observedInventoryStacks, [&](const auto& value) {
+                return value.second.container && !desiredContainers.contains(*value.second.container);
+            });
 
             if (!presentedGroundBaseline || presentedGroundBaseline->cell != groundItems.cell
                 || presentedGroundBaseline->items != groundItems.items
@@ -2528,6 +2537,8 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept
         {
             if (nativeDoor && id.value() == nativeDoor->placement) return ObjectRevision::fromValue(nativeDoor->motion);
+            if (presentedGroundBaseline && std::ranges::find(presentedGroundBaseline->teleportDoors, id.value())
+                    != presentedGroundBaseline->teleportDoors.end()) return ObjectRevision::initial();
             const auto found = observedDoors.find(id);
             return found != observedDoors.end() ? std::optional(found->second.lastRevision) : std::nullopt;
         }

@@ -2,57 +2,55 @@
 
 ## Handoff
 
-M3 in [PLAN.md](PLAN.md); direction and constraints: [README.md](README.md),
-[DECISIONS.md](DECISIONS.md). **Next:** exercise v9 doors with two graphical clients:
-contact, reversal, latency, reconnect and restart. Desktop wiring is built;
-graphical contact/presentation remains unverified.
+M3 in [PLAN.md](PLAN.md); constraints: [README.md](README.md), [DECISIONS.md](DECISIONS.md).
+**Deferred until tonight:** Alice/Bob teleport round trip, latency/reconnect/restart and
+ordinary-door contact/reversal. Broader reference/time/weather integration and
+Tamriel Rebuilt two-client acceptance remain.
 
-## Ordinary doors
+## Native cells
 
-The [host](../../apps/tes3mp-server/native/inventory_host.hpp) accepts
-**native-inventory-9**: insert `door "ORIGIN_PLUGIN" REFERENCE_INDEX` between
-`interior` and `cell`. One winning ordinary placement joins content identity.
-V9 requires a new campaign and native-door-capable clients; v8 remains unchanged.
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-11**,
+v10 fields, two interiors/wire IDs; requires fresh campaign and teleport-capable
+clients. V8/v9/v10 unchanged. Bounds: two players,
+32 shared inventories, 64 world items, one ordinary door and 32 teleport doors.
 
-[Session format 5](../../apps/tes3mp-server/native/equipment_session.hpp) saves stock
-DoorState with inventories/world membership. Recovery installs all owners atomically. The [runtime](../../apps/tes3mp-server/native/door_runtime.cpp)
-commits stock activation/reversal and 30 Hz motion before installation/replication.
-Preparations reject stale inventory commits. One native mutation
-per tick remains; inventory/activation defers that tick's motion. Uncertain writes close service.
+OpenMW resolves unscripted, unlocked, untrapped intercell doors. Activation validates
+session/actor, placement, cell, revision and reach. Native-image commit precedes
+destination publication; only requester position/epoch change. Direct transitions
+and old-epoch movement reject.
 
-Baselines carry angle, direction, motion ID and obstruction. Clients install exact
-angles without local motion/avoidance and probe only their own player with detached
-geometry. Authenticated, sequenced reports bind session/generation and motion.
-Any applicable block stalls progress; reports expire after ten observed ticks
-(~333 ms), never persist, and cannot block reversal/reconnect. Collision is trusted;
-latency may clip before a stall, without a response barrier or rewind. NPC contacts
-and server physics are deferred. Scripted, teleporting, locked/keyed or trapped
-doors and configured Lua services remain unsupported.
+Sessions pin occupied interiors. Empty cells release engine resources and freeze
+doors; canonical state remains resident.
 
-## Inventory
+Format 6 preserves inventories, door state and ground-reference cell membership.
+Reentry/recovery never initializes loot. Cell baselines suppress removed placements
+and replace old container/teleport bindings. Clients suppress local door fallback,
+ignore correction echoes and wait for matching destination state.
 
-Two players, 32 shared inventories, 64 world items, 19 equipment slots, corpse loot,
-Take All and pickup/drop share one interior/image. Recovery never reloads loot.
-User-accepted placement uses stock rays/bounds; model bytes bind saves. V7 retains player-position drops.
+## Existing native behavior
+
+Equipment/corpse loot/Take All/pickup/drop share one image. Ordinary doors use stock
+motion at 30 Hz; one native mutation per tick, uncertain writes close service.
+Contacts expire after ten ticks; latency may clip. No scripts/Lua,
+locked/trapped/exterior teleports, followers, server physics/NPC contacts, AI/combat,
+respawn, general streaming/recovery or persistent time/RNG. Movement/camera remain inherited.
 
 ## Verification
 
-Windows MSVC RelWithDebInfo, `build/vnext-product`; logs in `build/logs`.
+Windows RelWithDebInfo: `build/vnext-product`, `build/logs`.
 
-| Check | Evidence | Log |
+| Filter | Evidence | Log |
 |---|---|---|
-| door-service | atomic failures, report ordering/expiry/reversal/disconnect/restart, two wire clients; authenticated late join, spoof rejection, canonical commits | door-service.log |
-| door-session-host | Morrowind base/generated placements, activation/motion, inventory continuation/restart, binding rejection, v8 compatibility | door-live-host.log |
-| builds | native tests / openmw / tes3mp_server | door-live-build.log / door-live-client-build.log / door-live-server-build.log |
-| docs | budget/links | docs-budget.log / docs-links.log |
+| teleport-traversal | round trip/Bob stays, rejection/durability, stale motion, wire baselines, loot/restart | teleport-traversal.log |
+| teleport-host | Morrowind/generated interiors, OpenMW destinations, unsupported-door exclusion, reentry/recovery | teleport-host.log |
+| teleport-presentation (adapter) | reordered baselines, old-cell suppression, correction echo | teleport-presentation.log |
 
-Contacts are synthetic; desktop collision has build evidence only. Inherited:
-`door-persistence-codec.log`, `door-persistence-session.log`, `door-persistence-v8.log`;
-previous inventory/pickup presentation remains user-confirmed.
+Builds: `teleport-build.log`, `teleport-adapter-build.log`, `teleport-client-build.log`
+(openmw), `teleport-server-build.log` (tes3mp_server).
+V10 host regression: `teleport-v10-regression.log`. Guards: `teleport-boundary.log`,
+`docs-budget.log`, `docs-links.log`.
 
-## Limits
-
-Item-placement rays retain authored door transforms. Dynamic cells, animation,
-scripts/Lua, AI/combat, locks/traps, merchants/respawn, chargen/rewards, persistent
-time/RNG, general campaign recovery, published mods and Tamriel Rebuilt remain
-unfinished/unproven. Movement/camera authority remains inherited.
+Graphical: clients connected; Alice reached B. Desktop locked. Resume
+`build/teleport-graphical-v11-20260918/{launch,control}.py`; logs
+`teleport-graphical-v11/`. Synthetic loadout; loot unchanged. Driver builds; revised
+scene check unexercised. Requested acceptance and published mods remain unverified.

@@ -891,6 +891,11 @@ namespace TES3MP
                                             disposition = CommandDisposition::Applied;
                                             requiresSpatialAdvance = false;
                                         }
+                                        else if (mNativeInventory && mNativeInventory->requiresDoorTraversal())
+                                        {
+                                            disposition = CommandDisposition::ObjectInteractionRejected;
+                                            requiresSpatialAdvance = false;
+                                        }
                                         else
                                         {
                                             replacementTransform = Transform(requested, player->transform().position(),
@@ -910,8 +915,34 @@ namespace TES3MP
                                                 prepared.mNativeInventory = mNativeInventory->prepareDoorActivation(*prepared.mState, proposal);
                                                 disposition = prepared.mNativeInventory ? CommandDisposition::Applied
                                                     : CommandDisposition::ObjectInteractionRejected;
+                                                if (prepared.mNativeInventory)
+                                                {
+                                                    if (const auto destination = prepared.mNativeInventory->playerDestination())
+                                                    {
+                                                        const auto epoch = player->authorityEpoch().next();
+                                                        auto relocated = advanceCanonicalSpatialState(*player, tick, *destination,
+                                                            LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                                                        const auto* value = std::get_if<CanonicalPlayerEntityState>(&relocated);
+                                                        if (!epoch || !value || !mContentManifest.contains(destination->cell()))
+                                                        {
+                                                            prepared.mNativeInventory.reset();
+                                                            disposition = CommandDisposition::ObjectInteractionRejected;
+                                                        }
+                                                        else
+                                                        {
+                                                            // Invalidate in-flight pre-teleport motion/intents, including
+                                                            // later commands in this tick, and reset client prediction.
+                                                            playerReplacement.emplace(value->playerId(), value->entityId(),
+                                                                value->appearanceId(), value->transform(), value->linearVelocity(),
+                                                                value->entityRevision(), *epoch, tick, value->locomotionMode());
+                                                            playerStateChanged = true;
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
+                                        else if (mNativeInventory && mNativeInventory->requiresDoorTraversal())
+                                            disposition = CommandDisposition::ObjectInteractionRejected;
                                         else if (!prepared.mInteractiveObjects || objectCatalog == nullptr)
                                         {
                                             ObjectInteractionOutcome outcome;

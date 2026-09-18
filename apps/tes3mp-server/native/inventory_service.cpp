@@ -20,8 +20,32 @@ namespace TES3MP::Native
     {
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
         {
+            if (binding.mSecondWorldItems && (!binding.mWorldItems || !binding.mDoor
+                || binding.mSecondWorldItems->mCell == binding.mWorldItems->mCell))
+                throw std::invalid_argument("Two-cell domain requires distinct interiors and the first cell's door");
+            if (binding.mSecondWorldItems)
+            {
+                if (binding.mWorldItems->mCell.kind() != CellId::Kind::Interior
+                    || binding.mSecondWorldItems->mCell.kind() != CellId::Kind::Interior)
+                    throw std::invalid_argument("Native cell lifecycle supports interiors only");
+                for (const auto& shared : binding.mContainers)
+                    if (shared.mCell != binding.mWorldItems->mCell && shared.mCell != binding.mSecondWorldItems->mCell)
+                        throw std::invalid_argument("Shared inventory outside the two-cell domain");
+            }
             if (binding.mDoor && (!binding.mWorldItems || !(binding.mDoorId >> 63)))
                 throw std::invalid_argument("Native door requires a stable placement ID and world cell");
+            if (binding.mTeleportDoors)
+            {
+                if (!binding.mSecondWorldItems || binding.mTeleportDoors->size() > 32)
+                    throw std::invalid_argument("Native teleport domain requires two cells and bounded doors");
+                std::set<uint64_t> doors{binding.mDoorId};
+                for (const auto& door : *binding.mTeleportDoors)
+                    if (!(door.mId >> 63) || !doors.insert(door.mId).second
+                        || (door.mCell != binding.mWorldItems->mCell && door.mCell != binding.mSecondWorldItems->mCell)
+                        || door.mDestination.cell() != (door.mCell == binding.mWorldItems->mCell
+                            ? binding.mSecondWorldItems->mCell : binding.mWorldItems->mCell))
+                        throw std::invalid_argument("Native teleport identity or cell mapping invalid");
+            }
             if (binding.mPlayers[0] == binding.mPlayers[1] || (binding.mContainers.empty() && !binding.mWorldItems)
                 || binding.mContainers.size() > MaxEquipmentContainers
                 || binding.mActors[0].mBaseInventory != binding.mActors[1].mBaseInventory)
@@ -58,15 +82,35 @@ namespace TES3MP::Native
         std::optional<std::vector<ESM::CellRef>> worldItems(const InventoryServiceBinding& binding)
         {
             if (!binding.mWorldItems) return {};
-            if (binding.mWorldItems->mPlacements.size() > PreparedPlainEquipment::MaxItems)
+            if (binding.mWorldItems->mPlacements.size()
+                    + (binding.mSecondWorldItems ? binding.mSecondWorldItems->mPlacements.size() : 0) > PreparedPlainEquipment::MaxItems)
                 throw std::invalid_argument("Native world placement budget exceeded");
             std::vector<ESM::CellRef> result;
-            uint64_t previous = 0;
-            for (const auto& [id, ref] : binding.mWorldItems->mPlacements)
+            for (const auto* domain : {&*binding.mWorldItems, binding.mSecondWorldItems ? &*binding.mSecondWorldItems : nullptr})
             {
-                if (!id || id <= previous) throw std::invalid_argument("Native world identities not sorted");
-                previous = id;
-                result.push_back(ref);
+                if (!domain) continue;
+                uint64_t previous = 0;
+                for (const auto& [id, ref] : domain->mPlacements)
+                {
+                    if (!id || id <= previous) throw std::invalid_argument("Native world identities not sorted");
+                    previous = id;
+                    result.push_back(ref);
+                }
+            }
+            return result;
+        }
+        std::optional<EquipmentSessionValues::WorldCells> worldCells(const InventoryServiceBinding& binding)
+        {
+            if (!binding.mSecondWorldItems) return {};
+            if (!binding.mWorldItems) throw std::invalid_argument("Second world cell requires the first");
+            EquipmentSessionValues::WorldCells result;
+            uint8_t index = 0;
+            for (const auto* domain : {&*binding.mWorldItems, &*binding.mSecondWorldItems})
+            {
+                for (const auto& [id, ref] : domain->mPlacements)
+                    if (!result.emplace(ref.mRefNum, index).second)
+                        throw std::invalid_argument("Duplicate world placement across cells");
+                ++index;
             }
             return result;
         }
@@ -131,7 +175,7 @@ namespace TES3MP::Native
         InventoryServiceBinding binding, bool recovering)
         : mBinding(std::move(binding)), mWorld(content, readers, 1), mScripts(content),
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
-              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor)
+              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding))
     {
         for (const auto& [id, record] : MWWorld::inventoryRecords(content))
             mItemIds.emplace(record, ItemPrototypeId::fromValue(id).value());
@@ -149,6 +193,49 @@ namespace TES3MP::Native
         for (size_t i = 0; i < mBinding.mPlayers.size(); ++i)
             if (mBinding.mPlayers[i] == player) return i;
         throw std::invalid_argument("Authenticated player has no native actor binding");
+    }
+
+    const InventoryServiceBinding::WorldItems* InventoryService::worldDomain(CellId cell) const
+    {
+        if (mBinding.mWorldItems && mBinding.mWorldItems->mCell == cell) return &*mBinding.mWorldItems;
+        if (mBinding.mSecondWorldItems && mBinding.mSecondWorldItems->mCell == cell) return &*mBinding.mSecondWorldItems;
+        return nullptr;
+    }
+
+    uint8_t InventoryService::worldIndex(CellId cell) const
+    {
+        if (!worldDomain(cell)) throw std::invalid_argument("Cell outside native world domain");
+        return mBinding.mSecondWorldItems && mBinding.mSecondWorldItems->mCell == cell ? 1 : 0;
+    }
+
+    PlainEquipmentValues InventoryService::cellWorldValues(CellId cell, const EquipmentRuntime::PreparedWorldTransfer* prepared) const
+    {
+        auto result = mRuntime.worldValues(prepared);
+        const auto index = worldIndex(cell);
+        std::erase_if(result.mObjects, [&](const auto& object) { return mRuntime.worldCell(object.mRef.mRefNum, prepared) != index; });
+        return result;
+    }
+
+    void InventoryService::synchronizeCells(const CanonicalServerState& players)
+    {
+        if (!mBinding.mSecondWorldItems) return; // Earlier descriptors retain their scheduling.
+        std::array<bool, 2> active{};
+        for (const auto& session : players.activeSessions())
+        {
+            const auto* player = players.findPlayer(session.playerId());
+            if (player && std::ranges::find(mBinding.mPlayers, player->playerId()) != mBinding.mPlayers.end()
+                && worldDomain(player->transform().cell())) active[worldIndex(player->transform().cell())] = true;
+        }
+        if (mBinding.mCellActivity) mBinding.mCellActivity(active);
+        for (auto& report : mDoorReports)
+            if (report)
+            {
+                const auto* session = players.findActiveSession(report->session);
+                const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
+                if (!player || session->sessionGeneration() != report->generation
+                    || player->transform().cell() != mBinding.mWorldItems->mCell) report.reset();
+            }
+        mActiveCells = active;
     }
 
     size_t InventoryService::container(std::optional<ContainerId> id) const
@@ -174,18 +261,19 @@ namespace TES3MP::Native
         if (pickup || drop)
         {
             const auto* player = players.findPlayer(bound.player());
-            if (!mBinding.mWorldItems || !player || !command.stackId || command.containerId || command.slot
+            const auto* domain = player ? worldDomain(player->transform().cell()) : nullptr;
+            if (!domain || !command.stackId || command.containerId || command.slot
                 || command.expectedContainerRevision || command.player != bound.player() || command.count == 0
                 || command.count > MaximumTransferCount
                 || command.expectedInventoryRevision.value() != mWorld.getPtrRegistryRevision()
-                || player->transform().cell() != mBinding.mWorldItems->mCell
                 || !positionsWithinReach(player->transform().position(), command.interactionOrigin, ReachQuanta))
                 throw std::invalid_argument("World item command shape, cell or revision invalid");
             if (pickup)
             {
-                const auto& items = mRuntime.worldValues().mObjects;
+                const auto state = cellWorldValues(player->transform().cell());
+                const auto& items = state.mObjects;
                 const auto object = std::ranges::find_if(items, [&](const auto& value) {
-                    return worldId(value.mRef.mRefNum, *mBinding.mWorldItems) == command.stackId;
+                    return worldId(value.mRef.mRefNum, *domain) == command.stackId;
                 });
                 if (object == items.end() || !command.expectedWorldItemRevision
                     || command.expectedWorldItemRevision->value() != mWorld.getPtrRegistryRevision()
@@ -196,7 +284,7 @@ namespace TES3MP::Native
             }
             else
             {
-                if (mBinding.mWorldItems->mPlacement && !command.placement)
+                if (domain->mPlacement && !command.placement)
                     throw std::invalid_argument("Stock drop requires placement view input");
                 const auto native = nativeId(*command.stackId);
                 const auto item = mWorld.getPtr({native.mIndex, native.mContentFile});
@@ -454,6 +542,31 @@ namespace TES3MP::Native
         catch (...) { return CanonicalDurabilityResult::Rejected; }
     };
 
+    class InventoryService::TeleportTransaction final : public PreparedNativeInventory
+    {
+        Transform mDestination;
+        EquipmentBytes mBefore;
+        bool mConsumed = false;
+    public:
+        InventoryService& service;
+        TeleportTransaction(InventoryService& owner, Transform destination)
+            : mDestination(destination), mBefore(owner.mImage), service(owner) {}
+        std::optional<Transform> playerDestination() const override { return mDestination; }
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        {
+            if (mConsumed || service.inventoryImage().empty() || service.mImage != mBefore)
+                return CanonicalDurabilityResult::Rejected;
+            try
+            {
+                const auto result = persist(service.inventoryImage());
+                if (result != CanonicalDurabilityResult::Rejected) mConsumed = true;
+                if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
+                return result;
+            }
+            catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
+        }
+    };
+
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareDoorActivation(
         const CanonicalServerState& players, const ServerCommandProposal& proposal)
     {
@@ -461,6 +574,30 @@ namespace TES3MP::Native
         const auto* input = std::get_if<InteractiveObjectCommandProposal>(&proposal.payload());
         const auto* session = players.findActiveSession(proposal.sessionId());
         const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
+        if (mBinding.mTeleportDoors && input && player)
+        {
+            const auto found = std::ranges::find(*mBinding.mTeleportDoors, input->objectId().value(),
+                &InventoryServiceBinding::TeleportDoor::mId);
+            if (found != mBinding.mTeleportDoors->end())
+            {
+                if (inventoryImage().empty() || session->sessionGeneration() != proposal.sessionGeneration()
+                    || proposal.entityPrecondition().entityId() != player->entityId()
+                    || proposal.entityPrecondition().expectedAuthorityEpoch() != player->authorityEpoch()
+                    || input->kind() != ObjectInteractionKind::Activate || input->requestedKey() || input->requestedTool()
+                    || input->expectedInventoryRevision() || input->expectedCombatRevision()
+                    || input->expectedRevision() != ObjectRevision::initial() || input->cell() != found->mCell
+                    || player->transform().cell() != found->mCell
+                    || !positionsWithinReach(player->transform().position(), found->mPosition, ReachQuanta)
+                    || !positionsWithinReach(input->interactionOrigin(), found->mPosition, ReachQuanta)
+                    || !positionsWithinReach(player->transform().position(), input->interactionOrigin(), ReachQuanta)) return {};
+                try
+                {
+                    (void)actor(player->playerId());
+                    return std::make_unique<TeleportTransaction>(*this, found->mDestination);
+                }
+                catch (const std::invalid_argument&) { return {}; }
+            }
+        }
         if (!mBinding.mDoor || !input || !player || session->sessionGeneration() != proposal.sessionGeneration()
             || input->objectId().value() != mBinding.mDoorId || input->kind() != ObjectInteractionKind::Activate
             || input->requestedKey() || input->requestedTool() || input->expectedInventoryRevision() || input->expectedCombatRevision()
@@ -517,6 +654,10 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native door tick outside bounds");
         mDoorStepSeconds = seconds;
         if (!mRuntime.mDoorState || !mRuntime.mDoorState->mDoorState) return {};
+        if (mBinding.mSecondWorldItems && std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
+                const auto* player = players.findPlayer(session.playerId());
+                return player && player->transform().cell() == mBinding.mWorldItems->mCell;
+            })) return {}; // Empty interiors freeze; returning never catches up or resets the door.
         return std::make_unique<DoorTransaction>(*this, mRuntime.prepareDoor(false, seconds, doorBlocked(players, tick)));
     }
 
@@ -537,7 +678,10 @@ namespace TES3MP::Native
                 position.pos[1] = float(double(origin.y()) / 1024);
                 position.pos[2] = float(double(origin.z()) / 1024);
                 std::function<ESM::Position(const ESM::ObjectState&)> placement;
-                if (input.kind == InventoryTransactionKind::DropItem && mBinding.mWorldItems->mPlacement)
+                const auto cell = players.findPlayer(binding->player())->transform().cell();
+                const auto& domain = *worldDomain(cell);
+                const auto world = cellWorldValues(cell);
+                if (input.kind == InventoryTransactionKind::DropItem && domain.mPlacement)
                 {
                     const auto& transform = players.findPlayer(binding->player())->transform();
                     position.rot[2] = -float(double(transform.orientation().z().value()) / 4294967296.0 * 2 * std::numbers::pi);
@@ -547,17 +691,17 @@ namespace TES3MP::Native
                         MWWorld::ManualRef reference(mRuntime.mStore, state.mRef.mRefID);
                         auto ptr = reference.getPtr();
                         ptr.getCellRef() = MWWorld::CellRef(state.mRef);
-                        return mBinding.mWorldItems->mPlacement(position,ptr,*input.placement,mRuntime.worldValues().mObjects);
+                        return domain.mPlacement(position, ptr, *input.placement, world.mObjects);
                     };
                 }
                 auto item = nativeId(*input.stackId);
                 if (input.kind == InventoryTransactionKind::PickupItem)
-                    for (const auto& object : mRuntime.worldValues().mObjects)
-                        if (worldId(object.mRef.mRefNum, *mBinding.mWorldItems) == input.stackId)
+                    for (const auto& object : world.mObjects)
+                        if (worldId(object.mRef.mRefNum, domain) == input.stackId)
                             item = EquipmentRuntime::ownedId(object.mRef.mRefNum);
                 auto prepared = mRuntime.prepareWorldTransfer(actor(binding->player()), item,
                     int(input.count), input.kind == InventoryTransactionKind::PickupItem, position,
-                    input.expectedInventoryRevision.value(), placement);
+                    input.expectedInventoryRevision.value(), placement, worldIndex(cell));
                 if (prepared.image().size() > MaximumNativeInventoryImageBytes)
                     throw std::invalid_argument("Native world image exceeds canonical budget");
                 return std::make_unique<WorldTransaction>(*this, players, *binding, std::move(prepared));
@@ -604,7 +748,9 @@ namespace TES3MP::Native
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(candidate);
         const auto* world = dynamic_cast<const WorldTransaction*>(candidate);
         const auto* door = dynamic_cast<const DoorTransaction*>(candidate);
-        if (candidate && ((!transaction && !equipment && !world && !door) || (door && &door->service != this)
+        const auto* teleport = dynamic_cast<const TeleportTransaction*>(candidate);
+        if (candidate && ((!transaction && !equipment && !world && !door && !teleport)
+                || (teleport && &teleport->service != this) || (door && &door->service != this)
                 || (world && &world->service != this) || (transaction && &transaction->service != this)
                 || (equipment && &equipment->service != this))) return std::nullopt;
         return project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
@@ -681,14 +827,15 @@ namespace TES3MP::Native
         std::vector<GroundItemInterestMember> groundItems;
         std::vector<uint64_t> placements;
         std::vector<GroundItemPresentation> presentation;
-        if (mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell)
+        const auto* domain = worldDomain(player->transform().cell());
+        if (domain)
         {
-            for (const auto& [id, ref] : mBinding.mWorldItems->mPlacements) placements.push_back(id);
-            const auto& state = mRuntime.worldValues(world);
-            for (const auto& stack : stacks(state, mItemIds, mRuntime.mStore, &*mBinding.mWorldItems))
+            for (const auto& [id, ref] : domain->mPlacements) placements.push_back(id);
+            const auto state = cellWorldValues(player->transform().cell(), world);
+            for (const auto& stack : stacks(state, mItemIds, mRuntime.mStore, domain))
             {
                 const auto& ref = std::ranges::find_if(state.mObjects, [&](const auto& value) {
-                    return worldId(value.mRef.mRefNum, *mBinding.mWorldItems) == stack.stackId;
+                    return worldId(value.mRef.mRefNum, *domain) == stack.stackId;
                 })->mRef;
                 groundItems.push_back({stack, worldPosition(ref), WorldItemRevision::fromValue(version).value()});
                 presentation.push_back({stack.stackId, {ref.mPos.rot[0], ref.mPos.rot[1], ref.mPos.rot[2]}, ref.mScale});
@@ -701,8 +848,13 @@ namespace TES3MP::Native
             doorView = NativeDoorSnapshot{mBinding.mDoorId, door ? door->motion() : mRuntime.mDoorMotion,
                 state.mPosition.rot[2], mDoorStepSeconds, uint8_t(state.mDoorState), door ? door->blocked() : mRuntime.mDoorBlocked};
         }
+        std::vector<uint64_t> teleports;
+        if (mBinding.mTeleportDoors)
+            for (const auto& teleport : *mBinding.mTeleportDoors)
+                if (teleport.mCell == player->transform().cell()) teleports.push_back(teleport.mId);
+        std::ranges::sort(teleports);
         auto ground = ReliableGroundItemBaseline::create(header, player->transform().cell(), groundItems, placements, presentation,
-            mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell, doorView);
+            domain != nullptr, doorView, teleports);
         if (!std::holds_alternative<ReliableGroundItemBaseline>(ground)) return std::nullopt;
         result.groundItems.push_back(std::get<ReliableGroundItemBaseline>(std::move(ground)));
         std::vector<PublicEquipmentMember> visible;

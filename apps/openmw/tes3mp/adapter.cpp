@@ -39,7 +39,7 @@ namespace TES3MP::OpenMWAdapter
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
                 authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-                authoritativeTimedAreaMagicCapability(), nativeDoorCapability() };
+                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -337,6 +337,11 @@ namespace TES3MP::OpenMWAdapter
                 }
 
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                // A server teleport also marks the engine scene as changed.
+                // Do not echo that correction as a new client cell request.
+                if (captured.transition && snapshot && selfEntry(*snapshot)
+                    && captured.transition->requestedCell() == selfEntry(*snapshot)->transform().cell())
+                    captured.transition.reset();
                 if (advanced.characterProfileApplied
                     && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
                     && mPendingCharacterCompletionRevision)
@@ -425,6 +430,19 @@ namespace TES3MP::OpenMWAdapter
                 {
                     localReconciliation
                         = mRuntime->reconcileLocalPresentation(firstBaseline || mPresentationBootstrapPending);
+                    if (localReconciliation && localReconciliation->hardDiscontinuity)
+                    {
+                        mMotion = MotionIntentTracker(mMovementMetrics);
+                        if (!firstBaseline && !mPresentationBootstrapPending)
+                        {
+                            // Drop old-cell semantic targets and reset desktop
+                            // velocity sampling across the discontinuous move.
+                            mInput.clearSessionState();
+                            mMinimumActorBaselineRevision = snapshot->header().canonicalRevision();
+                            mMinimumObjectBaselineRevision = snapshot->header().canonicalRevision();
+                            mMinimumInventoryRevision = snapshot->header().canonicalRevision();
+                        }
+                    }
                 }
                 if (mGameRunning && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
                     && spatialStateChanged && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
@@ -492,6 +510,7 @@ namespace TES3MP::OpenMWAdapter
                         || advanced.baselineCompleted || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && playerInventory
                     && groundItems && equipment && playerBaseline && snapshot
+                    && selfEntry(*snapshot) && groundItems->cell == selfEntry(*snapshot)->transform().cell()
                     && playerInventory->header.canonicalRevision >= playerBaseline->canonicalRevision()
                     && playerInventory->header.canonicalRevision <= snapshot->header().canonicalRevision()
                     && groundItems->header.canonicalRevision == playerInventory->header.canonicalRevision

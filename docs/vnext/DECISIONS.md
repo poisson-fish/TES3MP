@@ -233,6 +233,14 @@ committed positions without repositioning. Scripts, animation, changed geometry
 and tumbling require separate services. Unsupported bootstrap content fails visibly.
 V9 adds one bound ordinary door using stock position/ANIM fields in session format 5;
 recovery installs it with inventories. V8 remains unchanged; no implicit migration.
+V10/session format 6 binds two interiors and ground-reference cell membership,
+retaining campaign-wide budgets and one door. Active sessions pin cell resources;
+empty cells release them and freeze motion. Canonical stores remain; reentry cannot
+initialize loot. New campaign required; v8/v9 remain unchanged.
+V11 adds 32 immutable OpenMW teleport doors between those interiors, without scripts/
+locks/traps/followers. Commit the requester's destination/authority epoch before
+publication; reject old motion/direct cell changes. Requires a new campaign and
+native-teleport capability. Format 6 and older domains stay unchanged.
 V3/v4 seeded meanings and older descriptor meanings remain intact; domain changes
 require explicit migration/new campaigns and matching builds. The format-6 inventory
 cutover deliberately rejects older development saves; never reset automatically.

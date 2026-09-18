@@ -1,6 +1,7 @@
 #include "equipment_session.hpp"
 
 #include <limits>
+#include <bit>
 #include <set>
 #include <stdexcept>
 
@@ -13,16 +14,30 @@ namespace TES3MP::Native
         constexpr uint64_t CellMagic = 0x3353534553335354; // TS3SESS3: bounded shared inventories.
         constexpr uint64_t WorldMagic = 0x3453534553335354; // TS3SESS4: coherent world items.
         constexpr uint64_t DoorMagic = 0x3553534553335354; // TS3SESS5: world items plus one bound door.
-        uint64_t magic(size_t count, bool world, bool door) { return door ? DoorMagic : world ? WorldMagic : count == 0 ? PairMagic : count == 1 ? SharedMagic : CellMagic; }
+        constexpr uint64_t AreasMagic = 0x3653534553335354; // TS3SESS6: two-cell world membership.
+        uint64_t magic(size_t count, bool world, bool door, bool cells) { return cells ? AreasMagic : door ? DoorMagic : world ? WorldMagic : count == 0 ? PairMagic : count == 1 ? SharedMagic : CellMagic; }
         size_t headerSize(size_t count, bool world, bool door) { return 32 + 8 * (count + world + door) + (count > 1 || world ? 8 : 0); }
         void validate(const EquipmentSessionValues& values, const std::array<EquipmentBindings, 2>& bindings,
-            std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door)
+            std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door, bool cells)
         {
             if (values.mRevision == 0 || values.mRevision >= std::numeric_limits<size_t>::max()
                 || bool(values.mWorldItems) != bool(world)
                 || bool(values.mDoor) != bool(door) || (door && !world)
+                || bool(values.mWorldCells) != cells || (cells && (!world || !door))
                 || containers.size() > MaxEquipmentContainers || values.mContainers.size() != containers.size())
                 throw std::invalid_argument("Equipment session revision or container binding mismatch");
+            if (cells)
+            {
+                if (values.mWorldCells->size() != values.mWorldItems->mObjects.size()
+                    || values.mWorldCells->size() > PreparedPlainEquipment::MaxItems)
+                    throw std::invalid_argument("World cell membership count mismatch");
+                for (const auto& object : values.mWorldItems->mObjects)
+                {
+                    const auto found = values.mWorldCells->find(object.mRef.mRefNum);
+                    if (found == values.mWorldCells->end() || found->second > 1)
+                        throw std::invalid_argument("World cell membership missing or invalid");
+                }
+            }
             std::set<ESM::RefNum> identities;
             if (door)
             {
@@ -64,11 +79,12 @@ namespace TES3MP::Native
     }
     void encodeEquipmentSession(const EquipmentSessionValues& values,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
-        std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door)
+        std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door, bool cells)
     {
-        validate(values, bindings, containers, world, door);
+        validate(values, bindings, containers, world, door, cells);
         std::vector<EquipmentBytes> owners(2 + containers.size() + (world != nullptr) + (door != nullptr));
-        size_t size = headerSize(containers.size(), world != nullptr, door != nullptr);
+        size_t size = headerSize(containers.size(), world != nullptr, door != nullptr)
+            + (cells ? 8 + 16 * values.mWorldCells->size() : 0);
         for (size_t i = 0; i < owners.size(); ++i)
         {
             const bool ground = i == 2 + containers.size();
@@ -81,24 +97,44 @@ namespace TES3MP::Native
         }
         EquipmentBytes staged;
         staged.reserve(size);
-        put(staged, magic(containers.size(), world != nullptr, door != nullptr));
+        put(staged, magic(containers.size(), world != nullptr, door != nullptr, cells));
         put(staged, values.mRevision);
         if (containers.size() > 1 || world) put(staged, containers.size());
         for (const auto& owner : owners) put(staged, owner.size());
+        if (cells)
+        {
+            put(staged, values.mWorldCells->size());
+            for (const auto& [ref, cell] : *values.mWorldCells)
+            {
+                put(staged, (uint64_t(std::bit_cast<uint32_t>(ref.mContentFile)) << 32) | ref.mIndex);
+                put(staged, cell);
+            }
+        }
         for (const auto& owner : owners) staged.insert(staged.end(), owner.begin(), owner.end());
         output.swap(staged);
     }
     void decodeEquipmentSession(std::span<const char> bytes,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
-        std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door)
+        std::span<const EquipmentBindings> containers, const EquipmentBindings* world, const DoorBinding* door, bool cells)
     {
-        if (containers.size() > MaxEquipmentContainers || (door && !world))
+        if (containers.size() > MaxEquipmentContainers || (door && !world) || (cells && (!world || !door)))
             throw std::invalid_argument("Equipment session container budget exceeded");
-        const auto header = headerSize(containers.size(), world != nullptr, door != nullptr);
-        if (bytes.size() < header || bytes.size() > MaxEquipmentSessionBytes
-            || get(bytes, 0) != magic(containers.size(), world != nullptr, door != nullptr)
+        auto header = headerSize(containers.size(), world != nullptr, door != nullptr);
+        if (bytes.size() < header + (cells ? 8 : 0) || bytes.size() > MaxEquipmentSessionBytes
+            || get(bytes, 0) != magic(containers.size(), world != nullptr, door != nullptr, cells)
             || ((containers.size() > 1 || world) && get(bytes, 16) != containers.size()))
             throw std::invalid_argument("Invalid equipment session header or container count");
+        const size_t membershipOffset = header;
+        const uint64_t membershipCount = cells ? get(bytes, header) : 0;
+        if (cells)
+        {
+            if (membershipCount > PreparedPlainEquipment::MaxItems || 8 + membershipCount * 16 > bytes.size() - header)
+                throw std::invalid_argument("Invalid world cell membership length");
+            header += 8 + membershipCount * 16;
+            for (size_t i = 0; i < membershipCount; ++i)
+                if (get(bytes, membershipOffset + 16 + i * 16) > 1)
+                    throw std::invalid_argument("Invalid world cell index");
+        }
         // Preflight every length before decoding or allocating owner images.
         std::array<size_t, 4 + MaxEquipmentContainers> lengths{};
         size_t remaining = bytes.size() - header;
@@ -116,6 +152,17 @@ namespace TES3MP::Native
         // content-derived names/placement are fixed by trusted startup binding.
         if (door) door->preflight(bytes.last(lengths[count - 1]));
         EquipmentSessionValues staged;
+        if (cells)
+        {
+            staged.mWorldCells.emplace();
+            for (size_t i = 0; i < membershipCount; ++i)
+            {
+                const auto ref = get(bytes, membershipOffset + 8 + i * 16);
+                if (!staged.mWorldCells->emplace(ESM::RefNum{uint32_t(ref), std::bit_cast<int32_t>(uint32_t(ref >> 32))},
+                        uint8_t(get(bytes, membershipOffset + 16 + i * 16))).second)
+                    throw std::invalid_argument("Duplicate world cell membership");
+            }
+        }
         staged.mRevision = get(bytes, 8);
         if (staged.mRevision == 0 || staged.mRevision >= std::numeric_limits<size_t>::max())
             throw std::invalid_argument("Invalid equipment session revision");
@@ -130,7 +177,7 @@ namespace TES3MP::Native
             offset += lengths[i];
         }
         if (door) staged.mDoor = decodeDoor(bytes.last(lengths[count - 1]), *door);
-        validate(staged, bindings, containers, world, door);
+        validate(staged, bindings, containers, world, door, cells);
         output.swap(staged);
     }
 }

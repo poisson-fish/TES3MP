@@ -43,6 +43,7 @@ namespace TES3MP::OpenMWAdapter
         NativeTake,
         NativeRecoverOne,
         NativeRecoverTwo,
+        NativeTraversal,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -105,6 +106,8 @@ namespace TES3MP::OpenMWAdapter
         bool nativeInventoryRole() const noexcept;
         void advanceNativeInventory(MonotonicInstant now);
         void writeNativeInventory(std::string_view event);
+        void advanceNativeTraversal(MonotonicInstant now);
+        void writeNativeTraversal(std::string_view event);
 
         DesktopAutomationRole mRole;
         CellId mInterior;
@@ -114,6 +117,9 @@ namespace TES3MP::OpenMWAdapter
         ConnectionStatusProvider& mStatus;
         EngineCoordinator* mCoordinator = nullptr;
         DesktopSemanticInput* mDesktopInput = nullptr;
+        std::filesystem::path mTraversalControl;
+        std::uint64_t mTraversalSequence = 0;
+        std::optional<ReliableGroundItemBaseline> mTraversalGround;
         std::optional<std::uint32_t> mNativePlayerCount;
         std::optional<std::uint32_t> mNativeContainerCount;
         std::optional<ContainerId> mNativeContainerId;

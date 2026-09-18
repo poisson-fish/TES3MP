@@ -642,6 +642,7 @@ int main(int argc, char** argv)
     if (nativeInventory && nativeInventory->hasNativeDoor())
     {
         requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
+        if (nativeInventory->requiresDoorTraversal()) requiredCapabilities.push_back(TES3MP::nativeTeleportCapability());
         std::erase(optionalCapabilities, TES3MP::inventoryReplicationCapability());
     }
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,

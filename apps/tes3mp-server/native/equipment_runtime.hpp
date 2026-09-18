@@ -84,6 +84,8 @@ namespace TES3MP::Native
         std::vector<std::unique_ptr<SharedInventory>> mContainers;
         std::optional<PlainEquipmentValues> mWorldItems;
         std::vector<ESM::CellRef> mPlacedItems;
+        std::optional<EquipmentSessionValues::WorldCells> mWorldCells;
+        EquipmentSessionValues::WorldCells mPlacedItemCells;
         std::optional<DoorBinding> mDoorBinding;
         std::shared_ptr<const ESM::DoorState> mDoorState;
         uint64_t mDoorMotion = 1; // Volatile: reconnect/restart establishes a new session generation.
@@ -241,7 +243,7 @@ namespace TES3MP::Native
         };
         PreparedWorldTransfer prepareWorldTransfer(size_t actor, InventoryInstanceId item, int count,
             bool pickup, ESM::Position dropPosition, uint64_t expectedRevision,
-            const std::function<ESM::Position(const ESM::ObjectState&)>& placement = {});
+            const std::function<ESM::Position(const ESM::ObjectState&)>& placement = {}, uint8_t cell = 0);
         PersistenceResult commit(PreparedWorldTransfer& prepared, EquipmentSessionCommitter& durability,
             EquipmentBytes& bytes);
         // Detached preparation is not a published success. Content/services must
@@ -294,7 +296,8 @@ namespace TES3MP::Native
             MWBase::ScriptManager* declarations = nullptr,
             std::optional<size_t> restartActor = {}, bool connected = false,
             std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0,
-            std::optional<std::vector<ESM::CellRef>> worldItems = {}, std::optional<ESM::CellRef> door = {});
+            std::optional<std::vector<ESM::CellRef>> worldItems = {}, std::optional<ESM::CellRef> door = {},
+            std::optional<EquipmentSessionValues::WorldCells> cells = {});
         // Diagnostic convenience; delegates to the same multi-owner runtime.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,
@@ -325,6 +328,7 @@ namespace TES3MP::Native
     private:
         PlainEquipmentValues preparedValues(const PreparedWorldTransfer& prepared, size_t owner) const;
         const PlainEquipmentValues& worldValues(const PreparedWorldTransfer* prepared = nullptr) const;
+        uint8_t worldCell(ESM::RefNum ref, const PreparedWorldTransfer* prepared = nullptr) const;
         PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
         PlainEquipmentValues preparedValues(const PreparedEquipment& prepared, size_t owner) const;
     };

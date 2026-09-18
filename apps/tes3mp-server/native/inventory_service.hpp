@@ -40,6 +40,19 @@ namespace TES3MP::Native
         std::optional<WorldItems> mWorldItems;
         std::optional<ESM::CellRef> mDoor;
         uint64_t mDoorId = 0;
+        // V10: exactly two interiors, one ordinary door in the first. Budgets
+        // (32 shared stores / 64 ground references) remain campaign-wide.
+        std::optional<WorldItems> mSecondWorldItems;
+        std::function<void(const std::array<bool, 2>&)> mCellActivity;
+        struct TeleportDoor
+        {
+            uint64_t mId;
+            CellId mCell;
+            Position3 mPosition;
+            Transform mDestination;
+        };
+        // V11: immutable, OpenMW-resolved doors, at most 32 across both cells.
+        std::optional<std::vector<TeleportDoor>> mTeleportDoors;
     };
 
     // One long-lived engine service group for all shared inventories. Loaded
@@ -57,8 +70,14 @@ namespace TES3MP::Native
         class EquipmentTransaction;
         class WorldTransaction;
         class DoorTransaction;
+        class TeleportTransaction;
         std::array<std::optional<ClientDoorObstruction>, 2> mDoorReports;
         float mDoorStepSeconds = 1.f / 30.f;
+        std::array<bool, 2> mActiveCells{};
+        const InventoryServiceBinding::WorldItems* worldDomain(CellId cell) const;
+        uint8_t worldIndex(CellId cell) const;
+        PlainEquipmentValues cellWorldValues(CellId cell,
+            const EquipmentRuntime::PreparedWorldTransfer* prepared = nullptr) const;
         bool doorBlocked(const CanonicalServerState& players, ServerTick tick) const;
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
@@ -91,9 +110,18 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::span<const std::byte> inventoryImage() const noexcept override;
+        void synchronizeCells(const CanonicalServerState& players) override;
+        std::array<bool, 2> activeCells() const noexcept { return mActiveCells; }
         bool hasNativeDoor() const noexcept override { return mBinding.mDoor.has_value(); }
         bool ownsNativeDoor(InteractiveObjectId id) const noexcept override
-        { return mBinding.mDoor && id.value() == mBinding.mDoorId; }
+        {
+            if (mBinding.mDoor && id.value() == mBinding.mDoorId) return true;
+            if (mBinding.mTeleportDoors)
+                for (const auto& door : *mBinding.mTeleportDoors)
+                    if (door.mId == id.value()) return true;
+            return false;
+        }
+        bool requiresDoorTraversal() const noexcept override { return mBinding.mTeleportDoors.has_value(); }
         std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorStep(

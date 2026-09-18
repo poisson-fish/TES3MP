@@ -301,7 +301,7 @@ namespace TES3MP
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
         InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
         std::span<const uint64_t> nativePlacements, std::span<const GroundItemPresentation> presentation, bool nativeWorld,
-        std::optional<NativeDoorSnapshot> door)
+        std::optional<NativeDoorSnapshot> door, std::span<const uint64_t> teleportDoors)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
@@ -331,8 +331,16 @@ namespace TES3MP
                 || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
                 || door->direction > 2 || (door->direction == 0 && door->blocked)))
             return error(Code::InvalidCommandShape);
+        if (teleportDoors.size() > 32 || (!teleportDoors.empty() && !nativeWorld))
+            return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < teleportDoors.size(); ++i)
+            if (!(teleportDoors[i] >> 63) || (i && teleportDoors[i - 1] >= teleportDoors[i])
+                || (door && door->placement == teleportDoors[i])
+                || std::ranges::find(nativePlacements, teleportDoors[i]) != nativePlacements.end())
+                return error(Code::InvalidCommandShape);
         return ReliableGroundItemBaseline{ header, std::move(cell), { items.begin(), items.end() },
-            {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld, door };
+            {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld, door,
+            {teleportDoors.begin(), teleportDoors.end()} };
     }
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
@@ -417,7 +425,8 @@ namespace TES3MP
         if (input.door) door.emplace(input.door->placement, input.door->motion, input.door->angle,
             input.door->stepSeconds, input.door->direction, uint8_t(input.door->blocked));
         const auto root = GroundSchema::CreateReliableGroundItemBaselineDirect(builder, header, &cell, &items,
-            &input.nativePlacements, &presentation, input.nativeWorld, door ? &*door : nullptr);
+            &input.nativePlacements, &presentation, input.nativeWorld, door ? &*door : nullptr,
+            input.teleportDoors.empty() ? nullptr : &input.teleportDoors);
         GroundSchema::FinishSizePrefixedReliableGroundItemBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -630,6 +639,14 @@ namespace TES3MP
                 || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
                 || door->direction > 2 || (!door->direction && door->blocked)) return error(Code::InvalidCommandShape);
         }
+        const auto* encodedTeleports = root->teleport_doors();
+        if (encodedTeleports && (encodedTeleports->size() > 32
+                || (encodedTeleports->size() && !root->native_world()))) return error(Code::InvalidCommandShape);
+        if (encodedTeleports)
+            for (size_t i = 0; i < encodedTeleports->size(); ++i)
+                if (!(encodedTeleports->Get(i) >> 63)
+                    || (i && encodedTeleports->Get(i - 1) >= encodedTeleports->Get(i))
+                    || (door && door->placement == encodedTeleports->Get(i))) return error(Code::InvalidCommandShape);
         std::vector<GroundItemInterestMember> items;
         if (const auto* encoded = root->items())
         {
@@ -668,8 +685,10 @@ namespace TES3MP
                 presentation.push_back({*stack, {current.rx(), current.ry(), current.rz()}, current.scale()});
             }
         }
+        std::vector<uint64_t> teleports;
+        if (encodedTeleports) teleports.assign(encodedTeleports->begin(), encodedTeleports->end());
         return ReliableGroundItemBaseline::create(
-            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world(), door);
+            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world(), door, teleports);
     }
 
     EquipmentSnapshotDecodeResult decodeLatestWinsEquipmentSnapshot(std::span<const std::byte> payload)

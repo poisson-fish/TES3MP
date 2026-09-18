@@ -10,6 +10,9 @@ namespace TES3MP::ServerApp
     class NativeInventoryService : public NativeInventoryAuthority
     {
     public:
+        // Cache/scheduling lifetime follows committed active sessions only.
+        // Canonical inventory/world state outlives these loaded cell resources.
+        virtual void synchronizeCells(const CanonicalServerState&) {}
         virtual std::optional<InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedNativeInventory* candidate = nullptr) const = 0;

@@ -238,6 +238,416 @@ namespace TES3MP::Native::Testing
                 pickup ? std::optional{ground.items.at(index).revision} : std::nullopt, Position3(0, 0, 0)};
         }
     }
+    namespace
+    {
+        // Real reducer, durability file, baseline codec and client receiver;
+        // synthetic transport/authentication, no graphical presentation claim.
+        void teleportRoundTrip(InventoryService& service, CanonicalServerState initial,
+            const std::filesystem::path& scratch)
+        {
+            NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+            const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+                CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
+            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+            const auto manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
+            CanonicalCommandReducer reducer(initial, observability, manifest);
+            const auto catalog = ServerScriptStateCatalog::create({}).value();
+            auto scripts = CanonicalScriptState::initial(catalog).value();
+            std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{1};
+            const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+                ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+            const auto path = scratch / "teleports.bin";
+            auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            struct Port final : CanonicalDurabilityPort
+            {
+                ServerApp::CanonicalPersistenceFile& file;
+                CanonicalCommandReducer& reducer;
+                bool reject = false;
+                Port(ServerApp::CanonicalPersistenceFile& f, CanonicalCommandReducer& r) : file(f), reducer(r) {}
+                CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                    CanonicalRevision revision, std::span<const DurableCommandOrder> commands,
+                    const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat,
+                    const CanonicalInteractiveObjectWorld* objects, const CanonicalActorWorld* actors,
+                    const CanonicalWorldState* world, const CanonicalScriptState* scripts,
+                    std::span<const std::byte> image) noexcept override
+                {
+                    if (reducer.latestPublication() == candidate || image.empty()) return CanonicalDurabilityResult::Failed;
+                    if (reject) return CanonicalDurabilityResult::Rejected;
+                    return file.commit(candidate, revision, commands, inventory, combat, objects, actors, world, scripts, image);
+                }
+            } port(*file, reducer);
+            require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &service),
+                "Teleport canonical composition failed");
+            Clock clock; Delivery delivery(clock, SessionGeneration::initial());
+            uint64_t tick = 1;
+            const auto first = CellId::interior(id<CellSpaceId>(7)), second = CellId::interior(id<CellSpaceId>(8));
+            const auto aliceId = initial.players()[0].playerId(), bobId = initial.players()[1].playerId();
+            const auto view = [&](uint64_t session) {
+                return service.projectInventory(reducer.state(), id<SessionId>(session), id<ServerTick>(tick), id<CanonicalRevision>(tick)).value();
+            };
+            const auto proposal = [&](uint64_t session, auto payload) {
+                const auto* caller = reducer.state().findActiveSession(id<SessionId>(session));
+                const auto& player = *reducer.state().findPlayer(caller->playerId());
+                const auto sequence = caller->highestContiguousFinalizedCommand()
+                    ? *caller->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+                return ServerCommandProposal(caller->sessionId(), caller->sessionGeneration(), sequence, id<CommandId>(sequence.value()),
+                    reducer.canonicalRevision(), EntityPrecondition(player.entityId(), player.entityRevision(), player.authorityEpoch()),
+                    std::move(payload));
+            };
+            const auto activate = [&](uint64_t session, uint64_t door) {
+                const auto& player = *reducer.state().findPlayer(session == 1 ? aliceId : bobId);
+                return proposal(session, InteractiveObjectCommandProposal(id<InteractiveObjectId>(door), player.transform().cell(),
+                    player.transform().position(), ObjectRevision::initial(), ObjectInteractionKind::Activate, {}));
+            };
+            const auto prepare = [&](const ServerCommandProposal& command, const ServerCommandProposal* after = nullptr) {
+                ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(++tick), IngressOrdinal::initial());
+                require(intake.submit(command) == CommandSubmissionResult::Accepted, "Teleport intake failed");
+                if (after) require(intake.submit(*after) == CommandSubmissionResult::Accepted, "Trailing motion intake failed");
+                clock.value += tick * 33'333'334;
+                auto batches = intake.pump();
+                require(batches && batches.batches().size() == 1, "Teleport tick failed");
+                return reducer.prepareTick(batches.batches().front());
+            };
+            const auto commit = [&](auto& pending) {
+                require(pending.result() && pending.result().dispositions()[0].disposition() == CommandDisposition::Applied
+                    && reducer.commit(std::move(pending)), "Teleport scenario mutation failed");
+                service.synchronizeCells(reducer.state());
+                publish(service, reducer.state(), delivery, ++tick);
+            };
+            const auto mutate = [&](ClientInventoryTransactionCommand input) {
+                const auto resolved = bind(reducer.state(), input).proposal();
+                auto pending = prepare(proposal(input.sessionId.value(), std::get<InventoryCommandProposal>(resolved.payload())));
+                commit(pending);
+            };
+            service.synchronizeCells(initial);
+            publish(service, initial, delivery, tick);
+            const auto baseline = view(1).groundItems[0];
+            require(baseline.teleportDoors.size() == 1
+                && delivery.clients[0]->confirmedGroundItemBaseline()->teleportDoors == baseline.teleportDoors,
+                "Supported teleport identity lost on wire");
+            const auto outward = baseline.teleportDoors[0];
+            for (int invalid = 0; invalid < 5; ++invalid)
+            {
+                auto bad = baseline;
+                if (invalid == 0) bad.teleportDoors.resize(33, outward);
+                if (invalid == 1) bad.teleportDoors.push_back(outward);
+                if (invalid == 2) bad.teleportDoors[0] = 1;
+                if (invalid == 3) bad.nativeWorld = false;
+                if (invalid == 4) bad.teleportDoors[0] = bad.door->placement;
+                require(std::holds_alternative<InventoryReplicationDecodeError>(
+                    decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(bad))), "Malformed teleport baseline accepted");
+            }
+            const auto stalePickup = worldWire(service, reducer.state(), 1, true);
+            mutate(worldWire(service, reducer.state(), 1, true));
+            const auto beforeExit = view(1);
+            auto direct = prepare(proposal(1, CellTransitionCommandProposal(second)));
+            require(direct.result().dispositions()[0].disposition() == CommandDisposition::ObjectInteractionRejected,
+                "Client bypassed native doors with direct cell intent");
+            for (int invalid = 0; invalid < 5; ++invalid)
+            {
+                auto request = proposal(1, InteractiveObjectCommandProposal(
+                    id<InteractiveObjectId>(invalid == 0 ? outward + 5000 : outward), invalid == 1 ? second : first,
+                    Position3(invalid == 2 ? 10000 * 1024 : 0, 0, 0),
+                    id<ObjectRevision>(invalid == 3 ? 2 : 1),
+                    invalid == 4 ? ObjectInteractionKind::PickLock : ObjectInteractionKind::Activate, {}));
+                auto bad = prepare(request);
+                require(bad.result().dispositions()[0].disposition() == CommandDisposition::ObjectInteractionRejected
+                    && !bad.candidateNativeInventory(), "Invalid teleport activation admitted");
+            }
+            const auto exit = activate(1, outward);
+            for (int invalid = 0; invalid < 2; ++invalid)
+            {
+                const auto precondition = invalid ? EntityPrecondition(id<EntityId>(999), EntityRevision::initial(), AuthorityEpoch::initial())
+                    : exit.entityPrecondition();
+                const ServerCommandProposal forged(exit.sessionId(), invalid ? exit.sessionGeneration() : id<SessionGeneration>(2),
+                    exit.commandSequence(), exit.commandId(), exit.observedCanonicalRevision(), precondition,
+                    std::get<InteractiveObjectCommandProposal>(exit.payload()));
+                require(!service.prepareDoorActivation(reducer.state(), forged), "Forged teleport session or actor accepted");
+            }
+            const auto contender = activate(2, outward);
+            auto contested = prepare(exit, &contender);
+            require(contested.result().dispositions()[0].disposition() == CommandDisposition::Applied
+                && contested.result().dispositions()[1].disposition() == CommandDisposition::ObjectInteractionRejected,
+                "Same-tick native teleport contention bypassed mutation budget");
+            const auto& oldAlice = *reducer.state().findPlayer(aliceId);
+            const auto epoch = oldAlice.authorityEpoch();
+            const auto nextSequence = *exit.commandSequence().next();
+            ServerCommandProposal trailing(exit.sessionId(), exit.sessionGeneration(), nextSequence, id<CommandId>(nextSequence.value()),
+                reducer.canonicalRevision(), EntityPrecondition(oldAlice.entityId(), oldAlice.entityRevision(), epoch),
+                PlayerMotionCommandProposal(LinearVelocity3(100, 0, 0)));
+            auto leaving = prepare(exit, &trailing);
+            require(leaving.result().dispositions()[1].disposition() == CommandDisposition::AuthorityEpochMismatch,
+                "Pre-teleport movement overwrote destination");
+            const auto expected = *leaving.candidateNativeInventory()->playerDestination();
+            require(expected.cell() == second && expected.position() == Position3(32 * 1024, 0, 0)
+                && std::abs(int64_t(expected.orientation().z().value()) - int64_t(0xc0000000)) < 64,
+                "OpenMW destination pose was not preserved");
+            const auto staged = service.projectInventory(leaving.candidateState(), id<SessionId>(1), id<ServerTick>(tick),
+                leaving.candidateRevision(), leaving.candidateNativeInventory());
+            require(staged && staged->groundItems[0].cell == second && staged->groundItems[0].teleportDoors.size() == 1,
+                "Teleport destination baseline could not be staged");
+            const auto publication = reducer.latestPublication();
+            const auto sent = delivery.sent;
+            port.reject = true;
+            require(!reducer.commit(std::move(leaving)) && reducer.latestPublication() == publication
+                && reducer.state().findPlayer(aliceId)->transform().cell() == first && delivery.sent == sent
+                && service.activeCells() == std::array{true, false}, "Rejected durability leaked relocation/baseline/activity");
+            port.reject = false;
+            commit(leaving);
+            require(reducer.state().findPlayer(aliceId)->transform() == expected
+                && reducer.state().findPlayer(aliceId)->authorityEpoch() == *epoch.next()
+                && reducer.state().findPlayer(bobId)->transform() == initial.findPlayer(bobId)->transform()
+                && service.activeCells() == std::array{true, true}, "Teleport moved Bob or lost destination");
+            require(file->restoredState()->findPlayer(aliceId)->transform() == expected,
+                "Destination baseline preceded persisted player state");
+            auto replay = prepare(exit);
+            require(replay.result().dispositions()[0].disposition() != CommandDisposition::Applied
+                && !replay.candidateNativeInventory(), "Repeated teleport was applied twice");
+            auto wrongCell = prepare(activate(1, outward));
+            require(wrongCell.result().dispositions()[0].disposition() == CommandDisposition::ObjectInteractionRejected,
+                "Previous-cell teleport remained usable");
+            require(!service.prepareInventory(reducer.state(), bind(reducer.state(), stalePickup).proposal()),
+                "Previous-cell pickup remained usable");
+            const auto inward = view(1).groundItems[0].teleportDoors[0];
+            require(delivery.clients[0]->confirmedGroundItemBaseline()->cell == second
+                && delivery.clients[1]->confirmedGroundItemBaseline()->cell == first
+                && delivery.clients[0]->confirmedGroundItemBaseline()->teleportDoors == std::vector{inward},
+                "Split wire clients retained old-cell activators");
+            mutate(worldWire(service, reducer.state(), 1, true));
+            auto drop = worldWire(service, reducer.state(), 1, false);
+            drop.placement = placementTestView(0, 0, true);
+            mutate(drop);
+            const auto savedDrop = view(1).groundItems[0].items;
+            while (!view(2).groundItems[0].items.empty()) mutate(worldWire(service, reducer.state(), 2, true));
+            const auto shared = view(2).containers[0];
+            if (!shared.stacks.empty())
+            {
+                const auto playerInventory = view(2).playerInventory[0];
+                mutate({id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(), id<CommandId>(1),
+                    CanonicalRevision::initial(), InventoryTransactionKind::TakeAllFromContainer, shared.container,
+                    shared.stacks[0].prototypeId, shared.stacks[0].stackId, 1, {}, playerInventory.revision,
+                    shared.revision, {}, Position3(0,0,0)});
+            }
+            auto returning = prepare(activate(1, inward)); commit(returning);
+            require(reducer.state().findPlayer(aliceId)->transform().cell() == first && view(1).groundItems[0].items.empty()
+                && view(1).containers[0].stacks.empty() && service.activeCells() == std::array{true, false}
+                && delivery.clients[0]->confirmedGroundItemBaseline()->teleportDoors == std::vector{outward}
+                && delivery.clients[0]->confirmedContainerInventoryBaselines().size() == view(1).containers.size(),
+                "Alice's return regenerated loot or retained stale references");
+            auto leavingAgain = prepare(activate(1, outward)); commit(leavingAgain);
+            const auto revisited = view(1).groundItems[0].items;
+            require(revisited.size() == savedDrop.size() && revisited[0].stack == savedDrop[0].stack
+                && revisited[0].position == savedDrop[0].position, "Reentry regenerated destination loot or changed drop identity");
+            auto reopened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            require(reopened->restoredState()->findPlayer(aliceId)->transform() == expected
+                && reopened->restoredState()->findPlayer(bobId)->transform() == initial.findPlayer(bobId)->transform()
+                && std::ranges::equal(reopened->prefix().latest()->nativeInventory(), service.inventoryImage()),
+                "Disk restart lost player destination or coherent loot image");
+            std::cout << "Teleport round trip: server validation, durable destination, epoch reset, split wire baselines, loot and disk state passed\n";
+        }
+    }
+
+    void checkTeleportTraversal(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Teleport scratch already exists");
+        Content content;
+        auto chest = *content.store.get<ESM::Container>().find(content.container);
+        chest.mInventory.mList = {{4, content.shirt}}; content.store.overrideRecord(chest);
+        ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("teleport_test"); content.store.insertStatic(door);
+        auto binding = content.binding();
+        const auto first = binding.mContainers[0].mCell, second = CellId::interior(id<CellSpaceId>(8));
+        binding.mContainers.push_back({id<ContainerId>(91), second, Position3(0,0,0), content.container, {}});
+        auto item = ESM::makeBlankCellRef(); item.mRefID = content.shirt; item.mRefNum = {500, 0};
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{first, {{MWWorld::PlacedRefTag | 500, item}}});
+        item.mRefNum = {501, 0};
+        binding.mSecondWorldItems.emplace(InventoryServiceBinding::WorldItems{second, {{MWWorld::PlacedRefTag | 501, item}}});
+        binding.mDoor = ESM::makeBlankCellRef(); binding.mDoor->mRefID = door.mId; binding.mDoor->mRefNum = {700, 0};
+        binding.mDoorId = MWWorld::PlacedRefTag | 700;
+        const auto zero = Turn32::fromValue(0);
+        binding.mTeleportDoors = std::vector<InventoryServiceBinding::TeleportDoor>{
+            {MWWorld::PlacedRefTag | 701, first, Position3(0,0,0), Transform(second, Position3(32 * 1024,0,0),
+                Orientation3(zero, zero, Turn32::fromValue(0xc0000000)))},
+            {MWWorld::PlacedRefTag | 702, second, Position3(0,0,0), Transform(first, Position3(0,0,0), Orientation3(zero,zero,zero))}};
+        InventoryService service(content.store, content.readers, binding);
+        teleportRoundTrip(service, players(), scratch);
+        InventoryService recovered(content.store, content.readers, binding, true);
+        const std::array references{content.actor, content.container, content.shirt, door.mId};
+        recovered.recover(service.inventoryImage(), references);
+        require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()), "Teleport recovery changed native state");
+        const auto authority = players();
+        const auto& alice = authority.players()[0];
+        const ServerCommandProposal activation(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+            id<CommandId>(1), CanonicalRevision::initial(), EntityPrecondition(alice.entityId(), alice.entityRevision(), alice.authorityEpoch()),
+            InteractiveObjectCommandProposal(id<InteractiveObjectId>(MWWorld::PlacedRefTag | 701), first, Position3(0,0,0),
+                ObjectRevision::initial(), ObjectInteractionKind::Activate, {}));
+        auto uncertain = recovered.prepareDoorActivation(authority, activation);
+        require(uncertain && uncertain->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && recovered.inventoryImage().empty() && !recovered.prepareDoorActivation(authority, activation),
+            "Uncertain teleport durability did not fail closed");
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1,10,10));
+        const std::array required{inventoryReplicationCapability(), nativeDoorCapability(), nativeTeleportCapability()};
+        const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, required));
+        const auto oldClient = std::get<CapabilityOffer>(CapabilityOffer::create(versions, std::span(required).first(2), {}));
+        require(!std::holds_alternative<ServerHello>(negotiateClientHello(ClientHello::fromOffer(oldClient), server)),
+            "V11 accepted a client unable to present teleport activators");
+    }
+
+    void checkCellLifecycle(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Cell lifecycle scratch already exists");
+        Content content;
+        auto chest = *content.store.get<ESM::Container>().find(content.container);
+        chest.mInventory.mList = {{4, content.shirt}};
+        content.store.overrideRecord(chest);
+        ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("cell_door"); content.store.insertStatic(door);
+        auto binding = content.binding();
+        const auto first = binding.mContainers[0].mCell, second = CellId::interior(id<CellSpaceId>(8));
+        binding.mContainers.push_back({id<ContainerId>(91), second, Position3(0, 0, 0), content.container, {}});
+        auto placed = ESM::makeBlankCellRef(); placed.mRefID = content.shirt; placed.mRefNum = {500, 0};
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{first, {{MWWorld::PlacedRefTag | 500, placed}}});
+        placed.mRefNum = {501, 0};
+        binding.mSecondWorldItems.emplace(InventoryServiceBinding::WorldItems{second, {{MWWorld::PlacedRefTag | 501, placed}}});
+        binding.mDoor = ESM::makeBlankCellRef(); binding.mDoor->mRefID = door.mId; binding.mDoor->mRefNum = {700, 0};
+        binding.mDoorId = MWWorld::PlacedRefTag | 700;
+        std::array<bool, 2> loaded{};
+        binding.mCellActivity = [&](const auto& active) { loaded = active; };
+        InventoryService service(content.store, content.readers, binding);
+        auto authority = players();
+        uint64_t tick = 1;
+        const auto move = [&](size_t index, CellId cell) {
+            auto entities = std::vector(authority.players().begin(), authority.players().end());
+            const auto& entity = entities[index];
+            entities[index] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(++tick),
+                Transform(cell, Position3(0, 0, 0), entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
+            service.synchronizeCells(authority);
+        };
+        const auto view = [&](InventoryService& owner, uint64_t session) {
+            return owner.projectInventory(authority, id<SessionId>(session), id<ServerTick>(++tick), id<CanonicalRevision>(tick)).value();
+        };
+        const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+        const auto mutate = [&](ClientInventoryTransactionCommand input) {
+            auto pending = service.prepareInventory(authority, bind(authority, input).proposal());
+            require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Cell inventory mutation failed");
+        };
+        service.synchronizeCells(authority);
+        require(loaded == std::array{true, false}, "Starting occupancy loaded the wrong interiors");
+        const auto initialSecondId = id<ItemStackId>(MWWorld::PlacedRefTag | 501);
+        Clock clock; Delivery delivery(clock, SessionGeneration::initial());
+        publish(service, authority, delivery, ++tick);
+        const auto stalePickup = worldWire(service, authority, 1, true);
+        const auto staleContainer = wire(service, authority, 1, false, 1);
+        move(0, second);
+        require(loaded == std::array{true, true}, "Alice's move unloaded Bob's occupied interior");
+        require(!service.prepareInventory(authority, bind(authority, stalePickup).proposal())
+            && !service.prepareInventory(authority, bind(authority, staleContainer).proposal()), "Cross-cell pickup/container accepted");
+        auto alice = view(service, 1), bob = view(service, 2);
+        require(alice.containers.size() == 1 && alice.containers[0].container == id<ContainerId>(91)
+            && alice.groundItems[0].items[0].stack.stackId == initialSecondId && !alice.groundItems[0].door
+            && bob.containers[0].container == id<ContainerId>(90) && bob.groundItems[0].door,
+            "Split occupancy leaked references or door state across interiors");
+        publish(service, authority, delivery, ++tick);
+        require(delivery.clients[0]->confirmedGroundItemBaseline()->cell == second
+            && delivery.clients[0]->confirmedGroundItemBaseline()->nativePlacements == alice.groundItems[0].nativePlacements
+            && !delivery.clients[0]->confirmedGroundItemBaseline()->door
+            && delivery.clients[0]->confirmedContainerInventoryBaselines().size() == 1
+            && delivery.clients[0]->confirmedContainerInventoryBaselines()[0].container == id<ContainerId>(91)
+            && delivery.clients[1]->confirmedGroundItemBaseline()->cell == first,
+            "Wire clients retained old-cell ground presentation");
+        const auto alicePickup = worldWire(service, authority, 1, true);
+        auto pending = service.prepareInventory(authority, bind(authority, alicePickup).proposal());
+        const std::vector before(service.inventoryImage().begin(), service.inventoryImage().end());
+        require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+            && std::ranges::equal(before, service.inventoryImage()) && view(service, 1).groundItems[0].items.size() == 1,
+            "Failed cell pickup leaked membership or inventory");
+        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Cell pickup retry failed");
+        mutate(worldWire(service, authority, 1, false));
+        const auto dropped = view(service, 1).groundItems[0].items.front().stack.stackId;
+        require(dropped != initialSecondId, "Dropped world item reused a placed identity");
+        mutate(wire(service, authority, 2, false, 4));
+        mutate(worldWire(service, authority, 2, true));
+        const auto& bobEntity = *authority.findPlayer(id<PlayerId>(22));
+        ServerCommandProposal activate(id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(), id<CommandId>(1),
+            CanonicalRevision::initial(), EntityPrecondition(bobEntity.entityId(), bobEntity.entityRevision(), bobEntity.authorityEpoch()),
+            InteractiveObjectCommandProposal(id<InteractiveObjectId>(binding.mDoorId), first, Position3(0,0,0),
+                ObjectRevision::initial(), ObjectInteractionKind::Activate, {}));
+        auto opening = service.prepareDoorActivation(authority, activate);
+        require(opening && opening->commit(accepted) == CanonicalDurabilityResult::Committed, "Bob could not activate his door");
+        auto motion = service.prepareDoorStep(authority, id<ServerTick>(++tick), .05f);
+        require(motion && motion->commit(accepted) == CanonicalDurabilityResult::Committed, "Occupied door did not advance");
+        const auto doorState = *view(service, 2).groundItems[0].door;
+        service.reportDoorObstruction(authority, {id<SessionId>(2), SessionGeneration::initial(), id<ServerTick>(tick),
+            binding.mDoorId, doorState.motion, 1, true}, id<ServerTick>(tick));
+        move(0, first);
+        alice = view(service, 1);
+        require(alice.containers[0].stacks.empty() && alice.groundItems[0].items.empty()
+            && alice.groundItems[0].door == doorState && loaded == std::array{true, false},
+            "Returning Alice did not see Bob's committed inventory/world/door changes");
+        const auto playerInventory = alice.playerInventory[0];
+        // Bob's old contact cannot reappear after leaving and returning while
+        // Alice keeps the first cell active throughout.
+        move(1, second); move(1, first);
+        auto unblocked = service.prepareDoorStep(authority, id<ServerTick>(++tick), .05f);
+        require(unblocked && !service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick),
+            id<CanonicalRevision>(tick), unblocked.get())->groundItems[0].door->blocked,
+            "Returning player revived a contact report from the previous visit");
+        move(0, second); move(1, second);
+        require(loaded == std::array{false, true} && !service.prepareDoorStep(authority, id<ServerTick>(++tick), .05f),
+            "Empty first interior remained active or advanced its door");
+        require(view(service, 1).groundItems[0].items.front().stack.stackId == dropped, "Reload regenerated placed loot or drop identity");
+        // Persist while neither cell is active; inactive character positions cannot pin cells.
+        const auto sessions = std::vector(authority.activeSessions().begin(), authority.activeSessions().end());
+        authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+        service.synchronizeCells(authority);
+        require(loaded == std::array{false, false}, "Disconnected characters pinned native cells");
+        EquipmentFileSink file(scratch / "cells.bin", true); FileFaults faults;
+        const auto image = service.inventoryImage();
+        require(file.writeSessionImage({reinterpret_cast<const char*>(image.data()), image.size()}, faults) == PersistenceResult::Accepted,
+            "Inactive cell image was not durable");
+        EquipmentBytes disk;
+        require(readBoundedFile(scratch / "cells.bin", MaxEquipmentSessionBytes, disk, faults) == FileReadResult::Read, "Cell image read failed");
+        InventoryService restarted(content.store, content.readers, binding, true);
+        const std::array references{content.actor, content.shirt, content.container, door.mId};
+        // Format 6: header + two owners + two containers + world + door lengths.
+        const size_t membership = 24 + 8 * 6;
+        for (int failure = 0; failure < 4; ++failure)
+        {
+            auto bad = disk;
+            if (failure == 0) bad[membership + 16] = 2; // Unsupported cell.
+            if (failure == 1) bad[membership] = 65; // Excessive map before allocation.
+            if (failure == 2) bad[membership + 8] ^= 127; // Orphaned membership.
+            if (failure == 3) bad.pop_back(); // Truncated owner image.
+            bool rejected = false;
+            try { restarted.recover(std::as_bytes(std::span(bad)), references); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected && restarted.inventoryImage().empty(), "Invalid cell membership partially restored");
+        }
+        restarted.recover(std::as_bytes(std::span(disk)), references);
+        require(std::ranges::equal(service.inventoryImage(), restarted.inventoryImage()), "Restart changed inactive state");
+        std::vector<CanonicalSessionProgress> resumed;
+        for (const auto& session : sessions)
+            resumed.emplace_back(session.sessionId(), id<SessionGeneration>(2), session.playerId(), session.entityId(), std::nullopt);
+        authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), resumed));
+        restarted.synchronizeCells(authority);
+        require(restarted.activeCells() == std::array{false, true}
+            && view(restarted, 1).groundItems[0].items.front().stack.stackId == dropped
+            && view(restarted, 1).playerInventory[0].stacks == playerInventory.stacks,
+            "Restart/reconnect changed inventory or second-cell drops");
+        Delivery reconnected(clock, id<SessionGeneration>(2));
+        publish(restarted, authority, reconnected, ++tick);
+        require(reconnected.clients[0]->confirmedGroundItemBaseline()->items.front().stack.stackId == dropped,
+            "Reconnected client did not receive saved cell membership");
+        move(0, first); move(1, first); restarted.synchronizeCells(authority);
+        const auto returned = view(restarted, 1);
+        require(returned.containers[0].stacks.empty() && returned.groundItems[0].items.empty()
+            && returned.groundItems[0].nativePlacements.size() == 1
+            && returned.groundItems[0].door->angle == doorState.angle && returned.groundItems[0].door->direction == doorState.direction,
+            "Both players returning after restart regenerated loot or reset the door");
+        std::cout << "Cell lifecycle: split occupancy, cell-filtered wire clients, rejection, unload, reconnect and disk restart passed\n";
+    }
+
     void checkWorldItems(const std::filesystem::path& scratch)
     {
         require(std::filesystem::create_directory(scratch), "World item scratch already exists");
@@ -1713,9 +2123,17 @@ namespace TES3MP::Native::Testing
     }
 
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement, bool door)
+        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement, bool door, bool twoCells, bool teleports)
     {
         require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
+        auto manifest = testContentManifest();
+        if (twoCells)
+        {
+            const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+                CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
+            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+            manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
+        }
         auto crypto = makeProductionCredentialCrypto();
         require(bool(crypto), "Native host crypto unavailable");
         struct Identities final : PlayerIdentityPersistence
@@ -1820,7 +2238,45 @@ namespace TES3MP::Native::Testing
                         placed.mPos.pos[0] = 1000.f + 1000.f * i;
                         placed.save(out);
                     }
+                if (teleports)
+                {
+                    // One supported outward door, plus locked/trapped/exterior/
+                    // unrelated destinations which must remain unsupported.
+                    for (int variant = 0; variant < 5; ++variant)
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                        placed.mRefID = ESM::RefId::stringRefId("in_c_door_arched");
+                        placed.mTeleport = true; placed.mDestCell = "VNEXT SECOND INTERIOR";
+                        placed.mDoorDest.pos[0] = 32;
+                        placed.mDoorDest.rot[2] = osg::DegreesToRadians(90.f);
+                        if (variant == 1) { placed.mIsLocked = true; placed.mLockLevel = 0; }
+                        if (variant == 2) placed.mTrap = ESM::RefId::stringRefId("test_trap");
+                        if (variant == 3) placed.mDestCell.clear();
+                        if (variant == 4) placed.mDestCell = "unbound interior";
+                        placed.save(out);
+                    }
+                }
                 out.endRecord(ESM::Cell::sRecordId);
+                if (twoCells)
+                {
+                    cell.mName = "vNext second interior"; cell.updateId();
+                    out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                    for (auto base : {ESM::RefId::stringRefId("vnext_dead_actor"), ESM::RefId::stringRefId("iron dagger"),
+                            ESM::RefId::stringRefId("placement-floor")})
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = base;
+                        if (base == "placement-floor") placed.mPos.pos[2] = -60.f;
+                        placed.save(out);
+                    }
+                    if (teleports)
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                        placed.mRefID = ESM::RefId::stringRefId("in_c_door_arched");
+                        placed.mTeleport = true; placed.mDestCell = "vNext actor inventory test";
+                        placed.save(out);
+                    }
+                    out.endRecord(ESM::Cell::sRecordId);
+                }
             }
             out.close();
         };
@@ -1849,7 +2305,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (door ? "native-inventory-9" : stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
+            out << (teleports ? "native-inventory-11" : twoCells ? "native-inventory-10" : door ? "native-inventory-9" : stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
             const auto manifestId = testContentManifestId();
             for (auto byte : manifestId.bytes())
                 out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
@@ -1861,6 +2317,121 @@ namespace TES3MP::Native::Testing
                 : "container \"Imperial Prison Ship\" \"Morrowind.esm\" 421490\n");
             if (door) out << "door \"StartingInventories.esp\" 10\n";
             out << "cell interior:7\n";
+            if (twoCells) out << "interior \"vNext second interior\"\ncell interior:8\n";
+        }
+        if (twoCells)
+        {
+            auto authority = players(SessionGeneration::initial(), 1, 2);
+            InventoryHost host(descriptor, manifest, *registry, *crypto, {});
+            auto& service = dynamic_cast<InventoryService&>(host.service());
+            service.synchronizeCells(authority);
+            unequipStartingItems(service, authority);
+            if (teleports)
+            {
+                teleportRoundTrip(service, authority, scratch);
+                InventoryHost recovered(descriptor, manifest, *registry, *crypto, service.inventoryImage());
+                require(std::ranges::equal(recovered.service().inventoryImage(), service.inventoryImage()),
+                    "OpenMW teleport host recovery regenerated loot");
+                std::cout << "Teleport host: Morrowind/generated winning placements and destination resolution; no graphical clients\n";
+                return;
+            }
+            uint64_t tick = 1;
+            const auto first = CellId::interior(id<CellSpaceId>(7)), second = CellId::interior(id<CellSpaceId>(8));
+            const auto move = [&](size_t index, CellId cell, Position3 position = Position3(0,0,0)) {
+                auto entities = std::vector(authority.players().begin(), authority.players().end());
+                const auto& player = entities[index];
+                entities[index] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player, id<ServerTick>(++tick),
+                    Transform(cell, position, player.transform().orientation()), LinearVelocity3(0,0,0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
+                service.synchronizeCells(authority);
+            };
+            const auto view = [&](InventoryService& owner, uint64_t session) {
+                return owner.projectInventory(authority, id<SessionId>(session), id<ServerTick>(++tick), id<CanonicalRevision>(tick)).value();
+            };
+            const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto mutate = [&](ClientInventoryTransactionCommand input) {
+                auto command = service.prepareInventory(authority, bind(authority, input).proposal());
+                require(command && command->commit(accepted) == CanonicalDurabilityResult::Committed, "Two-cell host inventory operation failed");
+            };
+            const auto firstView = view(service, 2);
+            move(0, second);
+            const auto secondView = view(service, 1);
+            require(service.activeCells() == std::array{true, true} && secondView.containers.size() == 1
+                && secondView.groundItems[0].items.size() == 1 && !secondView.groundItems[0].door
+                && firstView.groundItems[0].items.size() == 2
+                && firstView.containers[0].container != secondView.containers[0].container,
+                "OpenMW two-interior discovery or stable IDs incorrect");
+            mutate(worldWire(service, authority, 1, true));
+            auto alice = view(service, 1);
+            const auto dagger = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron dagger")));
+            const auto index = size_t(std::ranges::find(alice.playerInventory[0].stacks, dagger, &CanonicalItemStack::prototypeId)
+                - alice.playerInventory[0].stacks.begin());
+            auto drop = worldWire(service, authority, 1, false, index);
+            drop.placement = placementTestView(0,0,true);
+            mutate(drop);
+            const auto savedDrop = view(service, 1).groundItems[0].items.front();
+            require(savedDrop.position.z() == -62 * 1024, "Second interior used the first interior's placement scene");
+            for (int i = 0; i < 2; ++i) mutate(worldWire(service, authority, 2, true));
+            auto bob = view(service, 2);
+            const auto& shared = bob.containers[0];
+            mutate({id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(), id<CommandId>(1), CanonicalRevision::initial(),
+                InventoryTransactionKind::TakeAllFromContainer, shared.container, shared.stacks[0].prototypeId, shared.stacks[0].stackId,
+                1, {}, bob.playerInventory[0].revision, shared.revision, {}, Position3(0,0,0)});
+            move(1, first, Position3(1000 * 1024, 0, 0));
+            const auto& entity = authority.players()[1];
+            ServerCommandProposal activation(id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(), id<CommandId>(1),
+                CanonicalRevision::initial(), EntityPrecondition(entity.entityId(), entity.entityRevision(), entity.authorityEpoch()),
+                InteractiveObjectCommandProposal(id<InteractiveObjectId>(firstView.groundItems[0].door->placement), first,
+                    entity.transform().position(), ObjectRevision::initial(), ObjectInteractionKind::Activate, {}));
+            auto opened = service.prepareDoorActivation(authority, activation);
+            require(opened && opened->commit(accepted) == CanonicalDurabilityResult::Committed, "Two-cell host door activation failed");
+            auto motion = service.prepareDoorStep(authority, id<ServerTick>(++tick), .05f);
+            require(motion && motion->commit(accepted) == CanonicalDurabilityResult::Committed, "Two-cell host door motion failed");
+            move(0, first);
+            alice = view(service, 1);
+            const auto doorState = *alice.groundItems[0].door;
+            require(alice.containers[0].stacks.empty() && alice.groundItems[0].items.empty() && doorState.angle > 0
+                && service.activeCells() == std::array{true, false}, "Alice did not see Bob's changes on return");
+            move(0, second); move(1, second);
+            require(service.activeCells() == std::array{false, true}
+                && !service.prepareDoorStep(authority, id<ServerTick>(++tick), .05f)
+                && view(service, 1).groundItems[0].items[0].stack == savedDrop.stack,
+                "Unloaded interior simulated or reloaded loot");
+            const auto sessions = std::vector(authority.activeSessions().begin(), authority.activeSessions().end());
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            service.synchronizeCells(authority);
+            require(service.activeCells() == std::array{false, false}, "Disconnected host retained active interiors");
+            EquipmentFileSink file(scratch / "cells.bin", true); FileFaults faults;
+            const auto image = service.inventoryImage();
+            require(file.writeSessionImage({reinterpret_cast<const char*>(image.data()), image.size()}, faults) == PersistenceResult::Accepted,
+                "Two-cell host write failed");
+            EquipmentBytes disk;
+            require(readBoundedFile(scratch / "cells.bin", MaxEquipmentSessionBytes, disk, faults) == FileReadResult::Read, "Two-cell host read failed");
+            InventoryHost restarted(descriptor, manifest, *registry, *crypto, std::as_bytes(std::span(disk)));
+            auto& recovered = dynamic_cast<InventoryService&>(restarted.service());
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), sessions));
+            recovered.synchronizeCells(authority);
+            const auto recoveredDrop = view(recovered, 1).groundItems[0].items[0];
+            require(recoveredDrop.stack == savedDrop.stack && recoveredDrop.position == savedDrop.position,
+                "OpenMW restart lost second interior drop");
+            move(0, first); move(1, first); recovered.synchronizeCells(authority);
+            const auto returned = view(recovered, 1);
+            require(returned.containers[0].stacks.empty() && returned.groundItems[0].items.empty()
+                && returned.groundItems[0].door->angle == doorState.angle, "OpenMW reload/restart regenerated first interior state");
+            std::ifstream source(descriptor); const std::string text{std::istreambuf_iterator<char>(source), {}};
+            for (const auto& [from, to] : {std::pair{std::string("cell interior:8"), std::string("cell interior:7")},
+                    std::pair{std::string("vNext second interior"), std::string("vNext actor inventory test")}})
+            {
+                auto invalid = text; invalid.replace(invalid.find(from), from.size(), to);
+                const auto path = scratch / "invalid.txt";
+                { std::ofstream output(path); output << invalid; }
+                bool rejected = false;
+                try { InventoryHost bad(path, manifest, *registry, *crypto, image); }
+                catch (const std::invalid_argument&) { rejected = true; }
+                require(rejected, "Duplicate native cell mapping accepted");
+            }
+            std::cout << "cell host: Morrowind/generated interiors, split occupancy, per-cell stock placement, empty-cell release, committed loot/door return and disk restart passed; no graphical clients\n";
+            return;
         }
         if (door)
         {

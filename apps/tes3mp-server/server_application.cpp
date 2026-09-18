@@ -1026,6 +1026,7 @@ namespace TES3MP::ServerApp
             }
             const auto before = mDirectMutationBase ? *mDirectMutationBase : mWiring->reducer.state();
             const auto revisionBefore = mDirectMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
+            if (mWiring->nativeInventory) mWiring->nativeInventory->synchronizeCells(mWiring->reducer.state());
             mDirectMutationBase.reset();
             mDirectMutationBaseRevision.reset();
             CanonicalCommandWorlds commandWorlds{ .interactiveObjects = mWiring->interactiveObjects,
@@ -1514,6 +1515,7 @@ namespace TES3MP::ServerApp
                 return false;
             }
             mDialogueChoiceResults = std::move(dialogueChoiceResultsCandidate);
+            if (mWiring->nativeInventory) mWiring->nativeInventory->synchronizeCells(mWiring->reducer.state());
             if (waitRestApplied)
                 waitRestConsentsCandidate.clear();
             mWaitRestConsents = std::move(waitRestConsentsCandidate);

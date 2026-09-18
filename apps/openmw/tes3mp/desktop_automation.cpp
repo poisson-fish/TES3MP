@@ -79,6 +79,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept
     {
+        if (value == "native-traversal")
+            return DesktopAutomationRole::NativeTraversal;
         if (value == "flow-one")
             return DesktopAutomationRole::FlowOne;
         if (value == "flow-two")
@@ -142,11 +144,14 @@ namespace TES3MP::OpenMWAdapter
         ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status)
         : mRole(role)
         , mInterior(firstCell(contentManifest, CellId::Kind::Interior))
-        , mExterior(firstCell(contentManifest, CellId::Kind::Exterior))
+        , mExterior(role == DesktopAutomationRole::NativeTraversal ? mInterior
+                                                                 : firstCell(contentManifest, CellId::Kind::Exterior))
         , mOutput(output, std::ios::out | std::ios::trunc)
         , mPresentation(presentation)
         , mStatus(status)
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal)
+            mTraversalControl = output.string() + ".control";
         if (mOutput)
         {
             mOutput << "{\"event\":\"phase8_desktop_started\",\"role\":\"" << roleName() << "\"}\n";
@@ -157,6 +162,8 @@ namespace TES3MP::OpenMWAdapter
 
     CellTransitionCapture DesktopAutomation::captureCellTransition() noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput)
+            return mDesktopInput->captureCellTransition();
         if (mRole != DesktopAutomationRole::FlowOne || !mNow || !mStartedAt || !mSelfCell)
             return {};
         const auto elapsed = mNow->nanoseconds() - mStartedAt->nanoseconds();
@@ -176,6 +183,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<LocomotionIntent> DesktopAutomation::sampleCurrentIntent() noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput)
+            return mDesktopInput->sampleCurrentIntent();
         if (!mStartedAt || !mNow || mRole == DesktopAutomationRole::Reconnect
             || mRole == DesktopAutomationRole::ActorReconnect || mRole == DesktopAutomationRole::ActorAuth)
             return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
@@ -202,6 +211,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<ObjectInteractionCapture> DesktopAutomation::captureObjectInteraction() noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput)
+            return mDesktopInput->captureObjectInteraction();
         if ((mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
             || mSecuritySubmitted || !mSecurityObject || !mSecurityObjectRevision || !mSecurityTool
             || !mSecurityInventoryRevision || !mSecurityCombatRevision || !mSelfCell || !mInitialPosition)
@@ -399,7 +410,10 @@ namespace TES3MP::OpenMWAdapter
         {
             try
             {
-                advanceNativeInventory(now);
+                if (mRole == DesktopAutomationRole::NativeTraversal)
+                    advanceNativeTraversal(now);
+                else
+                    advanceNativeInventory(now);
             }
             catch (const std::exception& error)
             {
@@ -581,6 +595,13 @@ namespace TES3MP::OpenMWAdapter
             return applied;
         if (nativeInventoryRole())
         {
+            if (mRole == DesktopAutomationRole::NativeTraversal)
+            {
+                mTraversalGround = groundItems;
+                mNativeContainerCount.reset();
+                mNativeContainerId.reset();
+                mNativeContainerStacks.clear();
+            }
             const auto count = [](const auto& stacks) {
                 std::uint32_t total = 0;
                 for (const auto& stack : stacks)
@@ -899,6 +920,7 @@ namespace TES3MP::OpenMWAdapter
     void DesktopAutomation::clear() noexcept
     {
         mPresentation.clear();
+        mTraversalGround.reset();
         mNativePlayerCount.reset();
         mNativeContainerCount.reset();
         mNativeContainerId.reset();
@@ -933,6 +955,7 @@ namespace TES3MP::OpenMWAdapter
             : mRole == DesktopAutomationRole::MagicSpellCaster                ? 1u
             : mRole == DesktopAutomationRole::NativePut                       ? 1u
             : mRole == DesktopAutomationRole::NativeTake                      ? 1u
+            : mRole == DesktopAutomationRole::NativeTraversal                 ? 8u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
@@ -988,6 +1011,8 @@ namespace TES3MP::OpenMWAdapter
 
     const char* DesktopAutomation::roleName() const noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal)
+            return "native-traversal";
         switch (mRole)
         {
             case DesktopAutomationRole::NativePut:

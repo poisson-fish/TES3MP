@@ -16,6 +16,25 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V10 uses native-inventory-10, the V9 fields, then appends:
+    // interior "SECOND_INTERIOR_NAME"
+    // cell interior:SECOND_SPACE_ID
+    // Both engine cells and wire IDs must be distinct. One bound ordinary door
+    // remains in the first cell; 32 shared inventories / 64 world items are total
+    // budgets across both. Active sessions pin the union of occupied interiors.
+    // Empty cells release their OpenMW CellStores/query scenes and freeze door
+    // motion. Canonical inventories/items/door and drop-cell membership survive
+    // unloading in one session-format-6 image; returning never reloads loot.
+    // V10 requires a new campaign. Existing V8/V9 identities remain unchanged.
+    // V11 uses native-inventory-11 with the same fields. Discover at most 32
+    // winning unscripted, unlocked, untrapped teleport doors connecting the two
+    // interiors through OpenMW. Exterior/unbound/unsupported doors cannot activate.
+    // Activation validates authenticated caller, cell, placement, revision and
+    // reach; persists only that player's resolved destination and a new authority
+    // epoch with the native image, then publishes the destination baseline.
+    // Direct client cell changes are rejected; prior-epoch motion cannot undo
+    // the teleport. Requires native-teleport-capable clients and a new campaign.
+    // V8/V9/V10 remain unchanged; immutable teleport data needs no new save format.
     // V9 adds exactly one ordinary door to the coherent durable session. Use
     // native-inventory-9 and insert, between interior and cell:
     // door "ORIGIN_PLUGIN" REFERENCE_INDEX

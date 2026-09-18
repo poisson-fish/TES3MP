@@ -129,11 +129,14 @@ namespace TES3MP
         std::vector<GroundItemPresentation> presentation;
         bool nativeWorld = false;
         std::optional<NativeDoorSnapshot> door;
+        // Immutable teleport activators in this cell; destinations stay server-side.
+        std::vector<uint64_t> teleportDoors;
 
         static std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> create(
             InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
             std::span<const uint64_t> nativePlacements = {}, std::span<const GroundItemPresentation> presentation = {},
-            bool nativeWorld = false, std::optional<NativeDoorSnapshot> door = {});
+            bool nativeWorld = false, std::optional<NativeDoorSnapshot> door = {},
+            std::span<const uint64_t> teleportDoors = {});
         friend bool operator==(const ReliableGroundItemBaseline&, const ReliableGroundItemBaseline&) noexcept = default;
     };
 

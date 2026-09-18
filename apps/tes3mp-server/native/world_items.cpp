@@ -11,6 +11,9 @@ namespace TES3MP::Native
             throw std::invalid_argument("World item domain changed");
         if (!values.mWorldItems) return;
         const auto& world = *values.mWorldItems;
+        if (bool(values.mWorldCells) != bool(mWorldCells)
+            || (values.mWorldCells && values.mWorldCells->size() != world.mObjects.size()))
+            throw std::invalid_argument("World membership domain changed");
         if (world.mObjects.size() > PreparedPlainEquipment::MaxItems || world.mNpcStats
             || world.mSelected.isSet() || std::ranges::any_of(world.mSlots, [](auto id) { return id.isSet(); }))
             throw std::invalid_argument("Invalid world item storage shape");
@@ -18,6 +21,14 @@ namespace TES3MP::Native
         for (const auto& object : world.mObjects)
         {
             const auto& ref = object.mRef;
+            if (values.mWorldCells)
+            {
+                const auto cell = values.mWorldCells->find(ref.mRefNum);
+                const auto placedCell = mPlacedItemCells.find(ref.mRefNum);
+                if (cell == values.mWorldCells->end() || cell->second > 1
+                    || (ref.mRefNum.hasContentFile() && (placedCell == mPlacedItemCells.end() || placedCell->second != cell->second)))
+                    throw std::invalid_argument("Saved world cell differs from bound content");
+            }
             if (ref.mCount <= 0 || ref.mCount > 1000000)
                 throw std::invalid_argument("Invalid active world count");
             for (float value : ref.mPos.pos)
@@ -41,6 +52,7 @@ namespace TES3MP::Native
         uint64_t mBefore;
         std::unique_ptr<Installation> mInventory;
         PlainEquipmentValues mWorld;
+        std::optional<EquipmentSessionValues::WorldCells> mCells;
         EquipmentBytes mImage;
     };
     EquipmentRuntime::PreparedWorldTransfer::PreparedWorldTransfer(std::unique_ptr<State> state) : mState(std::move(state)) {}
@@ -71,17 +83,24 @@ namespace TES3MP::Native
         (void)worldValues(&prepared);
         return owner == prepared.mState->mActor ? prepared.mState->mInventory->mSaved : installedValues(owner);
     }
+    uint8_t EquipmentRuntime::worldCell(ESM::RefNum ref, const PreparedWorldTransfer* prepared) const
+    {
+        (void)worldValues(prepared);
+        const auto& cells = prepared ? prepared->mState->mCells : mWorldCells;
+        return cells ? cells->at(ref) : 0;
+    }
     EquipmentRuntime::PreparedWorldTransfer EquipmentRuntime::prepareWorldTransfer(size_t actor,
         InventoryInstanceId item, int count, bool pickup, ESM::Position position, uint64_t expected,
-        const std::function<ESM::Position(const ESM::ObjectState&)>& placement)
+        const std::function<ESM::Position(const ESM::ObjectState&)>& placement, uint8_t cell)
     {
         if (actor >= 2 || !mConnected || mFailedClosed || mRestartActor || !mWorldItems
-            || expected != mWorld.getPtrRegistryRevision() || count <= 0 || count > 1000000)
+            || expected != mWorld.getPtrRegistryRevision() || count <= 0 || count > 1000000
+            || cell > (mWorldCells ? 1 : 0))
             throw std::invalid_argument("World transfer unavailable, stale or invalid");
         const ESM::RefNum identity{item.mIndex, item.mContentFile};
         const auto found = std::ranges::find(mWorldItems->mObjects, identity,
             [](const auto& object) { return object.mRef.mRefNum; });
-        if ((pickup && found == mWorldItems->mObjects.end())
+        if ((pickup && (found == mWorldItems->mObjects.end() || worldCell(identity) != cell))
             || (!pickup && mWorldItems->mObjects.size() == PreparedPlainEquipment::MaxItems))
             throw std::invalid_argument("World item missing or world capacity exhausted");
         for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
@@ -96,19 +115,25 @@ namespace TES3MP::Native
         state->mBefore = expected;
         state->mInventory = stageInstallation(actor, ownerPtr(actor), std::move(inventory));
         state->mWorld = *mWorldItems;
+        state->mCells = mWorldCells;
         if (pickup)
+        {
             std::erase_if(state->mWorld.mObjects, [&](const auto& object) { return object.mRef.mRefNum == identity; });
+            if (state->mCells) state->mCells->erase(identity);
+        }
         else
         {
             if (placement) position = placement(world);
             world.mRef.mPos = position;
             world.mPosition = position;
+            if (state->mCells) state->mCells->emplace(world.mRef.mRefNum, cell);
             state->mWorld.mObjects.push_back(std::move(world));
         }
         state->mWorld.mLastGenerated = state->mInventory->mSaved.mLastGenerated;
         EquipmentSessionValues values{{installedValues(0), installedValues(1)}, state->mInventory->mRevision};
         values.mActors[actor] = state->mInventory->mSaved;
         values.mWorldItems = state->mWorld;
+        values.mWorldCells = state->mCells;
         encodeSession(std::move(values), state->mImage);
         return PreparedWorldTransfer(std::move(state));
     }
@@ -134,6 +159,7 @@ namespace TES3MP::Native
             mWorld.mPtrRegistry.mRevision = state.mInventory->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = state.mWorld.mLastGenerated;
             mWorldItems->swap(state.mWorld);
+            mWorldCells.swap(state.mCells);
             bytes.swap(state.mImage);
         };
         install();

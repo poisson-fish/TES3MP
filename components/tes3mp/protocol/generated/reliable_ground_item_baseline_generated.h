@@ -446,7 +446,8 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
     VT_NATIVE_PLACEMENTS = 10,
     VT_PRESENTATION = 12,
     VT_NATIVE_WORLD = 14,
-    VT_DOOR = 16
+    VT_DOOR = 16,
+    VT_TELEPORT_DOORS = 18
   };
   const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *>(VT_HEADER);
@@ -469,6 +470,9 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
   const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door() const {
     return GetStruct<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *>(VT_DOOR);
   }
+  const ::flatbuffers::Vector<uint64_t> *teleport_doors() const {
+    return GetPointer<const ::flatbuffers::Vector<uint64_t> *>(VT_TELEPORT_DOORS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -483,6 +487,8 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
            verifier.VerifyVector(presentation()) &&
            VerifyField<uint8_t>(verifier, VT_NATIVE_WORLD, 1) &&
            VerifyField<TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor>(verifier, VT_DOOR, 8) &&
+           VerifyOffset(verifier, VT_TELEPORT_DOORS) &&
+           verifier.VerifyVector(teleport_doors()) &&
            verifier.EndTable();
   }
 };
@@ -512,6 +518,9 @@ struct ReliableGroundItemBaselineBuilder {
   void add_door(const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door) {
     fbb_.AddStruct(ReliableGroundItemBaseline::VT_DOOR, door);
   }
+  void add_teleport_doors(::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> teleport_doors) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_TELEPORT_DOORS, teleport_doors);
+  }
   explicit ReliableGroundItemBaselineBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -531,8 +540,10 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> native_placements = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *>> presentation = 0,
     bool native_world = false,
-    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr) {
+    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> teleport_doors = 0) {
   ReliableGroundItemBaselineBuilder builder_(_fbb);
+  builder_.add_teleport_doors(teleport_doors);
   builder_.add_door(door);
   builder_.add_presentation(presentation);
   builder_.add_native_placements(native_placements);
@@ -551,10 +562,12 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     const std::vector<uint64_t> *native_placements = nullptr,
     const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation> *presentation = nullptr,
     bool native_world = false,
-    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr) {
+    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr,
+    const std::vector<uint64_t> *teleport_doors = nullptr) {
   auto items__ = items ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem>(*items) : 0;
   auto native_placements__ = native_placements ? _fbb.CreateVector<uint64_t>(*native_placements) : 0;
   auto presentation__ = presentation ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation>(*presentation) : 0;
+  auto teleport_doors__ = teleport_doors ? _fbb.CreateVector<uint64_t>(*teleport_doors) : 0;
   return TES3MP::Protocol::Schema::GroundItemBaseline::CreateReliableGroundItemBaseline(
       _fbb,
       header,
@@ -563,7 +576,8 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
       native_placements__,
       presentation__,
       native_world,
-      door);
+      door,
+      teleport_doors__);
 }
 
 inline const TES3MP::Protocol::Schema::GroundItemBaseline::ReliableGroundItemBaseline *GetReliableGroundItemBaseline(const void *buf) {

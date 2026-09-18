@@ -20,7 +20,8 @@ namespace TES3MP::Native
         const std::array<EquipmentActorBinding, 2>& actors,
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
         std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
-        int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems, std::optional<ESM::CellRef> door)
+        int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems, std::optional<ESM::CellRef> door,
+        std::optional<EquipmentSessionValues::WorldCells> cells)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
         , mScriptLocals(std::move(locals)), mConnected(connected)
     {
@@ -55,6 +56,19 @@ namespace TES3MP::Native
         }
         if (containers.size() > MaxEquipmentContainers)
             throw std::invalid_argument("Shared container budget exceeded");
+        if (cells)
+        {
+            if (!worldItems || !door || cells->size() != worldItems->size())
+                throw std::invalid_argument("Two-cell runtime requires complete world membership and a door");
+            for (const auto& ref : *worldItems)
+            {
+                const auto found = cells->find(ref.mRefNum);
+                if (found == cells->end() || found->second > 1)
+                    throw std::invalid_argument("Invalid placed cell membership");
+            }
+            mPlacedItemCells = *cells;
+            mWorldCells = restartActor ? EquipmentSessionValues::WorldCells{} : std::move(*cells);
+        }
         std::set<ESM::RefNum> placements;
         if (door)
         {
