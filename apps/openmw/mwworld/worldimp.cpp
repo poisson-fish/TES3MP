@@ -1,5 +1,6 @@
 #include "worldimp.hpp"
 #include "itemplacement.hpp"
+#include "doormotion.hpp"
 
 #include <charconv>
 #include <limits>
@@ -1421,15 +1422,11 @@ namespace MWWorld
         auto oldRot = objPos.asRotationVec3();
         auto newRot = oldRot;
 
-        float minRot = door.getCellRef().getPosition().rot[2];
-        float maxRot = minRot + osg::DegreesToRadians(90.f);
-
-        float diff = duration * osg::DegreesToRadians(90.f) * (state == MWWorld::DoorState::Opening ? 1 : -1);
-        float targetRot = std::clamp(oldRot.z() + diff, minRot, maxRot);
-        newRot.z() = targetRot;
+        const auto motion = doorMotion(state, door.getCellRef().getPosition().rot[2], oldRot.z(), duration);
+        newRot.z() = motion.mTargetAngle;
         rotateObject(door, newRot, MWBase::RotationFlag_none);
 
-        bool reached = (targetRot == maxRot && state != MWWorld::DoorState::Idle) || targetRot == minRot;
+        bool reached = motion.mReached;
 
         /// \todo should use convexSweepTest here
         bool collisionWithActor = false;
@@ -1439,11 +1436,8 @@ namespace MWWorld
 
             if (ptr.getClass().isActor())
             {
-                auto localPoint = objPos.asVec3() - point;
-                osg::Vec3f direction = osg::Quat(diff, osg::Vec3f(0, 0, 1)) * localPoint - localPoint;
-                direction.normalize();
                 mPhysics->reportCollision(Misc::Convert::toBullet(point), Misc::Convert::toBullet(normal));
-                if (direction * normal < 0) // door is turning away from actor
+                if (!doorContactBlocks(motion.mDelta, objPos.asVec3(), point, normal)) // turning away from actor
                     continue;
 
                 collisionWithActor = true;
@@ -2314,23 +2308,8 @@ namespace MWWorld
 
     void World::activateDoor(const MWWorld::Ptr& door)
     {
-        auto state = door.getClass().getDoorState(door);
-        switch (state)
-        {
-            case MWWorld::DoorState::Idle:
-                if (door.getRefData().getPosition().rot[2] == door.getCellRef().getPosition().rot[2])
-                    state = MWWorld::DoorState::Opening; // if closed, then open
-                else
-                    state = MWWorld::DoorState::Closing; // if open, then close
-                break;
-            case MWWorld::DoorState::Closing:
-                state = MWWorld::DoorState::Opening; // if closing, then open
-                break;
-            case MWWorld::DoorState::Opening:
-            default:
-                state = MWWorld::DoorState::Closing; // if opening, then close
-                break;
-        }
+        const auto state = activatedDoorState(door.getClass().getDoorState(door),
+            door.getCellRef().getPosition().rot[2], door.getRefData().getPosition().rot[2]);
         door.getClass().setDoorState(door, state);
         mDoorStates[door] = state;
     }

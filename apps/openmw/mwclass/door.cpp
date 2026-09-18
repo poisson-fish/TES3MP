@@ -20,6 +20,7 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/containerstore.hpp"
 #include "../mwworld/customdata.hpp"
+#include "../mwworld/doormotion.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/failedaction.hpp"
 #include "../mwworld/ptr.hpp"
@@ -202,30 +203,23 @@ namespace MWClass
             {
                 // animated door
                 std::unique_ptr<MWWorld::Action> action = std::make_unique<MWWorld::ActionDoor>(ptr);
-                const auto doorState = getDoorState(ptr);
-                bool opening = true;
-                float doorRot = ptr.getRefData().getPosition().rot[2] - ptr.getCellRef().getPosition().rot[2];
-                if (doorState == MWWorld::DoorState::Opening)
-                    opening = false;
-                if (doorState == MWWorld::DoorState::Idle && doorRot != 0)
-                    opening = false;
+                const float closedAngle = ptr.getCellRef().getPosition().rot[2];
+                const float currentAngle = ptr.getRefData().getPosition().rot[2];
+                const auto movement = MWWorld::activatedDoorState(getDoorState(ptr), closedAngle, currentAngle);
 
-                if (opening)
+                if (movement == MWWorld::DoorState::Opening)
                 {
                     MWBase::Environment::get().getSoundManager()->fadeOutSound3D(ptr, closeSound, 0.5f);
                     // Doors rotate at 90 degrees per second, so start the sound at
                     // where it would be at the current rotation.
-                    float offset = doorRot / (osg::PIf * 0.5f);
-                    action->setSoundOffset(offset);
                     action->setSound(openSound);
                 }
                 else
                 {
                     MWBase::Environment::get().getSoundManager()->fadeOutSound3D(ptr, openSound, 0.5f);
-                    float offset = 1.0f - doorRot / (osg::PIf * 0.5f);
-                    action->setSoundOffset(std::max(offset, 0.0f));
                     action->setSound(closeSound);
                 }
+                action->setSoundOffset(MWWorld::doorSoundOffset(movement, closedAngle, currentAngle));
 
                 return action;
             }

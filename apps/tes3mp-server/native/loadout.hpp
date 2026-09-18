@@ -64,6 +64,15 @@ namespace TES3MP::Native
         std::vector<PlacedInventory> placedActors(std::string_view cell);
         std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit);
         std::vector<PlacedInventory> placedItems(std::string_view cell, size_t limit);
+        struct PlacedDoor
+        {
+            ESM::CellRef mRef;
+            uint64_t mIdentity;
+            std::string mPlugin;
+        };
+        // Select one winning ordinary door; unrelated teleport/scripted doors
+        // are not silently brought into the supported domain.
+        PlacedDoor resolveDoor(std::string_view cell, std::string_view plugin, uint32_t index);
         void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;

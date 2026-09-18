@@ -4,71 +4,68 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M3 in [PLAN.md](PLAN.md). Shared inventories, actor equipment,
-  corpse loot, Take All and stationary world pickup/drop use one writer.
-- **Placement status:** user verified live dropping works and accepted this slice.
-- **Next action:** inspect stock non-teleport door activation, motion and saved
-  state; identify the smallest native-authority integration for one unscripted
-  door in the bound interior.
+- **Milestone:** M3 in [PLAN.md](PLAN.md). Stationary pickup/drop is user-accepted.
+- **Next action:** add one bound ordinary door's native state to the existing
+  coherent session image, with bounded byte preflight, content binding and recovery.
+  Preserve v8 campaigns; changing the domain requires an explicit descriptor version.
 
-## Implemented behavior
+## Door preparation
 
-The [native host](../../apps/tes3mp-server/native/inventory_host.hpp) accepts
-**native-inventory-8**. Stock OpenMW cursor/floor rays and rendered bounds now have
-shared query helpers used by single-player and a headless server scene. Clients
-send bounded camera/cursor input before inventory mutation. The server resolves
-the stock 200-unit camera query; misses or slopes >=30 degrees use the original
-downward ground fallback. Bounds center the actual dropped model, including gold
-piles. No additional reach, supporting-surface or overlap rules were added.
+[Stock callers](../../apps/openmw/mwworld/worldimp.cpp) now share
+[door motion rules](../../apps/openmw/mwworld/doormotion.hpp): activation reversal,
+partial-motion sound offsets, 90-degree/second rotation, endpoint clamping and
+actor-contact direction. World retains collision rollback, AI and presentation.
+Idle means stopped, including fully or partly open; explicit stock Idle activation
+retains its close/snap behavior.
 
-Resolved stationary position, partial-stack subtraction and fresh world identity
-commit in one durable image. Both clients install the committed position without
-snapping it again. Safe write rejection leaves inventory/world state unchanged;
-uncertain writes close service. Recovery never reloads looted placements or loot.
+[OrdinaryDoor](../../apps/tes3mp-server/native/ordinary_door.hpp) prepares detached
+ESM::DoorState values and sound intents. Moving steps require an explicit actor
+collision query; blocked steps preserve rotation/direction. Invalid state, transforms
+and duration reject before querying. Stock persistence stores current position plus
+ANIM direction, and native validation rejects invalid ANIM values retained by ESM.
+Loadout discovery resolves one winning placement and stable identity, rejecting
+scripted, teleporting, locked/keyed or trapped targets and configured Lua services.
 
-V8 adds resolved model bytes to saved content identity. Older descriptors retain
-their meanings; v7 still drops at the player position. Changing versions requires
-matching builds and a new campaign or explicit migration, never an automatic reset.
+This is preparation, not a network authority cutover. No production door descriptor,
+canonical transaction, bounded byte decoder, collision provider or native door
+replication is wired. No new save file or competing live writer was introduced.
 
-Inherited: up to 64 active world references, two players and 32 shared inventories
-in one interior; winning placement overrides/deletions, whole-reference pickup,
-stock instance fields and gold conversion, starting equipment/all 19 slots,
-container/corpse transfers and atomic Take All. Complete ground baselines suppress
-the original item domain. Authentication, stale-state checks and coherent recovery
-remain in the same canonical writer.
+## Running inventory authority
+
+The [native host](../../apps/tes3mp-server/native/inventory_host.hpp) remains
+**native-inventory-8**: two players, 32 shared inventories and 64 active world items
+in one interior. Equipment/all 19 slots, corpse loot, Take All and pickup/drop
+share one durable image. Recovery never reloads looted content.
+
+V8 uses shared stock camera/floor rays and model bounds for stationary placement;
+misses or slopes >=30 degrees use the downward fallback. Clients install committed
+positions without repositioning. Model bytes join saved content identity; v7 retains
+player-position drops. Safe write rejection is atomic; uncertain writes close service.
 
 ## Verification
 
-Windows MSVC RelWithDebInfo, `build/vnext-product`; focused logs in `build/logs`.
+Windows MSVC RelWithDebInfo, `build/vnext-product`; logs in `build/logs`.
 
 | Filter/check | Evidence | Log |
 |---|---|---|
-| item-placement | stock distance/fallback, slope threshold, upright yaw, scaled bounds and particle exclusion | placement-query.log |
-| world-item-placement-host | real Morrowind records plus synthetic meshes: floor/table/slopes, malformed cameras, partial stacks/gold, committed-item support, atomic rejection, two synthetic clients, reconnect/restart and resource mismatch | placement-host.log |
-| inventory replication | camera payload round trip, truncation and invalid-field rejection | placement-protocol.log |
-| world-items / world-items-canonical | inherited contention, atomic durability and recovery regressions | placement-world-items-regression.log / placement-world-items-canonical.log |
-| builds | native tests, desktop and adjacent tes3mp_server-placement.exe | placement-final-build.log / placement-desktop-build.log / placement-server-build.log |
-| guards | UI interception and patch coverage | placement-ui-contract.log / placement-registry.log |
+| ordinary-door | reversal, offsets, contact rollback, endpoints, stock field/save round trips, resumed motion, invalid-state rejection | door-state.log |
+| placed-door | synthetic overrides/deletions, origin identity, unsupported targets, Lua rejection | door-placement.log |
+| ordinary-door-loadout | Morrowind.esm:397586, in_c_door_arched, Seyda Neen Census and Excise Office; saved partial motion resumes/closes | door-real-loadout.log |
+| builds | native tests and desktop link | door-final-build.log / door-desktop-build.log |
+| guards | patch coverage and active documentation | door-registry.log / docs-budget.log / docs-links.log |
 
-Live v8: user confirmed dropping works and accepted stationary placement as done.
-The focused automated logs above supply the case-by-case placement evidence.
-
-Earlier live v7 evidence used Morrowind.esm plus generated ManualWorldItems.esp,
-"vNext World Items Test", `build/manual-world-items-v7-20260917`. User confirmed
-pickup/drop presentation; both clients rejoined at revision 33 before/after restart
-with an identical 3,588-byte image. Logs: `build/logs/manual-world-items-v7-20260917`.
-Container/corpse, equipment and Take All visuals are also inherited user-confirmed
-evidence. No published-mod, TR or complete-suite proof is claimed.
+Door collision queries in tests are synthetic; no live door-client proof is claimed.
+Inherited v8 evidence: `placement-query.log`, `placement-host.log`,
+`placement-protocol.log`, `placement-world-items-regression.log` and
+`placement-world-items-canonical.log`; user confirmed live dropping. Earlier v7
+two-client reconnect/restart reached revision 33 with identical 3,588-byte images
+in `build/manual-world-items-v7-20260917`. Container/corpse/equipment/Take All
+presentation is also inherited user-confirmed evidence.
 
 ## Limits
 
-The server placement scene covers initial unscripted non-actor geometry and
-committed world items in one interior. Animated geometry and changed doors are
-not simulated. Matching client/server model resources remain a deployment
-requirement; camera/movement authority is inherited. Optional placement preview
-is not implemented. Ordinary drops remain stationary; tumbling/bumping is excluded.
-
-Dynamic cells, script/Lua/custom records, ownership/theft, living/companion access,
-AI/combat/death, item use, locks/traps, merchants/respawn, chargen/rewards and
-persistent time/RNG remain unfinished. General campaign recovery and broad
-mod compatibility remain unproven.
+Placement geometry is initial unscripted non-actor content plus committed items;
+changed doors and animation remain unsimulated. Camera/movement authority is
+inherited. Dynamic cells, scripts/Lua, AI/combat, locks/traps, merchants/respawn,
+chargen/rewards and persistent time/RNG remain unfinished. General campaign
+recovery, published mods and Tamriel Rebuilt remain unproven.

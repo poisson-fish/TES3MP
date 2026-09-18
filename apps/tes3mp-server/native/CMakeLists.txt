@@ -4,7 +4,7 @@
 # headless packaging. Do not relax components/tes3mp's independent boundaries.
 add_library(tes3mp_native_equipment_runtime STATIC
     equipment_runtime.cpp equipment_runtime.hpp equipment_command.hpp inventory_identity.hpp actor_inventory.hpp
-    connected_runtime.cpp world_items.cpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
+    connected_runtime.cpp world_items.cpp ordinary_door.cpp ordinary_door.hpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
     equipment_codec.cpp equipment_codec.hpp equipment_file.cpp equipment_file.hpp
     bounded_file.cpp bounded_file.hpp persistence.hpp runtime_phases.hpp session_commit.hpp)
 target_compile_features(tes3mp_native_equipment_runtime PUBLIC cxx_std_20)
@@ -14,7 +14,7 @@ tes3mp_verify_target_includes(tes3mp_native_equipment_runtime
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender"
         "test_allocations.hpp" "equipment_tests.hpp" "transfer_rehearsal.hpp" "transfer_file_sink.hpp")
 
-add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp diagnostic.hpp inventory.cpp enchantment.cpp equipment_probe.cpp placed_containers.cpp)
+add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp diagnostic.hpp inventory.cpp enchantment.cpp equipment_probe.cpp placed_containers.cpp placed_door.cpp)
 target_compile_features(tes3mp_native_loadout PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_loadout PRIVATE tes3mp_native_equipment_runtime openmw-lib Boost::program_options)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout ALLOWED tes3mp_native_equipment_runtime openmw-lib Boost::program_options)
@@ -59,7 +59,7 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
     ../server_app_tests.cpp
     inventory_service_tests.cpp inventory_service_tests.hpp
-    placed_container_tests.cpp placement_tests.cpp
+    placed_container_tests.cpp placement_tests.cpp door_tests.cpp door_tests.hpp
     equipment_tests.cpp equipment_tests.hpp equipment_command.hpp
     transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
     transfer_save_codec.cpp transfer_save_codec.hpp

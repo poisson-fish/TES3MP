@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "door_tests.hpp"
 #include "equipment_tests.hpp"
 #include "inventory_service_tests.hpp"
 #include "transfer_rehearsal.hpp"
@@ -6223,6 +6224,16 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "ordinary-door")
+        {
+            TES3MP::Native::Testing::checkOrdinaryDoor();
+            return;
+        }
+        if (filter == "placed-door")
+        {
+            TES3MP::Native::Testing::checkPlacedDoor(root);
+            return;
+        }
         if (filter == "item-placement")
         {
             TES3MP::Native::Testing::checkItemPlacement();
@@ -6471,6 +6482,12 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 4 && std::string_view(argv[1]) == "ordinary-door-loadout")
+        {
+            TES3MP::Native::Testing::checkDoorLoadout(std::filesystem::absolute(std::filesystem::u8path(argv[2])), argv[3]);
+            std::cout << "PASS " << argv[1] << '\n';
+            return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "world-item-placement-host")
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),

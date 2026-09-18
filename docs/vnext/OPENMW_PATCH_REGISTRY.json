@@ -316,7 +316,7 @@
       "id": "P8-003",
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",
-      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement and scene-query helpers.",
+      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement, scene-query and ordinary-door motion helpers.",
       "paths": [
         "apps/openmw/CMakeLists.txt"
       ],
@@ -487,7 +487,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers now use the shared cursor/floor and bounds helpers without changing their mutation order.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -539,6 +539,26 @@
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies an equivalent supported pre-mutation external lockpick and probe authority seam"
+    },
+    {
+      "id": "NATIVE-DOOR-001",
+      "slice": "M3 ordinary door preparation",
+      "owner": "OpenMW native runtime",
+      "purpose": "Share stock ordinary-door activation direction, partial-motion sound offsets, rotation proposals and actor-contact direction between OpenMW callers and isolated native value preparation. Preserve idle/open distinction, reversal and explicit Idle snap semantics. Native tests exercise stock custom-state field producers/consumers and ESM DoorState persistence; production authority remains unwired.",
+      "paths": [
+        "apps/openmw/mwclass/door.cpp",
+        "apps/openmw/mwworld/doormotion.cpp",
+        "apps/openmw/mwworld/doormotion.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests ordinary-door",
+        "tes3mp_native_loadout_tests placed-door",
+        "tes3mp_native_loadout_tests ordinary-door-loadout",
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw RelWithDebInfo link"
+      ],
+      "disposition": "shared engine gameplay extraction",
+      "removal_condition": "OpenMW provides an equivalent service-independent ordinary-door activation and motion seam"
     }
   ]
 }
