@@ -39,6 +39,23 @@ int main()
     const auto containerBytes
         = encodeReliableContainerInventoryBaseline(std::get<ReliableContainerInventoryBaseline>(container));
     assert(decodeReliableContainerInventoryBaseline(containerBytes) == container);
+    auto actor = std::get<ReliableContainerInventoryBaseline>(container);
+    actor.equipment = {binding};
+    const auto actorBytes = encodeReliableContainerInventoryBaseline(actor);
+    assert(decodeReliableContainerInventoryBaseline(actorBytes) == ContainerInventoryBaselineDecodeResult(actor));
+    for (std::size_t size = 0; size < actorBytes.size(); ++size)
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeReliableContainerInventoryBaseline(std::span(actorBytes).first(size))));
+    // Exercise the decoder with adversarial wire values, bypassing create().
+    for (const auto& invalid : std::vector<std::vector<EquipmentBinding>>{
+            {{EquipmentSlot::CarriedRight, id<ItemStackId>(999)}},
+            {{EquipmentSlot::Shirt, stack.stackId}, {EquipmentSlot::CarriedRight, stack.stackId}},
+            {{EquipmentSlot::Count, stack.stackId}}, std::vector<EquipmentBinding>(20, binding)})
+    {
+        actor.equipment = invalid;
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeReliableContainerInventoryBaseline(encodeReliableContainerInventoryBaseline(actor))));
+    }
 
     const GroundItemInterestMember ground{ stack, Position3(4, 5, 6), id<WorldItemRevision>(6) };
     auto groundBaseline = ReliableGroundItemBaseline::create(header(), cell, std::span(&ground, 1));

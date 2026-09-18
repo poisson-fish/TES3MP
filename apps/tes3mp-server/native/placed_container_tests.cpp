@@ -8,6 +8,9 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
+#include <components/esm3/loadlevlist.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <fstream>
@@ -44,6 +47,11 @@ namespace TES3MP::Native::Testing
                 }
                 ESM::NPC npc; npc.blank(); npc.mId = ESM::RefId::stringRefId("actor");
                 npc.mClass = klass.mId; npc.mRace = race.mId; write(out, npc);
+                ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId("actor_script");
+                script.mScriptText = "begin actor_script\nend actor_script\n"; write(out, script);
+                npc.mId = ESM::RefId::stringRefId("scripted_actor"); npc.mScript = script.mId; write(out, npc);
+                ESM::Creature creature; creature.blank(); creature.mId = ESM::RefId::stringRefId("creature"); write(out, creature);
+                ESM::CreatureLevList leveled; leveled.blank(); leveled.mId = ESM::RefId::stringRefId("leveled_actor"); write(out, leveled);
                 ESM::Clothing shirt; shirt.blank(); shirt.mId = ESM::RefId::stringRefId("shirt");
                 shirt.mData.mType = ESM::Clothing::Shirt; write(out, shirt);
             }
@@ -68,7 +76,22 @@ namespace TES3MP::Native::Testing
                 ref.mPos.pos[0] = patch ? float(i * 2) : float(i);
                 ref.save(out, false, false, patch && i == 8);
             }
-            out.endRecord(ESM::REC_CELL); out.close();
+            out.endRecord(ESM::REC_CELL);
+            for (const auto* name : {"Actor test", "Scripted actor test", "Leveled actor test"})
+            {
+                cell.mName = name; cell.updateId();
+                out.startRecord(ESM::REC_CELL, 0); cell.save(out);
+                for (uint32_t i : {103, 101, 104, 102})
+                {
+                    ESM::CellRef ref; ref.blank(); ref.mRefNum = {i, patch ? 1 : 0};
+                    ref.mRefID = ESM::RefId::stringRefId(std::string_view(name) == "Scripted actor test" ? "scripted_actor"
+                        : std::string_view(name) == "Leveled actor test" ? "leveled_actor" : i == 103 ? "creature" : "actor");
+                    ref.mPos.pos[0] = patch ? float(i * 2) : float(i);
+                    ref.save(out, false, false, patch && i == 104);
+                }
+                out.endRecord(ESM::REC_CELL);
+            }
+            out.close();
         }
     }
 
@@ -144,6 +167,31 @@ namespace TES3MP::Native::Testing
             auto reopened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
                 ServerApp::CanonicalPersistenceFile::open(path, identity));
             ServerApp::Testing::nativeInventoryApplication(restored, *reopened);
+        }
+    }
+
+    void checkPlacedActors(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Actor discovery scratch already exists");
+        plugin(scratch / "Base.esm", false); plugin(scratch / "Patch.esp", true);
+        { std::ofstream out(scratch / "empty.omwscripts"); out << "# no script execution\n"; }
+        LoadoutOptions options; options.mDataPaths = {scratch};
+        options.mContent = {"Base.esm", "empty.omwscripts", "Patch.esp"}; options.mEncoding = "win1252";
+        Loadout loadout(options);
+        const auto actors = loadout.resolveActors("Actor test", 3);
+        require(actors.size() == 3 && actors[0].mRef.mRefNum == ESM::RefNum{101, 0}
+            && actors[1].mRef.mRefNum == ESM::RefNum{102, 0} && actors[2].mRef.mRefNum == ESM::RefNum{103, 0}
+            && actors[0].mRef.mPos.pos[0] == 202 && actors[1].mRef.mPos.pos[0] == 204
+            && actors[0].mIdentity != actors[1].mIdentity && actors[0].mRef.mRefID == actors[1].mRef.mRefID
+            && actors[2].mRef.mRefID == ESM::RefId::stringRefId("creature"),
+            "Actor discovery lost winning overrides, deletions, placement order or repeated-base identities");
+        require(loadout.resolveActors("Shared test", 1).empty(), "Empty actor domain is invalid");
+        for (const auto* cell : {"Actor test", "Scripted actor test", "Leveled actor test"})
+        {
+            bool rejected = false;
+            try { loadout.resolveActors(cell, std::string_view(cell) == "Actor test" ? 2 : 32); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "Actor discovery silently skipped a script, spawn or over-budget placement");
         }
     }
 }

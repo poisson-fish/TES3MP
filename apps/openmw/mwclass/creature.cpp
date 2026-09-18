@@ -751,9 +751,14 @@ namespace MWClass
 
     float Creature::getSkill(const MWWorld::Ptr& ptr, ESM::RefId id) const
     {
+        return getSkill(ptr, id, *MWBase::Environment::get().getESMStore());
+    }
+
+    float Creature::getSkill(const MWWorld::Ptr& ptr, ESM::RefId id, const MWWorld::ESMStore& store) const
+    {
         MWWorld::LiveCellRef<ESM::Creature>* ref = ptr.get<ESM::Creature>();
 
-        const ESM::Skill* skillRecord = MWBase::Environment::get().getESMStore()->get<ESM::Skill>().find(id);
+        const ESM::Skill* skillRecord = store.get<ESM::Skill>().find(id);
 
         switch (skillRecord->mData.mSpecialization)
         {

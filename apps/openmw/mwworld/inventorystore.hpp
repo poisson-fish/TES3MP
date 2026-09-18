@@ -26,6 +26,21 @@ namespace MWWorld
         std::function<void(const Ptr&)> mEquipmentChanged;
     };
 
+    // Synchronous stock selection with explicit actor inputs and effect ports.
+    // Splitting and equipment effects may mutate storage: callers needing atomic
+    // failure must provide detached/unpublished state, as at server bootstrap.
+    struct InventoryStoreAutoEquipContext
+    {
+        const ESMStore& mStore;
+        bool mActorIsNpc;
+        int mCreatureServices;
+        std::function<float(ESM::RefId)> mSkill;
+        std::function<float(const ConstPtr&)> mArmorRating;
+        std::function<bool(const ConstPtr&)> mCanEquip;
+        std::function<void(const Ptr&)> mUnstack;
+        std::function<void()> mEquipmentChanged;
+    };
+
     class InventoryStoreListener
     {
     public:
@@ -82,8 +97,9 @@ namespace MWWorld
 
         TSlots mSlots;
 
-        void autoEquipWeapon(TSlots& slots);
-        void autoEquipArmor(TSlots& slots);
+        void autoEquipWeapon(TSlots& slots, const InventoryStoreAutoEquipContext& context);
+        void autoEquipArmor(TSlots& slots, const InventoryStoreAutoEquipContext& context);
+        InventoryStoreAutoEquipContext stockAutoEquipContext();
 
         void copySlots(const InventoryStore& store);
 
@@ -144,6 +160,7 @@ namespace MWWorld
         ///< Unequip all currently equipped items.
 
         void autoEquip();
+        void autoEquip(const InventoryStoreAutoEquipContext& context);
         ///< Auto equip items according to stats and item value.
 
         using ContainerStore::stacks;
@@ -157,6 +174,10 @@ namespace MWWorld
         /// @return the number of items actually removed
 
         ContainerStoreIterator unequipSlot(int slot, bool applyUpdates = true);
+        bool unequipRemovedItem(const Ptr& item, const InventoryStoreEquipmentContext& context);
+        // Apply committed ordinary equipment to presentation storage. No splits,
+        // restacking, item scripts or gameplay selection; notify the model once.
+        void applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment);
         ContainerStoreIterator unequipSlot(
             int slot, const InventoryStoreEquipmentContext& context, bool applyUpdates = true);
         ///< Unequip \a slot.

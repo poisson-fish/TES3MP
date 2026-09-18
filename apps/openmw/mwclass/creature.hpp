@@ -117,6 +117,7 @@ namespace MWClass
         bool canWalk(const MWWorld::ConstPtr& ptr) const override;
 
         float getSkill(const MWWorld::Ptr& ptr, ESM::RefId id) const override;
+        float getSkill(const MWWorld::Ptr& ptr, ESM::RefId id, const MWWorld::ESMStore& store) const;
 
         void readAdditionalState(const MWWorld::Ptr& ptr, const ESM::ObjectState& state) const override;
         ///< Read additional state from \a state into \a ptr.

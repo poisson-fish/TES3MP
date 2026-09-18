@@ -44,6 +44,7 @@ namespace MWClass
         /// stay stacked when equipped?
 
         ESM::RefId getEquipmentSkill(const MWWorld::ConstPtr& ptr, bool useLuaInterfaceIfAvailable) const override;
+        ESM::RefId getEquipmentSkill(const MWWorld::ConstPtr& ptr, const MWWorld::ESMStore& content) const;
 
         MWGui::ToolTipInfo getToolTipInfo(const MWWorld::ConstPtr& ptr, int count) const override;
         ///< @return the content of the tool tip to be displayed. raises exception if the object has no tooltip.
@@ -88,6 +89,8 @@ namespace MWClass
         /// Get the effective armor rating, factoring in the actor's skills, for the given armor.
         float getSkillAdjustedArmorRating(
             const MWWorld::ConstPtr& armor, const MWWorld::Ptr& actor, bool useLuaInterfaceIfAvailable) const override;
+        float getSkillAdjustedArmorRating(
+            const MWWorld::ConstPtr& armor, float skill, const MWWorld::ESMStore& content) const;
     };
 }
 

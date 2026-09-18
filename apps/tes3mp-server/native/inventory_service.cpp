@@ -1,4 +1,5 @@
 #include "inventory_service.hpp"
+#include "actor_inventory.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -150,6 +151,9 @@ namespace TES3MP::Native
         }
         const auto sharedIndex = container(command.containerId);
         const auto& shared = mBinding.mContainers[sharedIndex];
+        const auto sharedOwner = mRuntime.ownerPtr(sharedIndex + 2);
+        if (actorInventory(sharedOwner) && !initialCorpse(sharedOwner))
+            throw std::invalid_argument("Living actor inventory access requires theft/companion services");
         const auto& player = *players.findPlayer(bound.player());
         const auto revision = mWorld.getPtrRegistryRevision();
         if (command.player != bound.player()
@@ -164,7 +168,7 @@ namespace TES3MP::Native
             || !positionsWithinReach(command.interactionOrigin, shared.mPosition, ReachQuanta)
             || !positionsWithinReach(player.transform().position(), command.interactionOrigin, ReachQuanta))
             throw std::invalid_argument("Native container command shape, revision, identity or reach invalid");
-        if (command.kind == InventoryTransactionKind::PutIntoContainer)
+        if (command.kind == InventoryTransactionKind::PutIntoContainer && !actorInventory(sharedOwner))
         {
             const auto* base = mRuntime.ownerPtr(sharedIndex + 2).get<ESM::Container>()->mBase;
             if (MWWorld::checkContainerPut((base->mFlags & ESM::Container::Organic) != 0,
@@ -368,9 +372,18 @@ namespace TES3MP::Native
         {
             const auto& shared = mBinding.mContainers[i];
             if (player->transform().cell() != shared.mCell) continue;
+            const auto owner = mRuntime.ownerPtr(i + 2);
+            // Living actors need an actor/equipment baseline and an access policy;
+            // do not publish their private contents as freely accessible chests.
+            if (actorInventory(owner) && !initialCorpse(owner)) continue;
+            const auto sharedValues = values(i + 2);
+            std::vector<EquipmentBinding> slots;
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (sharedValues.mSlots[slot].isSet())
+                    slots.push_back({static_cast<EquipmentSlot>(slot), wireId(sharedValues.mSlots[slot])});
             auto baseline = ReliableContainerInventoryBaseline::create(header, shared.mId, shared.mCell,
                 shared.mPosition, ContainerRevision::fromValue(version).value(), 0,
-                stacks(values(i + 2), mItemIds, mRuntime.mStore));
+                stacks(sharedValues, mItemIds, mRuntime.mStore), slots);
             if (!std::holds_alternative<ReliableContainerInventoryBaseline>(baseline)) return std::nullopt;
             result.containers.push_back(std::get<ReliableContainerInventoryBaseline>(std::move(baseline)));
         }

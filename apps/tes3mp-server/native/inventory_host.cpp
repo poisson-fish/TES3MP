@@ -31,6 +31,7 @@ namespace TES3MP::Native
             std::string cell, plugin;
             uint32_t index;
             CellId wireCell;
+            bool worldActors = false;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -49,9 +50,10 @@ namespace TES3MP::Native
                 return ESM::RefId::stringRefId(name);
             };
             std::string version; in >> version;
-            if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5")
+            if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
+                && version != "native-inventory-6")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool baseInventory = version == "native-inventory-5";
+            const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6";
             const bool wholeInterior = version != "native-inventory-3";
             key("manifest");
             std::string identity; in >> identity;
@@ -116,7 +118,8 @@ namespace TES3MP::Native
             semantic << version << '\n' << identity << registration << '\n'
                 << actorA << ':' << countA << '\n' << actorB << ':' << countB << '\n'
                 << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
-            return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front()};
+            return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
+                version == "native-inventory-6"};
         }
     }
     struct InventoryHost::Impl
@@ -125,9 +128,20 @@ namespace TES3MP::Native
         InventoryService inventory;
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto)
         {
-            const auto references = start.plugin.empty()
-                ? loadout.resolveContainers(start.cell, MaxEquipmentContainers)
+            auto references = start.plugin.empty()
+                ? (start.worldActors ? loadout.placedContainers(start.cell) : loadout.resolveContainers(start.cell, MaxEquipmentContainers))
                 : std::vector{loadout.resolveContainer(start.cell, start.plugin, start.index)};
+            if (start.worldActors)
+            {
+                const auto actors = loadout.resolveActors(start.cell, MaxEquipmentContainers);
+                references.insert(references.end(), actors.begin(), actors.end());
+                std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
+                if (references.empty() || references.size() > MaxEquipmentContainers)
+                    throw std::invalid_argument("Native interior shared inventory count is empty or exceeds the startup budget");
+                for (const auto& ref : references)
+                    if (ref.mScripted || ref.mRef.mIsLocked || !ref.mRef.mTrap.empty())
+                        throw std::invalid_argument("Native placed inventory requires script, lock or trap services");
+            }
             std::ostringstream placement;
             for (const auto& placed : references)
             {
@@ -158,6 +172,7 @@ namespace TES3MP::Native
             if (!restored.empty())
             {
                 std::vector<ESM::RefId> references{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase};
+                for (const auto& shared : start.binding.mContainers) references.push_back(shared.mBase);
                 for (const auto& [id, record] : MWWorld::inventoryRecords(loadout.store())) references.push_back(record);
                 for (const auto& [id, record] : MWWorld::inventorySoulRecords(loadout.store())) references.push_back(record);
                 inventory.recover(restored, references);

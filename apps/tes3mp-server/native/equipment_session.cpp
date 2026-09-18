@@ -30,7 +30,8 @@ namespace TES3MP::Native
                     || binding.mEnvelope.mContent != bindings[0].mEnvelope.mContent
                     || &binding.mContent != &bindings[0].mContent)
                     throw std::invalid_argument("Equipment session shared content mismatch");
-                if (i >= 2 && (std::any_of(image.mSlots.begin(), image.mSlots.end(), [](auto id) { return id.isSet(); }) || image.mSelected.isSet() || image.mNpcStats))
+                if (i >= 2 && (image.mNpcStats || (!binding.mInventory
+                    && (std::any_of(image.mSlots.begin(), image.mSlots.end(), [](auto id) { return id.isSet(); }) || image.mSelected.isSet()))))
                     throw std::invalid_argument("Equipment session container has equipment or stats");
                 image.validate(binding.mContent, binding.mEnvelope.mActor, binding.mScriptLocals.get());
                 if (!identities.insert(image.mActor).second)

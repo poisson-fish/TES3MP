@@ -4,14 +4,17 @@
 namespace TES3MP::Native::Testing
 {
     void checkPlacedContainers(const std::filesystem::path& scratch);
+    void checkPlacedActors(const std::filesystem::path& scratch);
     void checkStockedInventory(const std::filesystem::path& scratch);
     void checkCellInventories(const std::filesystem::path& scratch);
     void checkPlayerInventories(const std::filesystem::path& scratch);
+    void checkStartingEquipment(const std::filesystem::path& scratch);
+    void checkWorldActorInventories(const std::filesystem::path& scratch);
     void checkEquipmentSlots(const std::filesystem::path& scratch);
     void checkInventoryService(const std::filesystem::path& scratch, bool durability);
     void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment = false);
     void checkInventoryApplication(const std::filesystem::path& scratch);
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior = false, bool baseInventory = false);
+        bool wholeInterior = false, bool baseInventory = false, bool worldActors = false);
 }
 #endif

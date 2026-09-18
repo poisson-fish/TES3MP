@@ -3,6 +3,52 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M3-005",
+      "slice": "placed actor inventories and corpse looting",
+      "owner": "OpenMW server runtime",
+      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Project corpse equipment and distinct remote stacks without local selection or script execution; explicit cleanup services avoid borrowing a global world.",
+      "paths": [
+        "apps/openmw/mwclass/creature.cpp",
+        "apps/openmw/mwclass/creature.hpp",
+        "apps/openmw/mwworld/containerstore.cpp",
+        "apps/openmw/mwworld/containerstore.hpp",
+        "apps/openmw/mwworld/inventorystore.cpp",
+        "apps/openmw/mwworld/inventorystore.hpp",
+        "apps/openmw/mwworld/plainequipment.cpp",
+        "apps/openmw/mwworld/plainequipment.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests world-actor-inventories",
+        "tes3mp_native_loadout_tests placed-actors",
+        "tes3mp_native_loadout_tests world-actor-host",
+        "tes3mp_native_loadout_tests equipment-slots",
+        "tes3mp_inventory_replication_tests"
+      ],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit actor inventory preparation and authoritative presentation interfaces"
+    },
+    {
+      "id": "M3-004",
+      "slice": "automatic starting equipment",
+      "owner": "OpenMW server runtime",
+      "purpose": "Share stock auto-equipment selection with explicit skill, content, eligibility, split and effect services. Extract initial NPC skills without initializing unused health/death state; stock full startup retains those shared skills. Fresh v5 characters auto-equip ordinary gear; unavailable selected effects and excessive splits reject, while recovery retains saved slots.",
+      "paths": [
+        "apps/openmw/mwclass/armor.cpp",
+        "apps/openmw/mwclass/armor.hpp",
+        "apps/openmw/mwmechanics/npcstats.cpp",
+        "apps/openmw/mwmechanics/npcstats.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests starting-equipment",
+        "tes3mp_native_loadout_tests equipment-slots",
+        "tes3mp_native_loadout_tests player-inventories",
+        "tes3mp_native_loadout_tests player-inventory-host",
+        "tes3mp_native_loadout_tests inventory-equipment-npc-initialization"
+      ],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit starting-equipment selection and initial-skill interfaces"
+    },
+    {
       "id": "M3-003",
       "slice": "authoritative equipment slots",
       "owner": "OpenMW server runtime",
@@ -10,12 +56,8 @@
       "paths": [
         "apps/openmw/mwworld/equipmentslots.hpp",
         "apps/openmw/mwworld/inventoryitem.hpp",
-        "apps/openmw/mwworld/plainequipment.cpp",
-        "apps/openmw/mwworld/plainequipment.hpp",
         "apps/openmw/mwclass/clothing.cpp",
         "apps/openmw/mwclass/clothing.hpp",
-        "apps/openmw/mwclass/armor.cpp",
-        "apps/openmw/mwclass/armor.hpp",
         "apps/openmw/mwclass/weapon.cpp",
         "apps/openmw/mwmechanics/activespells.cpp"
       ],
@@ -34,8 +76,17 @@
       "slice": "stocked chest inventory",
       "owner": "OpenMW server runtime and desktop adapter",
       "purpose": "Generalize isolated inventory transfer/serialization to all TES3 inventory record types; share fixed/leveled initial loading with explicit content, level, RNG and registry services. Derive matching record identities and prevent client baseline replacement from refilling unresolved base loot. Scripts and unsupported execution remain rejected.",
-      "paths": ["apps/openmw/mwworld/inventoryitem.hpp", "apps/openmw/mwworld/inventoryrecordid.hpp", "apps/openmw/mwworld/containerstore.cpp", "apps/openmw/mwworld/containerstore.hpp", "apps/openmw/mwworld/containeradd.hpp", "apps/openmw/mwworld/plainequipment.cpp", "apps/openmw/mwworld/plainequipment.hpp", "apps/openmw/mwmechanics/levelledlist.cpp", "apps/openmw/mwmechanics/levelledlist.hpp", "apps/openmw/mwgui/containeritemmodel.cpp"],
-      "tests": ["tes3mp_native_loadout_tests stocked-inventory", "scripts/capture_native_inventory_desktop.py"],
+      "paths": [
+        "apps/openmw/mwworld/inventoryrecordid.hpp",
+        "apps/openmw/mwworld/containeradd.hpp",
+        "apps/openmw/mwmechanics/levelledlist.cpp",
+        "apps/openmw/mwmechanics/levelledlist.hpp",
+        "apps/openmw/mwgui/containeritemmodel.cpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests stocked-inventory",
+        "scripts/capture_native_inventory_desktop.py"
+      ],
       "disposition": "local shared engine extraction",
       "removal_condition": "OpenMW supplies equivalent explicit inventory initialization and transactional storage interfaces"
     },
@@ -44,8 +95,14 @@
       "slice": "shared placed container identity",
       "owner": "OpenMW server runtime and desktop adapter",
       "purpose": "Translate loaded OpenMW reference numbers to an ordered record-plugin identity shared by server and desktop, excluding script-list reader slots. Barrels and chests use the same placement mapping; the native host binds resolved placement and content fingerprints during recovery.",
-      "paths": ["apps/openmw/mwworld/placedrefid.hpp"],
-      "tests": ["tes3mp_native_loadout_tests placed-containers", "tes3mp_native_loadout_tests inventory-host", "scripts/capture_native_inventory_desktop.py"],
+      "paths": [
+        "apps/openmw/mwworld/placedrefid.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests placed-containers",
+        "tes3mp_native_loadout_tests inventory-host",
+        "scripts/capture_native_inventory_desktop.py"
+      ],
       "disposition": "local shared placement identity helper",
       "removal_condition": "OpenMW supplies an equivalent stable reference identity independent of local script-list reader slots"
     },
@@ -56,18 +113,22 @@
       "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface.",
       "paths": [
         "apps/openmw/mwclass/npc.cpp",
-        "apps/openmw/mwmechanics/npcstats.cpp",
-        "apps/openmw/mwmechanics/npcstats.hpp",
         "apps/openmw/mwmechanics/autocalcspell.cpp",
         "apps/openmw/mwmechanics/autocalcspell.hpp",
-        "apps/openmw/mwmechanics/activespells.cpp",
         "apps/openmw/mwmechanics/activespells.hpp",
         "apps/openmw/mwmechanics/creaturestats.cpp",
         "apps/openmw/mwmechanics/creaturestats.hpp",
         "apps/openmw/mwmechanics/spelleffects.cpp",
         "apps/openmw/mwmechanics/spelleffects.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-equipment-npc-initialization", "tes3mp_native_loadout_tests inventory-equipment-enchanted", "tes3mp_native_loadout_tests inventory-equipment-enchanted-guards", "tes3mp_native_loadout_tests inventory-equipment-enchanted-durability", "tes3mp_native_loadout_tests inventory-equipment-enchanted-allocations", "tes3mp_native_loadout_tests inventory-equipment-scripted"],
+      "tests": [
+        "tes3mp_native_loadout_tests inventory-equipment-npc-initialization",
+        "tes3mp_native_loadout_tests inventory-equipment-enchanted",
+        "tes3mp_native_loadout_tests inventory-equipment-enchanted-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-enchanted-durability",
+        "tes3mp_native_loadout_tests inventory-equipment-enchanted-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted"
+      ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent actor-context equipment-effect preparation interfaces"
     },
@@ -76,8 +137,14 @@
       "slice": "native enchantment calculation probe",
       "owner": "OpenMW server runtime",
       "purpose": "Share effect, spell and enchantment cost/charge calculations with explicit ESMStore inputs; use each loadout's GMSTs and preserve stock Environment wrappers over the same arithmetic.",
-      "paths": ["apps/openmw/mwmechanics/spellutil.cpp", "apps/openmw/mwmechanics/spellutil.hpp"],
-      "tests": ["tes3mp_native_loadout_tests enchantment-cost", "tes3mp_native_loadout_tests enchantment-rejection"],
+      "paths": [
+        "apps/openmw/mwmechanics/spellutil.cpp",
+        "apps/openmw/mwmechanics/spellutil.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests enchantment-cost",
+        "tes3mp_native_loadout_tests enchantment-rejection"
+      ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit content/settings interfaces for these calculations"
     },
@@ -98,7 +165,22 @@
         "apps/openmw/mwworld/refdata.cpp",
         "apps/openmw/mwworld/refdata.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-transfer-restart-scripts", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations", "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations", "tes3mp_native_loadout_tests inventory-transfer-serialization", "tes3mp_native_loadout_tests inventory-transfer-object-state", "tes3mp_native_loadout_tests inventory-transfer-locals-restore", "tes3mp_native_loadout_tests inventory-transfer-restore", "tes3mp_native_loadout_tests inventory-transfer-commit", "tes3mp_native_loadout_tests inventory-transfer-codec", "tes3mp_native_loadout_tests inventory-equipment-script-locals"],
+      "tests": [
+        "tes3mp_native_loadout_tests inventory-transfer-restart-scripts",
+        "tes3mp_native_loadout_tests inventory-scripted",
+        "tes3mp_native_loadout_tests inventory-rejection",
+        "tes3mp_native_loadout_tests inventory-transfer-preparation",
+        "tes3mp_native_loadout_tests inventory-transfer-rehearsal",
+        "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations",
+        "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations",
+        "tes3mp_native_loadout_tests inventory-transfer-serialization",
+        "tes3mp_native_loadout_tests inventory-transfer-object-state",
+        "tes3mp_native_loadout_tests inventory-transfer-locals-restore",
+        "tes3mp_native_loadout_tests inventory-transfer-restore",
+        "tes3mp_native_loadout_tests inventory-transfer-commit",
+        "tes3mp_native_loadout_tests inventory-transfer-codec",
+        "tes3mp_native_loadout_tests inventory-equipment-script-locals"
+      ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit script service interfaces for locals and registration"
     },
@@ -110,21 +192,60 @@
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",
-        "apps/openmw/mwworld/containeradd.hpp",
-        "apps/openmw/mwworld/containerstore.cpp",
-        "apps/openmw/mwworld/containerstore.hpp",
         "apps/openmw/mwworld/livecellref.cpp",
         "apps/openmw/mwworld/livecellref.hpp",
-        "apps/openmw/mwworld/inventorystore.cpp",
-        "apps/openmw/mwworld/inventorystore.hpp",
-        "apps/openmw/mwworld/plainequipment.cpp",
-        "apps/openmw/mwworld/plainequipment.hpp",
         "apps/openmw/mwworld/ptr.hpp",
         "apps/openmw/mwworld/ptrregistry.hpp",
         "apps/openmw/mwworld/worldmodel.cpp",
         "apps/openmw/mwworld/worldmodel.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-equipment-container", "tes3mp_native_loadout_tests inventory-equipment-container-recovery", "tes3mp_native_loadout_tests inventory-equipment-container-state", "tes3mp_native_loadout_tests inventory-equipment-container-allocations", "tes3mp_native_loadout_tests inventory-equipment-runtime", "tes3mp_native_loadout_tests inventory-equipment-restart-staging", "tes3mp_native_loadout_tests inventory-equipment-restart", "tes3mp_native_loadout_tests inventory-equipment-restart-guards", "tes3mp_native_loadout_tests inventory-equipment-restart-read", "tes3mp_native_loadout_tests inventory-equipment-restart-allocations", "tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners", "tes3mp_native_loadout_tests inventory-transfer-preparation", "tes3mp_native_loadout_tests inventory-transfer-rehearsal", "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations", "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations", "tes3mp_native_loadout_tests inventory-transfer-serialization", "tes3mp_native_loadout_tests inventory-transfer-object-state", "tes3mp_native_loadout_tests inventory-transfer-restore", "tes3mp_native_loadout_tests inventory-transfer-commit", "tes3mp_native_loadout_tests inventory-transfer-codec", "tes3mp_native_loadout_tests inventory-equipment-seam", "tes3mp_native_loadout_tests inventory-equipment-preparation", "tes3mp_native_loadout_tests inventory-equipment-guards", "tes3mp_native_loadout_tests inventory-equipment-allocations", "tes3mp_native_loadout_tests inventory-equipment-export", "tes3mp_native_loadout_tests inventory-equipment-restore", "tes3mp_native_loadout_tests inventory-equipment-value-guards", "tes3mp_native_loadout_tests inventory-equipment-value-allocations", "tes3mp_native_loadout_tests inventory-equipment-codec-encode", "tes3mp_native_loadout_tests inventory-equipment-codec", "tes3mp_native_loadout_tests inventory-equipment-codec-guards", "tes3mp_native_loadout_tests inventory-equipment-codec-bounds", "tes3mp_native_loadout_tests inventory-equipment-codec-allocations", "tes3mp_native_loadout_tests inventory-equipment-installation", "tes3mp_native_loadout_tests inventory-equipment-commit", "tes3mp_native_loadout_tests inventory-equipment-commit-guards", "tes3mp_native_loadout_tests inventory-equipment-commit-persistence", "tes3mp_native_loadout_tests inventory-equipment-commit-allocations", "tes3mp_native_loadout_tests inventory-equipment-scripted", "tes3mp_native_loadout_tests inventory-equipment-scripted-guards", "tes3mp_native_loadout_tests inventory-equipment-scripted-durability", "tes3mp_native_loadout_tests inventory-equipment-scripted-allocations"],
+      "tests": [
+        "tes3mp_native_loadout_tests inventory-equipment-container",
+        "tes3mp_native_loadout_tests inventory-equipment-container-recovery",
+        "tes3mp_native_loadout_tests inventory-equipment-container-state",
+        "tes3mp_native_loadout_tests inventory-equipment-container-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-runtime",
+        "tes3mp_native_loadout_tests inventory-equipment-restart-staging",
+        "tes3mp_native_loadout_tests inventory-equipment-restart",
+        "tes3mp_native_loadout_tests inventory-equipment-restart-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-restart-read",
+        "tes3mp_native_loadout_tests inventory-equipment-restart-allocations",
+        "tes3mp_native_loadout_tests inventory-plain",
+        "tes3mp_native_loadout_tests inventory-scripted",
+        "tes3mp_native_loadout_tests inventory-rejection",
+        "tes3mp_native_loadout_tests inventory-two-owners",
+        "tes3mp_native_loadout_tests inventory-transfer-preparation",
+        "tes3mp_native_loadout_tests inventory-transfer-rehearsal",
+        "tes3mp_native_loadout_tests inventory-transfer-rehearsal-allocations",
+        "tes3mp_native_loadout_tests inventory-transfer-preparation-allocations",
+        "tes3mp_native_loadout_tests inventory-transfer-serialization",
+        "tes3mp_native_loadout_tests inventory-transfer-object-state",
+        "tes3mp_native_loadout_tests inventory-transfer-restore",
+        "tes3mp_native_loadout_tests inventory-transfer-commit",
+        "tes3mp_native_loadout_tests inventory-transfer-codec",
+        "tes3mp_native_loadout_tests inventory-equipment-seam",
+        "tes3mp_native_loadout_tests inventory-equipment-preparation",
+        "tes3mp_native_loadout_tests inventory-equipment-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-export",
+        "tes3mp_native_loadout_tests inventory-equipment-restore",
+        "tes3mp_native_loadout_tests inventory-equipment-value-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-value-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-codec-encode",
+        "tes3mp_native_loadout_tests inventory-equipment-codec",
+        "tes3mp_native_loadout_tests inventory-equipment-codec-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-codec-bounds",
+        "tes3mp_native_loadout_tests inventory-equipment-codec-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-installation",
+        "tes3mp_native_loadout_tests inventory-equipment-commit",
+        "tes3mp_native_loadout_tests inventory-equipment-commit-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-commit-persistence",
+        "tes3mp_native_loadout_tests inventory-equipment-commit-allocations",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted-guards",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted-durability",
+        "tes3mp_native_loadout_tests inventory-equipment-scripted-allocations"
+      ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
     },
@@ -133,8 +254,14 @@
       "slice": "8.2",
       "owner": "OpenMW adapter",
       "purpose": "Own one optional coordinator and invoke it on the main thread after input and before world mutation, with teardown before OpenMW dependencies.",
-      "paths": ["apps/openmw/engine.cpp", "apps/openmw/engine.hpp"],
-      "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests"],
+      "paths": [
+        "apps/openmw/engine.cpp",
+        "apps/openmw/engine.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests"
+      ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed lifecycle and frame seam"
     },
@@ -143,8 +270,16 @@
       "slice": "8.3",
       "owner": "OpenMW adapter",
       "purpose": "Create and attach one concrete adapter only when explicitly enabled by validated desktop configuration, with fixed-role automation options available only in testing builds. Native inventory capture delegates GUI intent to the production desktop input provider.",
-      "paths": ["apps/openmw/main.cpp", "apps/openmw/options.cpp"],
-      "tests": ["scripts/tests/test_openmw_patch_registry.py", "scripts/tests/test_phase8_desktop_harness.py", "scripts/capture_native_inventory_desktop.py", "openmw_tes3mp_adapter_tests"],
+      "paths": [
+        "apps/openmw/main.cpp",
+        "apps/openmw/options.cpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_phase8_desktop_harness.py",
+        "scripts/capture_native_inventory_desktop.py",
+        "openmw_tes3mp_adapter_tests"
+      ],
       "disposition": "local product composition",
       "removal_condition": "A supported OpenMW plugin or composition facility fully owns multiplayer startup"
     },
@@ -153,8 +288,13 @@
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",
       "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge.",
-      "paths": ["apps/openmw/CMakeLists.txt"],
-      "tests": ["scripts/tests/test_tes3mp_target_boundaries.py", "scripts/tests/test_openmw_patch_registry.py"],
+      "paths": [
+        "apps/openmw/CMakeLists.txt"
+      ],
+      "tests": [
+        "scripts/tests/test_tes3mp_target_boundaries.py",
+        "scripts/tests/test_openmw_patch_registry.py"
+      ],
       "disposition": "local product build wiring",
       "removal_condition": "The adapter becomes an independently loaded supported module without this build edge"
     },
@@ -162,8 +302,10 @@
       "id": "P8-004",
       "slice": "8.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration.",
+      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body.",
       "paths": [
+        "apps/openmw/mwrender/actorutil.cpp",
+        "apps/openmw/mwrender/actorutil.hpp",
         "apps/openmw/mwrender/animation.cpp",
         "apps/openmw/mwrender/animation.hpp",
         "apps/openmw/mwrender/npcanimation.cpp",
@@ -174,9 +316,18 @@
         "apps/openmw/mwrender/replicatedactor.cpp",
         "apps/openmw/mwrender/replicatedactor.hpp",
         "apps/openmw/mwrender/vismask.hpp",
-        "apps/openmw/mwrender/water.cpp"
+        "apps/openmw/mwrender/water.cpp",
+        "apps/openmw/mwworld/scene.cpp"
       ],
-      "tests": ["scripts/tests/test_openmw_patch_registry.py", "scripts/tests/test_replicated_actor_contract.py", "openmw-tests ReplicatedActor.*", "openmw_tes3mp_adapter_tests", "content-backed two-client desktop flow/reconnect/soak", "openmw RelWithDebInfo link"],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_replicated_actor_contract.py",
+        "openmw-tests ReplicatedActor.*",
+        "openmw-tests ReplicatedActor.RootStaysUprightWhenLookingAround",
+        "openmw_tes3mp_adapter_tests",
+        "content-backed two-client desktop flow/reconnect/soak",
+        "openmw RelWithDebInfo link"
+      ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"
     },
@@ -205,7 +356,6 @@
       "purpose": "Provide bounded inventory transfer and item-use interception seams so multiplayer UI actions become server-authoritative transaction proposals before stock single-player mutation.",
       "paths": [
         "apps/openmw/mwgui/container.cpp",
-        "apps/openmw/mwgui/containeritemmodel.cpp",
         "apps/openmw/mwgui/containeritemmodel.hpp",
         "apps/openmw/mwgui/draganddrop.cpp",
         "apps/openmw/mwgui/inventoryitemmodel.hpp",

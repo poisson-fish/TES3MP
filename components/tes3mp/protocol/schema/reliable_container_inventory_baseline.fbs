@@ -34,6 +34,14 @@ struct ItemStack {
   padding1:ushort;
 }
 
+struct EquipmentBinding {
+  stack_id:ulong;
+  slot:ubyte;
+  padding0:ubyte;
+  padding1:ushort;
+  padding2:uint;
+}
+
 table ContainerInventoryBaselineHeader {
   target_session_id:ulong (id: 0);
   target_session_generation:ulong (id: 1);
@@ -51,6 +59,7 @@ table ReliableContainerInventoryBaseline {
   cell:Cell (id: 1);
   position:Position3 (id: 2);
   stacks:[ItemStack] (id: 3);
+  equipment:[EquipmentBinding] (id: 4);
 }
 
 root_type ReliableContainerInventoryBaseline;

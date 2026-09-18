@@ -26,6 +26,8 @@ namespace TES3MP::Native
         // Decode must never intern an unknown name from external bytes.
         std::span<const ESM::RefId> mReferenceIds;
         std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
+        // Trusted storage shape for a shared owner; never inferred from saved slots.
+        bool mInventory = false;
     };
 
     inline constexpr uint32_t EquipmentFormatVersion = 1;

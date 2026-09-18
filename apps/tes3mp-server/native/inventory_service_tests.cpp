@@ -12,6 +12,7 @@
 #include <components/esm3/loadlevlist.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/readerscache.hpp>
@@ -42,6 +43,31 @@ namespace TES3MP::Native::Testing
             const ESM::RefId container = ESM::RefId::stringRefId("service_container");
             Content()
             {
+                for (int i = 0; i < ESM::Attribute::Length; ++i)
+                {
+                    ESM::Attribute attribute;
+                    attribute.mId = *ESM::Attribute::indexToRefId(i).getIf<ESM::StringRefId>();
+                    store.insertStatic(attribute);
+                }
+                for (int i = 0; i < ESM::Skill::Length; ++i)
+                {
+                    ESM::Skill skill; skill.blank();
+                    skill.mId = *ESM::Skill::indexToRefId(i).getIf<ESM::StringRefId>();
+                    store.insertStatic(skill);
+                }
+                for (const auto [name, value] : std::initializer_list<std::pair<const char*, float>>{
+                        {"fNPCbaseMagickaMult", 2.f}, {"fUnarmoredBase1", .1f}, {"fUnarmoredBase2", .1f},
+                        {"fLightMaxMod", .3f}, {"fMedMaxMod", .6f}})
+                {
+                    ESM::GameSetting setting; setting.mId = ESM::RefId::stringRefId(name);
+                    setting.mValue = ESM::Variant(value); store.insertStatic(setting);
+                }
+                for (const auto name : {"iBaseArmorSkill", "iHelmWeight", "iCuirassWeight", "iPauldronWeight",
+                        "iGreavesWeight", "iBootsWeight", "iGauntletWeight", "iShieldWeight"})
+                {
+                    ESM::GameSetting setting; setting.mId = ESM::RefId::stringRefId(name);
+                    setting.mValue = ESM::Variant(30); store.insertStatic(setting);
+                }
                 ESM::Race race; race.blank(); race.mId = ESM::RefId::stringRefId("service_race"); store.insertStatic(race);
                 ESM::NPC npc; npc.blank(); npc.mId = actor; npc.mRace = race.mId; store.insertStatic(npc);
                 ESM::Clothing item; item.blank(); item.mId = shirt;
@@ -167,6 +193,204 @@ namespace TES3MP::Native::Testing
             const auto decoded = std::get<ClientInventoryTransactionCommand>(decodeClientInventoryTransactionCommand(encodeClientInventoryTransactionCommand(input)));
             return ServerApp::InventoryCommandBinding::resolve(authority, input.sessionId, input.sessionGeneration, decoded).value();
         }
+        void unequipStartingItems(InventoryService& service, const CanonicalServerState& authority)
+        {
+            // Manual-equipment/transfer tests begin with empty slots through the
+            // same public command path now that base inventories auto-equip.
+            for (uint64_t session : {1, 2})
+                for (;;)
+                {
+                    const auto inventory = service.project(authority, id<SessionId>(session), id<ServerTick>(1),
+                        id<CanonicalRevision>(1))->playerInventory.front();
+                    if (inventory.equipment.empty()) break;
+                    const auto gear = inventory.equipment.front();
+                    const auto item = std::ranges::find(inventory.stacks, gear.stackId, &CanonicalItemStack::stackId);
+                    const ClientInventoryTransactionCommand input{id<SessionId>(session),
+                        authority.findActiveSession(id<SessionId>(session))->sessionGeneration(), CommandSequence::initial(),
+                        id<CommandId>(1), id<CanonicalRevision>(1), InventoryTransactionKind::UnequipItem, {}, item->prototypeId,
+                        gear.stackId, 1, gear.slot, inventory.revision, {}, {}, Position3(0, 0, 0)};
+                    auto prepared = service.prepareInventory(authority, bind(authority, input).proposal());
+                    require(prepared && prepared->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed, "Fixture starting equipment could not be removed");
+                }
+        }
+    }
+
+    void checkWorldActorInventories(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Actor inventory scratch already exists");
+        Content content;
+        const auto ref = [](const char* text) { return ESM::RefId::stringRefId(text); };
+        ESM::Weapon bow; bow.blank(); bow.mId = ref("corpse_bow");
+        bow.mData.mType = ESM::Weapon::MarksmanBow; bow.mData.mHealth = 100; bow.mData.mChop[1] = 12;
+        content.store.insertStatic(bow);
+        auto arrow = bow; arrow.mId = ref("corpse_arrow"); arrow.mData.mType = ESM::Weapon::Arrow;
+        arrow.mData.mChop[1] = 4; content.store.insertStatic(arrow);
+        ESM::ItemLevList list; list.blank(); list.mId = ref("corpse_leveled"); list.mChanceNone = 0;
+        list.mList.push_back({arrow.mId, 1}); content.store.insertStatic(list);
+        auto dead = *content.store.get<ESM::NPC>().find(content.actor);
+        dead.mId = ref("corpse_npc"); dead.mNpdt.mHealth = 0; dead.mNpdt.mSkills.fill(30);
+        dead.mInventory.mList = {{2, content.shirt}, {1, bow.mId}, {3, arrow.mId}, {2, list.mId}};
+        content.store.insertStatic(dead);
+        auto live = dead; live.mId = ref("living_npc"); live.mNpdt.mHealth = 40; content.store.insertStatic(live);
+        ESM::Creature creature; creature.blank(); creature.mId = ref("corpse_creature");
+        creature.mData.mHealth = 0; creature.mInventory.mList = {{4, arrow.mId}}; content.store.insertStatic(creature);
+        auto armed = creature; armed.mId = ref("corpse_armed_creature"); armed.mFlags |= ESM::Creature::Weapon;
+        armed.mData.mCombat = 30; armed.mInventory.mList = {{1, bow.mId}, {4, arrow.mId}}; content.store.insertStatic(armed);
+        auto binding = content.binding(); binding.mShirt.reset();
+        binding.mActors = {{{content.actor, {}, 0, false, true}, {content.actor, {}, 0, false, true}}};
+        for (auto base : {dead.mId, live.mId, creature.mId, armed.mId})
+        {
+            const auto index = static_cast<uint32_t>(binding.mContainers.size());
+            ESM::CellRef placement; placement.blank(); placement.mRefNum = {index, 0}; placement.mRefID = base;
+            binding.mContainers.push_back({id<ContainerId>(90 + index), CellId::interior(id<CellSpaceId>(7)),
+                Position3(0, 0, 0), base, placement});
+        }
+        std::vector<ESM::RefId> references{content.actor, content.shirt, content.container, bow.mId, arrow.mId,
+            dead.mId, live.mId, creature.mId, armed.mId};
+        auto authority = players();
+        const auto view = [&](InventoryService& service, uint64_t session = 1) {
+            return service.project(authority, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+        };
+        const auto shared = [&](InventoryService& service, uint64_t owner) {
+            const auto current = view(service);
+            const auto found = std::ranges::find(current.containers, id<ContainerId>(owner), &ReliableContainerInventoryBaseline::container);
+            require(found != current.containers.end(), "Actor baseline missing");
+            return *found;
+        };
+        InventoryService service(content.store, content.readers, binding);
+        InventoryService twin(content.store, content.readers, binding);
+        require(std::ranges::equal(service.inventoryImage(), twin.inventoryImage()), "Actor startup is not deterministic");
+        require(view(service).containers.size() == 4 && shared(service, 91).equipment.size() == 3
+            && shared(service, 94).equipment.size() == 2 && shared(service, 93).equipment.empty(),
+            "NPC/creature storage or stock equipment selection incorrect, or living loot published");
+        require(shared(service, 91).stacks.size() == 4, "NPC equipment split or leveled loot lost");
+        // Exercise the exact engine presentation helpers used by the desktop
+        // adapter, without constructing a renderer, scripts or global player.
+        {
+            MWWorld::WorldModel localWorld(content.store, content.readers, 1);
+            MWWorld::LocalScripts localScripts(content.store);
+            MWWorld::InventoryStore local;
+            local.clearAuthoritative(localScripts);
+            MWWorld::ManualRef source(content.store, content.shirt);
+            const auto first = *local.addAuthoritative(source.getPtr(), 1, localWorld);
+            const auto second = *local.addAuthoritative(source.getPtr(), 1, localWorld);
+            require(first != second && local.count(content.shirt) == 2, "Remote split stacks merged");
+            const std::array slots{std::pair{MWWorld::InventoryStore::Slot_Shirt, first}};
+            local.applyAuthoritativeEquipment(slots);
+            require(*local.getSlot(MWWorld::InventoryStore::Slot_Shirt) == first, "Remote equipment selected a different instance");
+            bool rejected = false;
+            try { const std::array duplicate{slots[0], slots[0]}; local.applyAuthoritativeEquipment(duplicate); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected && *local.getSlot(MWWorld::InventoryStore::Slot_Shirt) == first,
+                "Invalid remote slots changed presentation equipment");
+            local.clearAuthoritative(localScripts);
+            const auto repeatedFirst = *local.addAuthoritative(source.getPtr(), 1, localWorld);
+            const auto repeatedSecond = *local.addAuthoritative(source.getPtr(), 1, localWorld);
+            require(repeatedFirst == first && repeatedSecond == second && local.count(content.shirt) == 2,
+                "Repeated baseline leaked retired presentation nodes");
+        }
+        const auto intent = [&](InventoryService& current, uint64_t session, uint64_t owner, CanonicalItemStack item,
+            bool put = false, uint32_t count = 0) {
+            const auto snapshot = view(current, session);
+            return ClientInventoryTransactionCommand{id<SessionId>(session),
+                authority.findActiveSession(id<SessionId>(session))->sessionGeneration(), CommandSequence::initial(),
+                id<CommandId>(1), id<CanonicalRevision>(1),
+                put ? InventoryTransactionKind::PutIntoContainer : InventoryTransactionKind::TakeFromContainer,
+                id<ContainerId>(owner), item.prototypeId, item.stackId, count ? count : item.count, {},
+                snapshot.playerInventory.front().revision, shared(current, 91).revision, {}, Position3(0, 0, 0)};
+        };
+        EquipmentFileSink file(scratch / "actors.equipment", true);
+        FileFaults faults; EquipmentFileCommitter sink(file, faults);
+        EquipmentBytes bytes; std::unique_ptr<const InventoryTransferSuccess> success;
+        const auto initial = shared(service, 91);
+        const auto slot = std::ranges::find(initial.equipment, EquipmentSlot::Shirt, &EquipmentBinding::slot);
+        const auto worn = *std::ranges::find(initial.stacks, slot->stackId, &CanonicalItemStack::stackId);
+        for (auto bad : {intent(service, 1, 92, worn), intent(service, 1, 90, worn)})
+            require(!service.prepareInventory(authority, bind(authority, bad).proposal()), "Live or foreign owner accepted corpse loot");
+        auto distant = intent(service, 1, 91, worn); distant.interactionOrigin = Position3(1'000'000, 0, 0);
+        require(!service.prepareInventory(authority, bind(authority, distant).proposal()), "Distant corpse loot accepted");
+        const auto take = intent(service, 1, 91, worn);
+        auto prepared = service.prepare(authority, bind(authority, take));
+        const std::vector before(service.inventoryImage().begin(), service.inventoryImage().end());
+        faults = {FileFault::Flush};
+        require(service.commit(authority, prepared, sink, success, bytes) == PersistenceResult::Rejected
+            && std::ranges::equal(before, service.inventoryImage()) && shared(service, 91).equipment == initial.equipment,
+            "Failed corpse loot changed live equipment or inventory");
+        faults = {};
+        MWWorld::Testing::Allocations::Trace trace;
+        PersistenceResult committed;
+        {
+            MWWorld::Testing::Allocations::Observe observe(trace);
+            committed = service.commit(authority, prepared, sink, success, bytes);
+        }
+        require(trace.visits(Allocations::Phase::Installation) > 0 && trace.allocations(Allocations::Phase::Installation) == 0
+            && trace.allocations(Allocations::Phase::Publication) == 0, "Corpse installation allocated after durability");
+        require(committed == PersistenceResult::Accepted
+            && shared(service, 91).equipment.size() == 2, "Equipped corpse item was not removed atomically");
+        require(!service.prepareInventory(authority, bind(authority, take).proposal()), "Retried corpse loot duplicated an item");
+        // An equipped ammunition stack keeps its slot during partial looting.
+        auto npc = shared(service, 91);
+        const auto ammoSlot = std::ranges::find(npc.equipment, EquipmentSlot::Ammunition, &EquipmentBinding::slot);
+        const auto ammo = *std::ranges::find(npc.stacks, ammoSlot->stackId, &CanonicalItemStack::stackId);
+        auto partial = service.prepare(authority, bind(authority, intent(service, 2, 91, ammo, false, 2)));
+        require(service.commit(authority, partial, sink, success, bytes) == PersistenceResult::Accepted
+            && shared(service, 91).equipment == npc.equipment, "Partial ammunition loot changed the remaining slots");
+        // Every remaining NPC/creature item, including armed-creature slots, uses the same writer.
+        for (uint64_t owner : {91, 93, 94})
+            for (const auto item : shared(service, owner).stacks)
+            {
+                auto next = service.prepare(authority, bind(authority, intent(service, 2, owner, item)));
+                require(service.commit(authority, next, sink, success, bytes) == PersistenceResult::Accepted,
+                    "NPC/creature loot transfer failed");
+            }
+        for (uint64_t owner : {91, 93, 94})
+            require(shared(service, owner).stacks.empty() && shared(service, owner).equipment.empty(), "Corpse did not empty");
+        const auto received = view(service).playerInventory.front().stacks.front();
+        auto put = service.prepare(authority, bind(authority, intent(service, 1, 91, received, true)));
+        require(service.commit(authority, put, sink, success, bytes) == PersistenceResult::Accepted
+            && shared(service, 91).equipment.empty(), "Put into corpse incorrectly selected replacement gear");
+        const std::vector saved(service.inventoryImage().begin(), service.inventoryImage().end());
+        InventoryService broken(content.store, content.readers, binding, true);
+        bool rejected = false;
+        try { broken.recover(std::span(saved).first(saved.size() - 1), references); }
+        catch (const std::exception&) { rejected = true; }
+        require(rejected && broken.inventoryImage().empty(), "Partial actor recovery published a world");
+        auto wrongShape = binding;
+        wrongShape.mContainers[1].mBase = content.container;
+        wrongShape.mContainers[1].mPlacement->mRefID = content.container;
+        InventoryService wrong(content.store, content.readers, wrongShape, true);
+        rejected = false;
+        try { wrong.recover(before, references); } catch (const std::exception&) { rejected = true; }
+        require(rejected && wrong.inventoryImage().empty(), "Actor equipment restored into plain container storage");
+        InventoryService uncertain(content.store, content.readers, binding);
+        auto pending = uncertain.prepareInventory(authority, bind(authority, intent(uncertain, 1, 91, worn)).proposal());
+        require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && uncertain.inventoryImage().empty() && !uncertain.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1)),
+            "Uncertain corpse transfer stayed open");
+        // Recovery must not load any actor loot or auto-select equipment.
+        const_cast<ESM::NPC*>(content.store.get<ESM::NPC>().find(dead.mId))->mInventory.mList = {{1, ref("missing_loot")}};
+        const_cast<ESM::Creature*>(content.store.get<ESM::Creature>().find(armed.mId))->mInventory.mList = {{1, ref("missing_loot")}};
+        InventoryService restored(content.store, content.readers, binding, true);
+        restored.recover(saved, references);
+        require(std::ranges::equal(saved, restored.inventoryImage()) && shared(restored, 91).equipment.empty()
+            && shared(restored, 94).stacks.empty(), "Recovery rerolled actor loot or equipment");
+        Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(restored, authority, delivery, 2);
+        for (const auto& client : delivery.clients)
+            require(client->confirmedContainerInventoryBaselines().size() == 4, "Late join lost corpse baselines");
+        authority = players(SessionGeneration::initial().next().value());
+        Delivery reconnect(clock, SessionGeneration::initial().next().value()); publish(restored, authority, reconnect, 3);
+        // The actual protocol/client path must preserve occupied slots too.
+        Delivery equipped(clock, SessionGeneration::initial()); publish(twin, players(), equipped, 1);
+        require(equipped.clients[0]->confirmedContainerInventoryBaselines()[1].equipment == initial.equipment,
+            "Wire/client assembly lost corpse equipment");
+        auto malformed = initial.equipment; malformed[1].stackId = malformed[0].stackId;
+        require(std::holds_alternative<InventoryReplicationDecodeError>(ReliableContainerInventoryBaseline::create(
+            initial.header, initial.container, initial.cell, initial.position, initial.revision, 0, initial.stacks, malformed)),
+            "Duplicate corpse equipment identity accepted by protocol");
+        std::cout << "world actors: NPC/creature loot, stock equipment, leveled/split identities, live/reach/foreign guards, "
+            "equipped and partial-ammo looting, failed durability/retry, corpse put, exact recovery without refill, "
+            "equipment wire/client assembly, late join/reconnect; synthetic transport\n";
     }
 
     void checkEquipmentSlots(const std::filesystem::path& scratch)
@@ -219,6 +443,7 @@ namespace TES3MP::Native::Testing
         binding.mActors = {{{npc.mId, {}, 0, false, true}, {beast.mId, {}, 0, false, true}}};
         InventoryService service(content.store, content.readers, binding);
         auto authority = players();
+        unequipStartingItems(service, authority);
         uint64_t tick = 1;
         const auto view = [&](InventoryService& source, uint64_t session = 1, const PreparedNativeInventory* candidate = nullptr) {
             return source.projectInventory(authority, id<SessionId>(session), id<ServerTick>(tick), id<CanonicalRevision>(tick), candidate).value();
@@ -696,11 +921,172 @@ namespace TES3MP::Native::Testing
             "atomic retry, two-player transfer, malformed recovery, no refill, late join/resume; synthetic transport\n";
     }
 
+    void checkStartingEquipment(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Starting equipment scratch already exists");
+        Content content;
+        const auto replace = [&]<class T>(const T& record) {
+            *const_cast<T*>(content.store.get<T>().find(record.mId)) = record;
+        };
+        const auto ref = [](const char* name) { return ESM::RefId::stringRefId(name); };
+        auto npc = *content.store.get<ESM::NPC>().find(content.actor);
+        npc.mNpdt.mSkills.fill(1);
+        const auto setSkill = [&](ESM::RefId skill, int value) { npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(skill)] = value; };
+        setSkill(ESM::Skill::Marksman, 90); setSkill(ESM::Skill::ShortBlade, 80);
+        setSkill(ESM::Skill::LongBlade, 70); setSkill(ESM::Skill::LightArmor, 90);
+        setSkill(ESM::Skill::HeavyArmor, 60); setSkill(ESM::Skill::Unarmored, 0);
+        std::vector<ESM::RefId> references{npc.mId};
+        const auto add = [&](const auto& record, int count = 1) {
+            content.store.insertStatic(record); references.push_back(record.mId);
+            npc.mInventory.mList.push_back({count, record.mId});
+        };
+        const auto weapon = [&](const char* name, int type, int damage, int count = 1) {
+            ESM::Weapon item; item.blank(); item.mId = ref(name); item.mData.mType = type;
+            item.mData.mHealth = 100; item.mData.mChop[1] = damage; add(item, count);
+        };
+        weapon("start_bow", ESM::Weapon::MarksmanBow, 8, 2);
+        weapon("start_dagger", ESM::Weapon::ShortBladeOneHand, 10);
+        weapon("start_dagger_tie", ESM::Weapon::ShortBladeOneHand, 10, 2);
+        weapon("start_sword", ESM::Weapon::LongBladeTwoHand, 100);
+        weapon("start_arrow", ESM::Weapon::Arrow, 3, 12);
+        weapon("start_arrow_best", ESM::Weapon::Arrow, 8, 9);
+        weapon("start_arrow_tie", ESM::Weapon::Arrow, 8, 7);
+        const auto clothing = [&](const char* name, int type, int value, int count = 1) {
+            ESM::Clothing item; item.blank(); item.mId = ref(name); item.mData.mType = type;
+            item.mData.mValue = value; add(item, count);
+        };
+        clothing("start_shirt", ESM::Clothing::Shirt, 2);
+        clothing("start_shirt_best", ESM::Clothing::Shirt, 20, 2);
+        clothing("start_ring", ESM::Clothing::Ring, 2);
+        clothing("start_ring_best", ESM::Clothing::Ring, 10, -3);
+        const auto armor = [&](const char* name, int type, float weight, int rating, int health = 100) {
+            ESM::Armor item; item.blank(); item.mId = ref(name); item.mData.mType = type;
+            item.mData.mWeight = weight; item.mData.mArmor = rating; item.mData.mHealth = health;
+            if (type == ESM::Armor::Boots) item.mParts.mParts.push_back({ESM::PRT_LFoot, {}, {}});
+            add(item);
+        };
+        armor("start_light", ESM::Armor::Cuirass, 5, 10);
+        armor("start_heavy", ESM::Armor::Cuirass, 30, 20);
+        armor("start_boots", ESM::Armor::Boots, 0, 10);
+        armor("start_shield", ESM::Armor::Shield, 0, 10);
+        armor("start_broken", ESM::Armor::Helmet, 0, 100, 0);
+        ESM::Light light; light.blank(); light.mId = ref("start_light_carried"); add(light);
+        replace(npc);
+        auto beastRace = *content.store.get<ESM::Race>().find(npc.mRace);
+        beastRace.mId = ref("start_beast"); beastRace.mData.mFlags |= ESM::Race::Beast;
+        beastRace.mData.mAttributeValues.fill(40); content.store.insertStatic(beastRace);
+        ESM::Class actorClass; actorClass.blank(); actorClass.mId = ref("start_class");
+        for (auto& skills : actorClass.mData.mSkills) skills.fill(-1);
+        actorClass.mData.mSkills[0][1] = ESM::Skill::refIdToIndex(ESM::Skill::LongBlade);
+        content.store.insertStatic(actorClass);
+        auto beast = npc; beast.mId = ref("start_auto_actor"); beast.mRace = beastRace.mId;
+        beast.mClass = actorClass.mId; beast.mNpdtType = ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS;
+        beast.mNpdt.mLevel = 4; content.store.insertStatic(beast); references.push_back(beast.mId);
+        auto binding = content.binding(); binding.mShirt.reset();
+        binding.mActors = {{{npc.mId, {}, 0, false, true}, {beast.mId, {}, 0, false, true}}};
+        auto authority = players();
+        const auto view = [&](InventoryService& service, uint64_t session = 1) {
+            return service.project(authority, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+        };
+        const auto equipped = [&](InventoryService& service, int slot, uint64_t session = 1) {
+            const auto inventory = view(service, session).playerInventory.front();
+            const auto found = std::ranges::find(inventory.equipment, static_cast<EquipmentSlot>(slot), &EquipmentBinding::slot);
+            if (found == inventory.equipment.end()) return std::optional<CanonicalItemStack>{};
+            return std::optional{*std::ranges::find(inventory.stacks, found->stackId, &CanonicalItemStack::stackId)};
+        };
+        const auto expect = [&](InventoryService& service, int slot, const char* base, uint64_t session = 1) {
+            const auto item = equipped(service, slot, session);
+            require(base ? item && item->prototypeId == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ref(base))) : !item,
+                "Stock starting equipment selection disagrees with expected slot");
+        };
+        InventoryService service(content.store, content.readers, binding);
+        expect(service, 16, "start_bow"); expect(service, 18, "start_arrow_tie");
+        expect(service, 8, "start_shirt_best"); expect(service, 12, "start_ring_best"); expect(service, 13, "start_ring_best");
+        expect(service, 1, "start_heavy"); expect(service, 7, "start_boots"); expect(service, 17, "start_shield");
+        expect(service, 0, nullptr); expect(service, 16, "start_sword", 2); expect(service, 18, nullptr, 2);
+        expect(service, 7, nullptr, 2); expect(service, 17, "start_shield", 2);
+        require(equipped(service, 18)->count == 7 && equipped(service, 16)->count == 1
+            && equipped(service, 12)->count == 1 && equipped(service, 13)->count == 1
+            && equipped(service, 12)->stackId != equipped(service, 13)->stackId,
+            "Starting ammo, signed stacks or separate rings were split incorrectly");
+        for (uint64_t session : {1, 2})
+        {
+            std::map<ItemPrototypeId, uint32_t> expected, actual;
+            for (const auto& item : npc.mInventory.mList)
+                expected[id<ItemPrototypeId>(MWWorld::inventoryRecordId(item.mItem))] += std::abs(item.mCount);
+            const auto current = view(service, session);
+            for (const auto& item : current.playerInventory.front().stacks) actual[item.prototypeId] += item.count;
+            require(expected == actual, "Auto-equipment duplicated or lost carried items");
+        }
+        InventoryService deterministic(content.store, content.readers, binding);
+        require(std::ranges::equal(service.inventoryImage(), deterministic.inventoryImage()), "Starting equipment identities are not deterministic");
+        const auto initial = view(service).playerInventory.front().equipment;
+        Clock clock; Delivery join(clock, SessionGeneration::initial()); publish(service, authority, join, 1);
+        require(join.clients[0]->confirmedPlayerInventoryBaseline()->equipment == initial, "Initial client baseline omitted auto-equipment");
+        const auto publicGear = view(service, 2).equipment->members.front();
+        require(publicGear.slots[16] == equipped(service, 16)->prototypeId && publicGear.slots[12] == equipped(service, 12)->prototypeId,
+            "Public starting equipment differs from private inventory");
+        EquipmentFileSink file(scratch / "starting.equipment", true); FileFaults faults;
+        require(file.writeSessionImage({reinterpret_cast<const char*>(service.inventoryImage().data()), service.inventoryImage().size()}, faults)
+            == PersistenceResult::Accepted, "Initial equipment image was not durable");
+        std::ifstream disk(scratch / "starting.equipment", std::ios::binary);
+        const std::vector<char> diskImage((std::istreambuf_iterator<char>(disk)), {});
+        InventoryService initialRestart(content.store, content.readers, binding, true);
+        initialRestart.recover(std::as_bytes(std::span(diskImage)), references);
+        require(view(initialRestart).playerInventory.front().equipment == initial
+            && std::ranges::equal(service.inventoryImage(), initialRestart.inventoryImage()),
+            "Durable starting equipment did not recover exactly");
+        // Saved empty slots are intentional. Recovery must not rerun selection,
+        // even if the source loot can no longer initialize a character.
+        unequipStartingItems(service, authority);
+        const std::vector saved(service.inventoryImage().begin(), service.inventoryImage().end());
+        npc.mInventory.mList = {{1, ref("missing_start")}}; replace(npc);
+        InventoryService restored(content.store, content.readers, binding, true); restored.recover(saved, references);
+        require(std::ranges::equal(saved, restored.inventoryImage()) && view(restored).playerInventory.front().equipment.empty(),
+            "Recovery rerolled loot or re-equipped deliberately empty slots");
+        authority = players(*SessionGeneration::initial().next());
+        Delivery reconnect(clock, *SessionGeneration::initial().next()); publish(restored, authority, reconnect, 2);
+        require(reconnect.clients[0]->confirmedPlayerInventoryBaseline()->equipment.empty(), "Reconnect re-equipped saved empty slots");
+        // Missing ammunition falls back to the next skill; ties use stock order.
+        npc = beast; npc.mId = content.actor; npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
+        npc.mRace = ESM::RefId::stringRefId("service_race");
+        std::erase_if(npc.mInventory.mList, [&](const auto& item) {
+            return item.mItem == ref("start_arrow") || item.mItem == ref("start_arrow_best") || item.mItem == ref("start_arrow_tie");
+        });
+        replace(npc);
+        InventoryService noAmmo(content.store, content.readers, binding); expect(noAmmo, 16, "start_dagger_tie"); expect(noAmmo, 18, nullptr);
+        auto broken = *content.store.get<ESM::Weapon>().find(ref("start_dagger_tie")); broken.mData.mHealth = 0;
+        replace(broken);
+        InventoryService brokenWinner(content.store, content.readers, binding); expect(brokenWinner, 16, "start_sword");
+        setSkill(ESM::Skill::Unarmored, 100); replace(npc);
+        InventoryService unarmored(content.store, content.readers, binding); expect(unarmored, 1, nullptr); expect(unarmored, 17, nullptr);
+        auto enchanted = *content.store.get<ESM::Clothing>().find(ref("start_shirt_best")); enchanted.mEnchant = ref("missing_effect_service");
+        replace(enchanted);
+        bool rejected = false;
+        try { InventoryService unsupported(content.store, content.readers, binding); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "Winning enchanted starting equipment was silently equipped or skipped");
+        enchanted.mEnchant = {}; replace(enchanted);
+        npc.mInventory.mList.clear();
+        for (int i = 0; i < 64; ++i)
+        {
+            ESM::Clothing item; item.blank(); item.mId = ESM::RefId::stringRefId("bounded_start_" + std::to_string(i));
+            item.mData.mType = ESM::Clothing::Shirt; item.mData.mValue = i; content.store.insertStatic(item);
+            npc.mInventory.mList.push_back({2, item.mId});
+        }
+        replace(npc); rejected = false;
+        try { InventoryService oversized(content.store, content.readers, binding); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "Auto-equipment exceeded the inventory node bound while splitting");
+        std::cout << "starting equipment: explicit/auto NPDT, weapon skill/damage/ties/ammo/fallback, armor/unarmored, "
+            "beast restrictions, signed ring splits, item conservation, deterministic IDs, private/public baselines, "
+            "durable image, recovery without selection, reconnect, unavailable effects and split bound; synthetic transport\n";
+    }
+
     void checkPlayerInventories(const std::filesystem::path& scratch)
     {
         require(std::filesystem::create_directory(scratch), "Player inventory scratch already exists");
         Content content;
         ESM::NPC character; character.blank(); character.mId = ESM::RefId::stringRefId("loaded_character");
+        character.mRace = content.store.get<ESM::NPC>().find(content.actor)->mRace;
         std::vector<ESM::RefId> references{content.actor, character.mId};
         const auto add = [&]<class T>(const char* name) {
             T item; item.blank(); item.mId = ESM::RefId::stringRefId(name);
@@ -725,6 +1111,7 @@ namespace TES3MP::Native::Testing
         binding.mActors = {{{character.mId, {}, 0, false, true}, {content.actor, {}, 0, false, true}}};
         InventoryService service(content.store, content.readers, binding);
         auto authority = players();
+        unequipStartingItems(service, authority);
         const auto view = [&](InventoryService& value, uint64_t session = 1) {
             return value.project(authority, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
         };
@@ -739,6 +1126,7 @@ namespace TES3MP::Native::Testing
         require(initial.size() == 12 && total == 27 && view(service, 2).playerInventory[0].stacks.empty(),
             "Fixed/leveled character inventory or empty starting character changed");
         InventoryService deterministic(content.store, content.readers, binding);
+        unequipStartingItems(deterministic, authority);
         require(std::ranges::equal(service.inventoryImage(), deterministic.inventoryImage()),
             "Same starting loadout and seed produced different identities or loot");
         auto twins = binding; twins.mActors[1] = twins.mActors[0];
@@ -842,7 +1230,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior, bool baseInventory)
+        bool wholeInterior, bool baseInventory, bool worldActors)
     {
         require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
         auto crypto = makeProductionCredentialCrypto();
@@ -873,6 +1261,7 @@ namespace TES3MP::Native::Testing
         // Generated override on actual game records. This is a synthetic mod,
         // not evidence for an arbitrary published mod or its script behavior.
         std::array<ESM::NPC, 2> startingCharacters;
+        ESM::Creature startingCreature;
         const auto writeStartingPlugin = [&](int gold) {
             std::ofstream stream(scratch / "StartingInventories.esp", std::ios::binary);
             ESM::ESMWriter out;
@@ -883,6 +1272,26 @@ namespace TES3MP::Native::Testing
                 auto npc = startingCharacters[i];
                 if (i == 0) npc.mInventory.mList.back().mCount = gold;
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            }
+            if (worldActors)
+            {
+                auto npc = startingCharacters[0]; npc.mScript = {};
+                npc.mNpdtType = ESM::NPC::NPC_DEFAULT; npc.mNpdt.mHealth = 0;
+                npc.mId = ESM::RefId::stringRefId("vnext_dead_actor");
+                out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+                npc.mId = ESM::RefId::stringRefId("vnext_living_actor"); npc.mNpdt.mHealth = 40;
+                out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+                out.startRecord(ESM::Creature::sRecordId, 0); startingCreature.save(out); out.endRecord(ESM::Creature::sRecordId);
+                ESM::Cell cell; cell.blank(); cell.mName = "vNext actor inventory test";
+                cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
+                out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                uint32_t index = 0;
+                for (auto base : {ESM::RefId::stringRefId("vnext_dead_actor"), startingCreature.mId, npc.mId})
+                {
+                    ESM::CellRef placement; placement.blank(); placement.mRefNum = {++index, 0}; placement.mRefID = base;
+                    placement.save(out);
+                }
+                out.endRecord(ESM::Cell::sRecordId);
             }
             out.close();
         };
@@ -897,6 +1306,13 @@ namespace TES3MP::Native::Testing
                 {25, ESM::RefId::stringRefId("gold_001")}};
             startingCharacters[1].mId = ESM::RefId::stringRefId("vnext_second_character");
             startingCharacters[1].mInventory.mList = {{7, ESM::RefId::stringRefId("gold_001")}};
+            if (worldActors)
+            {
+                startingCreature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("rat"));
+                startingCreature.mId = ESM::RefId::stringRefId("vnext_dead_creature"); startingCreature.mScript = {};
+                startingCreature.mData.mHealth = 0;
+                startingCreature.mInventory.mList = {{3, ESM::RefId::stringRefId("gold_001")}};
+            }
             writeStartingPlugin(25);
             std::ofstream out(scratch / "openmw" / "openmw.cfg", std::ios::app);
             out << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=StartingInventories.esp\n";
@@ -904,7 +1320,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
+            out << (worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
             const auto manifestId = testContentManifestId();
             for (auto byte : manifestId.bytes())
                 out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
@@ -912,8 +1328,48 @@ namespace TES3MP::Native::Testing
             out << (baseInventory ? "actors \"player\" \"vnext_second_character\"\n"
                 : "actors \"player\" 3 \"player\" 5\nshirt \"common_shirt_01\"\n");
             out << "loot 1 0\n";
-            out << (wholeInterior ? "interior \"Seyda Neen, Fargoth's House\"\n"
+            out << (worldActors ? "interior \"vNext actor inventory test\"\n" : wholeInterior ? "interior \"Seyda Neen, Fargoth's House\"\n"
                 : "container \"Imperial Prison Ship\" \"Morrowind.esm\" 421490\n") << "cell interior:7\n";
+        }
+        if (worldActors)
+        {
+            auto authority = players(SessionGeneration::initial(), 1, 2);
+            InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+            auto& service = dynamic_cast<InventoryService&>(host.service());
+            auto before = service.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+            require(before.containers.size() == 2 && before.containers[0].equipment.size() == 3,
+                "Real content host did not bind corpse inventories/equipment or exposed living loot");
+            EquipmentFileSink file(scratch / "actors.equipment", true);
+            FileFaults faults; EquipmentFileCommitter sink(file, faults);
+            EquipmentBytes bytes; std::unique_ptr<const InventoryTransferSuccess> success;
+            for (const auto& owner : before.containers)
+                for (const auto& stack : owner.stacks)
+                {
+                    const auto current = service.project(authority, id<SessionId>(2), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+                    auto input = ClientInventoryTransactionCommand{id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        InventoryTransactionKind::TakeFromContainer, owner.container, stack.prototypeId, stack.stackId,
+                        stack.count, {}, current.playerInventory.front().revision, current.containers.front().revision, {}, Position3(0, 0, 0)};
+                    auto prepared = service.prepare(authority, bind(authority, input));
+                    require(service.commit(authority, prepared, sink, success, bytes) == PersistenceResult::Accepted,
+                        "Real content equipped corpse loot failed");
+                }
+            const std::vector image(service.inventoryImage().begin(), service.inventoryImage().end());
+            InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, image);
+            auto& restored = dynamic_cast<InventoryService&>(recovered.service());
+            require(std::ranges::equal(image, restored.inventoryImage()), "Real actor restart changed image");
+            Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(restored, authority, delivery, 2);
+            for (const auto& client : delivery.clients)
+                for (const auto& corpse : client->confirmedContainerInventoryBaselines())
+                    require(corpse.stacks.empty() && corpse.equipment.empty(), "Real actor restart/late join refilled corpse");
+            writeStartingPlugin(26);
+            bool rejected = false;
+            try { InventoryHost changed(descriptor, testContentManifest(), *registry, *crypto, image); }
+            catch (const std::exception&) { rejected = true; }
+            require(rejected, "Changed actor loadout recovered an incompatible campaign");
+            std::cout << "real Morrowind.esm plus generated actor cell: v6 NPC/creature placements, ordinary equipment, "
+                "equipped corpse loot, living access closed, exact restart/late join, content mismatch rejected; synthetic clients\n";
+            return;
         }
         if (wholeInterior)
         {
@@ -968,10 +1424,16 @@ namespace TES3MP::Native::Testing
             };
             if (baseInventory)
             {
-                equip(1, "common_shirt_01", EquipmentSlot::Shirt, true);
-                equip(1, "common_pants_01", EquipmentSlot::Pants, true);
-                equip(1, "iron dagger", EquipmentSlot::CarriedRight, true);
+                const auto initial = view(service, 1).playerInventory.front().equipment;
+                require(initial.size() == 3 && view(service, 2).playerInventory.front().equipment.empty(),
+                    "Real starting loadouts did not auto-equip exactly shirt, pants and dagger");
+                const auto publicGear = view(service, 2).equipment->members.front();
+                for (const auto& [slot, name] : std::initializer_list<std::pair<int, const char*>>{
+                        {8, "common_shirt_01"}, {9, "common_pants_01"}, {16, "iron dagger"}})
+                    require(publicGear.slots[slot] == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name))),
+                        "Real automatic equipment was not publicly projected");
                 equip(1, "iron dagger", EquipmentSlot::CarriedRight, false);
+                equip(1, "common_shirt_01", EquipmentSlot::Shirt, false);
             }
             for (uint64_t session : {1, 2})
             {
@@ -1031,7 +1493,7 @@ namespace TES3MP::Native::Testing
                 require(client->confirmedContainerInventoryBaselines().size() == 9,
                     "Real interior late join lost container baselines");
             if (baseInventory)
-                require(late.clients[0]->confirmedPlayerInventoryBaseline()->equipment.size() == 2
+                require(late.clients[0]->confirmedPlayerInventoryBaseline()->equipment.size() == 1
                     && late.clients[1]->confirmedPlayerInventoryBaseline()->equipment.size() == 1,
                     "Real starting equipment lost on late join");
             // This real cell exceeds the bound and also contains scripted barrels.
@@ -1074,7 +1536,8 @@ namespace TES3MP::Native::Testing
                 require(rejected && std::ranges::equal(image, restoredService.inventoryImage()),
                     "Changed starting-loadout plugin recovered or mutated the committed campaign");
                 std::cout << "real Morrowind.esm plus generated NPC override: distinct 4/1-stack starting loadouts, "
-                    "shirt/pants equip, dagger equip/unequip/transfer/recipient equip, exact equipment restart/late join, legacy/content mismatch rejection; synthetic transport\n";
+                    "automatic shirt/pants/dagger equipment, deliberate unequip, dagger transfer/recipient equip, "
+                    "exact equipment restart/late join without re-equipping, legacy/content mismatch rejection; synthetic transport\n";
             }
             std::cout << "real Morrowind.esm: Fargoth's House, 9 inventories, two independent takes, unchanged peers, "
                 "exact recovery and late join; oversized/scripted Prison Ship rejected; synthetic transport\n";

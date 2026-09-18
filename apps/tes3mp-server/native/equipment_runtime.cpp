@@ -1,7 +1,13 @@
 #include "equipment_runtime.hpp"
+#include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
 #include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwclass/armor.hpp>
+#include <apps/openmw/mwclass/clothing.hpp>
+#include <apps/openmw/mwclass/creature.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/inventoryitem.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <limits>
 #include <set>
@@ -25,6 +31,7 @@ namespace TES3MP::Native
             throw std::invalid_argument("Equipment runtime content/service/startup binding mismatch");
         if (connected && (!world.mPtrRegistry.mIndex.empty() || !scripts.snapshot().mEntries.empty()))
             throw std::invalid_argument("Connected runtime requires exclusive fresh registry and script services");
+        MWClass::registerClasses();
         // Validate all trusted startup records before constructing registered nodes.
         for (const auto& actor : actors)
         {
@@ -56,14 +63,15 @@ namespace TES3MP::Native
                 || placement->mIsLocked || !placement->mTrap.empty()
                 || !placements.insert(placement->mRefNum).second))
                 throw std::invalid_argument("Placed container runtime binding invalid or duplicate");
-            const auto* base = content.get<ESM::Container>().find(binding.mBase);
-            if (!connected || !base->mScript.empty())
-                throw std::invalid_argument("Shared container requires connected mode and no container script");
+            ManualRef reference(content, binding.mBase);
+            const auto ptr = reference.getPtr();
+            if (!connected || (!actorInventory(ptr) && ptr.getType() != ESM::Container::sRecordId)
+                || !ptr.getClass().getScript(ptr).empty() || (actorInventory(ptr) && !placement))
+                throw std::invalid_argument("Shared inventory requires an unscripted container or placed actor");
         }
         // Bind lazy service identity during trusted startup, never during a
         // rejectable command/recovery allocation observation.
         scripts.lifetimeWitness();
-        MWClass::registerClasses();
         for (size_t i = 0; i < actors.size(); ++i)
         {
             mActors[i] = std::make_unique<ManualRef>(content, actors[i].mBase);
@@ -89,7 +97,7 @@ namespace TES3MP::Native
         }
         for (const auto& binding : containers)
         {
-            auto& shared = *mContainers.emplace_back(std::make_unique<SharedContainer>());
+            auto& shared = *mContainers.emplace_back(std::make_unique<SharedInventory>());
             shared.mReference = std::make_unique<ManualRef>(content, binding.mBase);
             if (binding.mPlacement)
             {
@@ -98,7 +106,10 @@ namespace TES3MP::Native
                 shared.mReference->getPtr().getRefData().setPosition(binding.mPlacement->mPos);
             }
             world.registerPtr(shared.mReference->getPtr());
-            shared.mStore.setPtr(shared.mReference->getPtr(), world);
+            const auto ptr = shared.mReference->getPtr();
+            shared.mStore = ptr.getClass().hasInventoryStore(ptr)
+                ? std::make_unique<InventoryStore>() : std::make_unique<ContainerStore>();
+            shared.mStore->setPtr(ptr, world);
         }
         // Bind every owner before loot consumes dynamic IDs, so even base-only
         // diagnostic owners have identical identities during empty recovery.
@@ -111,19 +122,29 @@ namespace TES3MP::Native
                 auto& inventory = mInventories[i];
                 inventory.fill(content.get<ESM::NPC>().find(actors[i].mBase)->mInventory, actors[i].mBase, rng,
                     {content, world, lootLevel});
+                initializeStartingEquipment(i);
                 if (inventory.begin() != inventory.end()) mItems[i] = *inventory.begin();
             }
         for (size_t i = 0; i < containers.size(); ++i)
         {
             const auto& binding = containers[i];
             auto& shared = *mContainers[i];
+            const auto ptr = shared.mReference->getPtr();
+            auto& store = *shared.mStore;
             if (restartActor)
-                shared.mStore.fill({}, {}, rng);
+                store.fill({}, {}, rng);
             else
-                shared.mStore.fill(content.get<ESM::Container>().find(binding.mBase)->mInventory, {}, rng,
+            {
+                const auto& items = ptr.getType() == ESM::NPC::sRecordId ? ptr.get<ESM::NPC>()->mBase->mInventory
+                    : ptr.getType() == ESM::Creature::sRecordId ? ptr.get<ESM::Creature>()->mBase->mInventory
+                    : ptr.get<ESM::Container>()->mBase->mInventory;
+                store.fill(items, actorInventory(ptr) ? binding.mBase : ESM::RefId{}, rng,
                     {content, world, lootLevel});
-            ContainerStoreResolution witness(shared.mStore, shared.mReference->getPtr());
-            shared.mStore.setContListener(&shared.mEffects.mListener);
+                if (inventoryStorage(i + 2)) initializeStartingEquipment(i + 2);
+            }
+            ContainerStoreResolution witness(store, ptr);
+            store.setContListener(&shared.mEffects.mListener);
+            if (auto* inventory = inventoryStorage(i + 2)) inventory->setInvListener(&shared.mEffects.mListener);
         }
         if (restartActor)
         {
@@ -135,6 +156,65 @@ namespace TES3MP::Native
                 }
             mRestartActor = restartActor;
         }
+    }
+
+    void EquipmentRuntime::initializeStartingEquipment(size_t index)
+    {
+        // Constructor-only unpublished storage: failure rejects the whole host.
+        // Stock NPC startup selects against NPDT skills before spell activation.
+        // This temporary stat context is not a second gameplay-state writer.
+        const auto actor = ownerPtr(index);
+        const bool isNpc = actor.getType() == ESM::NPC::sRecordId;
+        auto& inventory = *inventoryStorage(index);
+        MWMechanics::NpcStats stats(mStore);
+        if (isNpc)
+        {
+            const auto& npc = *actor.get<ESM::NPC>()->mBase;
+            if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS) stats.initializeAutoSkills(npc, mStore);
+            else stats.initializeExplicitSkills(npc);
+        }
+        const auto skill = [&](ESM::RefId id) {
+            return isNpc ? stats.getSkill(id).getModified()
+                : static_cast<const MWClass::Creature&>(actor.getClass()).getSkill(actor, id, mStore);
+        };
+        const ContainerStoreStackContext split{mStore,
+            [&](const Ptr& item) { mWorld.registerPtr(item); },
+            [&](const Ptr& item, int count) {
+                const auto removal = ContainerStore::prepareRemoveCount(item.getCellRef(), count);
+                if (removal.mFullRemoval) throw std::logic_error("Starting equipment split removed its source");
+                item.getCellRef() = item.getCellRef().copyWithCount(removal.mRemainingCount);
+                inventory.flagAsModified();
+            }, {}};
+        inventory.autoEquip({mStore, isNpc, isNpc ? 0 : actor.get<ESM::Creature>()->mBase->mAiData.mServices, skill,
+            [&](const ConstPtr& item) {
+                const auto& armor = static_cast<const MWClass::Armor&>(item.getClass());
+                return armor.getSkillAdjustedArmorRating(item, skill(armor.getEquipmentSkill(item, mStore)), mStore);
+            },
+            [&](const ConstPtr& item) {
+                if (item.getType() == ESM::Armor::sRecordId)
+                    return static_cast<const MWClass::Armor&>(item.getClass()).canBeEquipped(item, actor, mStore, inventory).first != 0;
+                if (item.getType() == ESM::Clothing::sRecordId)
+                    return static_cast<const MWClass::Clothing&>(item.getClass()).canBeEquipped(item, actor, mStore).first != 0;
+                return item.getClass().canBeEquipped(item, actor).first != 0;
+            },
+            [&](const Ptr& item) {
+                if (inventory.storedSize() >= PreparedPlainEquipment::MaxItems)
+                    throw std::invalid_argument("Starting equipment split exceeds inventory node budget");
+                inventory.unstack(item, 1, split);
+            },
+            [&] {
+                // Auto-selection doesn't activate item scripts/constant effects
+                // until the complete slot set changes. Reject rather than skip
+                // a winning enchanted item and choose a different stock result.
+                for (const auto& slot : inventory.mSlots)
+                    if (slot != inventory.end())
+                    {
+                        const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
+                        if (!record.mScript.empty() || !record.mEnchant.empty())
+                            throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
+                    }
+                effects(index).mListener.equipmentChanged();
+            }});
     }
 
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
@@ -254,7 +334,7 @@ namespace TES3MP::Native
                 mNpcStats[1] ? std::optional{ mNpcStats[1]->values() } : std::nullopt }, mScriptLocals,
             {} };
         for (const auto& shared : mContainers)
-            result.mContainers.emplace_back(shared->mStore, shared->mReference->getPtr());
+            result.mContainers.emplace_back(*shared->mStore, shared->mReference->getPtr());
         return result;
     }
 
@@ -298,7 +378,7 @@ namespace TES3MP::Native
         for (size_t i = 0; i < mContainers.size(); ++i)
         {
             const auto& shared = *mContainers[i];
-            const auto& store = shared.mStore;
+            const auto& store = *shared.mStore;
             const auto& witness = fresh.mContainers[i];
             valid(!witness.mLifetime.expired() && witness.mLifetime.lock() == store.mResolutionLifetime
                 && witness.mStorage == store.mStorageIdentity && witness.mStore == &store
@@ -502,7 +582,7 @@ namespace TES3MP::Native
         // Runtime listeners have fully owned, stageable semantics. Unknown
         // callbacks (including real mechanics listeners) cannot be dropped
         // or invoked after durable acceptance and are rejected visibly.
-        if ((actor < 2 && mInventories[actor].mInventoryListener != &pending.mListener) || live.mListener != &pending.mListener)
+        if ((inventoryStorage(actor) && inventoryStorage(actor)->mInventoryListener != &pending.mListener) || live.mListener != &pending.mListener)
             throw std::invalid_argument("Unsupported equipment effect listener");
         if (actor < 2 && !mItems[actor].isEmpty() && (!mItems[actor].hasLiveReference() || mItems[actor].mContainerStore != &live))
             throw std::invalid_argument("Equipment runtime item lifetime or binding changed");
@@ -634,16 +714,17 @@ namespace TES3MP::Native
     PlainEquipmentValues EquipmentRuntime::installedValues(size_t actor) const
     {
         const auto& inventory = storage(actor);
+        const auto* equipped = inventoryStorage(actor);
         if (inventory.storedSize() > PlainEquipmentValues::MaxItems)
             throw std::invalid_argument("Equipment inventory export bound exceeded");
         PlainEquipmentValues result;
         result.mActor = ownerPtr(actor).getCellRef().getRefNum();
         result.mLastGenerated = mWorld.getLastGeneratedRefNum();
         inventory.forEachStored([&](const auto& ref, auto position) {
-            if (actor < 2)
+            if (equipped)
                 for (int slot = 0; slot < InventoryStore::Slots; ++slot)
-                    if (position == mInventories[actor].mSlots[slot]) result.mSlots[slot] = ref.mRef.getRefNum();
-            if (actor < 2 && position == mInventories[actor].mSelectedEnchantItem)
+                    if (position == equipped->mSlots[slot]) result.mSlots[slot] = ref.mRef.getRefNum();
+            if (equipped && position == equipped->mSelectedEnchantItem)
                 result.mSelected = ref.mRef.getRefNum();
             auto& object = result.mObjects.emplace_back();
             object.blank();
@@ -659,7 +740,8 @@ namespace TES3MP::Native
     PlainEquipmentContext EquipmentRuntime::preparationContext(size_t actor, size_t initiator) const
     {
         const auto player = mActors.at(actor < 2 ? actor : initiator)->getPtr();
-        return { mStore, mWorld, mScripts, player, player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals };
+        return { mStore, mWorld, mScripts, actor >= 2 && actorInventory(ownerPtr(actor)) ? ownerPtr(actor) : player,
+            player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals };
     }
 
     auto EquipmentRuntime::cellValues(const ESM::CellRef& ref)

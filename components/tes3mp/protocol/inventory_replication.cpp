@@ -255,14 +255,28 @@ namespace TES3MP
     std::variant<ReliableContainerInventoryBaseline, InventoryReplicationDecodeError>
     ReliableContainerInventoryBaseline::create(InventoryBaselineHeader header, ContainerId container, CellId cell,
         Position3 position, ContainerRevision revision, std::uint32_t capacityWeight,
-        std::span<const CanonicalItemStack> stacks)
+        std::span<const CanonicalItemStack> stacks, std::span<const EquipmentBinding> equipment)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
         if (const auto failure = validateStacks(stacks))
             return *failure;
+        if (equipment.size() > static_cast<std::size_t>(EquipmentSlot::Count))
+            return error(Code::TooManyEntries, equipment.size(), static_cast<std::size_t>(EquipmentSlot::Count));
+        for (std::size_t i = 0; i < equipment.size(); ++i)
+        {
+            if (equipment[i].slot >= EquipmentSlot::Count)
+                return error(Code::InvalidEquipmentSlot, static_cast<std::size_t>(equipment[i].slot), 0, i);
+            if (i && equipment[i - 1].slot >= equipment[i].slot)
+                return error(Code::EntriesNotStrictlySorted, 0, 0, i);
+            if (std::ranges::find(stacks, equipment[i].stackId, &CanonicalItemStack::stackId) == stacks.end())
+                return error(Code::InvalidCommandShape, 0, 0, i);
+            for (std::size_t j = 0; j < i; ++j)
+                if (equipment[j].stackId == equipment[i].stackId)
+                    return error(Code::InvalidCommandShape, 0, 0, i);
+        }
         return ReliableContainerInventoryBaseline{ header, container, std::move(cell), position, revision,
-            capacityWeight, { stacks.begin(), stacks.end() } };
+            capacityWeight, { stacks.begin(), stacks.end() }, { equipment.begin(), equipment.end() } };
     }
 
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
@@ -327,8 +341,11 @@ namespace TES3MP
         std::vector<ContainerSchema::ItemStack> stacks;
         for (const auto& stack : input.stacks)
             stacks.push_back(encodeStack<ContainerSchema::ItemStack>(stack));
+        std::vector<ContainerSchema::EquipmentBinding> equipment;
+        for (const auto& binding : input.equipment)
+            equipment.emplace_back(binding.stackId.value(), static_cast<std::uint8_t>(binding.slot), 0, 0, 0);
         const auto root = ContainerSchema::CreateReliableContainerInventoryBaselineDirect(
-            builder, header, &cell, &position, &stacks);
+            builder, header, &cell, &position, &stacks, equipment.empty() ? nullptr : &equipment);
         ContainerSchema::FinishSizePrefixedReliableContainerInventoryBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -491,10 +508,25 @@ namespace TES3MP
                 stacks.push_back(std::get<CanonicalItemStack>(std::move(stack)));
             }
         }
+        std::vector<EquipmentBinding> equipment;
+        if (const auto* encoded = root->equipment())
+        {
+            if (encoded->size() > static_cast<std::size_t>(EquipmentSlot::Count))
+                return error(Code::TooManyEntries, encoded->size(), static_cast<std::size_t>(EquipmentSlot::Count));
+            for (std::size_t index = 0; index < encoded->size(); ++index)
+            {
+                const auto current = copyStruct(encoded, index);
+                if (current.slot() >= static_cast<std::uint8_t>(EquipmentSlot::Count))
+                    return error(Code::InvalidEquipmentSlot, current.slot(), 0, index);
+                auto stack = strong<ItemStackId>(current.stack_id(), index);
+                if (const auto* failure = std::get_if<Error>(&stack)) return *failure;
+                equipment.push_back({static_cast<EquipmentSlot>(current.slot()), *value(stack)});
+            }
+        }
         const auto* position = root->position();
         return ReliableContainerInventoryBaseline::create(std::get<InventoryBaselineHeader>(header), *value(container),
             std::get<CellId>(cell), Position3(position->x(), position->y(), position->z()), *value(revision),
-            h->capacity_weight(), stacks);
+            h->capacity_weight(), stacks, equipment);
     }
 
     GroundItemBaselineDecodeResult decodeReliableGroundItemBaseline(std::span<const std::byte> payload)

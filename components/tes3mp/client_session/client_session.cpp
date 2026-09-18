@@ -591,12 +591,16 @@ namespace TES3MP
         std::vector<CanonicalItemStack> stacks;
         for (const auto& chunk : pending->second.chunks)
             stacks.insert(stacks.end(), chunk->stacks.begin(), chunk->stacks.end());
+        std::vector<EquipmentBinding> equipment;
+        for (const auto& chunk : pending->second.chunks)
+            equipment.insert(equipment.end(), chunk->equipment.begin(), chunk->equipment.end());
+        std::ranges::sort(equipment, {}, &EquipmentBinding::slot);
         auto header = pending->second.header;
         header.chunkIndex = 0;
         header.chunkCount = 1;
         auto created
             = ReliableContainerInventoryBaseline::create(header, pending->second.container, pending->second.cell,
-                pending->second.position, pending->second.revision, pending->second.capacityWeight, stacks);
+                pending->second.position, pending->second.revision, pending->second.capacityWeight, stacks, equipment);
         auto* complete = std::get_if<ReliableContainerInventoryBaseline>(&created);
         if (!complete)
             return InventoryReplicationReceiveResult::InvalidChunkSequence;

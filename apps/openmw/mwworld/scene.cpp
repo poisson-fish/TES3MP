@@ -32,6 +32,7 @@
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
 
+#include "../mwrender/actorutil.hpp"
 #include "../mwrender/landmanager.hpp"
 #include "../mwrender/postprocessor.hpp"
 #include "../mwrender/renderingmanager.hpp"
@@ -56,11 +57,6 @@ namespace
 {
     using MWWorld::RotationOrder;
 
-    osg::Quat makeActorOsgQuat(const ESM::Position& position)
-    {
-        return osg::Quat(position.rot[2], osg::Vec3(0, 0, -1));
-    }
-
     osg::Quat makeInversedOrderObjectOsgQuat(const ESM::Position& position)
     {
         const float xr = position.rot[0];
@@ -74,13 +70,13 @@ namespace
     osg::Quat makeInverseNodeRotation(const MWWorld::Ptr& ptr)
     {
         const auto& pos = ptr.getRefData().getPosition();
-        return ptr.getClass().isActor() ? makeActorOsgQuat(pos) : makeInversedOrderObjectOsgQuat(pos);
+        return ptr.getClass().isActor() ? MWRender::makeActorRootRotation(pos) : makeInversedOrderObjectOsgQuat(pos);
     }
 
     osg::Quat makeDirectNodeRotation(const MWWorld::Ptr& ptr)
     {
         const auto& pos = ptr.getRefData().getPosition();
-        return ptr.getClass().isActor() ? makeActorOsgQuat(pos) : Misc::Convert::makeOsgQuat(pos);
+        return ptr.getClass().isActor() ? MWRender::makeActorRootRotation(pos) : Misc::Convert::makeOsgQuat(pos);
     }
 
     osg::Quat makeNodeRotation(const MWWorld::Ptr& ptr, RotationOrder order)

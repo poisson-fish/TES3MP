@@ -44,7 +44,7 @@ namespace TES3MP::Native
         MWWorld::ESMStore& store() { return mStore; }
         ESM::ReadersCache& readers() { return mReaders; }
         std::string contentFingerprint() const;
-        struct PlacedContainer
+        struct PlacedInventory
         {
             ESM::CellRef mRef;
             uint64_t mIdentity;
@@ -53,9 +53,13 @@ namespace TES3MP::Native
         };
         // One interior's winning engine references, including barrels and chests.
         // No gameplay or base-inventory execution occurs during discovery.
-        std::vector<PlacedContainer> placedContainers(std::string_view cell);
-        PlacedContainer resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index);
-        std::vector<PlacedContainer> resolveContainers(std::string_view cell, size_t limit);
+        std::vector<PlacedInventory> placedContainers(std::string_view cell);
+        PlacedInventory resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index);
+        std::vector<PlacedInventory> resolveContainers(std::string_view cell, size_t limit);
+        // Actor discovery never initializes custom data, AI, scripts or loot.
+        // NPC and creature placements use the same stable reference namespace.
+        std::vector<PlacedInventory> placedActors(std::string_view cell);
+        std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit);
         void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;

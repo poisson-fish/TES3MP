@@ -836,8 +836,6 @@ namespace TES3MP::ServerApp
             return false;
         }
 
-        std::optional<CanonicalServerState> directMutationBase;
-        std::optional<CanonicalRevision> directMutationBaseRevision;
         std::array<TransportMessage, TransportRuntime::MaxMessagesPerReceive> messages{};
         for (const auto connection : mWiring->sessions.connections())
         {
@@ -868,11 +866,11 @@ namespace TES3MP::ServerApp
                 const auto revisionBeforeDispatch = mWiring->reducer.canonicalRevision();
                 const auto dispatched = mWiring->sessions.dispatch(
                     connection, messages[index], mWiring->joins, mWiring->crypto, mWiring->intake, tick);
-                if (dispatched == ConnectionSessionResult::CommandSubmitted && !directMutationBase
+                if (dispatched == ConnectionSessionResult::CommandSubmitted && !mDirectMutationBase
                     && mWiring->reducer.canonicalRevision() != revisionBeforeDispatch)
                 {
-                    directMutationBase = beforeDispatch;
-                    directMutationBaseRevision = revisionBeforeDispatch;
+                    mDirectMutationBase = beforeDispatch;
+                    mDirectMutationBaseRevision = revisionBeforeDispatch;
                 }
                 if (dispatched == ConnectionSessionResult::ProtocolRejected
                     || dispatched == ConnectionSessionResult::QueueRejected
@@ -1019,10 +1017,10 @@ namespace TES3MP::ServerApp
                     return false;
                 }
             }
-            const auto before = directMutationBase ? *directMutationBase : mWiring->reducer.state();
-            const auto revisionBefore = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
-            directMutationBase.reset();
-            directMutationBaseRevision.reset();
+            const auto before = mDirectMutationBase ? *mDirectMutationBase : mWiring->reducer.state();
+            const auto revisionBefore = mDirectMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
+            mDirectMutationBase.reset();
+            mDirectMutationBaseRevision.reset();
             CanonicalCommandWorlds commandWorlds{ .interactiveObjects = mWiring->interactiveObjects,
                 .interactiveObjectCatalog = mWiring->interactiveObjectCatalog,
                 .inventory = mWiring->inventory,

@@ -1,10 +1,18 @@
 #include "actorutil.hpp"
 
+#include <components/esm/position.hpp>
 #include <components/settings/values.hpp>
 #include <components/vfs/pathutil.hpp>
 
+#include <osg/Quat>
+
 namespace MWRender
 {
+    osg::Quat makeActorRootRotation(const ESM::Position& position)
+    {
+        return osg::Quat(position.rot[2], osg::Vec3(0, 0, -1));
+    }
+
     const std::string& getActorSkeleton(bool firstPerson, bool isFemale, bool isBeast, bool isWerewolf)
     {
         if (!firstPerson)

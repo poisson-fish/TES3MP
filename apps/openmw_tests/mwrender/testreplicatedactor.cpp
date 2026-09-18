@@ -1,14 +1,39 @@
 #include <gtest/gtest.h>
 
 #include <components/esm/position.hpp>
+#include <osg/Quat>
 
+#include "../../openmw/mwrender/actorutil.hpp"
 #include "../../openmw/mwrender/replicatedactor.hpp"
 #include "../../openmw/mwrender/vismask.hpp"
 
+#include <cmath>
 #include <limits>
 
 namespace
 {
+    TEST(ReplicatedActor, RootStaysUprightWhenLookingAround)
+    {
+        for (const float yaw : { 0.f, 1.5707963f, -1.5707963f, 3.1415927f })
+            for (const float pitch : { -1.55f, 0.f, 1.55f })
+                for (const float roll : { -0.75f, 0.f, 0.75f })
+                {
+                    ESM::Position position{};
+                    position.rot[0] = pitch;
+                    position.rot[1] = roll;
+                    position.rot[2] = yaw;
+                    const auto rotation = MWRender::makeActorRootRotation(position);
+                    const auto up = rotation * osg::Vec3f(0.f, 0.f, 1.f);
+                    EXPECT_NEAR(up.x(), 0.f, 1e-6f);
+                    EXPECT_NEAR(up.y(), 0.f, 1e-6f);
+                    EXPECT_NEAR(up.z(), 1.f, 1e-6f);
+                    const auto forward = rotation * osg::Vec3f(0.f, 1.f, 0.f);
+                    EXPECT_NEAR(forward.x(), std::sin(yaw), 1e-6f);
+                    EXPECT_NEAR(forward.y(), std::cos(yaw), 1e-6f);
+                    EXPECT_NEAR(forward.z(), 0.f, 1e-6f);
+                }
+    }
+
     TEST(ReplicatedActor, AcceptsFinitePose)
     {
         ESM::Position position{};

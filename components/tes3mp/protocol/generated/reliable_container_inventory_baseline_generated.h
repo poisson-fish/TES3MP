@@ -24,6 +24,8 @@ struct Cell;
 
 struct ItemStack;
 
+struct EquipmentBinding;
+
 struct ContainerInventoryBaselineHeader;
 struct ContainerInventoryBaselineHeaderBuilder;
 
@@ -220,6 +222,47 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ItemStack FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(ItemStack, 48);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) EquipmentBinding FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t stack_id_;
+  uint8_t slot_;
+  uint8_t padding0_;
+  uint16_t padding1_;
+  uint32_t padding2_;
+
+ public:
+  EquipmentBinding()
+      : stack_id_(0),
+        slot_(0),
+        padding0_(0),
+        padding1_(0),
+        padding2_(0) {
+  }
+  EquipmentBinding(uint64_t _stack_id, uint8_t _slot, uint8_t _padding0, uint16_t _padding1, uint32_t _padding2)
+      : stack_id_(::flatbuffers::EndianScalar(_stack_id)),
+        slot_(::flatbuffers::EndianScalar(_slot)),
+        padding0_(::flatbuffers::EndianScalar(_padding0)),
+        padding1_(::flatbuffers::EndianScalar(_padding1)),
+        padding2_(::flatbuffers::EndianScalar(_padding2)) {
+  }
+  uint64_t stack_id() const {
+    return ::flatbuffers::EndianScalar(stack_id_);
+  }
+  uint8_t slot() const {
+    return ::flatbuffers::EndianScalar(slot_);
+  }
+  uint8_t padding0() const {
+    return ::flatbuffers::EndianScalar(padding0_);
+  }
+  uint16_t padding1() const {
+    return ::flatbuffers::EndianScalar(padding1_);
+  }
+  uint32_t padding2() const {
+    return ::flatbuffers::EndianScalar(padding2_);
+  }
+};
+FLATBUFFERS_STRUCT_END(EquipmentBinding, 16);
+
 struct ContainerInventoryBaselineHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ContainerInventoryBaselineHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -348,7 +391,8 @@ struct ReliableContainerInventoryBaseline FLATBUFFERS_FINAL_CLASS : private ::fl
     VT_HEADER = 4,
     VT_CELL = 6,
     VT_POSITION = 8,
-    VT_STACKS = 10
+    VT_STACKS = 10,
+    VT_EQUIPMENT = 12
   };
   const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ContainerInventoryBaselineHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ContainerInventoryBaselineHeader *>(VT_HEADER);
@@ -362,6 +406,9 @@ struct ReliableContainerInventoryBaseline FLATBUFFERS_FINAL_CLASS : private ::fl
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack *> *stacks() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack *> *>(VT_STACKS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding *> *equipment() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding *> *>(VT_EQUIPMENT);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -371,6 +418,8 @@ struct ReliableContainerInventoryBaseline FLATBUFFERS_FINAL_CLASS : private ::fl
            VerifyField<TES3MP::Protocol::Schema::ContainerInventoryBaseline::Position3>(verifier, VT_POSITION, 8) &&
            VerifyOffset(verifier, VT_STACKS) &&
            verifier.VerifyVector(stacks()) &&
+           VerifyOffset(verifier, VT_EQUIPMENT) &&
+           verifier.VerifyVector(equipment()) &&
            verifier.EndTable();
   }
 };
@@ -391,6 +440,9 @@ struct ReliableContainerInventoryBaselineBuilder {
   void add_stacks(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack *>> stacks) {
     fbb_.AddOffset(ReliableContainerInventoryBaseline::VT_STACKS, stacks);
   }
+  void add_equipment(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding *>> equipment) {
+    fbb_.AddOffset(ReliableContainerInventoryBaseline::VT_EQUIPMENT, equipment);
+  }
   explicit ReliableContainerInventoryBaselineBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -407,8 +459,10 @@ inline ::flatbuffers::Offset<ReliableContainerInventoryBaseline> CreateReliableC
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::ContainerInventoryBaseline::ContainerInventoryBaselineHeader> header = 0,
     const TES3MP::Protocol::Schema::ContainerInventoryBaseline::Cell *cell = nullptr,
     const TES3MP::Protocol::Schema::ContainerInventoryBaseline::Position3 *position = nullptr,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack *>> stacks = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack *>> stacks = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding *>> equipment = 0) {
   ReliableContainerInventoryBaselineBuilder builder_(_fbb);
+  builder_.add_equipment(equipment);
   builder_.add_stacks(stacks);
   builder_.add_position(position);
   builder_.add_cell(cell);
@@ -421,14 +475,17 @@ inline ::flatbuffers::Offset<ReliableContainerInventoryBaseline> CreateReliableC
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::ContainerInventoryBaseline::ContainerInventoryBaselineHeader> header = 0,
     const TES3MP::Protocol::Schema::ContainerInventoryBaseline::Cell *cell = nullptr,
     const TES3MP::Protocol::Schema::ContainerInventoryBaseline::Position3 *position = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack> *stacks = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack> *stacks = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding> *equipment = nullptr) {
   auto stacks__ = stacks ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::ContainerInventoryBaseline::ItemStack>(*stacks) : 0;
+  auto equipment__ = equipment ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::ContainerInventoryBaseline::EquipmentBinding>(*equipment) : 0;
   return TES3MP::Protocol::Schema::ContainerInventoryBaseline::CreateReliableContainerInventoryBaseline(
       _fbb,
       header,
       cell,
       position,
-      stacks__);
+      stacks__,
+      equipment__);
 }
 
 inline const TES3MP::Protocol::Schema::ContainerInventoryBaseline::ReliableContainerInventoryBaseline *GetReliableContainerInventoryBaseline(const void *buf) {

@@ -15,6 +15,7 @@
 
 #include <components/compiler/locals.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadscpt.hpp>
 #include <components/esm3/objectstate.hpp>
@@ -550,11 +551,21 @@ namespace MWWorld
             registered(context.mPlayer, context.mWorldModel);
             const auto* inventory = typeid(base) == typeid(InventoryStore) ? static_cast<const InventoryStore*>(&base) : nullptr;
             const bool container = typeid(base) == typeid(ContainerStore);
-            if ((!inventory && !container) || !base.mResolved || !context.mActor.getClass().isNpc()
-                || !sameReference(context.mActor, context.mPlayer)
+            const auto owner = resolution.mOwner;
+            const bool placedActor = owner.getCellRef().getRefNum().hasContentFile() && owner.getClass().isActor()
+                && sameReference(owner, context.mActor) && !sameReference(owner, context.mPlayer);
+            if (placedActor && (context.mNpcStats || !owner.getClass().getScript(owner).empty()
+                || owner.getRefData().getCustomData()
+                || (owner.getType() == ESM::NPC::sRecordId
+                    ? context.mStore.get<ESM::NPC>().search(owner.getCellRef().getRefId()) != owner.get<ESM::NPC>()->mBase
+                    : owner.getType() != ESM::Creature::sRecordId
+                        || context.mStore.get<ESM::Creature>().search(owner.getCellRef().getRefId()) != owner.get<ESM::Creature>()->mBase)))
+                throw std::invalid_argument("Placed actor inventory requires its original unscripted content and detached context");
+            if ((!inventory && !container) || !base.mResolved || !context.mPlayer.getClass().isNpc()
+                || (!placedActor && (!context.mActor.getClass().isNpc() || !sameReference(context.mActor, context.mPlayer)))
                 || !sameReference(base.getPtr(context.mWorldModel), resolution.mOwner)
                 || (inventory && !sameReference(resolution.mOwner, context.mActor))
-                || (container && (resolution.mOwner.getType() != ESM::Container::sRecordId
+                || (container && !placedActor && (resolution.mOwner.getType() != ESM::Container::sRecordId
                     || context.mNpcStats || !resolution.mOwner.getClass().getScript(resolution.mOwner).empty()
                     || context.mStore.get<ESM::Container>().search(resolution.mOwner.getCellRef().getRefId())
                         != resolution.mOwner.get<ESM::Container>()->mBase
@@ -857,7 +868,7 @@ namespace MWWorld
     std::array<PreparedPlainEquipment, 2> PreparedPlainEquipment::prepareTransfer(
         const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
         ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
-        const std::array<PlainEquipmentContext, 2>& contexts)
+        const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource)
     {
         const auto& source = State::storage(inventories[0], contexts[0]);
         const auto& destination = State::storage(inventories[1], contexts[1]);
@@ -870,7 +881,7 @@ namespace MWWorld
             || item.getContainerStore() != &source || item.getCellRef().getRefNum() != expectedIdentity
             || !ContainerStore::isStorableType(item.getType()) || count <= 0
             || count > std::abs(static_cast<int64_t>(item.getCellRef().getCount(false)))
-            || (dynamic_cast<const InventoryStore*>(&source)
+            || (!allowEquippedSource && dynamic_cast<const InventoryStore*>(&source)
                 && std::any_of(static_cast<const InventoryStore&>(source).mSlots.begin(),
                     static_cast<const InventoryStore&>(source).mSlots.end(), [&](const auto& slot) {
                         return State::position(static_cast<const InventoryStore&>(source), slot) == expectedIdentity;
@@ -918,6 +929,16 @@ namespace MWWorld
         normalizeContainerAddReference(added->getCellRef());
         const auto removal = ContainerStore::prepareRemoveCount(origin->getCellRef(), count);
         origin->getCellRef() = origin->getCellRef().copyWithCount(removal.mRemainingCount);
+        if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate()); inventory && allowEquippedSource)
+        {
+            // Stock removal only clears equipment when the entire stack is gone.
+            // Zero-count unequip cannot restack, split or execute item locals.
+            const InventoryStoreEquipmentContext context{{contexts[0].mStore, {}, {}, {}},
+                contexts[0].mActor, contexts[0].mPlayer,
+                [](const Ptr&, const ESM::RefId&) { throw std::logic_error("Removed item unexpectedly invoked script locals"); },
+                [&](const Ptr&) { from.effect(PlainEquipmentResult::EffectKind::EquipmentChanged); }};
+            inventory->unequipRemovedItem(*origin, context);
+        }
         if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate());
             inventory && removal.mFullRemoval && inventory->mSelectedEnchantItem == origin)
             inventory->mSelectedEnchantItem = inventory->end();

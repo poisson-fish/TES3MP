@@ -6,6 +6,9 @@
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadclot.hpp>
+#include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
+#include <components/esm3/loadlevlist.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -14,14 +17,14 @@
 
 namespace TES3MP::Native
 {
-    std::vector<Loadout::PlacedContainer> Loadout::placedContainers(std::string_view cell)
+    std::vector<Loadout::PlacedInventory> Loadout::placedContainers(std::string_view cell)
     {
         if (cell.empty() || cell.size() > 256)
             throw std::invalid_argument("Native placed container cell invalid");
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
         auto& loaded = world.getInterior(cell);
-        std::vector<PlacedContainer> result;
+        std::vector<PlacedInventory> result;
         loaded.forEachType<ESM::Container>([&](const MWWorld::Ptr& ptr) {
             if (result.size() == 4096)
                 throw std::invalid_argument("Native placed container discovery budget exceeded");
@@ -38,11 +41,11 @@ namespace TES3MP::Native
                 base->mInventory.mList.empty(), !base->mScript.empty()});
             return true;
         });
-        std::ranges::sort(result, {}, &PlacedContainer::mIdentity);
+        std::ranges::sort(result, {}, &PlacedInventory::mIdentity);
         return result;
     }
 
-    Loadout::PlacedContainer Loadout::resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index)
+    Loadout::PlacedInventory Loadout::resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index)
     {
         auto references = placedContainers(cell);
         const auto found = std::ranges::find_if(references, [&](const auto& ref) {
@@ -55,7 +58,54 @@ namespace TES3MP::Native
         return *found;
     }
 
-    std::vector<Loadout::PlacedContainer> Loadout::resolveContainers(std::string_view cell, size_t limit)
+    std::vector<Loadout::PlacedInventory> Loadout::placedActors(std::string_view cell)
+    {
+        if (cell.empty() || cell.size() > 256)
+            throw std::invalid_argument("Native placed actor cell invalid");
+        MWClass::registerClasses();
+        MWWorld::WorldModel world(mStore, mReaders, 1);
+        auto& loaded = world.getInterior(cell);
+        std::vector<PlacedInventory> result;
+        const auto visit = [&]<class T>(const MWWorld::Ptr& ptr) {
+            if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
+            if (result.size() == 4096)
+                throw std::invalid_argument("Native placed actor discovery budget exceeded");
+            ESM::ObjectState state;
+            ptr.getCellRef().writeState(state);
+            const auto id = MWWorld::placedRefId(state.mRef.mRefNum, mOptions.mContent);
+            if (!id) throw std::invalid_argument("Native placed actor identity unavailable");
+            for (float value : state.mRef.mPos.pos)
+                if (!std::isfinite(value) || std::abs(double(value)) >= double(INT64_MAX) / 1024)
+                    throw std::invalid_argument("Native placed actor position outside wire range");
+            const auto* base = ptr.get<T>()->mBase;
+            result.push_back({state.mRef, *id, mOptions.mContent.at(state.mRef.mRefNum.mContentFile),
+                base->mInventory.mList.empty(), !base->mScript.empty()});
+            return true;
+        };
+        loaded.forEachType<ESM::NPC>([&](const auto& ptr) { return visit.template operator()<ESM::NPC>(ptr); });
+        loaded.forEachType<ESM::Creature>([&](const auto& ptr) { return visit.template operator()<ESM::Creature>(ptr); });
+        // A leveled actor requires persistent spawning/RNG and cannot be silently skipped.
+        loaded.forEachType<ESM::CreatureLevList>([](const auto& ptr) {
+            if (ptr.getRefData().isEnabled() && !ptr.getRefData().isDeletedByContentFile())
+                throw std::invalid_argument("Native leveled actor spawning services unavailable");
+            return true;
+        });
+        std::ranges::sort(result, {}, &PlacedInventory::mIdentity);
+        return result;
+    }
+
+    std::vector<Loadout::PlacedInventory> Loadout::resolveActors(std::string_view cell, size_t limit)
+    {
+        auto references = placedActors(cell);
+        if (references.size() > limit) throw std::invalid_argument("Native interior actor inventory budget exceeded");
+        for (const auto& ref : references)
+            if (ref.mScripted)
+                throw std::invalid_argument("Native placed actor " + std::to_string(ref.mIdentity)
+                    + " (" + ref.mRef.mRefID.toDebugString() + ") requires script services");
+        return references;
+    }
+
+    std::vector<Loadout::PlacedInventory> Loadout::resolveContainers(std::string_view cell, size_t limit)
     {
         auto references = placedContainers(cell);
         if (references.empty() || references.size() > limit)

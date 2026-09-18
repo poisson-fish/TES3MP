@@ -2426,6 +2426,33 @@ void MWWorld::ContainerStore::addInitialItemImp(
     }
 }
 
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addAuthoritative(
+    const ConstPtr& ptr, int count, WorldModel& world)
+{
+    if (!mResolved || count <= 0 || ptr.getCellRef().getRefNum().isSet()
+        || !ptr.getClass().getScript(ptr).empty() || ptr.getRefData().getCustomData() || ptr.getRefData().getLuaScripts())
+        throw std::invalid_argument("Remote inventory requires resolved storage and ordinary positive stacks");
+    auto item = end();
+    forEachStored([&](auto& node, auto it) {
+        if (item == end() && node.mRef.getCount(false) == 0 && node.mRef.getRefId() == ptr.getCellRef().getRefId())
+            item = it;
+    });
+    if (item == end()) item = addNewStack(ptr, count);
+    else
+    {
+        // Repeated baselines reuse retired local nodes without merging two
+        // active remote identities or growing storage on every revision.
+        const auto localId = item->getCellRef().getRefNum();
+        item->getCellRef() = ptr.getCellRef().copyWithCount(count);
+        item->getCellRef().setRefNum(localId);
+        item->getRefData() = ptr.getRefData().copyForContainerTransfer();
+    }
+    world.registerPtr(*item);
+    flagAsModified();
+    mModified = true;
+    return item;
+}
+
 void MWWorld::ContainerStore::clear()
 {
     for (auto&& iter : *this)

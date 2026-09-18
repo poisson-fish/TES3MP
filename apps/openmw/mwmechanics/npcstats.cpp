@@ -144,7 +144,7 @@ namespace
     {
         const ESM::Class* npcClass = content.get<ESM::Class>().find(npc->mClass);
 
-        unsigned int level = npcStats.getLevel();
+        unsigned int level = npc->mNpdt.mLevel;
 
         const ESM::Race* race = content.get<ESM::Race>().find(npc->mRace);
 
@@ -225,10 +225,7 @@ MWMechanics::NpcStats::NpcStats(const MWWorld::ESMStore& store)
 
 void MWMechanics::NpcStats::initializeExplicitStats(const ESM::NPC& npc, std::optional<float> baseMagickaMultiplier)
 {
-    if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
-        throw std::invalid_argument("Explicit NPC stats require NPDT values");
-    for (size_t i = 0; i < npc.mNpdt.mSkills.size(); ++i)
-        getSkill(ESM::Skill::indexToRefId(static_cast<int>(i))).setBase(npc.mNpdt.mSkills[i]);
+    initializeExplicitSkills(npc);
     for (size_t i = 0; i < npc.mNpdt.mAttributes.size(); ++i)
     {
         const auto id = ESM::Attribute::indexToRefId(static_cast<int>(i));
@@ -258,6 +255,21 @@ void MWMechanics::NpcStats::initializeAutoStats(const ESM::NPC& npc, const MWWor
     setBaseDisposition(npc.mNpdt.mDisposition);
     setReputation(npc.mNpdt.mReputation);
     autoCalculateAttributes(&npc, *this, content, baseMagickaMultiplier);
+    initializeAutoSkills(npc, content);
+}
+
+void MWMechanics::NpcStats::initializeExplicitSkills(const ESM::NPC& npc)
+{
+    if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+        throw std::invalid_argument("Explicit NPC skills require NPDT values");
+    for (size_t i = 0; i < npc.mNpdt.mSkills.size(); ++i)
+        getSkill(ESM::Skill::indexToRefId(static_cast<int>(i))).setBase(npc.mNpdt.mSkills[i]);
+}
+
+void MWMechanics::NpcStats::initializeAutoSkills(const ESM::NPC& npc, const MWWorld::ESMStore& content)
+{
+    if (npc.mNpdtType != ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+        throw std::invalid_argument("Autocalculated NPC skills require auto NPDT");
     autoCalculateSkills(&npc, *this, content);
 }
 

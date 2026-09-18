@@ -88,10 +88,14 @@ namespace TES3MP
         ContainerRevision revision;
         std::uint32_t capacityWeight = 0;
         std::vector<CanonicalItemStack> stacks;
+        // Optional equipment for actor-owned shared storage. Ordinary containers
+        // retain an empty table and their original wire representation.
+        std::vector<EquipmentBinding> equipment;
 
         static std::variant<ReliableContainerInventoryBaseline, InventoryReplicationDecodeError> create(
             InventoryBaselineHeader header, ContainerId container, CellId cell, Position3 position,
-            ContainerRevision revision, std::uint32_t capacityWeight, std::span<const CanonicalItemStack> stacks);
+            ContainerRevision revision, std::uint32_t capacityWeight, std::span<const CanonicalItemStack> stacks,
+            std::span<const EquipmentBinding> equipment = {});
         friend bool operator==(
             const ReliableContainerInventoryBaseline&, const ReliableContainerInventoryBaseline&) noexcept = default;
     };

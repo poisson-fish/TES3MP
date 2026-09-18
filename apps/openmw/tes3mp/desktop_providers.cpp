@@ -1032,6 +1032,11 @@ namespace TES3MP::OpenMWAdapter
                 clear();
                 world->changeToCell(targetCell->getCell()->getId(), selfPosition, false, false);
                 player = world->getPlayerPtr();
+                // With adjustPlayerPos disabled, changing cells retains the old
+                // position. Install the confirmed pose before creating remotes;
+                // otherwise exterior streaming unloads their new cell again.
+                world->moveObject(player, selfPosition.asVec3());
+                world->rotateObject(player, selfPosition.asRotationVec3());
                 targetCell = player.getCell();
                 sessionBootstrapPending = false;
             }
@@ -1040,6 +1045,7 @@ namespace TES3MP::OpenMWAdapter
                 if (sessionBootstrapPending)
                 {
                     world->moveObject(player, selfPosition.asVec3());
+                    world->rotateObject(player, selfPosition.asRotationVec3());
                     sessionBootstrapPending = false;
                 }
                 const auto& local = player.getRefData().getPosition();
@@ -1473,7 +1479,10 @@ namespace TES3MP::OpenMWAdapter
             if (combatSnapshot && snapshot.serverTick() < combatSnapshot->serverTick())
                 return ProviderResult::Accepted;
             if (combatSnapshot && snapshot.serverTick() == combatSnapshot->serverTick() && snapshot != *combatSnapshot)
+            {
+                Log(Debug::Error) << "TES3MP combat presentation: conflicting snapshot at the same tick";
                 return ProviderResult::PresentationFailed;
+            }
             auto world = MWBase::Environment::get().getWorld();
             if (!world)
                 return ProviderResult::PresentationFailed;
@@ -1535,8 +1544,13 @@ namespace TES3MP::OpenMWAdapter
                 actorMagicka.setBase(combat->maximumMagicka);
                 actorMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(actorMagicka);
-                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                const auto deathResult = remote.actor->setDead(combat->dead);
+                if (!replicatedActorResultAccepted(deathResult))
+                {
+                    Log(Debug::Error) << "TES3MP combat actor death presentation: "
+                                      << replicatedActorResultName(deathResult);
                     return ProviderResult::PresentationFailed;
+                }
             }
             for (auto& [entity, remote] : remotes)
             {
@@ -1563,8 +1577,13 @@ namespace TES3MP::OpenMWAdapter
                 remoteMagicka.setBase(combat->maximumMagicka);
                 remoteMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(remoteMagicka);
-                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                const auto deathResult = remote.actor->setDead(combat->dead);
+                if (!replicatedActorResultAccepted(deathResult))
+                {
+                    Log(Debug::Error) << "TES3MP combat player death presentation: "
+                                      << replicatedActorResultName(deathResult);
                     return ProviderResult::PresentationFailed;
+                }
             }
             for (const auto& batch : events)
             {
@@ -1807,7 +1826,7 @@ namespace TES3MP::OpenMWAdapter
             MWWorld::CellStore& cell, std::uint32_t refNumIndex, std::int32_t contentFile)
         {
             MWWorld::Ptr found;
-            cell.forEachType<ESM::Container>([&](const MWWorld::Ptr& ptr) {
+            const auto visit = [&](const MWWorld::Ptr& ptr) {
                 const auto refNum = ptr.getCellRef().getRefNum();
                 if (refNum.mIndex == refNumIndex && (contentFile < 0 || refNum.mContentFile == contentFile))
                 {
@@ -1815,7 +1834,10 @@ namespace TES3MP::OpenMWAdapter
                     return false;
                 }
                 return true;
-            });
+            };
+            cell.forEachType<ESM::Container>(visit);
+            if (found.isEmpty()) cell.forEachType<ESM::NPC>(visit);
+            if (found.isEmpty()) cell.forEachType<ESM::Creature>(visit);
             return found;
         }
 
@@ -1961,29 +1983,56 @@ namespace TES3MP::OpenMWAdapter
             {
                 auto playerPtr = world->getPlayerPtr();
                 auto& inventory = playerPtr.getClass().getInventoryStore(playerPtr);
-                inventory.unequipAll();
-                inventory.clear();
+                const bool native = !nativeItemRecords.empty();
+                // Stock add merges an equipped copy with a newly received copy
+                // while the slots are temporarily empty. A native baseline owns
+                // both stack identities and slots; install it without restacking.
+                if (native)
+                    inventory.clearAuthoritative(world->getLocalScripts());
+                else
+                {
+                    inventory.unequipAll();
+                    inventory.clear();
+                }
                 std::erase_if(observedInventoryStacks,
                     [](const auto& value) { return !value.second.container && !value.second.ground; });
                 for (const auto& stack : player.stacks)
                 {
                     auto local = materializeItem(stack, [&](const MWWorld::Ptr& ptr) {
+                        if (native)
+                            return *inventory.addAuthoritative(ptr, static_cast<int>(stack.count),
+                                *MWBase::Environment::get().getWorldModel());
                         return *inventory.add(ptr, static_cast<int>(stack.count), false);
                     });
                     if (!local)
                         return ProviderResult::ContentMappingFailed;
                     const auto [stored, inserted] = observedInventoryStacks.emplace(stack.stackId,
                         ObservedInventoryStack{ stack, *local, std::nullopt, false, std::nullopt, std::nullopt });
-                    if (!inserted || std::ranges::any_of(observedInventoryStacks, [&](const auto& value) {
+                    if (!inserted)
+                    {
+                        Log(Debug::Error) << "TES3MP player inventory has duplicate stack ID=" << stack.stackId.value();
+                        return ProviderResult::ContentMappingFailed;
+                    }
+                    if (std::ranges::any_of(observedInventoryStacks, [&](const auto& value) {
                             return value.first != stored->first && value.second.ptr == stored->second.ptr;
                         }))
+                    {
+                        Log(Debug::Error) << "TES3MP player inventory merged distinct stacks for record="
+                                          << local->getCellRef().getRefId();
                         return ProviderResult::ContentMappingFailed;
+                    }
                 }
+                std::vector<std::pair<int, MWWorld::Ptr>> slots;
                 for (const auto& binding : player.equipment)
                 {
                     const auto stored = observedInventoryStacks.find(binding.stackId);
-                    if (stored == observedInventoryStacks.end())
+                    if (stored == observedInventoryStacks.end() || stored->second.container || stored->second.ground)
                         return ProviderResult::PresentationFailed;
+                    if (native)
+                    {
+                        slots.emplace_back(static_cast<int>(binding.slot), stored->second.ptr);
+                        continue;
+                    }
                     auto iter = inventory.begin();
                     for (; iter != inventory.end() && *iter != stored->second.ptr; ++iter)
                     {
@@ -1992,7 +2041,14 @@ namespace TES3MP::OpenMWAdapter
                         return ProviderResult::PresentationFailed;
                     inventory.equip(static_cast<int>(binding.slot), iter);
                 }
+                if (native)
+                    inventory.applyAuthoritativeEquipment(slots);
+                // An empty baseline has no add/equip callbacks to refresh the
+                // GUI. Notify once the complete committed inventory is installed.
+                MWBase::Environment::get().getWindowManager()->inventoryUpdated(playerPtr);
                 observedPlayerInventoryRevision = player.revision;
+                Log(Debug::Verbose) << "TES3MP player inventory installed: revision=" << player.revision.value()
+                                    << " stacks=" << player.stacks.size() << " equipped=" << player.equipment.size();
             }
 
             std::map<ContainerId, ContainerRevision> desiredContainers;
@@ -2030,13 +2086,24 @@ namespace TES3MP::OpenMWAdapter
                 if (ptr.isEmpty())
                     continue;
                 auto& store = ptr.getClass().getContainerStore(ptr);
-                store.clearAuthoritative();
+                // Actor baselines currently cover content-defined corpses only.
+                // A live local actor must not be converted into a loot container.
+                if (ptr.getClass().isActor() && !ptr.getClass().getCreatureStats(ptr).isDead())
+                    return ProviderResult::PresentationFailed;
+                if (!baseline.equipment.empty() && !ptr.getClass().hasInventoryStore(ptr))
+                    return ProviderResult::ContentMappingFailed;
+                store.clearAuthoritative(world->getLocalScripts());
                 std::erase_if(observedInventoryStacks,
                     [&](const auto& value) { return value.second.container == baseline.container; });
                 for (const auto& stack : baseline.stacks)
                 {
                     auto local = materializeItem(stack,
-                        [&](const MWWorld::Ptr& ptr) { return *store.add(ptr, static_cast<int>(stack.count), false); });
+                        [&](const MWWorld::Ptr& item) {
+                            if (!(baseline.container.value() & MWWorld::PlacedRefTag))
+                                return *store.add(item, static_cast<int>(stack.count), false);
+                            return *store.addAuthoritative(item, static_cast<int>(stack.count),
+                                *MWBase::Environment::get().getWorldModel());
+                        });
                     if (!local)
                         return ProviderResult::ContentMappingFailed;
                     const auto [stored, inserted] = observedInventoryStacks.emplace(stack.stackId,
@@ -2047,6 +2114,22 @@ namespace TES3MP::OpenMWAdapter
                         }))
                         return ProviderResult::ContentMappingFailed;
                 }
+                if (ptr.getClass().hasInventoryStore(ptr))
+                {
+                    auto& inventory = ptr.getClass().getInventoryStore(ptr);
+                    std::vector<std::pair<int, MWWorld::Ptr>> slots;
+                    for (const auto& binding : baseline.equipment)
+                    {
+                        const auto stored = observedInventoryStacks.find(binding.stackId);
+                        if (stored == observedInventoryStacks.end() || stored->second.container != baseline.container)
+                            return ProviderResult::ContentMappingFailed;
+                        slots.emplace_back(static_cast<int>(binding.slot), stored->second.ptr);
+                    }
+                    inventory.applyAuthoritativeEquipment(slots);
+                }
+                // Authoritative store installation bypasses stock mutation
+                // callbacks; an already-open loot window still needs a refresh.
+                MWBase::Environment::get().getWindowManager()->inventoryUpdated(ptr);
                 observedContainerRevisions.insert_or_assign(baseline.container, baseline.revision);
             }
             std::erase_if(observedContainerRevisions,
@@ -2117,9 +2200,16 @@ namespace TES3MP::OpenMWAdapter
             }
             if (sourcePlayer)
             {
+                // Corpse windows use InventoryItemModel for NPCs and armed
+                // creatures, and ContainerItemModel for other creatures/chests.
+                MWWorld::Ptr targetOwner;
                 if (auto* containerModel = dynamic_cast<MWGui::ContainerItemModel*>(&target))
+                    targetOwner = containerModel->primarySource();
+                else if (auto* inventoryModel = dynamic_cast<MWGui::InventoryItemModel*>(&target))
+                    targetOwner = inventoryModel->actor();
+                if (!targetOwner.isEmpty())
                 {
-                    const auto id = containerId(containerModel->primarySource());
+                    const auto id = containerId(targetOwner);
                     const auto revision = id ? observedContainerRevisions.find(*id) : observedContainerRevisions.end();
                     if (!id || revision == observedContainerRevisions.end())
                         return std::nullopt;
@@ -2419,8 +2509,15 @@ namespace TES3MP::OpenMWAdapter
                 mImpl->clear();
             return result;
         }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP combat presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
         catch (...)
         {
+            Log(Debug::Error) << "TES3MP combat presentation: unknown exception";
             mImpl->clear();
             return ProviderResult::PresentationFailed;
         }

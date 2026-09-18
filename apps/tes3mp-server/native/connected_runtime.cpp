@@ -1,4 +1,5 @@
 #include "equipment_runtime.hpp"
+#include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
 
 #include <limits>
@@ -8,18 +9,26 @@ namespace TES3MP::Native
 {
     ContainerStore& EquipmentRuntime::storage(size_t owner)
     {
-        if (owner >= 2) return mContainers.at(owner - 2)->mStore;
+        if (owner >= 2) return *mContainers.at(owner - 2)->mStore;
         return mInventories.at(owner);
     }
     const ContainerStore& EquipmentRuntime::storage(size_t owner) const
     {
-        if (owner >= 2) return mContainers.at(owner - 2)->mStore;
+        if (owner >= 2) return *mContainers.at(owner - 2)->mStore;
         return mInventories.at(owner);
     }
     Ptr EquipmentRuntime::ownerPtr(size_t owner) const
     {
         if (owner >= 2) return mContainers.at(owner - 2)->mReference->getPtr();
         return mActors.at(owner)->getPtr();
+    }
+    InventoryStore* EquipmentRuntime::inventoryStorage(size_t owner)
+    {
+        return dynamic_cast<InventoryStore*>(&storage(owner));
+    }
+    const InventoryStore* EquipmentRuntime::inventoryStorage(size_t owner) const
+    {
+        return dynamic_cast<const InventoryStore*>(&storage(owner));
     }
     EquipmentRuntime::ActorEffects& EquipmentRuntime::effects(size_t owner)
     {
@@ -59,7 +68,15 @@ namespace TES3MP::Native
 
     void EquipmentRuntime::installPrepared(size_t actor, Installation& staged, ContainerStore& candidate) noexcept
     {
-        if (actor >= 2) installStorage(storage(actor), candidate, false);
+        if (actor >= 2)
+        {
+            installStorage(storage(actor), candidate, false);
+            if (auto* inventory = inventoryStorage(actor))
+            {
+                std::copy(staged.mSlots.begin(), staged.mSlots.end(), inventory->mSlots.begin());
+                inventory->mSelectedEnchantItem = staged.mSelected;
+            }
+        }
         else installInventory(actor, static_cast<InventoryStore&>(candidate), staged.mSlots, staged.mSelected, staged.mItem,
             staged.mPrepared.installationNpcStats());
         auto& pending = effects(actor);
@@ -120,8 +137,8 @@ namespace TES3MP::Native
         for (size_t i = 2; i < ownerCount(); ++i)
             containerEnvelopes.push_back(expectedEnvelope(ownerPtr(i).getCellRef().getRefNum()));
         std::vector<EquipmentBindings> containerBindings;
-        for (const auto& envelope : containerEnvelopes)
-            containerBindings.push_back({envelope, mStore, ids, mScriptLocals});
+        for (size_t i = 0; i < containerEnvelopes.size(); ++i)
+            containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
         encodeEquipmentSession(values, bindings, bytes, containerBindings);
     }
 
@@ -217,6 +234,9 @@ namespace TES3MP::Native
         if (initiator >= 2 || (source >= 2 && destination != initiator)
             || (destination >= 2 && source != initiator))
             throw std::invalid_argument("Container intent requires its participating actor as trusted caller");
+        for (const auto owner : {source, destination})
+            if (owner >= 2 && actorInventory(ownerPtr(owner)) && !initialCorpse(ownerPtr(owner)))
+                throw std::invalid_argument("Living actor inventory access requires gameplay services");
         validateInventoryTransferIntent(caller, command, { command.mSourceOwner, command.mDestinationOwner },
             mWorld.getPtrRegistryRevision(), ownedId(mWorld.getLastGeneratedRefNum()));
         for (size_t i = 0; i < ownerCount(); ++i)
@@ -230,7 +250,8 @@ namespace TES3MP::Native
         auto prepared = PreparedPlainEquipment::prepareTransfer(
             { ContainerStoreResolution(storage(source), ownerPtr(source)),
                 ContainerStoreResolution(storage(destination), ownerPtr(destination)) },
-            item, id(command.mItem), command.mExpectedRevision, command.mQuantity, contexts);
+            item, id(command.mItem), command.mExpectedRevision, command.mQuantity, contexts,
+            source >= 2 && initialCorpse(ownerPtr(source)));
         std::array<std::unique_ptr<Installation>, 2> staged;
         auto registry = mWorld.mPtrRegistry.mIndex;
         EquipmentSessionValues values{ { installedValues(0), installedValues(1) } };
@@ -461,8 +482,8 @@ namespace TES3MP::Native
         for (size_t i = 2; i < ownerCount(); ++i)
             containerEnvelopes.push_back(expectedEnvelope(ownerPtr(i).getCellRef().getRefNum()));
         std::vector<EquipmentBindings> containerBindings;
-        for (const auto& envelope : containerEnvelopes)
-            containerBindings.push_back({envelope, mStore, referenceIds, mScriptLocals});
+        for (size_t i = 0; i < containerEnvelopes.size(); ++i)
+            containerBindings.push_back({containerEnvelopes[i], mStore, referenceIds, mScriptLocals, inventoryStorage(i + 2) != nullptr});
         decodeEquipmentSession(accepted, bindings, values, containerBindings);
         EquipmentBytes canonical;
         encodeEquipmentSession(values, bindings, canonical, containerBindings);
@@ -483,16 +504,26 @@ namespace TES3MP::Native
         }
         std::vector<std::unique_ptr<RestoredPlainEquipment>> containers;
         std::vector<ContainerStore*> sharedCandidates;
+        std::vector<std::vector<ContainerStoreIterator>> sharedSlots;
+        std::vector<ContainerStoreIterator> sharedSelected;
         for (size_t i = 0; i < values.mContainers.size(); ++i)
         {
             containers.push_back(std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
-                values.mContainers[i], mStore, ownerPtr(i + 2).getCellRef().getRefNum(), mScriptLocals, true)));
+                values.mContainers[i], mStore, ownerPtr(i + 2).getCellRef().getRefNum(), mScriptLocals,
+                inventoryStorage(i + 2) == nullptr)));
             auto& candidate = containers.back()->installationStorage(
                 mStore, ownerPtr(i + 2).getCellRef().getRefNum(), fresh.mSavedCounter);
             sharedCandidates.push_back(&candidate);
-            candidate.forEachStored([&](auto& node, auto) {
+            auto& live = storage(i + 2);
+            sharedSlots.emplace_back(InventoryStore::Slots, live.end());
+            sharedSelected.push_back(live.end());
+            candidate.forEachStored([&](auto& node, auto it) {
+                it.mContainer = &live;
                 Ptr ptr(&node, nullptr);
-                ptr.mContainerStore = &storage(i + 2);
+                ptr.mContainerStore = &live;
+                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                    if (node.mRef.getRefNum() == values.mContainers[i].mSlots[slot]) sharedSlots[i][slot] = it;
+                if (node.mRef.getRefNum() == values.mContainers[i].mSelected) sharedSelected[i] = it;
                 if (!registry.emplace(node.mRef.getRefNum(), ptr).second)
                     throw std::invalid_argument("Container recovery identity collision");
             });
@@ -507,7 +538,14 @@ namespace TES3MP::Native
                 installInventory(i, *candidates[i], staged[i]->mSlots, staged[i]->mSelected, staged[i]->mItem, staged[i]->mNpcStats, true);
             mWorld.mPtrRegistry.mIndex.swap(registry);
             for (size_t i = 0; i < sharedCandidates.size(); ++i)
+            {
                 installStorage(storage(i + 2), *sharedCandidates[i], true);
+                if (auto* inventory = inventoryStorage(i + 2))
+                {
+                    std::copy(sharedSlots[i].begin(), sharedSlots[i].end(), inventory->mSlots.begin());
+                    inventory->mSelectedEnchantItem = sharedSelected[i];
+                }
+            }
             mWorld.mPtrRegistry.mRevision = saved->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = fresh.mSavedCounter;
             mRestartActor.reset();

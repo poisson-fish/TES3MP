@@ -15,7 +15,6 @@
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadweap.hpp>
-#include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -590,6 +589,7 @@ namespace MWRender
 
         insertBegin(ptr, false);
         ptr.getRefData().getBaseNode()->setNodeMask(Mask_ReplicatedActor);
+        ptr.getRefData().getBaseNode()->setAttitude(makeActorRootRotation(ptr.getRefData().getPosition()));
         try
         {
             osg::ref_ptr<ReplicatedActorAnimation> animation(new ReplicatedActorAnimation(
@@ -633,7 +633,7 @@ namespace MWRender
         }
         ptr.getRefData().setPosition(position);
         ptr.getRefData().getBaseNode()->setPosition(position.asVec3());
-        ptr.getRefData().getBaseNode()->setAttitude(Misc::Convert::makeOsgQuat(position.rot));
+        ptr.getRefData().getBaseNode()->setAttitude(makeActorRootRotation(position));
         found->second->runAnimation(animationSeconds);
         return ReplicatedActorResult::Accepted;
     }

@@ -22,6 +22,7 @@
 #include "server_application.hpp"
 #include "server_config.hpp"
 #include "tes3mp/combat_replication.hpp"
+#include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
@@ -516,6 +517,134 @@ namespace
             CanonicalWorldTimeState{}, globalsCatalog, questCatalog, factionCatalog, weatherCatalog, random.snapshot())
             .value();
     }
+
+    void chargenVisibilityBetweenTicks()
+    {
+        using namespace TES3MP::ServerApp;
+        const auto config = parsedConfig();
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        auto crypto = makeProductionCredentialCrypto();
+        assert(crypto);
+        struct Identities final : PlayerIdentityPersistence
+        {
+            bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; }
+        } persistence;
+        auto registered = PlayerIdentityRegistry::create(*crypto, persistence, {});
+        auto identities = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(registered));
+        const auto zero = Turn32::fromValue(0);
+        const Transform spawn(CellId::interior(id<CellSpaceId>(7)), Position3(0, 0, 0),
+            Orientation3(zero, zero, zero));
+        const Transform outside(CellId::exterior(id<CellSpaceId>(8), 0, 0), Position3(100, 200, 300),
+            Orientation3(zero, zero, zero));
+        const CharacterAppearance appearance{ id<RaceRecordId>(1), id<HeadRecordId>(2), id<HairRecordId>(3),
+            CharacterSex::Female };
+        CharacterRaceDefinition race{ id<RaceRecordId>(1), { appearance } };
+        race.femaleAttributes.fill(40);
+        race.maleAttributes.fill(40);
+        const CharacterClassDefinition characterClass{ id<ClassRecordId>(1), ClassSpecialization::Combat,
+            { 0, 1 }, { 2, 3, 4, 5, 6 }, { 7, 8, 9, 10, 11 } };
+        const CharacterBirthsignDefinition birthsign{ id<BirthsignRecordId>(1), {} };
+        const auto characters = CharacterContentCatalog::create(testContentManifestId(), spawn, outside,
+            std::span(&race, 1), std::span(&characterClass, 1), std::span(&birthsign, 1), {}).value();
+        CanonicalCommandReducer reducer(std::get<CanonicalServerState>(createCanonicalServerState({}, {})),
+            observability, testContentManifest());
+        auto joins = AuthenticatedJoinCoordinator::create(
+            spawn, testContentManifest(), id<SessionId>(1), *identities, reducer).value();
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2).value();
+        FakeAuthentication authentication;
+        const std::array capabilities{ characterCreationCapability() };
+        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
+            std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10)), capabilities, {}));
+        ConnectionSessionCoordinator sessions(clock, observability,
+            SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
+            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &characters);
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), ServerTick::initial(),
+            IngressOrdinal::initial(), TickEpoch::NextTick);
+        auto lifecycle = ServerLifecycleCoordinator::create(30'000'000'000, reducer).value();
+        FakeRuntime runtime;
+        ServerApplication application(runtime, config,
+            { sessions, joins, *crypto, queues, clock, intake, reducer, lifecycle });
+        assert(application.start());
+        const auto send = [&](uint64_t connection, MessageClass category, MessageKind kind,
+                              std::vector<std::byte> payload) {
+            runtime.incomingByConnection[id<TransportConnectionId>(connection)].push_back({
+                TransportChannel::ReliableOrdered,
+                std::get<std::vector<std::byte>>(encodeProtocolFrame(category, kind, payload)) });
+        };
+        const auto clearSent = [&] {
+            runtime.sent.clear();
+            runtime.sentConnections.clear();
+            runtime.sentChannels.clear();
+        };
+        for (uint64_t player : { 1, 2 })
+        {
+            runtime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None, {}, {},
+                id<TransportConnectionId>(player), {}, TransportSecurity::EncryptedUnauthenticated,
+                scope(std::byte(player)) });
+            send(player, MessageClass::SessionControl, MessageKind::ClientHello,
+                encodeClientHello(ClientHello::fromOffer(offer)));
+            assert(application.pump(intake.nextTick()));
+            send(player, MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(AuthenticationMaterial::create({}).value())));
+            assert(application.pump(intake.nextTick()));
+            const auto apply = [&](CharacterCreationChoice choice) {
+                auto result = joins.applyCharacterCreation(id<PlayerId>(player), characters,
+                    { identities->characterProfile(id<PlayerId>(player))->revision(), std::move(choice) },
+                    intake.nextTick());
+                assert(std::holds_alternative<CharacterProfile>(result));
+            };
+            apply(SetCharacterName{ "Participant" });
+            apply(SetCharacterAppearance{ appearance });
+            apply(SetCharacterClass{ id<ClassRecordId>(1) });
+            apply(SetCharacterBirthsign{ id<BirthsignRecordId>(1) });
+        }
+        for (uint64_t player : { 1, 2 })
+        {
+            clearSent();
+            clock.nanoseconds = player == 1 ? 1'000'000 : 35'000'000;
+            const auto before = reducer.canonicalRevision();
+            const ClientCharacterCreationCommand complete{ id<SessionId>(player), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(1), before,
+                { identities->characterProfile(id<PlayerId>(player))->revision(), CompleteCharacterCreation{} } };
+            send(player, MessageClass::ReliableOperation, MessageKind::ClientCharacterCreationCommand,
+                encodeClientCharacterCreationCommand(complete));
+            assert(application.pump(intake.nextTick()));
+            assert(identities->characterProfile(id<PlayerId>(player))->lifecycle()
+                == CharacterLifecycle::EstablishedCharacter);
+            assert(reducer.state().findPlayer(id<PlayerId>(player))->transform() == outside);
+            // Another transport pump still precedes the next simulation tick.
+            ++clock.nanoseconds;
+            assert(application.pump(intake.nextTick()));
+            clearSent();
+            clock.nanoseconds = player == 1 ? 34'000'000 : 67'000'000;
+            assert(application.pump(intake.nextTick()));
+            std::array<bool, 2> views{}, observations{};
+            for (size_t index = 0; index < runtime.sent.size(); ++index)
+            {
+                const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[index]));
+                const auto target = runtime.sentConnections[index].value() - 1;
+                if (frame.messageKind() == MessageKind::LatestWinsSnapshot)
+                {
+                    const auto view = std::get<LatestWinsSnapshot>(decodeLatestWinsSnapshot(frame.payload()));
+                    assert(view.header().canonicalRevision() > before && view.view().entries().size() == player);
+                    views.at(target) = true;
+                }
+                if (frame.messageKind() == MessageKind::ReliableObservationBatch)
+                {
+                    const auto batch = std::get<ReliableObservationBatch>(decodeReliableObservationBatch(frame.payload()));
+                    assert(batch.changes().size() == 1 && batch.changes().front().kind
+                        == (player == 1 ? ObservationChangeKind::Leave : ObservationChangeKind::Enter));
+                    observations.at(target) = true;
+                }
+            }
+            assert(views[0] && views[1] && observations[0] && observations[1]);
+        }
+        assert(application.stop());
+        std::cout << "chargen-visibility: two staggered completions between ticks publish safe-point views and peer leave/enter\n";
+    }
 }
 #ifdef TES3MP_NATIVE_INVENTORY_SCENARIO
 namespace TES3MP::ServerApp::Testing
@@ -724,9 +853,16 @@ namespace TES3MP::ServerApp::Testing
     }
 }
 #else
-int main()
+int main(int argc, char** argv)
 {
     using namespace TES3MP::ServerApp;
+    if (argc > 1)
+    {
+        assert(argc == 2 && std::string_view(argv[1]) == "chargen-visibility");
+        chargenVisibilityBetweenTicks();
+        return 0;
+    }
+    chargenVisibilityBetweenTicks();
     {
         const auto resumedGeneration = *SessionGeneration::initial().next();
         const auto players = fixtureState(false, resumedGeneration);

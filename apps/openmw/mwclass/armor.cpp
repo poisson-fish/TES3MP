@@ -104,6 +104,11 @@ namespace MWClass
 
         // Fallback to the old engine implementation when actors don't have their scripts attached yet.
 
+        return getEquipmentSkill(ptr, *MWBase::Environment::get().getESMStore());
+    }
+
+    ESM::RefId Armor::getEquipmentSkill(const MWWorld::ConstPtr& ptr, const MWWorld::ESMStore& content) const
+    {
         const MWWorld::LiveCellRef<ESM::Armor>* ref = ptr.get<ESM::Armor>();
 
         std::string_view typeGmst;
@@ -142,8 +147,7 @@ namespace MWClass
         if (typeGmst.empty())
             return {};
 
-        const MWWorld::Store<ESM::GameSetting>& gmst
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
+        const MWWorld::Store<ESM::GameSetting>& gmst = content.get<ESM::GameSetting>();
 
         float iWeight = floor(gmst.find(typeGmst)->mValue.getFloat());
 
@@ -303,16 +307,17 @@ namespace MWClass
 
         // Fallback to the old engine implementation when actors don't have their scripts attached yet.
 
-        const MWWorld::LiveCellRef<ESM::Armor>* ref = ptr.get<ESM::Armor>();
-
         const ESM::RefId armorSkillType = getEquipmentSkill(ptr, useLuaInterfaceIfAvailable);
         float armorSkill = actor.getClass().getSkill(actor, armorSkillType);
 
-        int iBaseArmorSkill = MWBase::Environment::get()
-                                  .getESMStore()
-                                  ->get<ESM::GameSetting>()
-                                  .find("iBaseArmorSkill")
-                                  ->mValue.getInteger();
+        return getSkillAdjustedArmorRating(ptr, armorSkill, *MWBase::Environment::get().getESMStore());
+    }
+
+    float Armor::getSkillAdjustedArmorRating(
+        const MWWorld::ConstPtr& ptr, float armorSkill, const MWWorld::ESMStore& content) const
+    {
+        const MWWorld::LiveCellRef<ESM::Armor>* ref = ptr.get<ESM::Armor>();
+        int iBaseArmorSkill = content.get<ESM::GameSetting>().find("iBaseArmorSkill")->mValue.getInteger();
 
         if (ref->mBase->mData.mWeight == 0)
             return static_cast<float>(ref->mBase->mData.mArmor);

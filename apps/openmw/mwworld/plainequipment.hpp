@@ -181,7 +181,8 @@ namespace MWWorld
 
     // Bounded engine preparation, NOT a command/installation/persistence API.
     // Resolved, <=64-node TES3 inventories; all 19 clothing/armor/weapon slots.
-    // Actor/player must match; callers still provide authentication/serialization.
+    // Player inventories use matching actor/player; placed actor stores keep
+    // their owner separate from the initiating player. Callers authenticate access.
     // Plain by default; bound NPC stats opt into one fixed constant effect.
     // An explicit declaration binding permits one scripted constant shirt with
     // isolated initialized locals (single items, no executing registrations).
@@ -207,14 +208,15 @@ namespace MWWorld
         static PreparedPlainEquipment prepare(const ContainerStoreResolution& inventory, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRegistryRevision, bool equip,
             const PlainEquipmentContext& context, int slot = InventoryStore::Slot_Shirt);
-        // Unscripted, unequipped item transfer between protected stock inventories
-        // or a base ContainerStore. Actor/player is the explicit initiator for
-        // a container; its owner comes from the resolution. Both candidates
-        // share one generation counter and must be installed as a pair.
+        // Unscripted transfer between protected stock inventories. Trusted
+        // callers may allow equipped-source removal after authorizing corpse
+        // looting; this is never a client field. Both candidates share one counter
+        // and must be installed as a pair. Plain containers use the initiating
+        // player context; actor stores retain a distinct owner context.
         static std::array<PreparedPlainEquipment, 2> prepareTransfer(
             const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
-            const std::array<PlainEquipmentContext, 2>& contexts);
+            const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource = false);
         PreparedPlainEquipment(PreparedPlainEquipment&&) noexcept;
         PreparedPlainEquipment& operator=(PreparedPlainEquipment&&) noexcept;
         ~PreparedPlainEquipment();

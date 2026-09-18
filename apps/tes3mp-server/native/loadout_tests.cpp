@@ -6221,6 +6221,16 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "world-actor-inventories")
+        {
+            TES3MP::Native::Testing::checkWorldActorInventories(root);
+            return;
+        }
+        if (filter == "starting-equipment")
+        {
+            TES3MP::Native::Testing::checkStartingEquipment(root);
+            return;
+        }
         if (filter == "equipment-slots")
         {
             TES3MP::Native::Testing::checkEquipmentSlots(root);
@@ -6249,6 +6259,11 @@ namespace
         if (filter == "placed-containers")
         {
             TES3MP::Native::Testing::checkPlacedContainers(root);
+            return;
+        }
+        if (filter == "placed-actors")
+        {
+            TES3MP::Native::Testing::checkPlacedActors(root);
             return;
         }
         if (filter == "inventory-application")
@@ -6425,11 +6440,12 @@ int main(int argc, char** argv)
     try
     {
         if (argc == 4 && (std::string_view(argv[1]) == "inventory-host" || std::string_view(argv[1]) == "cell-inventory-host"
-            || std::string_view(argv[1]) == "player-inventory-host"))
+            || std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host"))
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
                 std::filesystem::absolute(std::filesystem::u8path(argv[3])), std::string_view(argv[1]) != "inventory-host",
-                std::string_view(argv[1]) == "player-inventory-host");
+                std::string_view(argv[1]) == "player-inventory-host" || std::string_view(argv[1]) == "world-actor-host",
+                std::string_view(argv[1]) == "world-actor-host");
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }

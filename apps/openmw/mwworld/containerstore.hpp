@@ -922,12 +922,17 @@ namespace MWWorld
 
         // A committed remote baseline is already resolved. Discard local base
         // loot without rolling leveled lists or subsequently refilling on add.
-        void clearAuthoritative()
+        void clearAuthoritative(LocalScripts& scripts)
         {
             mResolved = true;
+            forEachStored([&](auto& node, auto) { node.mRef.setCount(0, scripts); });
+            mSelectedEnchantItem = end();
             clear();
             mModified = true;
         }
+        // Install one committed remote stack without local merging, base loot,
+        // scripts, auto-equipment or gameplay listeners. Caller owns presentation.
+        ContainerStoreIterator addAuthoritative(const ConstPtr& ptr, int count, WorldModel& world);
         ///< Insert items into *this.
 
         void fillNonRandom(const ESM::InventoryList& items, const ESM::RefId& owner, unsigned int seed);

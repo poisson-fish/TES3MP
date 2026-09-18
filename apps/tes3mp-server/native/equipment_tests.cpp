@@ -257,7 +257,7 @@ namespace MWWorld::Testing
                 {
                     auto unchangedOther = other;
                     unchangedOther.mLastGenerated = world.getLastGeneratedRefNum();
-                    require(typeid(runtime.mContainers[0]->mStore) == typeid(ContainerStore)
+                    require(typeid(*runtime.mContainers[0]->mStore) == typeid(ContainerStore)
                         && EquipmentRuntime::sameValues(unchangedOther, runtime.installedValues(1)),
                         "Drop changed the other actor or used an inventory as the container");
                     sharedItem = transferred->mDestinationItem;
@@ -271,7 +271,7 @@ namespace MWWorld::Testing
                     try { runtime.execute({ take.mInitiator }, take, sink, transferred, bytes, faults); }
                     catch (const std::invalid_argument&) { rejected = true; }
                     require(rejected && priorResult == transferred.get() && bytes == priorBytes
-                        && runtime.mContainers[0]->mStore.count(shirt) == 1, "Stale container contention duplicated a take");
+                        && runtime.mContainers[0]->mStore->count(shirt) == 1, "Stale container contention duplicated a take");
                 }
                 received = transferred->mDestinationItem;
                 std::unique_ptr<const EquipmentSuccess> equipped;
@@ -322,7 +322,7 @@ namespace MWWorld::Testing
                     try { fresh.restartSession(scratch / "broken.bin", ids, restored, accepted, faults); }
                     catch (const std::invalid_argument&) { rejected = true; }
                     require(rejected && !restored && accepted.empty() && world.snapshotPtrRegistry() == registry
-                        && fresh.mContainers[0]->mStore.begin() == fresh.mContainers[0]->mStore.end(),
+                        && fresh.mContainers[0]->mStore->begin() == fresh.mContainers[0]->mStore->end(),
                         "Shared recovery accepted duplicate identity/slot or partially installed");
                 }
             }
@@ -352,7 +352,7 @@ namespace MWWorld::Testing
                 "Recovered return transfer lost or duplicated committed items");
             if (shared)
             {
-                require(fresh.mContainers[0]->mStore.count(shirt) == 0 && fresh.mInventories[0].count(shirt) == 2
+                require(fresh.mContainers[0]->mStore->count(shirt) == 0 && fresh.mInventories[0].count(shirt) == 2
                     && fresh.mInventories[1].count(shirt) == 6, "Shared recovery lost or duplicated shirts");
                 for (size_t i = 0; i < 2; ++i)
                 {

@@ -37,8 +37,13 @@ inventories, with real-content headless verification of nine placements.
 Character bootstrap can load each player's winning NPC inventory, including
 fixed/leveled starting items, with stable identities and recovery without refill.
 Ordinary clothing, armor and weapons support authoritative equip/unequip across
-all 19 slots, coherent saves and private/public replication. Starting equipment
-is carried unequipped until commanded; auto-equipping and chargen/scripts remain pending.
+all 19 slots, coherent saves and private/public replication. Fresh characters
+auto-equip ordinary starting gear using stock NPC selection; recovery preserves
+saved slots. Selected enchanted gear rejects until its services exist. Chargen
+and script-driven initialization remain pending.
+V6 also binds unscripted placed NPC/creature inventories and ordinary equipment,
+with authoritative take/put from content-defined corpses and recovery without
+refill. Living/companion access and dynamic death remain pending.
 Scripts, locks/traps, respawn and dynamic world activation remain unfinished. The server and desktop adapter remain the migration
 base; each subsystem changes authority exactly once. Broad compatibility is the
 destination, reached through

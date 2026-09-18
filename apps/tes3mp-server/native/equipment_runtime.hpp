@@ -22,11 +22,13 @@ namespace TES3MP::Native
         bool mNpcStats = false;
         // Explicit startup mode; an empty base inventory is valid. Legacy
         // diagnostics/descriptors retain their seed and saved owner identities.
+        // Fresh base inventories auto-equip; recovery always retains saved slots.
         bool mBaseInventory = false;
     };
 
     struct EquipmentContainerBinding
     {
+        // Shared storage: container, NPC or creature. Actors require a placement.
         ESM::RefId mBase;
         std::optional<ESM::CellRef> mPlacement;
     };
@@ -71,14 +73,14 @@ namespace TES3MP::Native
             std::vector<ESM::RefNum> mNotifications;
         };
         std::array<ActorEffects, 2> mActorEffects;
-        struct SharedContainer
+        struct SharedInventory
         {
             std::unique_ptr<ManualRef> mReference;
-            ContainerStore mStore;
+            std::unique_ptr<ContainerStore> mStore;
             ActorEffects mEffects;
         };
         // Stable addresses keep registry pointers and listener bindings valid.
-        std::vector<std::unique_ptr<SharedContainer>> mContainers;
+        std::vector<std::unique_ptr<SharedInventory>> mContainers;
         bool mFailedClosed = false;
         const bool mConnected;
         const std::shared_ptr<const void> mLifetime = std::make_shared<const char>(0);
@@ -152,6 +154,8 @@ namespace TES3MP::Native
         void installPrepared(size_t owner, Installation& staged, ContainerStore& candidate) noexcept;
         ContainerStore& storage(size_t owner);
         const ContainerStore& storage(size_t owner) const;
+        InventoryStore* inventoryStorage(size_t owner);
+        const InventoryStore* inventoryStorage(size_t owner) const;
         Ptr ownerPtr(size_t owner) const;
         ActorEffects& effects(size_t owner);
         const ActorEffects& effects(size_t owner) const;
@@ -161,6 +165,7 @@ namespace TES3MP::Native
             EquipmentBytes& bytes, FileFaults& faults) const;
         void encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const;
         void bindEffects(size_t actor);
+        void initializeStartingEquipment(size_t actor);
         void validateCaller(size_t actor, const Ptr& caller) const;
         RestartBindings restartBindings(ESM::RefNum savedCounter) const;
         static bool sameReference(const ConstPtr& a, const ConstPtr& b);
@@ -234,7 +239,8 @@ namespace TES3MP::Native
         // connected fixes this owner's persistence mode for its lifetime. Both
         // transfer and equipment then require a session sink; restartActor=2 means
         // fresh coherent recovery, with commands blocked until all owners install.
-        // Shared inventories load stock loot once, in binding order. Recovery
+        // Shared inventories include placed actors with their stock storage type.
+        // They load stock loot once, in binding order. Recovery
         // constructs empty storage and retains placed reference identity/state.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,

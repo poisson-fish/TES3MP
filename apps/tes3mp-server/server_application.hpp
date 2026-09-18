@@ -100,6 +100,10 @@ namespace TES3MP::ServerApp
         std::map<std::pair<SessionId, CommandId>, RetainedDialogueChoiceResult> mDialogueChoiceResults;
         std::map<SessionId, RetainedWaitRestConsent> mWaitRestConsents;
         std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
+        // Chargen may commit during a transport pump before a simulation tick is
+        // due. Retain its pre-change interest until the next tick publishes it.
+        std::optional<CanonicalServerState> mDirectMutationBase;
+        std::optional<CanonicalRevision> mDirectMutationBaseRevision;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;

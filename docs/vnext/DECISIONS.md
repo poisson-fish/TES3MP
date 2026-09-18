@@ -121,9 +121,22 @@ visibly until their engine services exist.
 player to a winning NPC inventory template, with no seed item. Assign all owner
 identities before loot; consume the configured stream in player-role order, then
 placement order. Empty inventories are valid. Recovery never loads base loot.
-Carried inventory initialization does not imply equipped slots, chargen/script
-execution or save import. V3/v4 retain their seeded meaning; switching versions
+Fresh v5 characters auto-equip ordinary starting gear using stock NPC selection
+and explicit initial skills; unavailable selected effects reject startup. Recovery
+preserves saved equipment without selection, including earlier unequipped v5
+campaigns. This does not imply chargen/script execution or save import.
+V3/v4 retain their seeded meaning; switching versions
 requires explicit migration or a new campaign, never an automatic reset.
+
+**Placed actor inventories share the canonical writer.** Descriptor v6 adds winning
+NPC/creature placements to the same bounded interior domain, sorted together with
+containers. Stock actor storage type and equipment selection apply; no AI/scripts
+are activated. Only content-defined corpses currently allow take/put, including
+stock slot removal when an equipped stack empties. Living access fails until its
+services exist. Shared equipment uses the existing slot codec with trusted storage
+shape checks and optional equipment in container baselines. Actor loot/equipment
+never reruns during recovery. V6 changes the bound domain and requires migration
+or a new campaign; older descriptor meanings are preserved.
 
 **Equipment is part of the coherent inventory image.** Retain all 19 engine slots
 by item identity, including stackable ammunition. Full slot format 7 carries an
