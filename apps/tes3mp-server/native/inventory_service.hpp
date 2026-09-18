@@ -38,6 +38,8 @@ namespace TES3MP::Native
                 const DropPlacementView&, std::span<const ESM::ObjectState>)> mPlacement;
         };
         std::optional<WorldItems> mWorldItems;
+        std::optional<ESM::CellRef> mDoor;
+        uint64_t mDoorId = 0;
     };
 
     // One long-lived engine service group for all shared inventories. Loaded
@@ -54,6 +56,10 @@ namespace TES3MP::Native
         class Transaction;
         class EquipmentTransaction;
         class WorldTransaction;
+        class DoorTransaction;
+        std::array<std::optional<ClientDoorObstruction>, 2> mDoorReports;
+        float mDoorStepSeconds = 1.f / 30.f;
+        bool doorBlocked(const CanonicalServerState& players, ServerTick tick) const;
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
@@ -85,6 +91,15 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::span<const std::byte> inventoryImage() const noexcept override;
+        bool hasNativeDoor() const noexcept override { return mBinding.mDoor.has_value(); }
+        bool ownsNativeDoor(InteractiveObjectId id) const noexcept override
+        { return mBinding.mDoor && id.value() == mBinding.mDoorId; }
+        std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(
+            const CanonicalServerState& players, const ServerCommandProposal& command) override;
+        std::unique_ptr<PreparedNativeInventory> prepareDoorStep(
+            const CanonicalServerState& players, ServerTick tick, float seconds) override;
+        void reportDoorObstruction(const CanonicalServerState& players,
+            const ClientDoorObstruction& report, ServerTick tick) override;
         std::optional<ServerApp::InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedNativeInventory* candidate = nullptr) const override;
@@ -94,7 +109,8 @@ namespace TES3MP::Native
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedCommand* candidate = nullptr,
             const EquipmentRuntime::PreparedEquipment* equipment = nullptr,
-            const EquipmentRuntime::PreparedWorldTransfer* world = nullptr) const;
+            const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
+            const EquipmentRuntime::PreparedDoor* door = nullptr) const;
     };
 }
 #endif

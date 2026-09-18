@@ -7,6 +7,7 @@
 namespace TES3MP::Native::Testing
 {
     void checkOrdinaryDoor();
+    void checkDoorCodec();
     void checkPlacedDoor(const std::filesystem::path& scratch);
     void checkDoorLoadout(const std::filesystem::path& configDirectory, std::string_view cell);
 }

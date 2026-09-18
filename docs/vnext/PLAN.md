@@ -1,9 +1,8 @@
 # Implementation plan
 
-This is an ordered roadmap, not a growing task diary. CURRENT.md holds the sole
-active status. Each session implements one bounded part of the active milestone;
-a milestone may take several sessions. Preserve these outcomes and replace the
-next action in CURRENT.md instead of adding nested phase plans or session notes.
+This is the sole roadmap; CURRENT.md holds status and next action. Implement one
+bounded slice of the active milestone per session. Preserve outcomes without
+adding phase plans or diaries.
 
 ## M1 - Prove the native loadout and runtime seam
 
@@ -75,6 +74,8 @@ recipes. Activate the union of player areas with bounded scheduling; define
 unload/background behavior. Establish stable reference/dynamic-record mappings,
 ownership/revisions, initial baselines, and committed incremental updates.
 Separate authoritative state from client input, prediction, animation, and UI.
+Ordinary doors use server motion with client player-contact reports. Verify
+expiry/reversal/disconnect and latency; defer server physics/NPC obstruction.
 
 **Exit:** an actual Tamriel Rebuilt location works with two clients; a shared
 container/door change and regional weather transition converge after late join
@@ -95,41 +96,70 @@ needed. Migrate one melee/effect path at a time, including spells/projectiles an
 enchantment lifecycle required by the chosen encounter. Account for missed
 attacks, resource use, friendly targeting, and retry/reconnect behavior.
 
+Cover Travel AI beyond processing range, both players' cell boundaries, unload/restart,
+and preserved destinations/completion state. Define inactive travel policy and
+prevent duplicate simulation.
+
 **Exit:** a recorded two-client encounter and narrow rejection tests establish
 single damage/death/loot consequences, shared actor targeting, and convergence.
+Prove persisted respawn deadlines, life generations and attributed death events
+for M5; authored corpses and transient summons must not become permanent spawns.
 
 **Retire:** replaced independent combat/AI/effect resolvers, hardcoded respawn
 policy, duplicate settings, and client gameplay writers. Keep already shared
 calculations where appropriate. One live authority per migrated subsystem.
 
-## M5 - Complete a real quest together
+## M5 - Complete scripted quests independently and together
 
-**Outcome:** the cooperative party completes an existing scripted quest using
-OpenMW dialogue and script behavior, with shared progress/world consequences.
+**Outcome:** personal progression over shared NPC lifecycles using unchanged engine
+scripts, without quest-specific handlers. Follow DECISIONS.md and these ordered slices.
 
-Run world/global gameplay scripts once on the server. Give dialogue, Player
-operations, item locals, and relevant Lua bindings explicit player/party context.
-Keep UI-only execution client-side. Meter execution, action queues, recursion,
-and allocations; rejected operations cannot leak effects. Preserve applicable
-OpenMW script serialization rather than requiring every quest to be rewritten
-into the old custom command language. Bind dialogue to actor/conversation state.
+1. **Context first:** refactor InterpreterContext, dialogue filters and Journal/
+   AddTopic around explicit character/story identity. First bounded slice: execute
+   one journal/topic script for two characters, proving separate state and unchanged
+   stock single-player behavior. Missing identity rejects before mutation.
+2. **State and execution:** namespace globals, locals, global-script instances,
+   cross-script access and callbacks. Add bounded transactional script execution:
+   commit state/effects/event consumption together. Distinguish committed, deferred
+   and rejected outcomes in ScriptManager; a wait must not deactivate the script.
+3. **Shared death, personal consequences:** connect M4 life generations to
+   attributed death history and OnDeath cursors. Implement unavailable-aware actor
+   queries, including GetHealth/existence/enumeration. A foreign kill defers B's
+   dependent invocation until respawn; B's own failure is preserved. Pause affected
+   deadlines, persist wake dependencies and revalidate on retry.
+4. **Persistent effects:** route Disable/Delete, relocation, scripted inventory/AI
+   changes and spawns through scoped references. Prove A's departure/removal leaves
+   B's interaction available. Physical divergence requires a coherent instance;
+   unsupported operations reject atomically. Shared combat remains a single writer.
+5. **Lua and recovery:** propagate context through Lua bindings, events, storage
+   and timers. Prove rollback of script-owned state as well as engine effects before
+   enabling gameplay handlers. Extend the durable image for personal state,
+   invocations, waits and scoped references; do not recreate today's singleton access.
+6. **Content proof:** run one unchanged TR quest separately and cooperatively.
+   A finishes first; B later completes without A's presence/items. Verify personal
+   rewards, shared encounters, respawn, concurrent dialogue and reconnect. Broader
+   compatibility follows exercised API coverage, not this single quest.
 
-**Exit:** one actual TR quest covers dialogue conditions, an item/script change,
-progress, a reward, and a world consequence. Both players agree after retries,
-reconnect, and concurrent interaction. Record the tested quest/semantics in the
-fixture, including initiator-specific rewards and unique-object behavior.
+**Acceptance:** narrow fixtures use arbitrary script/reference names. Exercise
+OnDeath and polling; write a local/grant an item before an unavailable read and
+prove zero partial effects. Cover indirect cross-script dependencies, foreign
+versus own kills, pre-quest/party credit, Disable, stale generations, late joins,
+duplicate callbacks, legitimate repeats, interrupted writes and restart while
+waiting. No duplicate public spawns or authored-corpse resurrection. Reuse the stock
+script-test harness and filtered native tests; one relevant check at a time.
 
-**Retire:** bespoke per-quest catalogs, duplicate quest logic, and old module ABI
-on migrated paths. Unsupported script APIs receive explicit diagnostics, not
-silent local authority or an advertised compatibility claim.
+**Retire:** migrated bespoke quest catalogs, duplicate logic, old module ABI and
+unscoped production callers only after replacement/failure evidence. Keep engine
+serialization and explicit unsupported-API diagnostics.
 
-## M6 - Restore the shared campaign
+## M6 - Restore the world and personal progression
 
-**Outcome:** restart resumes the same shared world and each player's character.
+**Outcome:** restart resumes the shared world, NPC lifecycles and personal progression.
 
 Extend M2 persistence across dynamic definitions, references, actor/AI/effect
-state, inventories, quest/journal/faction state, script state, time/weather, and
-RNG. Bind saves to content and runtime versions; never serialize process pointers
+state, inventories, personal quest/journal/faction state, reward receipts, story
+scopes, respawn deadlines/generations, script state, time/weather, and RNG. Bind saves
+to content, progression policy and runtime versions; never serialize process pointers
 or live network sessions. Reuse engine field serializers behind a coherent
 server save boundary. Restore off to the side and install only after validation.
 

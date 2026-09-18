@@ -141,6 +141,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/interactive_object_catalog.cpp
     protocol/interactive_object_replication.cpp
     protocol/inventory_replication.cpp
+    protocol/native_door.cpp include/tes3mp/native_door.hpp
     protocol/item_catalog.cpp
     protocol/melee_combat.cpp
     protocol/magic_use.cpp

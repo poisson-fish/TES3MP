@@ -119,6 +119,110 @@ namespace MWWorld::Testing
         std::vector<std::string> mEvents;
         Listener mListener;
         ESMStore& mStore = mContentStore;
+        static void checkDoorSession(const std::filesystem::path& scratch)
+        {
+            EquipmentScratch directory(scratch);
+            EquipmentContentFixture content;
+            ESM::Door base; base.blank(); base.mId = ESM::RefId::stringRefId("session_door");
+            content.mContentStore.insertStatic(base);
+            ESM::CellRef door; door.blank(); door.mRefID = base.mId; door.mRefNum = {17, 0};
+            door.mPos.rot[2] = .4f;
+            const auto actor = ESM::RefId::stringRefId("equipment_actor");
+            const auto shirt = ESM::RefId::stringRefId("equipment_shirt");
+            const auto container = ESM::RefId::stringRefId("equipment_container");
+            const std::array<EquipmentActorBinding, 2> actors{{{actor, shirt, 3}, {actor, shirt, 5}}};
+            const std::vector<EquipmentContainerBinding> containers{{container, {}}};
+            EquipmentRuntime runtime(content.mContentStore, content.mWorldService, content.mScriptService,
+                "door-session", {1, 2, 3}, actors, {}, nullptr, {}, true, containers, 1, 0,
+                std::vector<ESM::CellRef>{}, door);
+            // Synthetic fixture only: native activation is not a production
+            // transaction yet. Persist a partial opening through the real session.
+            const auto& motion = runtime.mDoorBinding->door();
+            auto state = motion.advance(motion.activate(*runtime.mDoorState).mState, .25f,
+                [](const auto&, float) { return false; }).mState;
+            runtime.mDoorState = std::make_shared<const ESM::DoorState>(state);
+            EquipmentBytes before;
+            runtime.encodeSession({{runtime.installedValues(0), runtime.installedValues(1)},
+                content.mWorldService.getPtrRegistryRevision()}, before);
+            EquipmentFileSink file(scratch / "session.bin", true);
+            FileFaults faults;
+            require(file.writeSessionImage(before, faults) == PersistenceResult::Accepted, "Door session initial write failed");
+            EquipmentFileCommitter durability(file, faults);
+            const auto command = runtime.containerCommand(0, true, runtime.command(0, true).mItem, 2);
+            auto transfer = runtime.prepare({command.mInitiator}, command);
+            const auto oldRevision = content.mWorldService.getPtrRegistryRevision();
+            const auto* oldDoor = runtime.mDoorState.get();
+            EquipmentBytes accepted = before;
+            std::unique_ptr<const InventoryTransferSuccess> success;
+            faults = {FileFault::Flush};
+            require(runtime.commit(transfer, durability, success, accepted) == PersistenceResult::Rejected
+                && !success && accepted == before && runtime.mDoorState.get() == oldDoor
+                && content.mWorldService.getPtrRegistryRevision() == oldRevision
+                && equipmentFileBytes(scratch / "session.bin") == before,
+                "Rejected inventory commit changed coherent door session");
+            faults = {};
+            require(runtime.commit(transfer, durability, success, accepted) == PersistenceResult::Accepted,
+                "Door-bearing inventory session did not commit");
+            const auto persisted = equipmentFileBytes(scratch / "session.bin");
+            require(persisted == accepted && runtime.mDoorState.get() == oldDoor,
+                "Inventory commit changed door state or durable image");
+            EquipmentContentFixture fresh;
+            fresh.mContentStore.insertStatic(base);
+            EquipmentRuntime recovered(fresh.mContentStore, fresh.mWorldService, fresh.mScriptService,
+                "door-session", {1, 2, 3}, actors, {}, nullptr, 2, true, containers, 1, 0,
+                std::vector<ESM::CellRef>{}, door);
+            const std::array references{actor, shirt};
+            std::unique_ptr<const EquipmentSessionValues> output;
+            EquipmentBytes recoveredBytes{'k'};
+            auto bad = persisted; bad.back() = char(255);
+            const auto freshRevision = fresh.mWorldService.getPtrRegistryRevision();
+            bool failed = false;
+            try { recovered.restoreSession(bad, references, output, recoveredBytes); }
+            catch (const std::invalid_argument&) { failed = true; }
+            require(failed && !output && recoveredBytes == EquipmentBytes{'k'} && !recovered.mDoorState
+                && recovered.installedValues(0).mObjects.empty() && recovered.installedValues(2).mObjects.empty()
+                && fresh.mWorldService.getPtrRegistryRevision() == freshRevision,
+                "Corrupt door recovery partially installed owners or output");
+            require(recovered.restartSession(scratch / "session.bin", references, output, recoveredBytes, faults) == FileReadResult::Read,
+                "Door session restart failed");
+            require(recoveredBytes == persisted && output->mDoor && recovered.mDoorState
+                && recovered.mDoorState->mPosition == state.mPosition && recovered.mDoorState->mDoorState == 1
+                && recovered.installedValues(0).mObjects.front().mRef.mCount == 1
+                && recovered.installedValues(2).mObjects.front().mRef.mCount == 2,
+                "Restart lost partial door motion or refilled transferred inventories");
+            auto continued = motion.advance(*recovered.mDoorState, .25f, [](const auto&, float) { return false; });
+            require(continued.mState.mPosition == motion.advance(state, .25f, [](const auto&, float) { return false; }).mState.mPosition,
+                "Restored door motion diverged");
+            const auto equipCommand = recovered.command(1, true);
+            auto equip = recovered.prepare({equipCommand.mActor}, equipCommand);
+            std::unique_ptr<const EquipmentSuccess> equipped;
+            require(recovered.commit(equip, durability, equipped, recoveredBytes) == PersistenceResult::Accepted,
+                "Equipment continuation lost door session");
+            // World membership changes use the same session encoder too.
+            const auto item = recovered.command(0, true).mItem;
+            auto drop = recovered.prepareWorldTransfer(0, item, 1, false, {}, fresh.mWorldService.getPtrRegistryRevision());
+            require(recovered.commit(drop, durability, recoveredBytes) == PersistenceResult::Accepted,
+                "World-item continuation lost door session");
+            EquipmentContentFixture last;
+            last.mContentStore.insertStatic(base);
+            EquipmentRuntime restarted(last.mContentStore, last.mWorldService, last.mScriptService,
+                "door-session", {1, 2, 3}, actors, {}, nullptr, 2, true, containers, 1, 0,
+                std::vector<ESM::CellRef>{}, door);
+            restarted.restoreSession(recoveredBytes, references, output, accepted);
+            require(restarted.mDoorState->mPosition == state.mPosition && restarted.mDoorState->mDoorState == 1
+                && restarted.mWorldItems->mObjects.size() == 1
+                && std::ranges::all_of(restarted.installedValues(0).mObjects, [](const auto& item) { return item.mRef.mCount == 0; }),
+                "Second restart lost door, equipment or world membership");
+            const auto unequipCommand = restarted.command(1, false);
+            auto uncertain = restarted.prepare({unequipCommand.mActor}, unequipCommand);
+            const auto retainedBytes = accepted;
+            faults = {FileFault::AfterReplace};
+            require(restarted.commit(uncertain, durability, equipped, accepted) == PersistenceResult::Uncertain
+                && restarted.mFailedClosed && accepted == retainedBytes
+                && restarted.mDoorState->mPosition == state.mPosition,
+                "Uncertain door-bearing session did not preserve state and fail closed");
+            std::cout << "door session: inventory/equipment/world-item commits, safe write rejection, atomic corrupt recovery/retry, partial-motion restart, uncertain-write closure\n";
+        }
         static void checkPreparedContainer(const std::filesystem::path& scratch)
         {
             EquipmentScratch directory(scratch);
@@ -6764,6 +6868,11 @@ namespace MWWorld::Testing
 
     void checkPlainEquipment(std::string_view filter, const std::filesystem::path& scratch)
     {
+        if (filter == "inventory-equipment-door-session")
+        {
+            PlainEquipmentFixture::checkDoorSession(scratch);
+            return;
+        }
         if (filter == "inventory-equipment-container-prepared")
         {
             PlainEquipmentFixture::checkPreparedContainer(scratch);

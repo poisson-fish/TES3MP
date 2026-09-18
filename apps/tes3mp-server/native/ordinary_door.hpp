@@ -17,7 +17,7 @@ namespace TES3MP::Native
     };
 
     // Preparation only: no live writer, network publication, file or singleton.
-    // The eventual canonical transaction must commit position + motion together
+    // The canonical transaction commits position + motion together
     // with the inventory image before installing state or emitting these effects.
     class OrdinaryDoor
     {
@@ -28,10 +28,13 @@ namespace TES3MP::Native
         OrdinaryDoor(const ESM::Door& base, const ESM::CellRef& placement);
         ESM::DoorState initialState() const;
         void validate(const ESM::DoorState& state) const;
+        void validatePosition(const ESM::Position& position) const;
         PreparedDoorChange activate(const ESM::DoorState& state) const;
 
-        // Query actor contacts at the proposed transform without mutating live
+        // Query obstruction at the proposed transform without mutating live
         // physics. True cancels the whole step, preserving motion for retry.
+        // M3 supplies aggregated fresh local-player reports, not verified server
+        // physics. Replacing that source does not change the motion transaction.
         // Use MWWorld::doorContactBlocks for stock contact direction semantics.
         // An explicit query is required for every moving step; absence is never
         // treated as proof of a clear door. Idle doors are not advanced.

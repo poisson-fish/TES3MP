@@ -207,6 +207,8 @@ namespace MWPhysics
             int collisionMask) const; ///< get handles this object collides with
         std::vector<ContactPoint> getCollisionsPoints(
             const MWWorld::ConstPtr& ptr, int collisionGroup, int collisionMask) const;
+        std::optional<bool> doorBlockedByActor(const MWWorld::Ptr& door, const MWWorld::Ptr& actor,
+            const ESM::Position& proposed, float delta) const;
         osg::Vec3f traceDown(const MWWorld::Ptr& ptr, const osg::Vec3f& position, float maxHeight);
 
         /// @param ignore Optional, a list of Ptr to ignore in the list of results. targets are actors to filter for,

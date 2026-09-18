@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_EQUIPMENT_SESSION_H
 
 #include "equipment_codec.hpp"
+#include "door_codec.hpp"
 
 namespace TES3MP::Native
 {
@@ -18,19 +19,25 @@ namespace TES3MP::Native
         // Complete active world membership; absent placed references stay removed.
         // Uses the first actor solely as the field-codec envelope anchor.
         std::optional<PlainEquipmentValues> mWorldItems;
+        // Immutable detached stock state; the runtime installs it with the
+        // other owners. No independently durable door file or live engine Ptr.
+        std::shared_ptr<const ESM::DoorState> mDoor;
         void swap(EquipmentSessionValues& other) noexcept
         {
             for (size_t i = 0; i < 2; ++i) mActors[i].swap(other.mActors[i]);
             std::swap(mRevision, other.mRevision);
             mContainers.swap(other.mContainers);
             mWorldItems.swap(other.mWorldItems);
+            mDoor.swap(other.mDoor);
         }
     };
     void encodeEquipmentSession(const EquipmentSessionValues& values,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
-        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr);
+        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
+        const DoorBinding* door = nullptr);
     void decodeEquipmentSession(std::span<const char> bytes,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
-        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr);
+        std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
+        const DoorBinding* door = nullptr);
 }
 #endif

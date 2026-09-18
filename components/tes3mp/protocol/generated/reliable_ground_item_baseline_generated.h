@@ -29,6 +29,8 @@ struct GroundItemBaselineHeaderBuilder;
 
 struct ItemPresentation;
 
+struct NativeDoor;
+
 struct ReliableGroundItemBaseline;
 struct ReliableGroundItemBaselineBuilder;
 
@@ -287,6 +289,62 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ItemPresentation FLATBUFFERS_FINAL_CLASS 
 };
 FLATBUFFERS_STRUCT_END(ItemPresentation, 24);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeDoor FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t placement_;
+  uint64_t motion_;
+  float angle_;
+  float step_seconds_;
+  uint8_t direction_;
+  uint8_t blocked_;
+  int16_t padding0__;  int32_t padding1__;
+
+ public:
+  NativeDoor()
+      : placement_(0),
+        motion_(0),
+        angle_(0),
+        step_seconds_(0),
+        direction_(0),
+        blocked_(0),
+        padding0__(0),
+        padding1__(0) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  NativeDoor(uint64_t _placement, uint64_t _motion, float _angle, float _step_seconds, uint8_t _direction, uint8_t _blocked)
+      : placement_(::flatbuffers::EndianScalar(_placement)),
+        motion_(::flatbuffers::EndianScalar(_motion)),
+        angle_(::flatbuffers::EndianScalar(_angle)),
+        step_seconds_(::flatbuffers::EndianScalar(_step_seconds)),
+        direction_(::flatbuffers::EndianScalar(_direction)),
+        blocked_(::flatbuffers::EndianScalar(_blocked)),
+        padding0__(0),
+        padding1__(0) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  uint64_t placement() const {
+    return ::flatbuffers::EndianScalar(placement_);
+  }
+  uint64_t motion() const {
+    return ::flatbuffers::EndianScalar(motion_);
+  }
+  float angle() const {
+    return ::flatbuffers::EndianScalar(angle_);
+  }
+  float step_seconds() const {
+    return ::flatbuffers::EndianScalar(step_seconds_);
+  }
+  uint8_t direction() const {
+    return ::flatbuffers::EndianScalar(direction_);
+  }
+  uint8_t blocked() const {
+    return ::flatbuffers::EndianScalar(blocked_);
+  }
+};
+FLATBUFFERS_STRUCT_END(NativeDoor, 32);
+
 struct GroundItemBaselineHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GroundItemBaselineHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -387,7 +445,8 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
     VT_ITEMS = 8,
     VT_NATIVE_PLACEMENTS = 10,
     VT_PRESENTATION = 12,
-    VT_NATIVE_WORLD = 14
+    VT_NATIVE_WORLD = 14,
+    VT_DOOR = 16
   };
   const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *>(VT_HEADER);
@@ -407,6 +466,9 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
   bool native_world() const {
     return GetField<uint8_t>(VT_NATIVE_WORLD, 0) != 0;
   }
+  const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door() const {
+    return GetStruct<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *>(VT_DOOR);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -420,6 +482,7 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
            VerifyOffset(verifier, VT_PRESENTATION) &&
            verifier.VerifyVector(presentation()) &&
            VerifyField<uint8_t>(verifier, VT_NATIVE_WORLD, 1) &&
+           VerifyField<TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor>(verifier, VT_DOOR, 8) &&
            verifier.EndTable();
   }
 };
@@ -446,6 +509,9 @@ struct ReliableGroundItemBaselineBuilder {
   void add_native_world(bool native_world) {
     fbb_.AddElement<uint8_t>(ReliableGroundItemBaseline::VT_NATIVE_WORLD, static_cast<uint8_t>(native_world), 0);
   }
+  void add_door(const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door) {
+    fbb_.AddStruct(ReliableGroundItemBaseline::VT_DOOR, door);
+  }
   explicit ReliableGroundItemBaselineBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -464,8 +530,10 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem *>> items = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> native_placements = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *>> presentation = 0,
-    bool native_world = false) {
+    bool native_world = false,
+    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr) {
   ReliableGroundItemBaselineBuilder builder_(_fbb);
+  builder_.add_door(door);
   builder_.add_presentation(presentation);
   builder_.add_native_placements(native_placements);
   builder_.add_items(items);
@@ -482,7 +550,8 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem> *items = nullptr,
     const std::vector<uint64_t> *native_placements = nullptr,
     const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation> *presentation = nullptr,
-    bool native_world = false) {
+    bool native_world = false,
+    const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr) {
   auto items__ = items ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem>(*items) : 0;
   auto native_placements__ = native_placements ? _fbb.CreateVector<uint64_t>(*native_placements) : 0;
   auto presentation__ = presentation ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation>(*presentation) : 0;
@@ -493,7 +562,8 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
       items__,
       native_placements__,
       presentation__,
-      native_world);
+      native_world,
+      door);
 }
 
 inline const TES3MP::Protocol::Schema::GroundItemBaseline::ReliableGroundItemBaseline *GetReliableGroundItemBaseline(const void *buf) {

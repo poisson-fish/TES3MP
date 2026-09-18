@@ -300,7 +300,8 @@ namespace TES3MP
 
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
         InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
-        std::span<const uint64_t> nativePlacements, std::span<const GroundItemPresentation> presentation, bool nativeWorld)
+        std::span<const uint64_t> nativePlacements, std::span<const GroundItemPresentation> presentation, bool nativeWorld,
+        std::optional<NativeDoorSnapshot> door)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
@@ -326,8 +327,12 @@ namespace TES3MP
                 || presentation[i].scale <= 0 || std::ranges::any_of(presentation[i].rotation,
                     [](float value) { return !std::isfinite(value); }))
                 return error(Code::InvalidCommandShape);
+        if (door && (!nativeWorld || !(door->placement >> 63) || !door->motion || !std::isfinite(door->angle)
+                || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
+                || door->direction > 2 || (door->direction == 0 && door->blocked)))
+            return error(Code::InvalidCommandShape);
         return ReliableGroundItemBaseline{ header, std::move(cell), { items.begin(), items.end() },
-            {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld };
+            {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld, door };
     }
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
@@ -408,8 +413,11 @@ namespace TES3MP
         std::vector<GroundSchema::ItemPresentation> presentation;
         for (const auto& item : input.presentation)
             presentation.emplace_back(item.stack.value(), item.rotation[0], item.rotation[1], item.rotation[2], item.scale);
+        std::optional<GroundSchema::NativeDoor> door;
+        if (input.door) door.emplace(input.door->placement, input.door->motion, input.door->angle,
+            input.door->stepSeconds, input.door->direction, uint8_t(input.door->blocked));
         const auto root = GroundSchema::CreateReliableGroundItemBaselineDirect(builder, header, &cell, &items,
-            &input.nativePlacements, &presentation, input.nativeWorld);
+            &input.nativePlacements, &presentation, input.nativeWorld, door ? &*door : nullptr);
         GroundSchema::FinishSizePrefixedReliableGroundItemBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -611,6 +619,17 @@ namespace TES3MP
             return *failure;
         if (const auto* failure = std::get_if<Error>(&cell))
             return *failure;
+        std::optional<NativeDoorSnapshot> door;
+        if (const auto* value = root->door())
+        {
+            if (value->blocked() > 1) return error(Code::InvalidCommandShape);
+            door = NativeDoorSnapshot{value->placement(), value->motion(), value->angle(),
+                value->step_seconds(), value->direction(), value->blocked() != 0};
+            // Validate this fixed-size extension before allocating any item vectors.
+            if (!root->native_world() || !(door->placement >> 63) || !door->motion || !std::isfinite(door->angle)
+                || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
+                || door->direction > 2 || (!door->direction && door->blocked)) return error(Code::InvalidCommandShape);
+        }
         std::vector<GroundItemInterestMember> items;
         if (const auto* encoded = root->items())
         {
@@ -650,7 +669,7 @@ namespace TES3MP
             }
         }
         return ReliableGroundItemBaseline::create(
-            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world());
+            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world(), door);
     }
 
     EquipmentSnapshotDecodeResult decodeLatestWinsEquipmentSnapshot(std::span<const std::byte> payload)

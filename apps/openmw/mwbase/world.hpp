@@ -4,6 +4,7 @@
 #include "rotationflags.hpp"
 
 #include <deque>
+#include <optional>
 #include <cstdint>
 #include <set>
 #include <span>
@@ -395,6 +396,12 @@ namespace MWBase
         /// @param state see MWClass::setDoorState
         /// @note throws an exception when invoked on a teleport door
         virtual void activateDoor(const MWWorld::Ptr& door, MWWorld::DoorState state) = 0;
+        // Read-only candidate contact query for the local player's body only.
+        // Missing physics is not a clear report. Does not run actor avoidance.
+        virtual std::optional<bool> doorBlockedByPlayer(const MWWorld::Ptr&, MWWorld::DoorState, float)
+        { return std::nullopt; }
+        virtual bool applyDoorAngle(const MWWorld::Ptr&, float) { return false; }
+        virtual void clearDoorAuthority() {}
 
         virtual void getActorsStandingOn(const MWWorld::ConstPtr& object, std::vector<MWWorld::Ptr>& actors)
             = 0; ///< get a list of actors standing on \a object

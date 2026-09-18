@@ -3,6 +3,7 @@
 
 #include "canonical_persistence.hpp"
 #include "server_command_intake.hpp"
+#include "native_door.hpp"
 #include <functional>
 
 namespace TES3MP
@@ -28,6 +29,13 @@ namespace TES3MP
         virtual std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) = 0;
         virtual std::span<const std::byte> inventoryImage() const noexcept = 0;
+        virtual bool hasNativeDoor() const noexcept { return false; }
+        virtual bool ownsNativeDoor(InteractiveObjectId) const noexcept { return false; }
+        virtual std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(
+            const CanonicalServerState&, const ServerCommandProposal&) { return {}; }
+        virtual std::unique_ptr<PreparedNativeInventory> prepareDoorStep(
+            const CanonicalServerState&, ServerTick, float) { return {}; }
+        virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };
 }
 #endif

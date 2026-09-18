@@ -20,6 +20,8 @@ namespace TES3MP::Native
     {
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
         {
+            if (binding.mDoor && (!binding.mWorldItems || !(binding.mDoorId >> 63)))
+                throw std::invalid_argument("Native door requires a stable placement ID and world cell");
             if (binding.mPlayers[0] == binding.mPlayers[1] || (binding.mContainers.empty() && !binding.mWorldItems)
                 || binding.mContainers.size() > MaxEquipmentContainers
                 || binding.mActors[0].mBaseInventory != binding.mActors[1].mBaseInventory)
@@ -129,7 +131,7 @@ namespace TES3MP::Native
         InventoryServiceBinding binding, bool recovering)
         : mBinding(std::move(binding)), mWorld(content, readers, 1), mScripts(content),
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
-              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding))
+              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor)
     {
         for (const auto& [id, record] : MWWorld::inventoryRecords(content))
             mItemIds.emplace(record, ItemPrototypeId::fromValue(id).value());
@@ -421,6 +423,103 @@ namespace TES3MP::Native
         catch (...) { return CanonicalDurabilityResult::Rejected; }
     };
 
+    class InventoryService::DoorTransaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        EquipmentRuntime::PreparedDoor prepared;
+        DoorTransaction(InventoryService& owner, EquipmentRuntime::PreparedDoor change)
+            : service(owner), prepared(std::move(change)) {}
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        try
+        {
+            EquipmentBytes retained(prepared.image().begin(), prepared.image().end());
+            struct Sink final : EquipmentSessionCommitter
+            {
+                const NativeInventoryCommit& persist;
+                explicit Sink(const NativeInventoryCommit& value) : persist(value) {}
+                PersistenceResult commit(std::span<const char> image) noexcept override
+                {
+                    const auto result = persist(std::as_bytes(image));
+                    return result == CanonicalDurabilityResult::Committed ? PersistenceResult::Accepted
+                        : result == CanonicalDurabilityResult::Rejected ? PersistenceResult::Rejected : PersistenceResult::Uncertain;
+                }
+            } sink(persist);
+            EquipmentBytes bytes;
+            const auto result = service.mRuntime.commit(prepared, sink, bytes);
+            if (result == PersistenceResult::Accepted) service.mImage.swap(retained);
+            return result == PersistenceResult::Accepted ? CanonicalDurabilityResult::Committed
+                : result == PersistenceResult::Rejected ? CanonicalDurabilityResult::Rejected : CanonicalDurabilityResult::Failed;
+        }
+        catch (...) { return CanonicalDurabilityResult::Rejected; }
+    };
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareDoorActivation(
+        const CanonicalServerState& players, const ServerCommandProposal& proposal)
+    {
+        constexpr uint32_t ReachQuanta = 384 * 1024;
+        const auto* input = std::get_if<InteractiveObjectCommandProposal>(&proposal.payload());
+        const auto* session = players.findActiveSession(proposal.sessionId());
+        const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
+        if (!mBinding.mDoor || !input || !player || session->sessionGeneration() != proposal.sessionGeneration()
+            || input->objectId().value() != mBinding.mDoorId || input->kind() != ObjectInteractionKind::Activate
+            || input->requestedKey() || input->requestedTool() || input->expectedInventoryRevision() || input->expectedCombatRevision()
+            || input->expectedRevision().value() != mRuntime.mDoorMotion
+            || player->transform().cell() != mBinding.mWorldItems->mCell || input->cell() != mBinding.mWorldItems->mCell
+            || !positionsWithinReach(player->transform().position(), worldPosition(*mBinding.mDoor), ReachQuanta)
+            || !positionsWithinReach(input->interactionOrigin(), worldPosition(*mBinding.mDoor), ReachQuanta)
+            || !positionsWithinReach(player->transform().position(), input->interactionOrigin(), ReachQuanta)) return {};
+        try
+        {
+            (void)actor(player->playerId());
+            return std::make_unique<DoorTransaction>(*this, mRuntime.prepareDoor(true, 0, false));
+        }
+        catch (const std::invalid_argument&) { return {}; }
+    }
+
+    void InventoryService::reportDoorObstruction(
+        const CanonicalServerState& players, const ClientDoorObstruction& report, ServerTick tick)
+    {
+        const auto* session = players.findActiveSession(report.session);
+        const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
+        if (!mBinding.mDoor || !player || session->sessionGeneration() != report.generation
+            || report.placement != mBinding.mDoorId || report.motion != mRuntime.mDoorMotion
+            || !mRuntime.mDoorState || !mRuntime.mDoorState->mDoorState || !report.sequence
+            || player->transform().cell() != mBinding.mWorldItems->mCell
+            || report.observedTick > tick || tick.value() - report.observedTick.value() >= DoorObstructionLifetimeTicks) return;
+        const auto found = std::ranges::find(mBinding.mPlayers, player->playerId());
+        if (found == mBinding.mPlayers.end()) return;
+        auto& previous = mDoorReports[size_t(found - mBinding.mPlayers.begin())];
+        if (previous && previous->session == report.session && previous->generation == report.generation
+            && previous->motion == report.motion && (report.sequence <= previous->sequence
+                || report.observedTick < previous->observedTick)) return;
+        previous = report;
+    }
+
+    bool InventoryService::doorBlocked(const CanonicalServerState& players, ServerTick tick) const
+    {
+        for (const auto& report : mDoorReports)
+        {
+            if (!report || !report->blocked || report->motion != mRuntime.mDoorMotion || report->observedTick > tick
+                || tick.value() - report->observedTick.value() >= DoorObstructionLifetimeTicks) continue;
+            const auto* session = players.findActiveSession(report->session);
+            const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
+            if (player && session->sessionGeneration() == report->generation
+                && player->transform().cell() == mBinding.mWorldItems->mCell) return true;
+        }
+        return false;
+    }
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareDoorStep(
+        const CanonicalServerState& players, ServerTick tick, float seconds)
+    {
+        if (!std::isfinite(seconds) || seconds <= 0 || seconds > OrdinaryDoor::MaxStepSeconds)
+            throw std::invalid_argument("Native door tick outside bounds");
+        mDoorStepSeconds = seconds;
+        if (!mRuntime.mDoorState || !mRuntime.mDoorState->mDoorState) return {};
+        return std::make_unique<DoorTransaction>(*this, mRuntime.prepareDoor(false, seconds, doorBlocked(players, tick)));
+    }
+
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareInventory(
         const CanonicalServerState& players, const ServerCommandProposal& proposal)
     {
@@ -504,15 +603,18 @@ namespace TES3MP::Native
         const auto* transaction = dynamic_cast<const Transaction*>(candidate);
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(candidate);
         const auto* world = dynamic_cast<const WorldTransaction*>(candidate);
-        if (candidate && ((!transaction && !equipment && !world) || (world && &world->service != this) || (transaction && &transaction->service != this)
+        const auto* door = dynamic_cast<const DoorTransaction*>(candidate);
+        if (candidate && ((!transaction && !equipment && !world && !door) || (door && &door->service != this)
+                || (world && &world->service != this) || (transaction && &transaction->service != this)
                 || (equipment && &equipment->service != this))) return std::nullopt;
         return project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
-            equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr);
+            equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr);
     }
 
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::project(const CanonicalServerState& players,
         SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedCommand* candidate,
-        const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world) const
+        const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world,
+        const EquipmentRuntime::PreparedDoor* door) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -592,8 +694,15 @@ namespace TES3MP::Native
                 presentation.push_back({stack.stackId, {ref.mPos.rot[0], ref.mPos.rot[1], ref.mPos.rot[2]}, ref.mScale});
             }
         }
+        std::optional<NativeDoorSnapshot> doorView;
+        if (mBinding.mDoor && player->transform().cell() == mBinding.mWorldItems->mCell)
+        {
+            const auto& state = door ? door->state() : *mRuntime.mDoorState;
+            doorView = NativeDoorSnapshot{mBinding.mDoorId, door ? door->motion() : mRuntime.mDoorMotion,
+                state.mPosition.rot[2], mDoorStepSeconds, uint8_t(state.mDoorState), door ? door->blocked() : mRuntime.mDoorBlocked};
+        }
         auto ground = ReliableGroundItemBaseline::create(header, player->transform().cell(), groundItems, placements, presentation,
-            mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell);
+            mBinding.mWorldItems && player->transform().cell() == mBinding.mWorldItems->mCell, doorView);
         if (!std::holds_alternative<ReliableGroundItemBaseline>(ground)) return std::nullopt;
         result.groundItems.push_back(std::get<ReliableGroundItemBaseline>(std::move(ground)));
         std::vector<PublicEquipmentMember> visible;

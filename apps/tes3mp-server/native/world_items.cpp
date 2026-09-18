@@ -36,6 +36,7 @@ namespace TES3MP::Native
     {
         const EquipmentRuntime* mOwner;
         std::weak_ptr<const void> mLifetime;
+        std::shared_ptr<const ESM::DoorState> mDoor;
         size_t mActor;
         uint64_t mBefore;
         std::unique_ptr<Installation> mInventory;
@@ -60,7 +61,7 @@ namespace TES3MP::Native
         if (!mWorldItems) throw std::invalid_argument("World item domain unavailable");
         if (!prepared) return *mWorldItems;
         if (!prepared->mState || prepared->mState->mOwner != this
-            || prepared->mState->mLifetime.lock() != mLifetime
+            || prepared->mState->mLifetime.lock() != mLifetime || prepared->mState->mDoor != mDoorState
             || prepared->mState->mBefore != mWorld.getPtrRegistryRevision())
             throw std::invalid_argument("Stale or foreign world transfer");
         return prepared->mState->mWorld;
@@ -90,6 +91,7 @@ namespace TES3MP::Native
         auto state = std::make_unique<PreparedWorldTransfer::State>();
         state->mOwner = this;
         state->mLifetime = mLifetime;
+        state->mDoor = mDoorState;
         state->mActor = actor;
         state->mBefore = expected;
         state->mInventory = stageInstallation(actor, ownerPtr(actor), std::move(inventory));

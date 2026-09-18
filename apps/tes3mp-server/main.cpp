@@ -638,8 +638,14 @@ int main(int argc, char** argv)
     std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
     optionalCapabilities.erase(
         std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
-    auto offer
-        = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
+    std::vector<TES3MP::CapabilityId> requiredCapabilities;
+    if (nativeInventory && nativeInventory->hasNativeDoor())
+    {
+        requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
+        std::erase(optionalCapabilities, TES3MP::inventoryReplicationCapability());
+    }
+    auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,
+        requiredCapabilities, config.contentManifest.id());
     std::vector<TES3MP::Transform> spawns;
     if (characterContent)
         spawns.push_back(characterContent->creationSpawn());

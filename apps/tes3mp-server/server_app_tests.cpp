@@ -709,7 +709,8 @@ namespace TES3MP::ServerApp::Testing
         auto joins = AuthenticatedJoinCoordinator::create(spawn, testContentManifest(), id<SessionId>(1), *identities, reducer).value();
         auto lifecycle = ServerLifecycleCoordinator::create(30'000'000'000, reducer).value();
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-        const std::array capabilities{inventoryReplicationCapability()};
+        std::vector capabilities{inventoryReplicationCapability()};
+        if (native.hasNativeDoor()) capabilities.push_back(nativeDoorCapability());
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
         ConnectionSessionCoordinator sessions(clock, observability,
             SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
@@ -776,6 +777,70 @@ namespace TES3MP::ServerApp::Testing
             }
             assert(found);
         };
+        if (native.hasNativeDoor())
+        {
+            const auto door = [&](uint64_t session) {
+                return *native.projectInventory(reducer.state(), id<SessionId>(session), reducer.checkpointTick(),
+                    reducer.canonicalRevision())->groundItems[0].door;
+            };
+            const auto pump = [&](uint64_t tick) {
+                clock.nanoseconds = tick * 33'333'334;
+                const bool result = application.pump(id<ServerTick>(tick));
+                if (!result) std::cerr << "door application tick " << tick << ": " << application.failure() << '\n';
+                assert(result);
+            };
+            const auto activate = [&](uint64_t session, uint64_t sequence) {
+                const auto current = door(session);
+                ClientInteractObjectCommand command{id<SessionId>(session), SessionGeneration::initial(),
+                    id<CommandSequence>(sequence), id<CommandId>(sequence), reducer.canonicalRevision(),
+                    id<InteractiveObjectId>(current.placement), spawn.cell(), spawn.position(),
+                    id<ObjectRevision>(current.motion)};
+                send(session, MessageClass::ReliableOperation, MessageKind::ClientInteractObjectCommand,
+                    encodeClientInteractObjectCommand(command));
+            };
+            const auto report = [&](uint64_t connection, uint64_t session, uint64_t sequence, bool blocked, uint64_t tick) {
+                const auto current = door(session);
+                send(connection, MessageClass::ReliableOperation, MessageKind::ClientDoorObstruction,
+                    encodeClientDoorObstruction({id<SessionId>(session), SessionGeneration::initial(), id<ServerTick>(tick),
+                        current.placement, current.motion, sequence, blocked}));
+            };
+            const auto deliveredDoor = [&](uint64_t connection) {
+                for (unsigned i = 0; i < 16; ++i)
+                    (void)queues.pump(runtime, id<TransportConnectionId>(connection), clock.nanoseconds / 1'000'000);
+                std::optional<NativeDoorSnapshot> last;
+                for (size_t i = 0; i < runtime.sent.size(); ++i)
+                {
+                    if (runtime.sentConnections[i] != id<TransportConnectionId>(connection)) continue;
+                    const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[i]));
+                    if (frame.messageKind() == MessageKind::ReliableGroundItemBaseline)
+                        last = std::get<ReliableGroundItemBaseline>(decodeReliableGroundItemBaseline(frame.payload())).door;
+                }
+                assert(last && *last == door(connection));
+            };
+            join(1);
+            activate(1, 1); pump(1); pump(2);
+            const auto moving = door(1);
+            assert(moving.direction == 1 && moving.angle > 0);
+            join(2); // Actual authenticated late join receives the moving angle.
+            deliveredDoor(1); deliveredDoor(2);
+            report(1, 1, 1, true, 2); pump(3);
+            assert(door(1).blocked && door(1).angle == moving.angle);
+            report(2, 2, 1, true, 3); report(1, 1, 2, false, 3); pump(4);
+            assert(door(2).blocked && door(2).angle == moving.angle);
+            report(2, 2, 2, false, 4); pump(5);
+            assert(!door(1).blocked && door(1).angle > moving.angle);
+            deliveredDoor(1); deliveredDoor(2);
+            // Connection 1 cannot impersonate connection 2's sensor. Rejection
+            // disconnects the sender without changing the other player's report.
+            report(1, 2, 100, true, 5); pump(6);
+            assert(!reducer.state().findActiveSession(id<SessionId>(1)) && !door(2).blocked);
+            activate(2, 1); pump(7);
+            assert(door(2).direction == 2 && door(2).motion != moving.motion);
+            deliveredDoor(2);
+            assert(application.stop());
+            std::cout << "ServerApplication doors: authentication, late join, combined contacts, spoof rejection and reversal passed\n";
+            return;
+        }
         if (restored)
         {
             join(1); join(2);

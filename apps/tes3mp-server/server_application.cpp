@@ -876,6 +876,13 @@ namespace TES3MP::ServerApp
                     || dispatched == ConnectionSessionResult::QueueRejected
                     || dispatched == ConnectionSessionResult::UnknownConnection)
                 {
+                    // Retire the canonical session before discarding its connection.
+                    // Otherwise its sensor report and interest target outlive eviction.
+                    if (!disconnectConnection(connection, tick))
+                    {
+                        mFailure = "rejected connection disconnect failed";
+                        return false;
+                    }
                     (void)failConnection(connection, "connection dispatch rejected");
                     closed = true;
                     break;
@@ -1038,7 +1045,8 @@ namespace TES3MP::ServerApp
             commandWorlds.scriptState = mWiring->scriptState;
             commandWorlds.scriptStateCatalog = mWiring->scriptStateCatalog;
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds, pumpedScripts.commands());
-            if (!prepared.result())
+            if (!prepared.result() || !mWiring->reducer.stageNativeDoorStep(prepared,
+                    batch.scheduledTick().value(), 1.f / ServerTicksPerSecond))
             {
                 mFailure = "command reduction failed";
                 return false;
@@ -1051,7 +1059,7 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>> weatherUpdates;
             std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>> worldTimeUpdates;
             std::vector<CellId> changedObjectCells;
-            bool refreshInventoryBaselines = false;
+            bool refreshInventoryBaselines = prepared.candidateNativeInventory() != nullptr;
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
             auto waitRestConsentsCandidate = mWaitRestConsents;

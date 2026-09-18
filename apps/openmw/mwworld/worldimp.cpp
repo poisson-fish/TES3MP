@@ -373,6 +373,7 @@ namespace MWWorld
         }
 
         mDoorStates.clear();
+        mExternalDoors.clear();
 
         mGoToJail = false;
         mTeleportEnabled = true;
@@ -1416,6 +1417,28 @@ namespace MWWorld
         return mPhysics.get();
     }
 
+    bool World::applyDoorAngle(const Ptr& door, float angle)
+    {
+        if (door.isEmpty() || door.getType() != ESM::Door::sRecordId || !std::isfinite(angle)) return false;
+        mExternalDoors.insert(door.getCellRef().getRefNum());
+        mDoorStates.erase(door);
+        door.getClass().setDoorState(door, DoorState::Idle);
+        auto rotation = door.getRefData().getPosition().asRotationVec3();
+        rotation.z() = angle;
+        rotateObject(door, rotation, MWBase::RotationFlag_none);
+        return true;
+    }
+
+    std::optional<bool> World::doorBlockedByPlayer(const Ptr& door, MWWorld::DoorState state, float seconds)
+    {
+        if (door.isEmpty() || door.getType() != ESM::Door::sRecordId || state == DoorState::Idle
+            || !std::isfinite(seconds) || seconds <= 0 || seconds > 1) return std::nullopt;
+        auto proposed = door.getRefData().getPosition();
+        const auto motion = doorMotion(state, door.getCellRef().getPosition().rot[2], proposed.rot[2], seconds);
+        proposed.rot[2] = motion.mTargetAngle;
+        return mPhysics->doorBlockedByActor(door, getPlayerPtr(), proposed, motion.mDelta);
+    }
+
     bool World::rotateDoor(const Ptr door, MWWorld::DoorState state, float duration)
     {
         const ESM::Position& objPos = door.getRefData().getPosition();
@@ -2308,6 +2331,7 @@ namespace MWWorld
 
     void World::activateDoor(const MWWorld::Ptr& door)
     {
+        if (mExternalDoors.contains(door.getCellRef().getRefNum())) return;
         const auto state = activatedDoorState(door.getClass().getDoorState(door),
             door.getCellRef().getPosition().rot[2], door.getRefData().getPosition().rot[2]);
         door.getClass().setDoorState(door, state);
@@ -2316,6 +2340,7 @@ namespace MWWorld
 
     void World::activateDoor(const Ptr& door, MWWorld::DoorState state)
     {
+        if (mExternalDoors.contains(door.getCellRef().getRefNum())) return;
         door.getClass().setDoorState(door, state);
         mDoorStates[door] = state;
         if (state == MWWorld::DoorState::Idle)

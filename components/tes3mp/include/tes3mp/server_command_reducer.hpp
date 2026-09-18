@@ -288,6 +288,7 @@ namespace TES3MP
             std::optional<CanonicalCombatWorld> combat, const CanonicalActorWorld* baseActors,
             std::optional<CanonicalActorWorld> actors, const CanonicalWorldState* baseWorld = nullptr,
             std::optional<CanonicalWorldState> world = std::nullopt) noexcept;
+        bool stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds) noexcept;
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);

@@ -39,10 +39,16 @@ namespace TES3MP::OpenMWAdapter
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
                 authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-                authoritativeTimedAreaMagicCapability() };
+                authoritativeTimedAreaMagicCapability(), nativeDoorCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
+        }
+
+        bool nativeDoorNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), nativeDoorCapability());
         }
 
         bool poseNegotiated(const ClientSessionRuntime& runtime) noexcept
@@ -653,7 +659,7 @@ namespace TES3MP::OpenMWAdapter
                 }
 
                 if (mReady && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
-                    && interactiveObjectsNegotiated(*mRuntime))
+                    && (interactiveObjectsNegotiated(*mRuntime) || nativeDoorNegotiated(*mRuntime)))
                 {
                     if (auto interaction = mInput.captureObjectInteraction())
                     {
@@ -773,6 +779,27 @@ namespace TES3MP::OpenMWAdapter
                             return;
                         }
                     }
+                }
+                if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
+                    && nativeDoorNegotiated(*mRuntime) && (!mNextDoorReport || now >= *mNextDoorReport))
+                {
+                    const auto& ground = mRuntime->session().stateMachine().confirmedGroundItemBaseline();
+                    if (ground && ground->door && ground->door->direction)
+                    {
+                        if (auto blocked = mPresentation.nativeDoorObstruction(*ground->door))
+                        {
+                            if (mDoorReportSequence == std::numeric_limits<uint64_t>::max())
+                            { closeTerminal(ConnectionStatus::TransportFailed); return; }
+                            const ClientDoorObstruction report{ground->header.targetSessionId,
+                                ground->header.targetSessionGeneration, ground->header.serverTick,
+                                ground->door->placement, ground->door->motion, ++mDoorReportSequence, *blocked};
+                            if (mRuntime->queue(MessageClass::ReliableOperation, MessageKind::ClientDoorObstruction,
+                                    encodeClientDoorObstruction(report)) != ClientRuntimeResult::Accepted)
+                            { closeTerminal(ConnectionStatus::TransportFailed); return; }
+                        }
+                    }
+                    if (now.nanoseconds() <= std::numeric_limits<uint64_t>::max() - PoseSampleIntervalNanoseconds)
+                        mNextDoorReport = MonotonicInstant::fromNanoseconds(now.nanoseconds() + PoseSampleIntervalNanoseconds);
                 }
                 if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
                     handleRuntimeFailure(ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
@@ -934,6 +961,8 @@ namespace TES3MP::OpenMWAdapter
                 mMotion = MotionIntentTracker(mMovementMetrics);
                 mPoseEvidence.clear();
                 mPoseSequence.reset();
+                mDoorReportSequence = 0;
+                mNextDoorReport.reset();
                 mNextPoseSample.reset();
                 mPendingCellTransition.reset();
                 mDeferredCellTransition.reset();
@@ -1120,6 +1149,8 @@ namespace TES3MP::OpenMWAdapter
             std::optional<CommandSequence> mPendingCellTransition;
             std::optional<CellTransition> mDeferredCellTransition;
             std::optional<PoseSampleSequence> mPoseSequence;
+            uint64_t mDoorReportSequence = 0;
+            std::optional<MonotonicInstant> mNextDoorReport;
             std::optional<MonotonicInstant> mNextPoseSample;
             std::optional<ResumeToken> mResumeToken;
             std::optional<MonotonicInstant> mTokenDeadline;

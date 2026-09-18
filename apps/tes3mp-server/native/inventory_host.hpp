@@ -16,6 +16,15 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V9 adds exactly one ordinary door to the coherent durable session. Use
+    // native-inventory-9 and insert, between interior and cell:
+    // door "ORIGIN_PLUGIN" REFERENCE_INDEX
+    // The winning placement and descriptor version join content identity.
+    // V8 campaigns remain V8; V9 requires a new campaign (no implicit upgrade).
+    // Requires native-door-capable clients. The server commits activation and
+    // motion; each client reports only contact with its local player. Reports
+    // expire after ten observed server ticks and never supply door positions.
+    // The item-placement scene still uses authored geometry for its floor rays.
     // V7 also binds 0..64 winning unscripted placed items. Their complete active
     // membership shares the inventory image; recovery never reloads placements.
     // Pickup consumes a whole world reference; drops split unequipped inventory

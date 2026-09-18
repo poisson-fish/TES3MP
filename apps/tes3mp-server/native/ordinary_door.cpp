@@ -84,13 +84,18 @@ namespace TES3MP::Native
                 && state.mAnimationState.empty() && state.mDoorState >= 0 && state.mDoorState <= 2
                 && (state.mHasCustomState || state.mDoorState == 0),
             "Unsupported native door saved state");
+        validatePosition(state.mPosition);
+    }
+
+    void OrdinaryDoor::validatePosition(const ESM::Position& position) const
+    {
         const float closed = mPlacement.mPos.rot[2];
         const float opened = MWWorld::doorMotion(MWWorld::DoorState::Opening, closed, closed, 1).mTargetAngle;
-        require(state.mPosition.asVec3() == mPlacement.mPos.asVec3()
-                && state.mPosition.rot[0] == mPlacement.mPos.rot[0]
-                && state.mPosition.rot[1] == mPlacement.mPos.rot[1]
-                && std::isfinite(state.mPosition.rot[2]) && state.mPosition.rot[2] >= closed
-                && state.mPosition.rot[2] <= opened,
+        require(position.asVec3() == mPlacement.mPos.asVec3()
+                && position.rot[0] == mPlacement.mPos.rot[0]
+                && position.rot[1] == mPlacement.mPos.rot[1]
+                && std::isfinite(position.rot[2]) && position.rot[2] >= closed
+                && position.rot[2] <= opened,
             "Native door saved transform outside its authored swing");
     }
 

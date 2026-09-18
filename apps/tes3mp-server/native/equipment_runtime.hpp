@@ -84,6 +84,10 @@ namespace TES3MP::Native
         std::vector<std::unique_ptr<SharedInventory>> mContainers;
         std::optional<PlainEquipmentValues> mWorldItems;
         std::vector<ESM::CellRef> mPlacedItems;
+        std::optional<DoorBinding> mDoorBinding;
+        std::shared_ptr<const ESM::DoorState> mDoorState;
+        uint64_t mDoorMotion = 1; // Volatile: reconnect/restart establishes a new session generation.
+        bool mDoorBlocked = false;
         void validateWorldItems(const EquipmentSessionValues& values) const;
         bool mFailedClosed = false;
         const bool mConnected;
@@ -204,6 +208,25 @@ namespace TES3MP::Native
         EquipmentEnvelope expectedEnvelope(ESM::RefNum actor) const;
 
     public:
+        class PreparedDoor
+        {
+            friend class EquipmentRuntime;
+            const EquipmentRuntime* mOwner;
+            std::weak_ptr<const void> mLifetime;
+            std::shared_ptr<const ESM::DoorState> mBefore, mAfter;
+            uint64_t mRegistryRevision, mMotion;
+            bool mBlocked;
+            EquipmentBytes mImage;
+            PreparedDoor(const EquipmentRuntime& owner, PreparedDoorChange change, bool activation, bool blocked);
+        public:
+            std::span<const char> image() const { return mImage; }
+            const ESM::DoorState& state() const { return *mAfter; }
+            uint64_t motion() const { return mMotion; }
+            bool blocked() const { return mBlocked; }
+        };
+        PreparedDoor prepareDoor(bool activation, float seconds, bool blocked);
+        PersistenceResult commit(PreparedDoor& prepared, EquipmentSessionCommitter& durability, EquipmentBytes& bytes);
+
         class PreparedWorldTransfer
         {
             friend class EquipmentRuntime;
@@ -271,7 +294,7 @@ namespace TES3MP::Native
             MWBase::ScriptManager* declarations = nullptr,
             std::optional<size_t> restartActor = {}, bool connected = false,
             std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0,
-            std::optional<std::vector<ESM::CellRef>> worldItems = {});
+            std::optional<std::vector<ESM::CellRef>> worldItems = {}, std::optional<ESM::CellRef> door = {});
         // Diagnostic convenience; delegates to the same multi-owner runtime.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,

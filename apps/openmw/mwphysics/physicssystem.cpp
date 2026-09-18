@@ -1,4 +1,5 @@
 #include "physicssystem.hpp"
+#include "../mwworld/doormotion.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -345,6 +346,45 @@ namespace MWPhysics
             return physactor->getCollisionObjectPosition();
         else
             return osg::Vec3f();
+    }
+
+    std::optional<bool> PhysicsSystem::doorBlockedByActor(const MWWorld::Ptr& door, const MWWorld::Ptr& actor,
+        const ESM::Position& proposed, float delta) const
+    {
+        const auto* object = getObject(door);
+        if (!object || !getActor(actor)) return std::nullopt;
+        // Detached Bullet query object shares the loaded shape. The live door's
+        // transform, broadphase and rendered angle never move during sensing.
+        btCollisionObject query;
+        query.setCollisionShape(object->getCollisionObject()->getCollisionShape());
+        query.setWorldTransform(btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(proposed)),
+            Misc::Convert::toBullet(proposed.asVec3())));
+        struct Contact final : btCollisionWorld::ContactResultCallback
+        {
+            const btCollisionObject* query;
+            MWWorld::Ptr actor;
+            osg::Vec3f origin;
+            float delta;
+            bool blocked = false;
+            Contact(const btCollisionObject* q, MWWorld::Ptr a, osg::Vec3f o, float d)
+                : query(q), actor(a), origin(o), delta(d) {}
+            btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* a, int, int,
+                const btCollisionObjectWrapper* b, int, int) override
+            {
+                const bool first = a->getCollisionObject() == query;
+                const auto* other = first ? b->getCollisionObject() : a->getCollisionObject();
+                const auto* holder = static_cast<const PtrHolder*>(other->getUserPointer());
+                if (cp.getDistance() <= 0 && holder && holder->getPtr() == actor)
+                    blocked |= MWWorld::doorContactBlocks(delta, origin,
+                        Misc::Convert::toOsg(first ? cp.getPositionWorldOnB() : cp.getPositionWorldOnA()),
+                        Misc::Convert::toOsg(first ? cp.m_normalWorldOnB : -cp.m_normalWorldOnB));
+                return 0;
+            }
+        } contact(&query, actor, proposed.asVec3(), delta);
+        contact.m_collisionFilterGroup = CollisionType_Door;
+        contact.m_collisionFilterMask = CollisionType_Actor;
+        mTaskScheduler->contactTest(&query, contact);
+        return contact.blocked;
     }
 
     std::vector<ContactPoint> PhysicsSystem::getCollisionsPoints(

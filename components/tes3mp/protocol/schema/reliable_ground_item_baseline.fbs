@@ -55,6 +55,15 @@ struct ItemPresentation {
   scale:float;
 }
 
+struct NativeDoor {
+  placement:ulong;
+  motion:ulong;
+  angle:float;
+  step_seconds:float;
+  direction:ubyte;
+  blocked:ubyte;
+}
+
 table ReliableGroundItemBaseline {
   header:GroundItemBaselineHeader (id: 0);
   cell:Cell (id: 1);
@@ -62,6 +71,7 @@ table ReliableGroundItemBaseline {
   native_placements:[ulong] (id: 3);
   presentation:[ItemPresentation] (id: 4);
   native_world:bool (id: 5);
+  door:NativeDoor (id: 6);
 }
 
 root_type ReliableGroundItemBaseline;

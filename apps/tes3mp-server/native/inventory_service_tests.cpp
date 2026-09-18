@@ -1713,7 +1713,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement)
+        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement, bool door)
     {
         require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
         auto crypto = makeProductionCredentialCrypto();
@@ -1812,6 +1812,14 @@ namespace TES3MP::Native::Testing
                         placed.save(out);
                     }
                 }
+                if (door)
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                        placed.mRefID = ESM::RefId::stringRefId("in_c_door_arched");
+                        placed.mPos.pos[0] = 1000.f + 1000.f * i;
+                        placed.save(out);
+                    }
                 out.endRecord(ESM::Cell::sRecordId);
             }
             out.close();
@@ -1841,7 +1849,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
+            out << (door ? "native-inventory-9" : stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
             const auto manifestId = testContentManifestId();
             for (auto byte : manifestId.bytes())
                 out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
@@ -1850,7 +1858,99 @@ namespace TES3MP::Native::Testing
                 : "actors \"player\" 3 \"player\" 5\nshirt \"common_shirt_01\"\n");
             out << "loot 1 0\n";
             out << (worldActors ? "interior \"vNext actor inventory test\"\n" : wholeInterior ? "interior \"Seyda Neen, Fargoth's House\"\n"
-                : "container \"Imperial Prison Ship\" \"Morrowind.esm\" 421490\n") << "cell interior:7\n";
+                : "container \"Imperial Prison Ship\" \"Morrowind.esm\" 421490\n");
+            if (door) out << "door \"StartingInventories.esp\" 10\n";
+            out << "cell interior:7\n";
+        }
+        if (door)
+        {
+            auto authority = players(SessionGeneration::initial(), 1, 2);
+            InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+            auto image = std::vector(host.service().inventoryImage().begin(), host.service().inventoryImage().end());
+            const auto get64 = [](auto bytes, size_t offset) {
+                uint64_t value = 0;
+                for (size_t i = 0; i < 8; ++i) value |= uint64_t(std::to_integer<unsigned char>(bytes[offset + i])) << (8 * i);
+                return value;
+            };
+            const auto doorLengthOffset = size_t(24 + 8 * (3 + get64(std::span(image), 16)));
+            const auto directory = (scratch / "openmw").string();
+            const char* args[]{"door-host", "--config", directory.c_str()};
+            Loadout loadout(readLoadoutOptions(3, args));
+            const auto placement = loadout.resolveDoor("vNext actor inventory test", "StartingInventories.esp", 10);
+            DoorBinding binding(*loadout.store().get<ESM::Door>().find(placement.mRef.mRefID), placement.mRef);
+            const auto tail = [&](auto bytes) {
+                const auto size = size_t(get64(bytes, doorLengthOffset));
+                return std::span(reinterpret_cast<const char*>(bytes.data() + bytes.size() - size), size);
+            };
+            require(decodeDoor(tail(std::span(image)), binding)->mDoorState == 0, "V9 host initial door missing");
+            auto nearPlayers = std::vector(authority.players().begin(), authority.players().end());
+            const auto& player = nearPlayers.front();
+            nearPlayers.front() = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                id<ServerTick>(1), Transform(player.transform().cell(), Position3(1000 * 1024, 0, 0),
+                    player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            auto nearDoor = std::get<CanonicalServerState>(createCanonicalServerState(nearPlayers, authority.activeSessions()));
+            const auto& caller = nearDoor.players().front();
+            ServerCommandProposal activation(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(1), CanonicalRevision::initial(),
+                EntityPrecondition(caller.entityId(), caller.entityRevision(), caller.authorityEpoch()),
+                InteractiveObjectCommandProposal(id<InteractiveObjectId>(placement.mIdentity), caller.transform().cell(),
+                    caller.transform().position(), ObjectRevision::initial(), ObjectInteractionKind::Activate, {}));
+            auto activated = host.service().prepareDoorActivation(nearDoor, activation);
+            require(activated && activated->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Real door activation failed");
+            auto advanced = host.service().prepareDoorStep(nearDoor, id<ServerTick>(2), .4f);
+            require(advanced && advanced->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Real door step failed");
+            image.assign(host.service().inventoryImage().begin(), host.service().inventoryImage().end());
+            const auto moving = *decodeDoor(tail(std::span(image)), binding);
+            require(moving.mDoorState == 1 && moving.mPosition.rot[2] > 0, "Real door motion missing");
+            EquipmentFileSink file(scratch / "session.bin", true);
+            FileFaults faults;
+            require(file.writeSessionImage({reinterpret_cast<const char*>(image.data()), image.size()}, faults)
+                == PersistenceResult::Accepted, "V9 host session write failed");
+            EquipmentBytes disk;
+            require(readBoundedFile(scratch / "session.bin", MaxEquipmentSessionBytes, disk, faults) == FileReadResult::Read,
+                "V9 host session read failed");
+            InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, std::as_bytes(std::span(disk)));
+            require(std::ranges::equal(image, restarted.service().inventoryImage()), "V9 host restart changed partial motion");
+            auto& service = dynamic_cast<InventoryService&>(restarted.service());
+            auto pickup = service.prepareInventory(authority, bind(authority, worldWire(service, authority, 1, true)).proposal());
+            require(pickup && pickup->commit([&](auto next) {
+                return file.writeSessionImage({reinterpret_cast<const char*>(next.data()), next.size()}, faults) == PersistenceResult::Accepted
+                    ? CanonicalDurabilityResult::Committed : CanonicalDurabilityResult::Rejected;
+            }) == CanonicalDurabilityResult::Committed, "V9 host inventory continuation failed");
+            InventoryHost continued(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+            require(std::ranges::equal(service.inventoryImage(), continued.service().inventoryImage())
+                && decodeDoor(tail(continued.service().inventoryImage()), binding)->mPosition == moving.mPosition,
+                "V9 host inventory commit or restart reset door state");
+            std::ifstream original(descriptor);
+            std::string text((std::istreambuf_iterator<char>(original)), {});
+            const auto alternative = scratch / "alternative.txt";
+            const auto reject = [&](const std::string& changed, std::span<const std::byte> saved) {
+                { std::ofstream out(alternative); out << changed; }
+                bool failed = false;
+                try { InventoryHost wrong(alternative, testContentManifest(), *registry, *crypto, saved); }
+                catch (const std::exception&) { failed = true; }
+                require(failed, "V9 host accepted incompatible descriptor/campaign");
+            };
+            auto other = text;
+            other.replace(other.find(".esp\" 10"), 8, ".esp\" 11");
+            reject(other, image);
+            auto legacy = text;
+            legacy.replace(legacy.find("native-inventory-9"), 18, "native-inventory-8");
+            legacy.erase(legacy.find("door \""), std::string("door \"StartingInventories.esp\" 10\n").size());
+            reject(legacy, image);
+            { std::ofstream out(alternative); out << legacy; }
+            InventoryHost v8(alternative, testContentManifest(), *registry, *crypto, {});
+            InventoryHost v8Restored(alternative, testContentManifest(), *registry, *crypto, v8.service().inventoryImage());
+            require(std::ranges::equal(v8.service().inventoryImage(), v8Restored.service().inventoryImage()),
+                "V8 campaign recovery changed bytes");
+            reject(text, v8.service().inventoryImage());
+            reject(legacy.replace(legacy.find("native-inventory-8"), 18, "native-inventory-9"), {});
+            writeStartingPlugin(26);
+            reject(text, image);
+            std::cout << "door host: real base/generated placement, activation and committed motion, inventory continuation/restart, binding rejection, unchanged v8 recovery; no graphical clients\n";
+            return;
         }
         if (worldActors)
         {
@@ -2263,6 +2363,181 @@ namespace TES3MP::Native::Testing
         require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()),
             "ServerApplication recovery did not restore both actors and container coherently");
         ServerApp::Testing::nativeInventoryApplication(recovered, *opened);
+    }
+
+    void checkDoorService(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Door scratch already exists");
+        Content content;
+        ESM::Door base; base.blank(); base.mId = ESM::RefId::stringRefId("service_door");
+        content.store.insertStatic(base);
+        auto binding = content.binding();
+        binding.mDoor = ESM::makeBlankCellRef();
+        binding.mDoor->mRefID = base.mId;
+        binding.mDoor->mRefNum = {700, 0};
+        binding.mDoorId = MWWorld::PlacedRefTag | 700;
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{binding.mContainers[0].mCell, {}});
+        InventoryService service(content.store, content.readers, binding);
+        auto authority = players();
+        const auto view = [&](InventoryService& owner, const PreparedNativeInventory* pending = nullptr) {
+            return *owner.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1),
+                id<CanonicalRevision>(1), pending)->groundItems[0].door;
+        };
+        const auto command = [&](InventoryService& owner, uint64_t session = 1) {
+            const auto* active = authority.findActiveSession(id<SessionId>(session));
+            const auto* player = authority.findPlayer(active->playerId());
+            return ServerCommandProposal(active->sessionId(), active->sessionGeneration(), CommandSequence::initial(),
+                id<CommandId>(1), CanonicalRevision::initial(),
+                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                InteractiveObjectCommandProposal(id<InteractiveObjectId>(binding.mDoorId), player->transform().cell(),
+                    player->transform().position(), id<ObjectRevision>(view(owner).motion), ObjectInteractionKind::Activate, {}));
+        };
+        const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+        const NativeInventoryCommit rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+        auto activation = service.prepareDoorActivation(authority, command(service));
+        auto contender = service.prepareDoorActivation(authority, command(service, 2));
+        auto inventoryBeforeDoor = service.prepareInventory(authority, bind(authority, wire(service, authority, 1, true, 1)).proposal());
+        const auto initial = view(service);
+        const std::vector initialImage(service.inventoryImage().begin(), service.inventoryImage().end());
+        require(activation && view(service, activation.get()).direction == 1 && view(service) == initial,
+            "Door preparation leaked state or lacked opening candidate");
+        require(activation->commit(rejected) == CanonicalDurabilityResult::Rejected && view(service) == initial
+            && std::ranges::equal(initialImage, service.inventoryImage()), "Rejected door activation changed state");
+        require(activation->commit(accepted) == CanonicalDurabilityResult::Committed, "Door activation retry failed");
+        require(contender->commit(accepted) == CanonicalDurabilityResult::Rejected, "Stale door contender committed");
+        require(inventoryBeforeDoor && inventoryBeforeDoor->commit(accepted) == CanonicalDurabilityResult::Rejected,
+            "Inventory prepared before door commit rewound the saved door");
+        const auto step = [&](uint64_t tick, const CanonicalServerState& state) {
+            auto pending = service.prepareDoorStep(state, id<ServerTick>(tick), .05f);
+            require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Door step failed");
+        };
+        step(2, authority);
+        const auto moving = view(service);
+        require(moving.angle > 0 && moving.direction == 1, "Door did not advance");
+        auto rejectedStep = service.prepareDoorStep(authority, id<ServerTick>(3), .05f);
+        const std::vector beforeStep(service.inventoryImage().begin(), service.inventoryImage().end());
+        require(rejectedStep->commit(rejected) == CanonicalDurabilityResult::Rejected && view(service) == moving
+            && std::ranges::equal(beforeStep, service.inventoryImage()), "Rejected step leaked angle or persistence");
+        const ClientDoorObstruction codecSample{id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2),
+            binding.mDoorId, moving.motion, 1, true};
+        auto invalidReport = encodeClientDoorObstruction(codecSample);
+        invalidReport[49] = std::byte{2};
+        require(!decodeClientDoorObstruction(invalidReport), "Non-boolean door report accepted");
+        invalidReport = encodeClientDoorObstruction(codecSample);
+        invalidReport.resize(51);
+        require(!decodeClientDoorObstruction(invalidReport), "Trailing report bytes accepted");
+        invalidReport = encodeClientDoorObstruction(codecSample);
+        std::fill(invalidReport.begin() + 41, invalidReport.begin() + 49, std::byte{0});
+        require(!decodeClientDoorObstruction(invalidReport), "Zero report sequence accepted");
+        const auto report = [&](uint64_t session, uint64_t seq, bool blocked, uint64_t observed, uint64_t received,
+                                uint64_t motion = 0) {
+            ClientDoorObstruction sample{id<SessionId>(session), SessionGeneration::initial(), id<ServerTick>(observed),
+                binding.mDoorId, motion ? motion : view(service).motion, seq, blocked};
+            const auto bytes = encodeClientDoorObstruction(sample);
+            require(decodeClientDoorObstruction(bytes) == sample, "Door report codec roundtrip failed");
+            require(!decodeClientDoorObstruction(std::span(bytes).first(bytes.size() - 1)), "Truncated door report accepted");
+            service.reportDoorObstruction(authority, *decodeClientDoorObstruction(bytes), id<ServerTick>(received));
+        };
+        report(1, 2, true, 2, 3); // Late contact applies to current motion, no angle rewind.
+        step(3, authority);
+        require(view(service).angle == moving.angle && view(service).blocked, "Late local obstruction did not stall");
+        report(2, 1, true, 3, 3);
+        report(1, 3, false, 3, 3);
+        step(4, authority);
+        require(view(service).angle == moving.angle, "One clear report overrode another player's block");
+        report(2, 2, false, 4, 4);
+        report(2, 1, true, 3, 4); // Reordered packet must not replace the newer clear.
+        step(5, authority);
+        require(view(service).angle > moving.angle && !view(service).blocked, "Reordered block replaced fresh clear");
+        report(1, 4, true, 5, 5);
+        auto reverse = service.prepareDoorActivation(authority, command(service));
+        require(reverse && reverse->commit(accepted) == CanonicalDurabilityResult::Committed, "Door reversal failed");
+        const auto reversed = view(service);
+        report(1, 99, true, 5, 6, moving.motion);
+        step(6, authority);
+        require(view(service).motion != moving.motion && view(service).direction == 2
+            && view(service).angle < reversed.angle && !view(service).blocked, "Old motion blocked reversed door");
+        report(1, 1, true, 6, 6);
+        step(7, authority);
+        const auto stalled = view(service);
+        require(stalled.blocked, "Current motion block ignored");
+        report(1, 2, true, 6, 16); // Receipt time cannot renew old observations.
+        step(16, authority);
+        require(view(service).angle < stalled.angle && !view(service).blocked, "Expired obstruction survived");
+        auto reopen = service.prepareDoorActivation(authority, command(service));
+        require(reopen->commit(accepted) == CanonicalDurabilityResult::Committed, "Reopen failed");
+        step(17, authority);
+        report(1, 1, true, 17, 17);
+        const std::array remaining{authority.activeSessions()[1]};
+        auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), remaining));
+        step(18, disconnected);
+        require(!view(service).blocked, "Disconnected player retained obstruction");
+        auto resumed = players(id<SessionGeneration>(2));
+        step(19, resumed);
+        require(!view(service).blocked, "Prior session generation retained obstruction");
+        report(1, 2, false, 19, 19);
+        report(1, 3, true, 30, 20); // Future observation is not applicable.
+        step(20, authority);
+        require(!view(service).blocked, "Future report admitted");
+
+        Clock clock;
+        Delivery delivery(clock, SessionGeneration::initial());
+        publish(service, authority, delivery, 21);
+        for (auto& client : delivery.clients)
+            require(client->confirmedGroundItemBaseline()->door == view(service), "Door angle lost on client baseline assembly");
+        InventoryService recovered(content.store, content.readers, binding, true);
+        const std::array references{content.actor, content.shirt, base.mId};
+        recovered.recover(service.inventoryImage(), references);
+        require(view(recovered).angle == view(service).angle && view(recovered).direction == view(service).direction,
+            "Restart lost moving door state");
+        require(!view(recovered).blocked, "Restart restored transient obstruction");
+        auto afterRestart = recovered.prepareDoorStep(resumed, id<ServerTick>(22), .05f);
+        require(afterRestart && afterRestart->commit(accepted) == CanonicalDurabilityResult::Committed,
+            "Restarted door did not resume");
+        auto uncertain = recovered.prepareDoorStep(resumed, id<ServerTick>(23), .05f);
+        require(uncertain && uncertain->commit([](auto) { return CanonicalDurabilityResult::Failed; })
+                == CanonicalDurabilityResult::Failed && recovered.inventoryImage().empty(),
+            "Uncertain door write did not close native service");
+
+        // A real canonical file transaction must accept an autonomous door step,
+        // and retain command disposition + door image together for activation.
+        NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+        InventoryService canonical(content.store, content.readers, binding);
+        CanonicalCommandReducer reducer(players(), observability);
+        const auto catalog = ServerScriptStateCatalog::create({}).value();
+        auto scripts = CanonicalScriptState::initial(catalog).value();
+        std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{1};
+        const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+        auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(scratch / "doors.bin", identity));
+        require(reducer.configureDurability(*file, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &canonical),
+            "Canonical door binding failed");
+        Clock tickClock;
+        ServerCommandIntakeCoordinator intake(tickClock, observability, tickClock.now(), id<ServerTick>(1), IngressOrdinal::initial());
+        require(intake.submit(command(canonical)) == CommandSubmissionResult::Accepted, "Door command intake failed");
+        tickClock.value += 33'333'334;
+        auto batch = intake.pump();
+        require(batch && batch.batches().size() == 1, "Door command batch failed");
+        auto pending = reducer.prepareTick(batch.batches().front());
+        require(pending.result().dispositions()[0].disposition() == CommandDisposition::Applied
+            && reducer.commit(std::move(pending)), "Canonical door activation failed");
+        tickClock.value += 33'333'334;
+        batch = intake.pump();
+        require(batch && batch.batches().size() == 1, "Door motion batch failed");
+        auto motion = reducer.prepareTick(batch.batches().front());
+        require(reducer.stageNativeDoorStep(motion, id<ServerTick>(2), .05f) && motion.candidateNativeInventory()
+            && reducer.commit(std::move(motion)) && view(canonical).angle > 0,
+            "Autonomous door step did not commit canonically");
+        require(std::ranges::equal(file->prefix().latest()->nativeInventory(), canonical.inventoryImage()),
+            "Canonical door image differs from durable image");
+        auto applicationBinding = binding;
+        applicationBinding.mPlayers = {id<PlayerId>(1), id<PlayerId>(2)};
+        InventoryService applicationService(content.store, content.readers, applicationBinding);
+        auto applicationFile = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+            ServerApp::CanonicalPersistenceFile::open(scratch / "door-application.bin", identity));
+        ServerApp::Testing::nativeInventoryApplication(applicationService, *applicationFile);
+        std::cout << "Door service: transaction, two-player telemetry, expiry, reversal, restart and wire clients passed\n";
     }
 
     void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment, bool takeAll, bool worldItems)

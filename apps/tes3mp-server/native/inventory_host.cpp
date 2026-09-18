@@ -35,6 +35,8 @@ namespace TES3MP::Native
             bool worldActors = false;
             bool worldItems = false;
             bool stockPlacement = false;
+            std::string doorPlugin;
+            uint32_t doorIndex = 0;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -54,9 +56,11 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
-                && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8")
+                && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
+                && version != "native-inventory-9")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8";
+            const bool door = version == "native-inventory-9";
+            const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door;
             const bool wholeInterior = version != "native-inventory-3";
             key("manifest");
             std::string identity; in >> identity;
@@ -103,6 +107,16 @@ namespace TES3MP::Native
             std::string cell, plugin; uint64_t index = 0;
             if (wholeInterior) { key("interior"); in >> std::quoted(cell); }
             else { key("container"); in >> std::quoted(cell) >> std::quoted(plugin) >> index; }
+            std::string doorPlugin;
+            uint64_t doorIndex = 0;
+            if (door)
+            {
+                key("door"); in >> std::quoted(doorPlugin) >> doorIndex;
+                if (!in || doorPlugin.empty() || doorPlugin.size() > 256
+                    || doorPlugin.find_first_of("\r\n\t") != std::string::npos
+                    || doorPlugin.find('\0') != std::string::npos || doorIndex > UINT32_MAX)
+                    throw std::invalid_argument("Native door selection invalid");
+            }
             key("cell"); std::string cellText; in >> cellText;
             const auto cells = parseContentCells(cellText);
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
@@ -122,8 +136,9 @@ namespace TES3MP::Native
                 << actorA << ':' << countA << '\n' << actorB << ':' << countB << '\n'
                 << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
-                version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8",
-                version == "native-inventory-7" || version == "native-inventory-8", version == "native-inventory-8"};
+                version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
+                version == "native-inventory-7" || version == "native-inventory-8" || door,
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex)};
         }
     }
     struct InventoryHost::Impl
@@ -178,6 +193,14 @@ namespace TES3MP::Native
                 placement << scene->fingerprint();
                 start.binding.mWorldItems->mPlacement = [query = scene.get()](const auto& actor, const auto& item,
                     const auto& view, auto world) { return query->resolve(actor, item, view, world); };
+            }
+            if (!start.doorPlugin.empty())
+            {
+                const auto door = loadout.resolveDoor(start.cell, start.doorPlugin, start.doorIndex);
+                start.binding.mDoor = door.mRef;
+                start.binding.mDoorId = door.mIdentity;
+                placement << "\ndoor:" << std::quoted(loadout.store().get<ESM::Cell>().find(start.cell)->mId.serializeText())
+                    << ':' << door.mIdentity << ':' << door.mRef.mRefID;
             }
             // Re-resolve before recovery. The image envelope binds resolved
             // placement plus actual ordered file bytes, encoding and player roles.

@@ -24,6 +24,7 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
 #include "../mwworld/placedrefid.hpp"
+#include "../mwworld/doormotion.hpp"
 #include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/inventorystore.hpp"
@@ -620,8 +621,16 @@ namespace TES3MP::OpenMWAdapter
             const auto refNum = doorPtr.getCellRef().getRefNum();
             std::optional<InteractiveObjectId> objectId;
             bool explicitlyMapped = false;
+            const auto placed = MWWorld::placedRefId(refNum, MWBase::Environment::get().getWorld()->getContentFiles());
+            if (placed && mImpl->presentation
+                && mImpl->presentation->observedObjectRevision(*InteractiveObjectId::fromValue(*placed)))
+            {
+                objectId = InteractiveObjectId::fromValue(*placed);
+                explicitlyMapped = true;
+            }
             for (const auto& objMap : mImpl->mapping->interactiveObjects)
             {
+                if (objectId) break;
                 if (objMap.refNumIndex == refNum.mIndex
                     && (objMap.refNumContentFile == -1 || objMap.refNumContentFile == refNum.mContentFile))
                 {
@@ -893,6 +902,8 @@ namespace TES3MP::OpenMWAdapter
         std::map<EntityId, Remote> remotes;
         std::map<EntityId, ActorRemote> actorRemotes;
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
+        std::optional<NativeDoorSnapshot> nativeDoor;
+        std::optional<ReliableGroundItemBaseline> presentedGroundBaseline;
         std::map<ItemStackId, ObservedInventoryStack> observedInventoryStacks;
         std::map<ContainerId, ContainerRevision> observedContainerRevisions;
         MWWorld::InventoryRecordMap nativeItemRecords, nativeSoulRecords;
@@ -919,16 +930,21 @@ namespace TES3MP::OpenMWAdapter
             }
             actorRemotes.clear();
             observedDoors.clear();
+            nativeDoor.reset();
+            presentedGroundBaseline.reset();
             try
             {
                 auto world = MWBase::Environment::get().getWorld();
                 if (world)
+                {
+                    world->clearDoorAuthority();
                     for (const auto& [stack, ptr] : presentedGroundItems)
                     {
                         (void)stack;
                         if (!ptr.isEmpty())
                             world->deleteObject(ptr);
                     }
+                }
             }
             catch (...)
             {
@@ -2187,8 +2203,11 @@ namespace TES3MP::OpenMWAdapter
             std::erase_if(observedContainerRevisions,
                 [&](const auto& value) { return !desiredContainers.contains(value.first); });
 
-            if (!observedInventoryCanonicalRevision
-                || *observedInventoryCanonicalRevision != groundItems.header.canonicalRevision)
+            if (!presentedGroundBaseline || presentedGroundBaseline->cell != groundItems.cell
+                || presentedGroundBaseline->items != groundItems.items
+                || presentedGroundBaseline->nativePlacements != groundItems.nativePlacements
+                || presentedGroundBaseline->presentation != groundItems.presentation
+                || presentedGroundBaseline->nativeWorld != groundItems.nativeWorld)
             {
                 for (const auto& [stack, ptr] : presentedGroundItems)
                 {
@@ -2238,7 +2257,45 @@ namespace TES3MP::OpenMWAdapter
                             .second)
                         return ProviderResult::PresentationFailed;
                 }
-                observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
+                presentedGroundBaseline = groundItems;
+            }
+            observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
+            if (groundItems.door)
+            {
+                const auto& next = *groundItems.door;
+                const auto ref = MWWorld::localPlacedRef(next.placement, world->getContentFiles());
+                const auto ptr = ref ? findActiveDoor(ref->mIndex, ref->mContentFile) : MWWorld::Ptr{};
+                if (ptr.isEmpty()) return ProviderResult::ContentMappingFailed;
+                const float closed = ptr.getCellRef().getPosition().rot[2];
+                const float opened = MWWorld::doorMotion(MWWorld::DoorState::Opening, closed, closed, 1).mTargetAngle;
+                if (next.angle < closed || next.angle > opened) return ProviderResult::ContentMappingFailed;
+                // Cancel the stock local scheduler before installing the exact
+                // committed angle. Local collision never chooses a door position.
+                if (nativeDoor && nativeDoor->placement != next.placement) world->clearDoorAuthority();
+                if (!world->applyDoorAngle(ptr, next.angle)) return ProviderResult::PresentationFailed;
+                auto sounds = MWBase::Environment::get().getSoundManager();
+                const auto* base = ptr.get<ESM::Door>()->mBase;
+                if (sounds && nativeDoor && next.motion != nativeDoor->motion && next.direction)
+                {
+                    const bool opening = next.direction == 1;
+                    const auto play = opening ? base->mOpenSound : base->mCloseSound;
+                    const auto fade = opening ? base->mCloseSound : base->mOpenSound;
+                    if (!fade.empty()) sounds->fadeOutSound3D(ptr, fade, .5f);
+                    if (!play.empty()) sounds->playSound3D(ptr, play, 1.f, 1.f,
+                        MWSound::Type::Sfx, MWSound::PlayMode::Normal,
+                        MWWorld::doorSoundOffset(static_cast<MWWorld::DoorState>(next.direction), closed, next.angle));
+                }
+                if (sounds && next.blocked)
+                {
+                    const auto sound = next.direction == 1 ? base->mOpenSound : base->mCloseSound;
+                    if (!sound.empty()) sounds->stopSound3D(ptr, sound);
+                }
+                nativeDoor = next;
+            }
+            else
+            {
+                world->clearDoorAuthority();
+                nativeDoor.reset();
             }
             return applyPublicEquipment(equipment);
         }
@@ -2396,6 +2453,9 @@ namespace TES3MP::OpenMWAdapter
                 auto doorPtr = findActiveDoor(refNumIndex, refNumContentFile);
                 if (doorPtr.isEmpty())
                     continue;
+                if (nativeDoor && nativeDoor->placement
+                    == MWWorld::placedRefId(doorPtr.getCellRef().getRefNum(), world->getContentFiles()))
+                    continue;
                 const bool teleportDoor = doorPtr.getCellRef().getTeleport();
                 if (teleportDoor && member.doorState != TES3MP::DoorState::Closed)
                     return ProviderResult::ContentMappingFailed;
@@ -2467,6 +2527,7 @@ namespace TES3MP::OpenMWAdapter
 
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept
         {
+            if (nativeDoor && id.value() == nativeDoor->placement) return ObjectRevision::fromValue(nativeDoor->motion);
             const auto found = observedDoors.find(id);
             return found != observedDoors.end() ? std::optional(found->second.lastRevision) : std::nullopt;
         }
@@ -2478,6 +2539,19 @@ namespace TES3MP::OpenMWAdapter
     }
 
     DesktopPresentation::~DesktopPresentation() = default;
+
+    std::optional<bool> DesktopPresentation::nativeDoorObstruction(const NativeDoorSnapshot& door) const noexcept
+    try
+    {
+        if (!mImpl->nativeDoor || *mImpl->nativeDoor != door || !door.direction) return {};
+        auto world = MWBase::Environment::get().getWorld();
+        if (!world) return {};
+        const auto ref = MWWorld::localPlacedRef(door.placement, world->getContentFiles());
+        const auto ptr = ref ? Impl::findActiveDoor(ref->mIndex, ref->mContentFile) : MWWorld::Ptr{};
+        if (ptr.isEmpty()) return {};
+        return world->doorBlockedByPlayer(ptr, static_cast<MWWorld::DoorState>(door.direction), door.stepSeconds);
+    }
+    catch (...) { return {}; }
 
     void DesktopPresentation::configure(DesktopContentMapping mapping)
     {

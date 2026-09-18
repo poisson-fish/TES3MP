@@ -135,6 +135,8 @@ namespace MWWorld
 
         std::map<MWWorld::Ptr, MWWorld::DoorState> mDoorStates;
         ///< only holds doors that are currently moving. 1 = opening, 2 = closing
+        std::set<ESM::RefNum> mExternalDoors;
+        ///< session-owned doors cannot enter the local motion scheduler
 
         uint32_t mRandomSeed{};
         bool mIdsRebuilt{};
@@ -485,6 +487,9 @@ namespace MWWorld
         /// @param state see MWClass::setDoorState
         /// @note throws an exception when invoked on a teleport door
         void activateDoor(const MWWorld::Ptr& door, MWWorld::DoorState state) override;
+        std::optional<bool> doorBlockedByPlayer(const MWWorld::Ptr& door, MWWorld::DoorState state, float seconds) override;
+        bool applyDoorAngle(const MWWorld::Ptr& door, float angle) override;
+        void clearDoorAuthority() override { mExternalDoors.clear(); }
 
         void getActorsStandingOn(const MWWorld::ConstPtr& object,
             std::vector<MWWorld::Ptr>& actors) override; ///< get a list of actors standing on \a object

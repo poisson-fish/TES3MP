@@ -20,7 +20,7 @@ namespace TES3MP::Native
         const std::array<EquipmentActorBinding, 2>& actors,
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
         std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
-        int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems)
+        int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems, std::optional<ESM::CellRef> door)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
         , mScriptLocals(std::move(locals)), mConnected(connected)
     {
@@ -56,6 +56,14 @@ namespace TES3MP::Native
         if (containers.size() > MaxEquipmentContainers)
             throw std::invalid_argument("Shared container budget exceeded");
         std::set<ESM::RefNum> placements;
+        if (door)
+        {
+            if (!connected || !worldItems || !content.getLuaScriptsCfg().mScripts.empty())
+                throw std::invalid_argument("Native door requires a connected world domain without Lua services");
+            mDoorBinding.emplace(*content.get<ESM::Door>().find(door->mRefID), *door);
+            placements.insert(door->mRefNum);
+            if (!restartActor) mDoorState = std::make_shared<const ESM::DoorState>(mDoorBinding->door().initialState());
+        }
         for (const auto& binding : containers)
         {
             const auto& placement = binding.mPlacement;

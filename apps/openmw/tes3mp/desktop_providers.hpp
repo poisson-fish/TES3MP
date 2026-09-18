@@ -155,6 +155,7 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyInteractiveObjects(
             const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
+        std::optional<bool> nativeDoorObstruction(const NativeDoorSnapshot& door) const noexcept override;
         ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,

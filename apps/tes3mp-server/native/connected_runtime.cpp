@@ -105,6 +105,7 @@ namespace TES3MP::Native
         if (values.mContainers.size() != mContainers.size())
             throw std::invalid_argument("Session container count changed");
         if (!values.mWorldItems) values.mWorldItems = mWorldItems;
+        if (!values.mDoor) values.mDoor = mDoorState;
         auto counter = values.mActors[0].mLastGenerated;
         const auto other = values.mActors[1].mLastGenerated;
         if (other.mContentFile < counter.mContentFile
@@ -149,7 +150,8 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &bindings[0] : nullptr);
+        encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &bindings[0] : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr);
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -191,6 +193,7 @@ namespace TES3MP::Native
     {
         const EquipmentRuntime* mOwner;
         std::weak_ptr<const void> mLifetime;
+        std::shared_ptr<const ESM::DoorState> mDoor;
         size_t mInitiator;
         std::array<size_t, 2> mOwners;
         std::array<std::unique_ptr<Installation>, 2> mStaged;
@@ -217,7 +220,7 @@ namespace TES3MP::Native
     {
         (void)prepared.candidate();
         const auto& state = *prepared.mState;
-        if (state.mOwner != this || state.mLifetime.lock() != mLifetime
+        if (state.mOwner != this || state.mLifetime.lock() != mLifetime || state.mDoor != mDoorState
             || state.mSuccess->mCommand.mExpectedRevision != mWorld.getPtrRegistryRevision())
             throw std::invalid_argument("Native projection candidate is stale or foreign");
         for (size_t i = 0; i < 2; ++i)
@@ -311,6 +314,7 @@ namespace TES3MP::Native
         auto state = std::make_unique<PreparedTransfer::State>();
         state->mOwner = this;
         state->mLifetime = mLifetime;
+        state->mDoor = mDoorState;
         state->mInitiator = initiator;
         state->mOwners = owners;
         state->mStaged = std::move(staged);
@@ -327,7 +331,7 @@ namespace TES3MP::Native
         InPhase phase(Phase::Validation);
         if (mFailedClosed) return PersistenceResult::Uncertain;
         if (!prepared.mState || prepared.mState->mOwner != this
-            || prepared.mState->mLifetime.lock() != mLifetime || !prepared.mState->mSuccess || mRestartActor)
+            || prepared.mState->mLifetime.lock() != mLifetime || prepared.mState->mDoor != mDoorState || !prepared.mState->mSuccess || mRestartActor)
             throw std::invalid_argument("Transfer preparation does not belong to this live runtime");
         auto& state = *prepared.mState;
         const auto& command = state.mSuccess->mCommand;
@@ -373,6 +377,7 @@ namespace TES3MP::Native
     {
         const EquipmentRuntime* mOwner;
         std::weak_ptr<const void> mLifetime;
+        std::shared_ptr<const ESM::DoorState> mDoor;
         size_t mActor;
         std::unique_ptr<Installation> mStaged;
         std::unique_ptr<const EquipmentSuccess> mSuccess;
@@ -396,7 +401,7 @@ namespace TES3MP::Native
     {
         (void)prepared.candidate();
         const auto& state = *prepared.mState;
-        if (state.mOwner != this || state.mLifetime.lock() != mLifetime
+        if (state.mOwner != this || state.mLifetime.lock() != mLifetime || state.mDoor != mDoorState
             || state.mSuccess->mCommand.mExpectedRevision != mWorld.getPtrRegistryRevision())
             throw std::invalid_argument("Equipment projection candidate is stale or foreign");
         return owner == state.mActor ? state.mStaged->mSaved : installedValues(owner);
@@ -429,6 +434,7 @@ namespace TES3MP::Native
         auto state = std::make_unique<PreparedEquipment::State>();
         state->mOwner = this;
         state->mLifetime = mLifetime;
+        state->mDoor = mDoorState;
         state->mActor = actor;
         state->mStaged = std::move(staged);
         state->mSuccess = std::move(success);
@@ -441,7 +447,7 @@ namespace TES3MP::Native
         using namespace Allocations;
         InPhase phase(Phase::Validation);
         if (mFailedClosed) return PersistenceResult::Uncertain;
-        if (!prepared.mState || prepared.mState->mOwner != this || prepared.mState->mLifetime.lock() != mLifetime
+        if (!prepared.mState || prepared.mState->mOwner != this || prepared.mState->mLifetime.lock() != mLifetime || prepared.mState->mDoor != mDoorState
             || !prepared.mState->mSuccess || mRestartActor)
             throw std::invalid_argument("Equipment preparation does not belong to this live runtime");
         auto& state = *prepared.mState;
@@ -509,10 +515,12 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, referenceIds, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &bindings[0] : nullptr);
+        decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &bindings[0] : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr);
         validateWorldItems(values);
         EquipmentBytes canonical;
-        encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &bindings[0] : nullptr);
+        encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &bindings[0] : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr);
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;
@@ -556,6 +564,7 @@ namespace TES3MP::Native
         }
         phase.set(Phase::Result);
         auto restoredWorld = values.mWorldItems;
+        auto restoredDoor = values.mDoor;
         auto saved = std::make_unique<const EquipmentSessionValues>(std::move(values));
         phase.set(Phase::Revalidation);
         for (size_t i = 0; i < 2; ++i) validateRestart(i, mActors[i]->getPtr(), bindings[i], fresh);
@@ -576,6 +585,7 @@ namespace TES3MP::Native
             mWorld.mPtrRegistry.mRevision = saved->mRevision;
             mWorld.mPtrRegistry.mLastGenerated = fresh.mSavedCounter;
             mWorldItems.swap(restoredWorld);
+            mDoorState.swap(restoredDoor);
             mRestartActor.reset();
             phase.set(Phase::Publication);
             output.swap(saved);

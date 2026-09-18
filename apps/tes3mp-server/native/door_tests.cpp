@@ -1,6 +1,8 @@
 #include "door_tests.hpp"
 #include "loadout.hpp"
 #include "ordinary_door.hpp"
+#include "equipment_session.hpp"
+#include "test_allocations.hpp"
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwworld/class.hpp>
@@ -20,6 +22,7 @@
 #include <osg/Math>
 
 #include <cmath>
+#include <bit>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -74,9 +77,7 @@ namespace TES3MP::Native::Testing
             return result;
         }
 
-        // Exercise the existing engine field serializer. This is not a new
-        // network/save codec: bounded byte preflight and the coherent session
-        // envelope must be added at the future canonical-writer integration.
+        // Raw stock serialization used independently of the bounded codec.
         std::string save(const ESM::DoorState& state)
         {
             std::ostringstream stream(std::ios::binary);
@@ -177,6 +178,138 @@ namespace TES3MP::Native::Testing
             out.endRecord(ESM::REC_CELL);
             out.close();
         }
+    }
+
+    void checkDoorCodec()
+    {
+        auto ref = placement();
+        ref.mGlobalVariable = std::string(256, 'g'); // Exercise non-SSO bound text.
+        DoorBinding door(baseDoor(), ref);
+        MWWorld::ESMStore store;
+        const std::array<EquipmentEnvelope, 2> envelopes{{{"door-codec", {1, 2, 3}, {1, -1}},
+            {"door-codec", {1, 2, 3}, {2, -1}}}};
+        const std::array<EquipmentBindings, 2> bindings{{{envelopes[0], store, {}}, {envelopes[1], store, {}}}};
+        EquipmentSessionValues values;
+        values.mRevision = 7;
+        for (size_t i = 0; i < 2; ++i)
+        {
+            values.mActors[i].mActor = envelopes[i].mActor;
+            values.mActors[i].mLastGenerated = {2, -1};
+        }
+        values.mWorldItems = values.mActors[0];
+        EquipmentBytes legacy;
+        encodeEquipmentSession(values, bindings, legacy, {}, &bindings[0]);
+        require(legacy[7] == '4', "Legacy world session version changed");
+        const auto initial = door.door().initialState();
+        const auto moving = door.door().advance(door.door().activate(initial).mState, .3f,
+            [](const auto&, float) { return false; }).mState;
+        for (int direction = 0; direction <= 2; ++direction)
+        {
+            auto state = moving;
+            state.mDoorState = direction;
+            values.mDoor = std::make_shared<const ESM::DoorState>(state);
+            EquipmentBytes image;
+            encodeEquipmentSession(values, bindings, image, {}, &bindings[0], &door);
+            EquipmentSessionValues decoded;
+            decodeEquipmentSession(image, bindings, decoded, {}, &bindings[0], &door);
+            require(decoded.mDoor && save(*decoded.mDoor) == save(state) && decoded.mRevision == 7,
+                "Door session lost partial position or motion direction");
+            EquipmentBytes roundTrip;
+            encodeEquipmentSession(decoded, bindings, roundTrip, {}, &bindings[0], &door);
+            require(roundTrip == image, "Door session round trip changed bytes");
+        }
+        for (auto state : {initial, door.door().advance(door.door().activate(initial).mState, 1.f,
+                 [](const auto&, float) { return false; }).mState})
+        {
+            EquipmentBytes bytes;
+            encodeDoor(state, door, bytes);
+            require(save(*decodeDoor(bytes, door)) == save(state), "Door endpoint/default state changed");
+        }
+        values.mDoor = std::make_shared<const ESM::DoorState>(moving);
+        EquipmentBytes image, bytes;
+        encodeEquipmentSession(values, bindings, image, {}, &bindings[0], &door);
+        encodeDoor(moving, door, bytes);
+        EquipmentSessionValues retained = values;
+        const auto* previous = retained.mDoor.get();
+        const auto reject = [&](std::span<const char> bad) {
+            MWWorld::Testing::Allocations::Trace trace;
+            bool failed = false;
+            {
+                MWWorld::Testing::Allocations::Observe observe(trace);
+                try { decodeEquipmentSession(bad, bindings, retained, {}, &bindings[0], &door); }
+                catch (const std::invalid_argument&) { failed = true; }
+            }
+            require(failed && retained.mDoor.get() == previous && retained.mRevision == 7,
+                "Malformed door session changed retained output");
+            require(trace.mTotal <= 1, "Door preflight allocated before rejection");
+        };
+        for (size_t end = 0; end < image.size(); ++end) reject(std::span(image).first(end));
+        auto bad = image; bad.push_back(0); reject(bad);
+        for (size_t offset : {size_t(0), size_t(16), size_t(48)})
+        {
+            bad = image; bad[offset] = char(255); reject(bad);
+        }
+        const auto start = image.size() - bytes.size();
+        const auto field = [&](std::string_view tag) {
+            const auto it = std::search(bytes.begin(), bytes.end(), tag.begin(), tag.end());
+            require(it != bytes.end(), "Door codec fixture field missing");
+            return size_t(it - bytes.begin());
+        };
+        const auto put32 = [](auto& target, size_t offset, uint32_t number) {
+            for (size_t i = 0; i < 4; ++i) target[offset + i] = char(number >> (8 * i));
+        };
+        for (auto tag : {"FORM", "HEDR", "DOOR", "FRMR", "NAME", "XSCL", "ANAM", "BNAM", "CNAM", "DATA", "POS_", "ANIM"})
+        {
+            bad = image; bad[start + field(tag)] ^= 1; reject(bad);
+            bad = image; put32(bad, start + field(tag) + 4, UINT32_MAX); reject(bad);
+        }
+        bad = image; bad[start + field("NAME") + 9] ^= 1; reject(bad);
+        bad = image; bad[start + field("FRMR") + 8] ^= 1; reject(bad);
+        for (uint32_t direction : {0u, 3u, UINT32_MAX})
+        {
+            bad = image; put32(bad, start + field("ANIM") + 8, direction); reject(bad);
+        }
+        for (size_t component = 0; component < 6; ++component)
+        {
+            bad = image;
+            put32(bad, start + field("POS_") + 8 + 4 * component, std::bit_cast<uint32_t>(std::numeric_limits<float>::quiet_NaN()));
+            reject(bad);
+        }
+        for (float angle : {ref.mPos.rot[2] - .1f, ref.mPos.rot[2] + 2.f})
+        {
+            bad = image; put32(bad, start + field("POS_") + 28, std::bit_cast<uint32_t>(angle)); reject(bad);
+        }
+        // Stock can encode unsupported locals/flags; our bounded domain must not.
+        for (int kind = 0; kind < 4; ++kind)
+        {
+            auto state = moving;
+            if (kind == 0) state.mFlags = 1;
+            if (kind == 1) state.mEnabled = 0;
+            if (kind == 2) state.mHasCustomState = false;
+            if (kind == 3) state.mRef.mRefNum.mIndex++;
+            const auto raw = save(state);
+            bad.assign(image.begin(), image.begin() + start);
+            bad.insert(bad.end(), raw.begin(), raw.end());
+            put32(bad, 48, uint32_t(raw.size()));
+            reject(bad);
+        }
+        auto changed = ref; changed.mRefNum.mIndex++;
+        DoorBinding other(baseDoor(), changed);
+        rejects([&] { decodeEquipmentSession(image, bindings, retained, {}, &bindings[0], &other); },
+            "Different door placement accepted saved state");
+        rejects([&] { decodeEquipmentSession(image, bindings, retained, {}, &bindings[0]); }, "V8 accepted V9 state");
+        rejects([&] { decodeEquipmentSession(legacy, bindings, retained, {}, &bindings[0], &door); }, "V9 silently upgraded V8");
+        auto wrongEnvelopes = envelopes;
+        wrongEnvelopes[0].mContent[0]++;
+        const std::array<EquipmentBindings, 2> wrongBindings{{{wrongEnvelopes[0], store, {}}, {wrongEnvelopes[1], store, {}}}};
+        rejects([&] { decodeEquipmentSession(image, wrongBindings, retained, {}, &wrongBindings[0], &door); },
+            "Door session accepted mismatched content");
+        require(retained.mDoor.get() == previous, "Binding rejection changed output");
+        decodeEquipmentSession(legacy, bindings, retained, {}, &bindings[0]);
+        EquipmentBytes legacyAgain;
+        encodeEquipmentSession(retained, bindings, legacyAgain, {}, &bindings[0]);
+        require(legacyAgain == legacy && !retained.mDoor, "Legacy campaign bytes changed");
+        std::cout << "door codec: stock fields, endpoints/partial/idle motion, session v5, bounded allocation-free rejection, content binding, unchanged v4\n";
     }
 
     void checkOrdinaryDoor()

@@ -487,7 +487,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -542,18 +542,20 @@
     },
     {
       "id": "NATIVE-DOOR-001",
-      "slice": "M3 ordinary door preparation",
+      "slice": "M3 native door motion and delegated player contacts",
       "owner": "OpenMW native runtime",
-      "purpose": "Share stock ordinary-door activation direction, partial-motion sound offsets, rotation proposals and actor-contact direction between OpenMW callers and isolated native value preparation. Preserve idle/open distinction, reversal and explicit Idle snap semantics. Native tests exercise stock custom-state field producers/consumers and ESM DoorState persistence; production authority remains unwired.",
+      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred.",
       "paths": [
         "apps/openmw/mwclass/door.cpp",
         "apps/openmw/mwworld/doormotion.cpp",
-        "apps/openmw/mwworld/doormotion.hpp"
+        "apps/openmw/mwworld/doormotion.hpp",
+        "apps/openmw/mwphysics/physicssystem.cpp",
+        "apps/openmw/mwphysics/physicssystem.hpp"
       ],
       "tests": [
+        "tes3mp_native_loadout_tests door-service",
+        "tes3mp_native_loadout_tests door-session-host",
         "tes3mp_native_loadout_tests ordinary-door",
-        "tes3mp_native_loadout_tests placed-door",
-        "tes3mp_native_loadout_tests ordinary-door-loadout",
         "scripts/tests/test_openmw_patch_registry.py",
         "openmw RelWithDebInfo link"
       ],

@@ -322,6 +322,20 @@ namespace TES3MP::ServerApp
             return ConnectionSessionResult::ProtocolRejected;
         }
 
+        if (frame->messageKind() == MessageKind::ClientDoorObstruction)
+        {
+            const auto report = decodeClientDoorObstruction(frame->payload());
+            if (!mNativeInventory || state->state() != ServerSessionState::Established || !state->sessionId()
+                || !state->negotiatedHello() || !std::ranges::binary_search(
+                    state->negotiatedHello()->negotiatedCapabilities(), nativeDoorCapability())
+                || !report || report->session != *state->sessionId() || report->generation != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            // Sensor telemetry is transient and cannot acknowledge a world mutation.
+            // Applicability, ordering and freshness are checked by the native owner.
+            mNativeInventory->reportDoorObstruction(joins.state(), *report, tick);
+            return ConnectionSessionResult::CommandSubmitted;
+        }
+
         if (frame->messageKind() == MessageKind::ClientInteractObjectCommand)
         {
             if (frame->messageClass() != MessageClass::ReliableOperation)
@@ -334,8 +348,8 @@ namespace TES3MP::ServerApp
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& hello = state->negotiatedHello();
             if (!hello
-                || !std::ranges::binary_search(
-                    hello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
+                || (!std::ranges::binary_search(hello->negotiatedCapabilities(), interactiveObjectReplicationCapability())
+                    && !(mNativeInventory && std::ranges::binary_search(hello->negotiatedCapabilities(), nativeDoorCapability()))))
                 return ConnectionSessionResult::ProtocolRejected;
             if ((cmd->kind == ObjectInteractionKind::UnlockWithKey || cmd->kind == ObjectInteractionKind::PickLock
                     || cmd->kind == ObjectInteractionKind::DisarmTrap)

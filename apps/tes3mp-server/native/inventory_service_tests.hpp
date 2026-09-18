@@ -3,6 +3,7 @@
 #include <filesystem>
 namespace TES3MP::Native::Testing
 {
+    void checkDoorService(const std::filesystem::path& scratch);
     void checkPlacedContainers(const std::filesystem::path& scratch);
     void checkPlacedActors(const std::filesystem::path& scratch);
     void checkStockedInventory(const std::filesystem::path& scratch);
@@ -18,6 +19,7 @@ namespace TES3MP::Native::Testing
     void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment = false, bool takeAll = false, bool worldItems = false);
     void checkInventoryApplication(const std::filesystem::path& scratch);
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior = false, bool baseInventory = false, bool worldActors = false, bool worldItems = false, bool stockPlacement = false);
+        bool wholeInterior = false, bool baseInventory = false, bool worldActors = false, bool worldItems = false,
+        bool stockPlacement = false, bool door = false);
 }
 #endif

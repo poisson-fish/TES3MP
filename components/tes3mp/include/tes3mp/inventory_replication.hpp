@@ -1,6 +1,8 @@
 #ifndef TES3MP_INVENTORY_REPLICATION_HPP
 #define TES3MP_INVENTORY_REPLICATION_HPP
 
+#include "native_door.hpp"
+
 #include "inventory_world.hpp"
 
 #include <array>
@@ -126,10 +128,12 @@ namespace TES3MP
         std::vector<uint64_t> nativePlacements;
         std::vector<GroundItemPresentation> presentation;
         bool nativeWorld = false;
+        std::optional<NativeDoorSnapshot> door;
 
         static std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> create(
             InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
-            std::span<const uint64_t> nativePlacements = {}, std::span<const GroundItemPresentation> presentation = {}, bool nativeWorld = false);
+            std::span<const uint64_t> nativePlacements = {}, std::span<const GroundItemPresentation> presentation = {},
+            bool nativeWorld = false, std::optional<NativeDoorSnapshot> door = {});
         friend bool operator==(const ReliableGroundItemBaseline&, const ReliableGroundItemBaseline&) noexcept = default;
     };
 

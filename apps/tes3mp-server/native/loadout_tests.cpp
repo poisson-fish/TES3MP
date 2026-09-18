@@ -6229,6 +6229,11 @@ namespace
             TES3MP::Native::Testing::checkOrdinaryDoor();
             return;
         }
+        if (filter == "door-codec")
+        {
+            TES3MP::Native::Testing::checkDoorCodec();
+            return;
+        }
         if (filter == "placed-door")
         {
             TES3MP::Native::Testing::checkPlacedDoor(root);
@@ -6317,6 +6322,11 @@ namespace
         if (filter == "inventory-canonical")
         {
             TES3MP::Native::Testing::checkCanonicalInventory(root);
+            return;
+        }
+        if (filter == "door-service")
+        {
+            TES3MP::Native::Testing::checkDoorService(root);
             return;
         }
         if (filter == "inventory-service" || filter == "inventory-service-durability")
@@ -6488,10 +6498,11 @@ int main(int argc, char** argv)
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }
-        if (argc == 4 && std::string_view(argv[1]) == "world-item-placement-host")
+        if (argc == 4 && (std::string_view(argv[1]) == "world-item-placement-host" || std::string_view(argv[1]) == "door-session-host"))
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
-                std::filesystem::absolute(std::filesystem::u8path(argv[3])),true,true,true,true,true);
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])),true,true,true,true,true,
+                std::string_view(argv[1]) == "door-session-host");
             std::cout << "PASS " << argv[1] << '\n';
             return 0;
         }

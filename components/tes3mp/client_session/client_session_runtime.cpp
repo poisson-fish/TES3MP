@@ -592,7 +592,8 @@ namespace TES3MP
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
         if (!snapshot || !sessionId || !mSession->stateMachine().interestBaselineComplete()
-            || !negotiated(mSession->stateMachine(), interactiveObjectReplicationCapability()))
+            || (!negotiated(mSession->stateMachine(), interactiveObjectReplicationCapability())
+                && !negotiated(mSession->stateMachine(), nativeDoorCapability())))
             return { ClientRuntimeResult::NotConnected, std::nullopt };
         auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
             : snapshot->header().acknowledgedCommandSequence()

@@ -85,6 +85,8 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyWorldTime(
             const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
+        std::optional<bool> nativeDoorObstruction(const NativeDoorSnapshot& door) const noexcept override
+        { return mPresentation.nativeDoorObstruction(door); }
         ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;
         void report(ConnectionStatus status) noexcept override;

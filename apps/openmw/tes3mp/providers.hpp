@@ -193,6 +193,7 @@ namespace TES3MP::OpenMWAdapter
         {
             return std::nullopt;
         }
+        virtual std::optional<bool> nativeDoorObstruction(const NativeDoorSnapshot&) const noexcept { return std::nullopt; }
         virtual ProviderResult applyVrPose(const ServerVrPoseSnapshot&, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;

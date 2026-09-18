@@ -2,70 +2,57 @@
 
 ## Handoff
 
-- **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
-  [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M3 in [PLAN.md](PLAN.md). Stationary pickup/drop is user-accepted.
-- **Next action:** add one bound ordinary door's native state to the existing
-  coherent session image, with bounded byte preflight, content binding and recovery.
-  Preserve v8 campaigns; changing the domain requires an explicit descriptor version.
+M3 in [PLAN.md](PLAN.md); direction and constraints: [README.md](README.md),
+[DECISIONS.md](DECISIONS.md). **Next:** exercise v9 doors with two graphical clients:
+contact, reversal, latency, reconnect and restart. Desktop wiring is built;
+graphical contact/presentation remains unverified.
 
-## Door preparation
+## Ordinary doors
 
-[Stock callers](../../apps/openmw/mwworld/worldimp.cpp) now share
-[door motion rules](../../apps/openmw/mwworld/doormotion.hpp): activation reversal,
-partial-motion sound offsets, 90-degree/second rotation, endpoint clamping and
-actor-contact direction. World retains collision rollback, AI and presentation.
-Idle means stopped, including fully or partly open; explicit stock Idle activation
-retains its close/snap behavior.
+The [host](../../apps/tes3mp-server/native/inventory_host.hpp) accepts
+**native-inventory-9**: insert `door "ORIGIN_PLUGIN" REFERENCE_INDEX` between
+`interior` and `cell`. One winning ordinary placement joins content identity.
+V9 requires a new campaign and native-door-capable clients; v8 remains unchanged.
 
-[OrdinaryDoor](../../apps/tes3mp-server/native/ordinary_door.hpp) prepares detached
-ESM::DoorState values and sound intents. Moving steps require an explicit actor
-collision query; blocked steps preserve rotation/direction. Invalid state, transforms
-and duration reject before querying. Stock persistence stores current position plus
-ANIM direction, and native validation rejects invalid ANIM values retained by ESM.
-Loadout discovery resolves one winning placement and stable identity, rejecting
-scripted, teleporting, locked/keyed or trapped targets and configured Lua services.
+[Session format 5](../../apps/tes3mp-server/native/equipment_session.hpp) saves stock
+DoorState with inventories/world membership. Recovery installs all owners atomically. The [runtime](../../apps/tes3mp-server/native/door_runtime.cpp)
+commits stock activation/reversal and 30 Hz motion before installation/replication.
+Preparations reject stale inventory commits. One native mutation
+per tick remains; inventory/activation defers that tick's motion. Uncertain writes close service.
 
-This is preparation, not a network authority cutover. No production door descriptor,
-canonical transaction, bounded byte decoder, collision provider or native door
-replication is wired. No new save file or competing live writer was introduced.
+Baselines carry angle, direction, motion ID and obstruction. Clients install exact
+angles without local motion/avoidance and probe only their own player with detached
+geometry. Authenticated, sequenced reports bind session/generation and motion.
+Any applicable block stalls progress; reports expire after ten observed ticks
+(~333 ms), never persist, and cannot block reversal/reconnect. Collision is trusted;
+latency may clip before a stall, without a response barrier or rewind. NPC contacts
+and server physics are deferred. Scripted, teleporting, locked/keyed or trapped
+doors and configured Lua services remain unsupported.
 
-## Running inventory authority
+## Inventory
 
-The [native host](../../apps/tes3mp-server/native/inventory_host.hpp) remains
-**native-inventory-8**: two players, 32 shared inventories and 64 active world items
-in one interior. Equipment/all 19 slots, corpse loot, Take All and pickup/drop
-share one durable image. Recovery never reloads looted content.
-
-V8 uses shared stock camera/floor rays and model bounds for stationary placement;
-misses or slopes >=30 degrees use the downward fallback. Clients install committed
-positions without repositioning. Model bytes join saved content identity; v7 retains
-player-position drops. Safe write rejection is atomic; uncertain writes close service.
+Two players, 32 shared inventories, 64 world items, 19 equipment slots, corpse loot,
+Take All and pickup/drop share one interior/image. Recovery never reloads loot.
+User-accepted placement uses stock rays/bounds; model bytes bind saves. V7 retains player-position drops.
 
 ## Verification
 
 Windows MSVC RelWithDebInfo, `build/vnext-product`; logs in `build/logs`.
 
-| Filter/check | Evidence | Log |
+| Check | Evidence | Log |
 |---|---|---|
-| ordinary-door | reversal, offsets, contact rollback, endpoints, stock field/save round trips, resumed motion, invalid-state rejection | door-state.log |
-| placed-door | synthetic overrides/deletions, origin identity, unsupported targets, Lua rejection | door-placement.log |
-| ordinary-door-loadout | Morrowind.esm:397586, in_c_door_arched, Seyda Neen Census and Excise Office; saved partial motion resumes/closes | door-real-loadout.log |
-| builds | native tests and desktop link | door-final-build.log / door-desktop-build.log |
-| guards | patch coverage and active documentation | door-registry.log / docs-budget.log / docs-links.log |
+| door-service | atomic failures, report ordering/expiry/reversal/disconnect/restart, two wire clients; authenticated late join, spoof rejection, canonical commits | door-service.log |
+| door-session-host | Morrowind base/generated placements, activation/motion, inventory continuation/restart, binding rejection, v8 compatibility | door-live-host.log |
+| builds | native tests / openmw / tes3mp_server | door-live-build.log / door-live-client-build.log / door-live-server-build.log |
+| docs | budget/links | docs-budget.log / docs-links.log |
 
-Door collision queries in tests are synthetic; no live door-client proof is claimed.
-Inherited v8 evidence: `placement-query.log`, `placement-host.log`,
-`placement-protocol.log`, `placement-world-items-regression.log` and
-`placement-world-items-canonical.log`; user confirmed live dropping. Earlier v7
-two-client reconnect/restart reached revision 33 with identical 3,588-byte images
-in `build/manual-world-items-v7-20260917`. Container/corpse/equipment/Take All
-presentation is also inherited user-confirmed evidence.
+Contacts are synthetic; desktop collision has build evidence only. Inherited:
+`door-persistence-codec.log`, `door-persistence-session.log`, `door-persistence-v8.log`;
+previous inventory/pickup presentation remains user-confirmed.
 
 ## Limits
 
-Placement geometry is initial unscripted non-actor content plus committed items;
-changed doors and animation remain unsimulated. Camera/movement authority is
-inherited. Dynamic cells, scripts/Lua, AI/combat, locks/traps, merchants/respawn,
-chargen/rewards and persistent time/RNG remain unfinished. General campaign
-recovery, published mods and Tamriel Rebuilt remain unproven.
+Item-placement rays retain authored door transforms. Dynamic cells, animation,
+scripts/Lua, AI/combat, locks/traps, merchants/respawn, chargen/rewards, persistent
+time/RNG, general campaign recovery, published mods and Tamriel Rebuilt remain
+unfinished/unproven. Movement/camera authority remains inherited.

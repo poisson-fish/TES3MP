@@ -901,7 +901,18 @@ namespace TES3MP
                                         = std::get_if<InteractiveObjectCommandProposal>(&proposal.payload()))
                                     {
                                         requiresSpatialAdvance = false;
-                                        if (!prepared.mInteractiveObjects || objectCatalog == nullptr)
+                                        if (mNativeInventory && mNativeInventory->ownsNativeDoor(interaction->objectId()))
+                                        {
+                                            if (prepared.mNativeInventory)
+                                                disposition = CommandDisposition::ObjectInteractionRejected;
+                                            else
+                                            {
+                                                prepared.mNativeInventory = mNativeInventory->prepareDoorActivation(*prepared.mState, proposal);
+                                                disposition = prepared.mNativeInventory ? CommandDisposition::Applied
+                                                    : CommandDisposition::ObjectInteractionRejected;
+                                            }
+                                        }
+                                        else if (!prepared.mInteractiveObjects || objectCatalog == nullptr)
                                         {
                                             ObjectInteractionOutcome outcome;
                                             outcome.code = ObjectInteractionResultCode::InternalError;
@@ -1989,6 +2000,25 @@ namespace TES3MP
                                     worlds.globalCatalog, worlds.scriptState, worlds.scriptStateCatalog),
             batch);
     }
+
+    bool CanonicalCommandReducer::stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds) noexcept
+    try
+    {
+        if (!prepared.result() || prepared.mBaseVersion != mStateVersion) return false;
+        // Preserve the bounded one-native-mutation-per-tick rule. Inventory or
+        // activation commits consume this step; elapsed time is never caught up.
+        if (!mNativeInventory || prepared.mNativeInventory) return true;
+        auto door = mNativeInventory->prepareDoorStep(*prepared.mState, tick, seconds);
+        if (!door) return true;
+        const auto version = prepared.mStateVersion.next();
+        const auto revision = prepared.mCanonicalRevision.next();
+        if (!version || !revision) return false;
+        prepared.mNativeInventory = std::move(door);
+        prepared.mStateVersion = *version;
+        prepared.mCanonicalRevision = *revision;
+        return true;
+    }
+    catch (...) { return false; }
 
     bool CanonicalCommandReducer::stageSimulationCandidates(PreparedBatch& prepared,
         const CanonicalInventoryWorld* baseInventory, std::optional<CanonicalInventoryWorld> inventory,

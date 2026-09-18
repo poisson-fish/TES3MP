@@ -1,10 +1,11 @@
 # Multiplayer modded OpenMW
 
 The product is cooperative multiplayer OpenMW: load a compatible modpack such
-as Tamriel Rebuilt, explore together, fight the same actors, complete quests
-together, and share objects, time, weather, and persistent world consequences.
+as Tamriel Rebuilt, explore and fight together, and complete the game independently.
+Other players must not permanently close a character's quest paths. Preserve
+personal progression in a shared world, with NPC respawn restoring later access.
 Clients retain OpenMW graphics and compatible visual mods. This is the target,
-not a claim that the current implementation already supports it.
+not a claim of implemented support.
 
 ## Chosen route
 
@@ -26,26 +27,22 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking stays engine-independent. An app-local OpenMW runtime owns bounded
-inventory transfers, equipment, shared containers and placed actor inventories,
-corpse loot, bulk Take All, and ordinary world pickup/drop. The same durable image
-covers inventories and active world items. Clients submit authenticated intent
-and present committed baselines; recovery never refills looted content.
-
-Existing desktop evidence covers containers, corpse loot, public equipment and
-world pickup/drop, including reconnect/restart in a generated Morrowind test cell.
-[CURRENT.md](CURRENT.md) names exact evidence, limitations and the
-next concrete action. Scripts, AI/combat, dynamic activation
-and general campaign recovery remain unfinished. Stock stationary placement has
-automated v8 evidence and user-confirmed live behavior. Each subsystem changes authority
-once, through small playable slices; broad mod compatibility remains the destination.
+Networking stays engine-independent. The native runtime currently owns bounded
+inventory, equipment, container/corpse and world-item operations in one durable
+image. [CURRENT.md](CURRENT.md) names verified behavior, limitations and the next
+action. Each subsystem changes authority once, through small playable slices.
 
 ## Product boundaries
 
-- One authoritative shared world; individual characters, inventories, and stats.
-- Start with a cooperative party sharing quest progress and world consequences.
-  Dialogue and player-specific script operations need an explicit initiator;
-  rewards and unique world items must not duplicate when clients retry.
+- One authoritative shared world; individual characters and progression.
+  Cooperation must not require synchronized quest stages or attendance.
+- [Cooperative progression design](DECISIONS.md#cooperative-progression-design)
+  proposes shared NPC lives/respawn and personal story state through engine services.
+  Quest-specific adaptations cannot be required. Temporary NPC unavailability is
+  acceptable; personal worlds are not the default. M5 plans contextual scripts,
+  deferred unavailable dependencies and scoped permanent changes; item access
+  still needs generic replenishment/transfer rules.
+  Rewards must not duplicate when clients retry.
 - Match gameplay plugins, ordering, scripts, and gameplay-relevant resources.
   Purely visual texture/shader/settings differences may remain client-local.
 - Target mods supported by the chosen OpenMW version. MWSE/native-engine-only
@@ -63,10 +60,6 @@ once, through small playable slices; broad mod compatibility remains the destina
 3. [PLAN.md](PLAN.md): ordered outcomes and acceptance criteria; read the active
    milestone, not an invented expansion of the entire roadmap.
 4. [DECISIONS.md](DECISIONS.md): durable architecture and cooperative semantics.
-
-A fresh implementation request can be: "Follow AGENTS.md. Implement the next
-unfinished slice of the active milestone in docs/vnext/CURRENT.md using PLAN.md.
-Verify it narrowly and replace the handoff with the next concrete action."
 
 The code baseline remains OpenMW 0.51.0 at
 `f4bec41444214a7903bebd178389ca22ca13f646`; this pivot does not upgrade it.

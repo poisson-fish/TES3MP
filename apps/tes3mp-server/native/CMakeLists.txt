@@ -4,7 +4,7 @@
 # headless packaging. Do not relax components/tes3mp's independent boundaries.
 add_library(tes3mp_native_equipment_runtime STATIC
     equipment_runtime.cpp equipment_runtime.hpp equipment_command.hpp inventory_identity.hpp actor_inventory.hpp
-    connected_runtime.cpp world_items.cpp ordinary_door.cpp ordinary_door.hpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
+    connected_runtime.cpp world_items.cpp door_runtime.cpp ordinary_door.cpp ordinary_door.hpp door_codec.cpp door_codec.hpp equipment_session.cpp equipment_session.hpp inventory_transfer_command.cpp inventory_transfer_command.hpp
     equipment_codec.cpp equipment_codec.hpp equipment_file.cpp equipment_file.hpp
     bounded_file.cpp bounded_file.hpp persistence.hpp runtime_phases.hpp session_commit.hpp)
 target_compile_features(tes3mp_native_equipment_runtime PUBLIC cxx_std_20)
