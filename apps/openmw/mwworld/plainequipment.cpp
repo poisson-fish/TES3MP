@@ -875,7 +875,7 @@ namespace MWWorld
     std::array<PreparedPlainEquipment, 2> PreparedPlainEquipment::prepareTransfer(
         const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
         ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
-        const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource)
+        const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource, bool takeAll)
     {
         const auto& source = State::storage(inventories[0], contexts[0]);
         const auto& destination = State::storage(inventories[1], contexts[1]);
@@ -899,8 +899,27 @@ namespace MWWorld
         if (expectedRevision >= std::numeric_limits<size_t>::max() - 1
             || generated.mContentFile != -1 || generated.mIndex == std::numeric_limits<uint32_t>::max())
             throw std::invalid_argument("Inventory transfer registry counter exhausted");
-        // Check the aggregate before stock int arithmetic or candidate allocation.
-        int64_t total = count;
+        // Bound the complete request before stock arithmetic or candidate allocation.
+        int64_t total = takeAll ? 0 : count;
+        size_t transferCount = takeAll ? 0 : 1;
+        if (takeAll)
+            for (auto it = source.begin(); it != source.end(); ++it)
+            {
+                if (!it->getClass().getScript(*it).empty()
+                    || (!allowEquippedSource && dynamic_cast<const InventoryStore*>(&source)
+                        && std::any_of(static_cast<const InventoryStore&>(source).mSlots.begin(),
+                            static_cast<const InventoryStore&>(source).mSlots.end(), [&](const auto& slot) {
+                                return State::position(static_cast<const InventoryStore&>(source), slot)
+                                    == it->getCellRef().getRefNum();
+                            })))
+                    throw std::invalid_argument("Take All contains an unsupported source item");
+                total += std::abs(static_cast<int64_t>(it->getCellRef().getCount(false)));
+                ++transferCount;
+            }
+        if (transferCount == 0 || transferCount > MaxItems
+            || expectedRevision > std::numeric_limits<size_t>::max() - transferCount - 1
+            || generated.mIndex > std::numeric_limits<uint32_t>::max() - transferCount)
+            throw std::invalid_argument("Transfer batch or registry counter bound exceeded");
         destination.forEachStored([&](const auto& node, auto) {
             total += std::abs(static_cast<int64_t>(node.mRef.getCount(false)));
         });
@@ -912,55 +931,70 @@ namespace MWWorld
         states[1]->capture(destination, true);
         auto& from = *states[0];
         auto& to = *states[1];
-        auto origin = from.candidate().begin();
-        while (origin != from.candidate().end() && origin->getCellRef().getRefNum() != expectedIdentity)
-            ++origin;
-        if (origin == from.candidate().end())
-            throw std::invalid_argument("Transfer source is dormant or foreign");
-        ManualRef detachedItem(contexts[0].mStore, origin->getCellRef().getRefId());
-        auto& incoming = *detachedItem.getPtr().getBase();
-        incoming.mRef = origin->getCellRef();
-        incoming.mData = origin->getRefData().copyForContainerTransfer();
-        incoming.mRef.unsetRefNum();
-        incoming.mRef.setCount(count);
-        // Exactly the stock add selection, signed count arithmetic and equipped
-        // stack exclusion. The protected copy owns RefData and no live service.
-        auto added = to.candidate().addImp(ConstPtr(&incoming), count, contexts[0].mStore);
-        if (!added->getCellRef().getRefNum().isSet())
-            added->getRefData() = incoming.mData.copyForContainerTransfer();
         auto counter = world.getLastGeneratedRefNum();
-        const bool newIdentity = !added->getCellRef().getRefNum().isSet();
-        const auto destinationId = added->getCellRef().getOrAssignRefNum(counter);
-        if (newIdentity && from.mRegistry.mEntries.contains(destinationId))
-            throw std::invalid_argument("Transfer generated identity collision");
-        normalizeContainerAddReference(added->getCellRef());
-        const auto removal = ContainerStore::prepareRemoveCount(origin->getCellRef(), count);
-        origin->getCellRef() = origin->getCellRef().copyWithCount(removal.mRemainingCount);
-        if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate()); inventory && allowEquippedSource)
+        const auto transfer = [&](const ContainerStoreIterator& origin, int quantity) {
+            const auto sourceId = origin->getCellRef().getRefNum();
+            ManualRef detachedItem(contexts[0].mStore, origin->getCellRef().getRefId());
+            auto& incoming = *detachedItem.getPtr().getBase();
+            incoming.mRef = origin->getCellRef();
+            incoming.mData = origin->getRefData().copyForContainerTransfer();
+            incoming.mRef.unsetRefNum();
+            incoming.mRef.setCount(quantity);
+            // Exactly the stock add selection, signed count arithmetic and equipped
+            // stack exclusion. The protected copy owns RefData and no live service.
+            auto added = to.candidate().addImp(ConstPtr(&incoming), quantity, contexts[0].mStore);
+            if (!added->getCellRef().getRefNum().isSet())
+                added->getRefData() = incoming.mData.copyForContainerTransfer();
+            const bool newIdentity = !added->getCellRef().getRefNum().isSet();
+            const auto destinationId = added->getCellRef().getOrAssignRefNum(counter);
+            if (newIdentity && from.mRegistry.mEntries.contains(destinationId))
+                throw std::invalid_argument("Transfer generated identity collision");
+            normalizeContainerAddReference(added->getCellRef());
+            const auto removal = ContainerStore::prepareRemoveCount(origin->getCellRef(), quantity);
+            origin->getCellRef() = origin->getCellRef().copyWithCount(removal.mRemainingCount);
+            if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate()); inventory && allowEquippedSource)
+            {
+                // Stock removal only clears equipment when the entire stack is gone.
+                // Zero-count unequip cannot restack, split or execute item locals.
+                const InventoryStoreEquipmentContext context{{contexts[0].mStore, {}, {}, {}},
+                    contexts[0].mActor, contexts[0].mPlayer,
+                    [](const Ptr&, const ESM::RefId&) { throw std::logic_error("Removed item unexpectedly invoked script locals"); },
+                    [&](const Ptr&) { from.effect(PlainEquipmentResult::EffectKind::EquipmentChanged); }};
+                inventory->unequipRemovedItem(*origin, context);
+            }
+            if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate());
+                inventory && removal.mFullRemoval && inventory->mSelectedEnchantItem == origin)
+                inventory->mSelectedEnchantItem = inventory->end();
+            if (sourceId == expectedIdentity)
+            {
+                from.mResult.mTransferred = sourceId;
+                to.mResult.mTransferred = destinationId;
+            }
+            if (takeAll) from.mResult.mBulkTransfers.push_back({sourceId, destinationId, quantity});
+            using Kind = PlainEquipmentResult::EffectKind;
+            from.effect(Kind::InventoryUpdated);
+            if (from.mContainerListener) from.effect(Kind::ItemRemoved, *origin, quantity);
+            from.effect(Kind::InventoryUpdated);
+            // Stock add registers even an existing destination stack once.
+            to.effect(Kind::RegisterSplit, *added);
+            to.effect(Kind::InventoryUpdated);
+            if (to.mContainerListener) to.effect(Kind::ItemAdded, *added, quantity);
+            to.effect(Kind::InventoryUpdated);
+        };
+        for (auto origin = from.candidate().begin(); origin != from.candidate().end(); ++origin)
         {
-            // Stock removal only clears equipment when the entire stack is gone.
-            // Zero-count unequip cannot restack, split or execute item locals.
-            const InventoryStoreEquipmentContext context{{contexts[0].mStore, {}, {}, {}},
-                contexts[0].mActor, contexts[0].mPlayer,
-                [](const Ptr&, const ESM::RefId&) { throw std::logic_error("Removed item unexpectedly invoked script locals"); },
-                [&](const Ptr&) { from.effect(PlainEquipmentResult::EffectKind::EquipmentChanged); }};
-            inventory->unequipRemovedItem(*origin, context);
+            if (!takeAll && origin->getCellRef().getRefNum() != expectedIdentity) continue;
+            const int quantity = takeAll ? origin->getCellRef().getCount() : count;
+            transfer(origin, quantity);
+            if (!takeAll) break;
         }
-        if (auto* inventory = dynamic_cast<InventoryStore*>(&from.candidate());
-            inventory && removal.mFullRemoval && inventory->mSelectedEnchantItem == origin)
-            inventory->mSelectedEnchantItem = inventory->end();
+        if (!from.mResult.mTransferred.isSet())
+            throw std::invalid_argument("Transfer source witness is dormant or foreign");
+        // Capacity is checked after stock stacking: a full inventory may still
+        // accept matching stacks. Failure discards both detached candidates.
+        if (to.candidate().storedSize() > MaxItems)
+            throw std::invalid_argument("Transfer destination node bound exceeded");
         from.mResult.mLastGenerated = to.mResult.mLastGenerated = counter;
-        from.mResult.mTransferred = expectedIdentity;
-        to.mResult.mTransferred = destinationId;
-        using Kind = PlainEquipmentResult::EffectKind;
-        from.effect(Kind::InventoryUpdated);
-        if (from.mContainerListener) from.effect(Kind::ItemRemoved, *origin, count);
-        from.effect(Kind::InventoryUpdated);
-        // Stock add registers even an existing destination stack once.
-        to.effect(Kind::RegisterSplit, *added);
-        to.effect(Kind::InventoryUpdated);
-        if (to.mContainerListener) to.effect(Kind::ItemAdded, *added, count);
-        to.effect(Kind::InventoryUpdated);
         for (auto& state : states)
         {
             state->finish();

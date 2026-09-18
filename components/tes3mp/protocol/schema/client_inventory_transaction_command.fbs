@@ -12,7 +12,8 @@ enum InventoryTransactionKind : ubyte {
   EquipItem = 2,
   UnequipItem = 3,
   DropItem = 4,
-  PickupItem = 5
+  PickupItem = 5,
+  TakeAllFromContainer = 6
 }
 
 table ClientCommandHeader {

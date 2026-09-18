@@ -35,7 +35,7 @@ namespace TES3MP::Native
         notifications[1] = intent(InventoryNotificationKind::InventoryUpdated, command.mSourceOwner, command.mItem);
         if (added) notifications[2] = intent(InventoryNotificationKind::ItemAdded, command.mDestinationOwner, destination);
         notifications[3] = intent(InventoryNotificationKind::InventoryUpdated, command.mDestinationOwner, destination);
-        return { command, destination, sourceCount, destinationCount, revision, notifications, sourceSelection, destinationSelection };
+        return { command, destination, sourceCount, destinationCount, revision, notifications, {}, sourceSelection, destinationSelection };
     }
 
     InventoryNotificationDelivery consumeInventoryNotifications(
@@ -54,6 +54,11 @@ namespace TES3MP::Native
                     consumer.receive(*intent);
                     ++result.mConfirmed;
                 }
+            for (const auto& intent : committed->mBulkNotifications)
+            {
+                consumer.receive(intent);
+                ++result.mConfirmed;
+            }
         }
         catch (...)
         {

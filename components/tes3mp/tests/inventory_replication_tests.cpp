@@ -146,6 +146,30 @@ int main()
         .interactionOrigin = Position3(1, 2, 3) };
     const auto commandBytes = encodeClientInventoryTransactionCommand(command);
     assert(decodeClientInventoryTransactionCommand(commandBytes) == InventoryTransactionCommandDecodeResult(command));
+    auto bulk = command;
+    bulk.kind = InventoryTransactionKind::TakeAllFromContainer;
+    const auto bulkBytes = encodeClientInventoryTransactionCommand(bulk);
+    assert(decodeClientInventoryTransactionCommand(bulkBytes) == InventoryTransactionCommandDecodeResult(bulk));
+    for (std::size_t size = 0; size < bulkBytes.size(); ++size)
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeClientInventoryTransactionCommand(std::span(bulkBytes).first(size))));
+    for (int invalid = 0; invalid < 8; ++invalid)
+    {
+        auto malformed = bulk;
+        switch (invalid)
+        {
+            case 0: malformed.stackId.reset(); break;
+            case 1: malformed.containerId.reset(); break;
+            case 2: malformed.expectedContainerRevision.reset(); break;
+            case 3: malformed.count = 0; break;
+            case 4: malformed.count = 2; break;
+            case 5: malformed.slot = EquipmentSlot::Shirt; break;
+            case 6: malformed.expectedWorldItemRevision = id<WorldItemRevision>(1); break;
+            case 7: malformed.kind = static_cast<InventoryTransactionKind>(7); break;
+        }
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(
+            decodeClientInventoryTransactionCommand(encodeClientInventoryTransactionCommand(malformed))));
+    }
 
     for (std::size_t size = 0; size < playerBytes.size(); ++size)
         assert(std::holds_alternative<InventoryReplicationDecodeError>(

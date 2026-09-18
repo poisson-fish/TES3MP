@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace TES3MP::Native { struct FileFaults; }
 
@@ -19,6 +20,7 @@ namespace TES3MP::Native
         InventoryInstanceId mSourceOwner, mDestinationOwner, mInitiator, mItem;
         std::int32_t mQuantity = 0;
         std::uint64_t mExpectedRevision = 0;
+        bool mTakeAll = false; // Source must be a shared inventory; item is a witness.
         bool operator==(const InventoryTransferCommand&) const = default;
     };
 
@@ -59,6 +61,9 @@ namespace TES3MP::Native
         std::int32_t mSourceCount = 0, mDestinationCount = 0;
         std::uint64_t mRevision = 0;
         InventoryNotificationBatch mNotifications;
+        // Bulk results retain the witness stack in the scalar fields, leave
+        // mNotifications empty, and carry all stacks in stock traversal order.
+        std::vector<InventoryNotificationIntent> mBulkNotifications;
         // Prepared stock selections, including unset and dormant identities.
         InventoryInstanceId mSourceSelection, mDestinationSelection;
         bool operator==(const InventoryTransferSuccess&) const = default;

@@ -45,6 +45,7 @@ namespace MWGui
     {
     public:
         using TransferInterceptor = std::function<bool(ItemModel&, const ItemStack&, std::size_t, ItemModel&)>;
+        using TakeAllInterceptor = std::function<void(ItemModel&, ItemModel&)>;
         ItemModel();
         virtual ~ItemModel() = default;
 
@@ -69,6 +70,8 @@ namespace MWGui
             const ItemStack& item, size_t count, ItemModel* otherModel, bool allowAutoEquip = true);
         bool interceptTransfer(const ItemStack& item, size_t count, ItemModel& otherModel);
         static void setTransferInterceptor(TransferInterceptor interceptor);
+        static void setTakeAllInterceptor(TakeAllInterceptor interceptor);
+        void interceptTakeAll(ItemModel& otherModel);
         static void clearTransferInterceptor() noexcept;
         static bool hasTransferInterceptor() noexcept;
         static bool takeTransferIntercepted() noexcept;

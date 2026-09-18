@@ -240,9 +240,15 @@ namespace MWGui
         assert(mModel);
         mModel->update();
 
-        // Remote slots and stack identities must survive until the committed
-        // baseline arrives. Stock unequip may merge equipped and spare copies.
-        if (!ItemModel::hasTransferInterceptor() && mPtr.getClass().hasInventoryStore(mPtr))
+        // One remote intent preserves slots/identities until the committed
+        // baseline arrives. Never fall through to local unequip or item scripts.
+        if (ItemModel::hasTransferInterceptor())
+        {
+            mModel->interceptTakeAll(*playerModel);
+            return;
+        }
+
+        if (mPtr.getClass().hasInventoryStore(mPtr))
         {
             MWWorld::InventoryStore& invStore = mPtr.getClass().getInventoryStore(mPtr);
             for (size_t i = 0; i < mModel->getItemCount(); ++i)

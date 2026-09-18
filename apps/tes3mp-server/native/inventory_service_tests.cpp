@@ -218,6 +218,173 @@ namespace TES3MP::Native::Testing
         }
     }
 
+    void checkBulkTakeAll(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Bulk inventory scratch already exists");
+        Content content;
+        const auto ref = [](const char* text) { return ESM::RefId::stringRefId(text); };
+        ESM::Weapon bow; bow.blank(); bow.mId = ref("bulk_bow");
+        bow.mData.mType = ESM::Weapon::MarksmanBow; bow.mData.mHealth = 100; bow.mData.mChop[1] = 12;
+        content.store.insertStatic(bow);
+        auto arrow = bow; arrow.mId = ref("bulk_arrow"); arrow.mData.mType = ESM::Weapon::Arrow;
+        content.store.insertStatic(arrow);
+        auto chest = *content.store.get<ESM::Container>().find(content.container);
+        chest.mInventory.mList = {{2, content.shirt}, {1, bow.mId}, {5, arrow.mId}};
+        content.store.overrideRecord(chest);
+        auto dead = *content.store.get<ESM::NPC>().find(content.actor);
+        dead.mId = ref("bulk_corpse"); dead.mNpdt.mHealth = 0; dead.mNpdt.mSkills.fill(30);
+        dead.mInventory = chest.mInventory; content.store.insertStatic(dead);
+        auto living = dead; living.mId = ref("bulk_living"); living.mNpdt.mHealth = 40;
+        content.store.insertStatic(living);
+        ESM::Creature creature; creature.blank(); creature.mId = ref("bulk_creature");
+        creature.mData.mHealth = 0; creature.mData.mCombat = 30; creature.mFlags |= ESM::Creature::Weapon;
+        creature.mInventory = chest.mInventory; content.store.insertStatic(creature);
+        std::vector<ESM::RefId> references{content.actor, content.shirt, content.container,
+            bow.mId, arrow.mId, dead.mId, living.mId, creature.mId};
+        const auto authority = players();
+        const auto view = [&](InventoryService& service, uint64_t session = 1) {
+            return service.project(authority, id<SessionId>(session), id<ServerTick>(1), id<CanonicalRevision>(1)).value();
+        };
+        const auto intent = [&](InventoryService& service, uint64_t session = 1) {
+            const auto snapshot = view(service, session);
+            const auto& source = snapshot.containers.front();
+            const auto& witness = source.stacks.back(); // Not necessarily first in stock order.
+            return ClientInventoryTransactionCommand{id<SessionId>(session), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                InventoryTransactionKind::TakeAllFromContainer, source.container, witness.prototypeId,
+                witness.stackId, 1, {}, snapshot.playerInventory.front().revision, source.revision, {}, Position3(0, 0, 0)};
+        };
+        for (auto base : {chest.mId, dead.mId, creature.mId})
+        {
+            auto binding = content.binding();
+            ESM::CellRef placement; placement.blank(); placement.mRefNum = {1, 0}; placement.mRefID = base;
+            binding.mContainers.front().mBase = base;
+            binding.mContainers.front().mPlacement = placement;
+            auto livePlacement = placement; livePlacement.mRefNum = {2, 0}; livePlacement.mRefID = living.mId;
+            binding.mContainers.push_back({id<ContainerId>(91), CellId::interior(id<CellSpaceId>(7)),
+                Position3(0, 0, 0), living.mId, livePlacement});
+            InventoryService service(content.store, content.readers, binding);
+            const auto initial = view(service);
+            const auto other = view(service, 2).playerInventory.front();
+            const auto input = intent(service);
+            const auto rival = intent(service, 2);
+            const std::vector before(service.inventoryImage().begin(), service.inventoryImage().end());
+            for (int invalid = 0; invalid < 5; ++invalid)
+            {
+                auto bad = input;
+                switch (invalid)
+                {
+                    case 0: bad.containerId = id<ContainerId>(91); break; // Living owner.
+                    case 1: bad.interactionOrigin = Position3(1'000'000, 0, 0); break;
+                    case 2: bad.expectedInventoryRevision = InventoryRevision::initial(); break;
+                    case 3: bad.stackId = other.stacks.front().stackId; bad.prototypeId = other.stacks.front().prototypeId; break;
+                    case 4: bad.expectedContainerRevision = ContainerRevision::initial(); break;
+                }
+                require(!service.prepareInventory(authority, bind(authority, bad).proposal()), "Invalid bulk access accepted");
+            }
+            auto staleSession = input; staleSession.sessionGeneration = id<SessionGeneration>(2);
+            require(!ServerApp::InventoryCommandBinding::resolve(authority, input.sessionId,
+                input.sessionGeneration, staleSession), "Bulk command crossed session generations");
+            auto prepared = service.prepareInventory(authority, bind(authority, input).proposal());
+            auto contending = service.prepareInventory(authority, bind(authority, rival).proposal());
+            require(prepared && contending, "Bulk preparation failed");
+            for (uint64_t session : {1, 2})
+            {
+                const auto candidate = service.projectInventory(authority, id<SessionId>(session), id<ServerTick>(1),
+                    id<CanonicalRevision>(1), prepared.get());
+                require(candidate && candidate->containers.front().stacks.empty()
+                    && candidate->containers.front().equipment.empty(), "Bulk candidate did not empty source/slots for both clients");
+            }
+            require(std::ranges::equal(before, service.inventoryImage())
+                && view(service).containers.front().stacks == initial.containers.front().stacks,
+                "Bulk preparation mutated live state");
+            size_t writes = 0;
+            require(prepared->commit([&](auto) { ++writes; return CanonicalDurabilityResult::Rejected; })
+                == CanonicalDurabilityResult::Rejected && writes == 1
+                && std::ranges::equal(before, service.inventoryImage()), "Failed bulk durability partially installed");
+            std::vector<std::byte> saved;
+            MWWorld::Testing::Allocations::Trace trace;
+            CanonicalDurabilityResult committed;
+            {
+                MWWorld::Testing::Allocations::Observe observe(trace);
+                committed = prepared->commit([&](auto image) {
+                    ++writes; saved.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Committed;
+                });
+            }
+            require(committed == CanonicalDurabilityResult::Committed && writes == 2
+                && trace.visits(Allocations::Phase::Installation) > 0
+                && trace.allocations(Allocations::Phase::Installation) == 0
+                && trace.allocations(Allocations::Phase::Publication) == 0, "Bulk commit was not one nonthrowing installation");
+            const auto result = view(service);
+            require(result.containers.front().stacks.empty() && result.containers.front().equipment.empty()
+                && view(service, 2).containers.front().stacks.empty(), "Bulk transfer left source items or equipment");
+            std::map<ItemPrototypeId, uint32_t> expected, actual;
+            for (const auto& stack : initial.playerInventory.front().stacks) expected[stack.prototypeId] += stack.count;
+            for (const auto& stack : initial.containers.front().stacks) expected[stack.prototypeId] += stack.count;
+            for (const auto& stack : result.playerInventory.front().stacks) actual[stack.prototypeId] += stack.count;
+            require(actual == expected && result.playerInventory.front().stacks.size() == 3
+                && view(service, 2).playerInventory.front().stacks == other.stacks,
+                "Bulk transfer lost/duplicated counts, failed stock merging, or changed the other player");
+            require(!service.prepareInventory(authority, bind(authority, input).proposal())
+                && !service.prepareInventory(authority, bind(authority, rival).proposal()), "Bulk replay or stale contender applied");
+            require(contending->commit([&](auto) { ++writes; return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Rejected && writes == 2, "Stale bulk preparation reached durability");
+            InventoryService restored(content.store, content.readers, binding, true);
+            restored.recover(saved, references);
+            require(view(restored).playerInventory.front().stacks == result.playerInventory.front().stacks
+                && view(restored, 2).playerInventory.front().stacks == other.stacks
+                && view(restored).containers.front().stacks.empty() && view(restored).containers.front().equipment.empty(),
+                "Bulk restart refilled source or lost player items");
+            InventoryService uncertain(content.store, content.readers, binding);
+            auto pending = uncertain.prepareInventory(authority, bind(authority, intent(uncertain)).proposal());
+            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Failed; })
+                == CanonicalDurabilityResult::Failed && uncertain.inventoryImage().empty()
+                && !uncertain.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1)),
+                "Uncertain bulk durability left service open");
+        }
+        // Full bounded source, then destination overflow after several otherwise
+        // valid transfers. Both outcomes must use the same detached writer.
+        chest.mInventory.mList.clear();
+        for (unsigned i = 0; i < 64; ++i)
+        {
+            ESM::Miscellaneous item; item.blank(); item.mId = ESM::RefId::stringRefId("bulk_item_" + std::to_string(i));
+            content.store.insertStatic(item); chest.mInventory.mList.push_back({int(i + 1), item.mId});
+        }
+        content.store.overrideRecord(chest);
+        auto binding = content.binding();
+        binding.mShirt.reset();
+        binding.mActors = {{{content.actor, {}, 0, false, true}, {content.actor, {}, 0, false, true}}};
+        InventoryService maximum(content.store, content.readers, binding);
+        auto all = maximum.prepare(authority, bind(authority, intent(maximum)));
+        struct Sink final : EquipmentSessionCommitter
+        {
+            PersistenceResult commit(std::span<const char>) noexcept override { return PersistenceResult::Accepted; }
+        } sink;
+        std::unique_ptr<const InventoryTransferSuccess> success; EquipmentBytes bytes;
+        require(maximum.commit(authority, all, sink, success, bytes) == PersistenceResult::Accepted
+            && view(maximum).containers.front().stacks.empty() && view(maximum).playerInventory.front().stacks.size() == 64,
+            "Maximum 64-stack Take All failed");
+        struct Consumer final : InventoryNotificationConsumer
+        {
+            size_t calls = 0;
+            void receive(InventoryNotificationIntent) override { ++calls; }
+        } consumer;
+        require(consumeInventoryNotifications(success, consumer).mStatus == InventoryNotificationDeliveryStatus::Delivered
+            && consumer.calls == 64 * 4, "Bulk notifications omitted stacks");
+        require(consumeInventoryNotifications(success, consumer).mStatus == InventoryNotificationDeliveryStatus::NoPendingSuccess,
+            "Bulk notifications replayed");
+        // An equipped shirt consumes the 65th destination node.
+        auto carrier = *content.store.get<ESM::NPC>().find(content.actor);
+        carrier.mId = ref("bulk_carrier"); carrier.mInventory.mList = {{1, content.shirt}};
+        content.store.insertStatic(carrier);
+        binding.mActors[0].mBase = carrier.mId;
+        InventoryService overflow(content.store, content.readers, binding);
+        const std::vector prior(overflow.inventoryImage().begin(), overflow.inventoryImage().end());
+        require(!overflow.prepareInventory(authority, bind(authority, intent(overflow)).proposal())
+            && std::ranges::equal(prior, overflow.inventoryImage())
+            && view(overflow).containers.front().stacks.size() == 64, "Bulk capacity rejection transferred a prefix");
+    }
+
     void checkWorldActorInventories(const std::filesystem::path& scratch)
     {
         require(std::filesystem::create_directory(scratch), "Actor inventory scratch already exists");
@@ -727,7 +894,7 @@ namespace TES3MP::Native::Testing
         loot.mList.push_back({references.back(), 1});
         content.store.insertStatic(loot);
         chest.mInventory.mList.push_back({1, loot.mId});
-        content.store.insertStatic(chest);
+        content.store.overrideRecord(chest);
         auto binding = content.binding(); binding.mContainers[0].mBase = chest.mId;
         InventoryService service(content.store, content.readers, binding);
         auto authority = players();
@@ -899,7 +1066,7 @@ namespace TES3MP::Native::Testing
         list.mList.push_back({loot.mId, 1}); content.store.insertStatic(list);
         ESM::Container chest; chest.blank(); chest.mId = ESM::RefId::stringRefId("cell_chest");
         chest.mWeight = 1000; chest.mInventory.mList = {{1, loot.mId}, {1, list.mId}};
-        content.store.insertStatic(chest);
+        content.store.overrideRecord(chest);
         auto binding = content.binding();
         binding.mContainers.clear();
         for (uint32_t i = 0; i < 3; ++i)
@@ -1721,10 +1888,18 @@ namespace TES3MP::Native::Testing
         ServerApp::Testing::nativeInventoryApplication(recovered, *opened);
     }
 
-    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment)
+    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment, bool takeAll)
     {
         require(std::filesystem::create_directory(scratch), "Canonical inventory scratch already exists");
         Content content;
+        const auto extra = ESM::RefId::stringRefId("bulk_canonical_item");
+        if (takeAll)
+        {
+            ESM::Miscellaneous item; item.blank(); item.mId = extra; content.store.insertStatic(item);
+            auto chest = *content.store.get<ESM::Container>().find(content.container);
+            chest.mInventory.mList = {{2, content.shirt}, {3, extra}};
+            content.store.overrideRecord(chest);
+        }
         InventoryService service(content.store, content.readers, content.binding());
         NullMetricSink metrics;
         NullStructuredEventSink events;
@@ -1774,7 +1949,12 @@ namespace TES3MP::Native::Testing
             return reducer.prepareTick(pumped.batches().front());
         };
         const auto action = [&](InventoryService& current, const CanonicalServerState& state, uint64_t session, bool put, uint32_t count) {
-            auto input = wire(current, state, session, equipment || put, equipment ? 1 : count);
+            auto input = wire(current, state, session, equipment || (takeAll ? !put : put), equipment ? 1 : count);
+            if (takeAll && put)
+            {
+                input.kind = InventoryTransactionKind::TakeAllFromContainer;
+                input.count = 1;
+            }
             if (equipment)
             {
                 input.kind = InventoryTransactionKind::EquipItem; input.slot = EquipmentSlot::Shirt;
@@ -1795,6 +1975,7 @@ namespace TES3MP::Native::Testing
         auto candidate = service.projectInventory(prepared.candidateState(), id<SessionId>(1), id<ServerTick>(1),
             prepared.candidateRevision(), prepared.candidateNativeInventory());
         require(candidate && (equipment ? candidate->playerInventory[0].equipment.size() == 1
+            : takeAll ? candidate->containers[0].stacks.empty() && candidate->playerInventory[0].stacks.size() == 2
             : candidate->containers[0].stacks[0].count == 2), "Native candidate projection missing");
         require(!reducer.commit(std::move(prepared)) && reducer.latestPublication() == published
             && std::ranges::equal(before, service.inventoryImage()) && !file->prefix().latest(),
@@ -1829,7 +2010,8 @@ namespace TES3MP::Native::Testing
         auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
             ServerApp::CanonicalPersistenceFile::open(path, identity));
         InventoryService recovered(content.store, content.readers, content.binding(), true);
-        const std::array references{content.actor, content.shirt};
+        std::vector references{content.actor, content.shirt};
+        if (takeAll) references.push_back(extra);
         recovered.recover(opened->prefix().latest()->nativeInventory(), references);
         require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()), "Canonical recovery changed coherent image");
         auto resumed = players(*SessionGeneration::initial().next());

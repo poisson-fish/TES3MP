@@ -43,7 +43,7 @@ saved slots. Selected enchanted gear rejects until its services exist. Chargen
 and script-driven initialization remain pending.
 V6 also binds unscripted placed NPC/creature inventories and ordinary equipment,
 with authoritative take/put from content-defined corpses and recovery without
-refill. Living actors replicate public equipment while keeping inventories private.
+refill. Bulk Take All commits every container/corpse stack atomically. Living actors replicate public equipment while keeping inventories private.
 Living/companion access and dynamic death remain pending.
 Scripts, locks/traps, respawn and dynamic world activation remain unfinished. The server and desktop adapter remain the migration
 base; each subsystem changes authority exactly once. Broad compatibility is the

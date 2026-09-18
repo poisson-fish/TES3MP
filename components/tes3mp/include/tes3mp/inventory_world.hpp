@@ -93,6 +93,9 @@ namespace TES3MP
         UnequipItem,
         DropItem,
         PickupItem,
+        // stack/prototype witness one source item; count is 1. The native
+        // authority takes every stack at the supplied container revision.
+        TakeAllFromContainer,
     };
 
     struct InventoryTransactionCommand

@@ -11,6 +11,7 @@ namespace MWGui
     namespace
     {
         ItemModel::TransferInterceptor sTransferInterceptor;
+        ItemModel::TakeAllInterceptor sTakeAllInterceptor;
         bool sTransferIntercepted = false;
     }
 
@@ -88,12 +89,24 @@ namespace MWGui
     void ItemModel::clearTransferInterceptor() noexcept
     {
         sTransferInterceptor = {};
+        sTakeAllInterceptor = {};
         sTransferIntercepted = false;
     }
 
     bool ItemModel::takeTransferIntercepted() noexcept
     {
         return std::exchange(sTransferIntercepted, false);
+    }
+
+    void ItemModel::setTakeAllInterceptor(TakeAllInterceptor interceptor)
+    {
+        sTakeAllInterceptor = std::move(interceptor);
+    }
+
+    void ItemModel::interceptTakeAll(ItemModel& otherModel)
+    {
+        if (sTakeAllInterceptor)
+            sTakeAllInterceptor(*this, otherModel);
     }
 
     bool ItemModel::hasTransferInterceptor() noexcept

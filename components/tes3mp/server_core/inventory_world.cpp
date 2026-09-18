@@ -580,6 +580,9 @@ namespace TES3MP
 
         switch (command.kind)
         {
+            case InventoryTransactionKind::TakeAllFromContainer:
+                // Bulk transfer belongs to the coherent OpenMW runtime.
+                return makeOutcome(InventoryTransactionResultCode::InternalError);
             case InventoryTransactionKind::TakeFromContainer:
             {
                 if (!command.containerId)

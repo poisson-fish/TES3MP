@@ -67,7 +67,8 @@ namespace TES3MP::Native
 
         struct ActorEffects
         {
-            static constexpr size_t MaxPending = 64;
+            // Stock transfer emits two updates per stack, including Take All.
+            static constexpr size_t MaxPending = 2 * PreparedPlainEquipment::MaxItems;
             Listener mListener;
             size_t mInventoryUpdates = 0;
             std::vector<ESM::RefNum> mNotifications;

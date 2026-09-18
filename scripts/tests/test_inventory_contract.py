@@ -34,7 +34,7 @@ class InventoryContractTests(unittest.TestCase):
             ("containeritemmodel.cpp", "bool ContainerItemModel::onTakeItem",
              "interceptTransfer", "itemTaken"),
             ("container.cpp", "void ContainerWindow::onTakeAllButtonClicked",
-             "!ItemModel::hasTransferInterceptor()", "invStore.unequipItem"),
+             "mModel->interceptTakeAll(*playerModel)", "invStore.unequipItem"),
             ("container.cpp", "void ContainerWindow::onDisposeCorpseButtonClicked",
              "if (ItemModel::hasTransferInterceptor())", "onTakeAllButtonClicked(mTakeButton)"),
         )

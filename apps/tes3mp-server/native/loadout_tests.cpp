@@ -6221,6 +6221,16 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "bulk-take-all")
+        {
+            TES3MP::Native::Testing::checkBulkTakeAll(root);
+            return;
+        }
+        if (filter == "bulk-canonical")
+        {
+            TES3MP::Native::Testing::checkCanonicalInventory(root, false, true);
+            return;
+        }
         if (filter == "world-actor-inventories")
         {
             TES3MP::Native::Testing::checkWorldActorInventories(root);

@@ -142,6 +142,13 @@ including empty appearances, in the bounded equipment snapshot. Private stacks,
 counts and transfer revisions stay server-side. Desktop appearance items are
 presentation copies and never enter the inventory-command identity map.
 
+**Take All is one transaction.** A witnessed source stack and both inventory
+revisions bind the intent; the native authority enumerates all live source stacks
+in stock order. Stock stacking and corpse slot removal run on detached stores.
+Capacity, access, stale state or durability failure cannot transfer a prefix.
+One coherent image commits before installation/publication; retries cannot refill
+or duplicate loot. This adds no living-actor access or corpse disposal.
+
 **Equipment is part of the coherent inventory image.** Retain all 19 engine slots
 by item identity, including stackable ammunition. Full slot format 7 carries an
 explicit payload mode; shirt-only 1/5/6 encodings remain readable and unchanged.

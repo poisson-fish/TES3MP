@@ -10,9 +10,10 @@ namespace TES3MP::Native::Testing
     void checkPlayerInventories(const std::filesystem::path& scratch);
     void checkStartingEquipment(const std::filesystem::path& scratch);
     void checkWorldActorInventories(const std::filesystem::path& scratch);
+    void checkBulkTakeAll(const std::filesystem::path& scratch);
     void checkEquipmentSlots(const std::filesystem::path& scratch);
     void checkInventoryService(const std::filesystem::path& scratch, bool durability);
-    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment = false);
+    void checkCanonicalInventory(const std::filesystem::path& scratch, bool equipment = false, bool takeAll = false);
     void checkInventoryApplication(const std::filesystem::path& scratch);
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
         bool wholeInterior = false, bool baseInventory = false, bool worldActors = false);

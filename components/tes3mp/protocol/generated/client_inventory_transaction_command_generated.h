@@ -33,37 +33,40 @@ enum class InventoryTransactionKind : uint8_t {
   UnequipItem = 3,
   DropItem = 4,
   PickupItem = 5,
+  TakeAllFromContainer = 6,
   MIN = TakeFromContainer,
-  MAX = PickupItem
+  MAX = TakeAllFromContainer
 };
 
-inline const InventoryTransactionKind (&EnumValuesInventoryTransactionKind())[6] {
+inline const InventoryTransactionKind (&EnumValuesInventoryTransactionKind())[7] {
   static const InventoryTransactionKind values[] = {
     InventoryTransactionKind::TakeFromContainer,
     InventoryTransactionKind::PutIntoContainer,
     InventoryTransactionKind::EquipItem,
     InventoryTransactionKind::UnequipItem,
     InventoryTransactionKind::DropItem,
-    InventoryTransactionKind::PickupItem
+    InventoryTransactionKind::PickupItem,
+    InventoryTransactionKind::TakeAllFromContainer
   };
   return values;
 }
 
 inline const char * const *EnumNamesInventoryTransactionKind() {
-  static const char * const names[7] = {
+  static const char * const names[8] = {
     "TakeFromContainer",
     "PutIntoContainer",
     "EquipItem",
     "UnequipItem",
     "DropItem",
     "PickupItem",
+    "TakeAllFromContainer",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameInventoryTransactionKind(InventoryTransactionKind e) {
-  if (::flatbuffers::IsOutRange(e, InventoryTransactionKind::TakeFromContainer, InventoryTransactionKind::PickupItem)) return "";
+  if (::flatbuffers::IsOutRange(e, InventoryTransactionKind::TakeFromContainer, InventoryTransactionKind::TakeAllFromContainer)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesInventoryTransactionKind()[index];
 }

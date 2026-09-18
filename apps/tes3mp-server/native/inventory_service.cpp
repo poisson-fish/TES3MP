@@ -159,10 +159,12 @@ namespace TES3MP::Native
         if (command.player != bound.player()
             || !command.stackId || command.slot
             || command.expectedWorldItemRevision || command.count == 0 || command.count > MaximumTransferCount
+            || (command.kind == InventoryTransactionKind::TakeAllFromContainer && command.count != 1)
             || command.expectedInventoryRevision.value() != revision || !command.expectedContainerRevision
             || command.expectedContainerRevision->value() != revision
             || (command.kind != InventoryTransactionKind::PutIntoContainer
-                && command.kind != InventoryTransactionKind::TakeFromContainer)
+                && command.kind != InventoryTransactionKind::TakeFromContainer
+                && command.kind != InventoryTransactionKind::TakeAllFromContainer)
             || player.transform().cell() != shared.mCell
             || !positionsWithinReach(player.transform().position(), shared.mPosition, ReachQuanta)
             || !positionsWithinReach(command.interactionOrigin, shared.mPosition, ReachQuanta)
@@ -186,6 +188,7 @@ namespace TES3MP::Native
         const auto& input = bound.transaction();
         auto command = mRuntime.containerCommand(index, input.kind == InventoryTransactionKind::PutIntoContainer,
             nativeId(*input.stackId), int32_t(input.count), container(input.containerId));
+        command.mTakeAll = input.kind == InventoryTransactionKind::TakeAllFromContainer;
         return PreparedCommand(bound, mRuntime.prepare({ command.mInitiator }, command));
     }
 

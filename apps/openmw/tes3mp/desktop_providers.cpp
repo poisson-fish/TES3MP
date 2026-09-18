@@ -491,6 +491,19 @@ namespace TES3MP::OpenMWAdapter
                         self->mImpl->pendingInventoryTransaction = std::move(*capture);
                     return capture.has_value() || presentation->observesInventoryItem(item.mBase);
                 });
+                MWGui::ItemModel::setTakeAllInterceptor([self](MWGui::ItemModel& source, MWGui::ItemModel& target) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (!presentation || self->mImpl->pendingInventoryTransaction || source.getItemCount() == 0)
+                        return;
+                    // One observed source stack witnesses the owner. The server
+                    // enumerates the entire inventory at this revision.
+                    auto capture = presentation->inventoryTransfer(source, source.getItem(0).mBase, 1, target);
+                    if (capture && capture->kind == InventoryTransactionKind::TakeFromContainer)
+                    {
+                        capture->kind = InventoryTransactionKind::TakeAllFromContainer;
+                        self->mImpl->pendingInventoryTransaction = std::move(*capture);
+                    }
+                });
                 MWGui::InventoryWindow::setUseItemInterceptor([self](const MWWorld::Ptr& item) {
                     auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
                     if (!presentation)

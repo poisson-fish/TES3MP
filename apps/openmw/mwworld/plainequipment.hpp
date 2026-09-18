@@ -126,6 +126,13 @@ namespace MWWorld
         std::vector<Effect> mEffects;
         bool mSkipped = false;
         ESM::RefNum mTransferred; // Transfer source/destination identity, otherwise unset.
+        struct Transfer
+        {
+            ESM::RefNum mSource, mDestination;
+            int mCount;
+            bool operator==(const Transfer&) const = default;
+        };
+        std::vector<Transfer> mBulkTransfers; // Source result only, stock traversal order.
         bool operator==(const PlainEquipmentResult&) const = default;
     };
 
@@ -216,7 +223,8 @@ namespace MWWorld
         static std::array<PreparedPlainEquipment, 2> prepareTransfer(
             const std::array<ContainerStoreResolution, 2>& inventories, const ConstPtr& item,
             ESM::RefNum expectedIdentity, size_t expectedRevision, int count,
-            const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource = false);
+            const std::array<PlainEquipmentContext, 2>& contexts, bool allowEquippedSource = false,
+            bool takeAll = false);
         PreparedPlainEquipment(PreparedPlainEquipment&&) noexcept;
         PreparedPlainEquipment& operator=(PreparedPlainEquipment&&) noexcept;
         ~PreparedPlainEquipment();

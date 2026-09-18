@@ -231,6 +231,8 @@ namespace TES3MP::Native
         };
         const size_t source = index(command.mSourceOwner), destination = index(command.mDestinationOwner);
         const size_t initiator = index(caller.mInitiator);
+        if (command.mTakeAll && (source < 2 || destination != initiator || command.mQuantity != 1))
+            throw std::invalid_argument("Take All requires a shared source and participating player");
         if (initiator >= 2 || (source >= 2 && destination != initiator)
             || (destination >= 2 && source != initiator))
             throw std::invalid_argument("Container intent requires its participating actor as trusted caller");
@@ -251,7 +253,7 @@ namespace TES3MP::Native
             { ContainerStoreResolution(storage(source), ownerPtr(source)),
                 ContainerStoreResolution(storage(destination), ownerPtr(destination)) },
             item, id(command.mItem), command.mExpectedRevision, command.mQuantity, contexts,
-            source >= 2 && initialCorpse(ownerPtr(source)));
+            source >= 2 && initialCorpse(ownerPtr(source)), command.mTakeAll);
         std::array<std::unique_ptr<Installation>, 2> staged;
         auto registry = mWorld.mPtrRegistry.mIndex;
         EquipmentSessionValues values{ { installedValues(0), installedValues(1) } };
@@ -276,10 +278,22 @@ namespace TES3MP::Native
             throw std::logic_error("Transfer result identity missing");
         };
         phase.set(Phase::Result);
-        auto success = std::make_unique<const InventoryTransferSuccess>(inventoryTransferSuccess(command,
+        auto success = std::make_unique<InventoryTransferSuccess>(inventoryTransferSuccess(command,
             ownedId(to.mTransferred), count(staged[0]->mSaved, from.mTransferred),
             count(staged[1]->mSaved, to.mTransferred), revision,
             ownedId(from.mSelected), ownedId(to.mSelected), true, true));
+        if (command.mTakeAll) success->mNotifications = {};
+        for (const auto& transfer : from.mBulkTransfers)
+        {
+            auto itemCommand = command;
+            itemCommand.mItem = ownedId(transfer.mSource);
+            itemCommand.mQuantity = transfer.mCount;
+            const auto item = inventoryTransferSuccess(itemCommand, ownedId(transfer.mDestination), 0,
+                count(staged[1]->mSaved, transfer.mDestination), revision,
+                ownedId(from.mSelected), ownedId(to.mSelected), true, true);
+            for (const auto& notification : item.mNotifications)
+                if (notification) success->mBulkNotifications.push_back(*notification);
+        }
         phase.set(Phase::Revalidation);
         for (size_t i = 0; i < 2; ++i) staged[i]->mPrepared.validate(contexts[i]);
         EquipmentBytes encoded;

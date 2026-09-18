@@ -197,10 +197,13 @@ namespace
     std::optional<Error> validateCommandShape(const TES3MP::ClientInventoryTransactionCommand& command) noexcept
     {
         const bool transfer = command.kind == TES3MP::InventoryTransactionKind::TakeFromContainer
-            || command.kind == TES3MP::InventoryTransactionKind::PutIntoContainer;
+            || command.kind == TES3MP::InventoryTransactionKind::PutIntoContainer
+            || command.kind == TES3MP::InventoryTransactionKind::TakeAllFromContainer;
         if (transfer
             && (!command.containerId || !command.stackId || !command.expectedContainerRevision || command.slot
                 || command.expectedWorldItemRevision))
+            return error(Code::InvalidCommandShape);
+        if (command.kind == TES3MP::InventoryTransactionKind::TakeAllFromContainer && command.count != 1)
             return error(Code::InvalidCommandShape);
         if (command.kind == TES3MP::InventoryTransactionKind::EquipItem
             && (!command.stackId || !command.slot || command.containerId || command.expectedContainerRevision
@@ -702,7 +705,7 @@ namespace TES3MP
         for (const auto* failure : failures)
             if (failure)
                 return *failure;
-        if (static_cast<std::uint8_t>(root->kind()) > static_cast<std::uint8_t>(InventoryTransactionKind::PickupItem))
+        if (static_cast<std::uint8_t>(root->kind()) > static_cast<std::uint8_t>(InventoryTransactionKind::TakeAllFromContainer))
             return error(Code::InvalidTransactionKind, static_cast<std::size_t>(root->kind()));
         ClientInventoryTransactionCommand command{ .sessionId = *value(session),
             .sessionGeneration = *value(generation),
