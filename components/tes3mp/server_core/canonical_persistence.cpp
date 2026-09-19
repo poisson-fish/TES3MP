@@ -903,7 +903,7 @@ namespace
     void writeWorld(Writer& writer, const CanonicalWorldState& world)
     {
         const auto& time = world.time();
-        writer.fixed(time.day);
+        writer.fixed(static_cast<std::uint8_t>(time.day | (time.daysPassed ? 0x80 : 0)));
         writer.fixed(time.month);
         writer.fixed(time.year);
         writer.fixed(time.millisecondsSinceMidnight);
@@ -912,6 +912,7 @@ namespace
         writeStrong(writer, time.revision);
         writeStrong(writer, time.lastChangeTick);
         writeStrong(writer, time.lastAdvanceTick);
+        if (time.daysPassed) writer.fixed(*time.daysPassed);
         writer.fixed(static_cast<std::uint32_t>(world.globals().size()));
         for (const auto& global : world.globals())
         {
@@ -1016,7 +1017,10 @@ namespace
         const auto& weatherCatalog = *world.weatherCatalog();
         const auto& weather = *world.weather();
         writer.bytes(weatherCatalog.manifest().bytes());
-        writer.fixed(static_cast<std::uint32_t>(weatherCatalog.weather().size()));
+        // The high bit tags an app-owned environment extension. Old domain bytes
+        // remain identical; older readers reject the out-of-range count safely.
+        writer.fixed(static_cast<std::uint32_t>(weatherCatalog.weather().size())
+            | (weather.nativeEnvironment.empty() ? 0u : 0x80000000u));
         for (const auto id : weatherCatalog.weather())
             writeStrong(writer, id);
         writer.fixed(static_cast<std::uint32_t>(weatherCatalog.regions().size()));
@@ -1045,12 +1049,20 @@ namespace
             writeStrong(writer, region.revision);
             writeStrong(writer, region.lastChangeTick);
         }
+        if (!weather.nativeEnvironment.empty())
+        {
+            writer.fixed(static_cast<std::uint32_t>(weather.nativeEnvironment.size()));
+            writer.bytes(weather.nativeEnvironment);
+        }
+
     }
 
     std::optional<CanonicalWorldState> readWorld(Reader& reader) noexcept
     {
         CanonicalWorldTimeState time;
-        const auto day = reader.fixed<std::uint8_t>();
+        auto day = reader.fixed<std::uint8_t>();
+        const bool hasDaysPassed = day && (*day & 0x80);
+        if (day) *day &= 0x7f;
         const auto month = reader.fixed<std::uint8_t>();
         const auto year = reader.fixed<std::int32_t>();
         const auto milliseconds = reader.fixed<std::uint32_t>();
@@ -1059,11 +1071,13 @@ namespace
         const auto revision = readStrong<WorldTimeRevision>(reader);
         const auto lastChange = readStrong<ServerTick>(reader);
         const auto lastAdvance = readStrong<ServerTick>(reader);
+        const auto daysPassed = hasDaysPassed ? reader.fixed<std::uint32_t>() : std::optional<std::uint32_t>{};
+        if (hasDaysPassed && !daysPassed) return std::nullopt;
         const auto count = reader.fixed<std::uint32_t>();
         if (!day || !month || !year || !milliseconds || !scale || !remainder || !revision || !lastChange || !lastAdvance
             || !count || *count > MaximumGlobalVariables)
             return std::nullopt;
-        time = { *day, *month, *year, *milliseconds, *scale, *remainder, *revision, *lastChange, *lastAdvance };
+        time = { *day, *month, *year, *milliseconds, *scale, *remainder, *revision, *lastChange, *lastAdvance, daysPassed };
         std::vector<CanonicalGlobalVariableState> globals;
         globals.reserve(*count);
         for (std::uint32_t index = 0; index < *count; ++index)
@@ -1307,7 +1321,9 @@ namespace
             return CanonicalWorldState::create(
                 time, globals, std::move(*catalog), std::move(*factionCatalog), players, playerFactions);
         const auto weatherManifestBytes = reader.bytes(ContentManifestIdBytes);
-        const auto weatherCount = reader.fixed<std::uint32_t>();
+        auto weatherCount = reader.fixed<std::uint32_t>();
+        const bool nativeEnvironment = weatherCount && (*weatherCount & 0x80000000u);
+        if (weatherCount) *weatherCount &= 0x7fffffffu;
         if (!weatherManifestBytes || !weatherCount || *weatherCount == 0 || *weatherCount > MaximumWeatherIdentities)
             return std::nullopt;
         const auto weatherManifest = ContentManifestId::fromBytes(*weatherManifestBytes);
@@ -1381,6 +1397,14 @@ namespace
                 return std::nullopt;
             weatherState.regions.push_back({ *region, *current, *target, *transitionStart, *transitionEnd,
                 *nextSelection, *weatherRevision, *weatherLastChange });
+        }
+        if (nativeEnvironment)
+        {
+            const auto size = reader.fixed<std::uint32_t>();
+            if (!size || *size == 0 || *size > MaximumNativeEnvironmentBytes) return std::nullopt;
+            const auto bytes = reader.bytes(*size);
+            if (!bytes) return std::nullopt;
+            weatherState.nativeEnvironment.assign(bytes->begin(), bytes->end());
         }
         return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog),
             std::move(*weatherCatalog), players, playerFactions, std::move(weatherState));

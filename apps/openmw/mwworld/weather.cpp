@@ -287,73 +287,14 @@ namespace MWWorld
         MWBase::Environment::get().getSoundManager()->playSound(mThunderSoundID[distance], 1.0, 1.0);
     }
 
-    RegionWeather::RegionWeather(const ESM::Region& region)
-        : mWeather(invalidWeatherID)
-        , mChances(region.mData.mProbabilities.begin(), region.mData.mProbabilities.end())
-    {
-    }
-
-    RegionWeather::RegionWeather(const ESM::RegionWeatherState& state)
-        : mWeather(state.mWeather)
-        , mChances(state.mChances)
-    {
-    }
-
-    RegionWeather::operator ESM::RegionWeatherState() const
-    {
-        ESM::RegionWeatherState state = { mWeather, mChances };
-
-        return state;
-    }
-
     void RegionWeather::setChances(const std::vector<uint8_t>& chances)
     {
-        mChances = chances;
-
-        // Regional weather no longer supports the current type, select a new weather pattern.
-        if ((static_cast<size_t>(mWeather) >= mChances.size()) || (mChances[mWeather] == 0))
-        {
-            chooseNewWeather();
-        }
-    }
-
-    void RegionWeather::setWeather(int weatherID)
-    {
-        mWeather = weatherID;
+        setChances(chances, MWBase::Environment::get().getWorld()->getPrng());
     }
 
     int RegionWeather::getWeather()
     {
-        // If the region weather was already set (by ChangeWeather, or by a previous call) then just return that value.
-        // Note that the region weather will be expired periodically when the weather update timer expires.
-        if (mWeather == invalidWeatherID)
-        {
-            chooseNewWeather();
-        }
-
-        return mWeather;
-    }
-
-    void RegionWeather::chooseNewWeather()
-    {
-        // All probabilities must add to 100 (responsibility of the user).
-        // If chances A and B has values 30 and 70 then by generating 100 numbers 1..100, 30% will be lesser or equal 30
-        // and 70% will be greater than 30 (in theory).
-        auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-        unsigned int chance = static_cast<unsigned int>(Misc::Rng::rollDice(100, prng) + 1); // 1..100
-        unsigned int sum = 0;
-        for (size_t i = 0; i < mChances.size(); ++i)
-        {
-            sum += mChances[i];
-            if (chance <= sum)
-            {
-                mWeather = static_cast<int>(i);
-                return;
-            }
-        }
-
-        // if we hit this path then the chances don't add to 100, choose a default weather instead
-        mWeather = 0;
+        return getWeather(MWBase::Environment::get().getWorld()->getPrng());
     }
 
     MoonModel::MoonModel(float fadeInStart, float fadeInFinish, float fadeOutStart, float fadeOutFinish,
@@ -1157,9 +1098,9 @@ namespace MWWorld
 
     inline bool WeatherManager::updateWeatherTime()
     {
-        mWeatherUpdateTime -= mTimePassed;
+        const bool expired = advanceWeatherSelection(mWeatherUpdateTime, mTimePassed, mHoursBetweenWeatherChanges);
         mTimePassed = 0.0f;
-        if (mWeatherUpdateTime <= 0.0f)
+        if (expired)
         {
             // Expire all regional weather, so that any call to getWeather() will return a new weather ID.
             auto it = mRegions.begin();
@@ -1168,7 +1109,6 @@ namespace MWWorld
                 it->second.setWeather(invalidWeatherID);
             }
 
-            mWeatherUpdateTime += mHoursBetweenWeatherChanges;
 
             return true;
         }
@@ -1198,48 +1138,15 @@ namespace MWWorld
 
     inline void WeatherManager::updateWeatherTransitions(const float elapsedRealSeconds)
     {
-        // When a player chooses to train, wait, or serves jail time, any transitions will be fast forwarded to the last
-        // weather type set, regardless of the remaining transition time.
-        if (!mFastForward && inTransition())
-        {
-            const float delta = mExternalAuthority ? mAuthoritativeTransitionDelta
-                                                   : mWeatherSettings[mNextWeather].transitionDelta();
-            mTransitionFactor -= elapsedRealSeconds * delta;
-            if (mTransitionFactor <= 0.0f)
-            {
-                mCurrentWeather = mNextWeather;
-                mNextWeather = mQueuedWeather;
-                mQueuedWeather = invalidWeatherID;
-
-                // We may have begun processing the queued transition, so we need to apply the remaining time towards
-                // it.
-                if (inTransition())
-                {
-                    const float newDelta = mWeatherSettings[mNextWeather].transitionDelta();
-                    const float remainingSeconds = -(mTransitionFactor / delta);
-                    mTransitionFactor = 1.0f - (remainingSeconds * newDelta);
-                }
-                else
-                {
-                    mTransitionFactor = 0.0f;
-                }
-            }
-        }
-        else
-        {
-            if (mQueuedWeather != invalidWeatherID)
-            {
-                mCurrentWeather = mQueuedWeather;
-            }
-            else if (mNextWeather != invalidWeatherID)
-            {
-                mCurrentWeather = mNextWeather;
-            }
-
-            mNextWeather = invalidWeatherID;
-            mQueuedWeather = invalidWeatherID;
-            mFastForward = false;
-        }
+        WeatherTransition state{mCurrentWeather, mNextWeather, mQueuedWeather, mTransitionFactor, mFastForward};
+        state.advance(elapsedRealSeconds, [&](int weather) {
+            return mExternalAuthority ? mAuthoritativeTransitionDelta : mWeatherSettings[weather].transitionDelta();
+        });
+        mCurrentWeather = state.mCurrentWeather;
+        mNextWeather = state.mNextWeather;
+        mQueuedWeather = state.mQueuedWeather;
+        mTransitionFactor = state.mTransitionFactor;
+        mFastForward = state.mFastForward;
     }
 
     inline void WeatherManager::forceWeather(const int weatherID)
@@ -1271,20 +1178,12 @@ namespace MWWorld
 
     inline void WeatherManager::addWeatherTransition(const int weatherID)
     {
-        // In order to work like ChangeWeather expects, this method begins transitioning to the new weather immediately
-        // if no transition is in progress, otherwise it queues it to be transitioned.
-
         assert(weatherID >= 0 && static_cast<size_t>(weatherID) < mWeatherSettings.size());
-
-        if (!inTransition() && (weatherID != mCurrentWeather))
-        {
-            mNextWeather = weatherID;
-            mTransitionFactor = 1.0f;
-        }
-        else if (inTransition() && (weatherID != mNextWeather))
-        {
-            mQueuedWeather = weatherID;
-        }
+        WeatherTransition state{mCurrentWeather, mNextWeather, mQueuedWeather, mTransitionFactor, mFastForward};
+        state.add(weatherID);
+        mNextWeather = state.mNextWeather;
+        mQueuedWeather = state.mQueuedWeather;
+        mTransitionFactor = state.mTransitionFactor;
     }
 
     inline void WeatherManager::calculateWeatherResult(

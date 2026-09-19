@@ -2,6 +2,7 @@
 #include "placement_scene.hpp"
 #include "inventory_service.hpp"
 #include "loadout.hpp"
+#include "environment.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <algorithm>
 #include <fstream>
@@ -30,7 +31,8 @@ namespace TES3MP::Native
             std::string text;
             LoadoutOptions options;
             InventoryServiceBinding binding;
-            std::string cell, plugin;
+            ESM::RefId cell;
+            std::string plugin;
             uint32_t index;
             CellId wireCell;
             bool worldActors = false;
@@ -38,7 +40,7 @@ namespace TES3MP::Native
             bool stockPlacement = false;
             std::string doorPlugin;
             uint32_t doorIndex = 0;
-            std::string secondCell;
+            ESM::RefId secondCell;
             std::optional<CellId> secondWireCell;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
@@ -60,9 +62,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool twoCells = version == "native-inventory-10" || version == "native-inventory-11";
+            const bool exteriorCells = version == "native-inventory-13";
+            const bool twoCells = exteriorCells || version == "native-inventory-10" || version == "native-inventory-11" || version == "native-inventory-12";
             const bool door = version == "native-inventory-9" || twoCells;
             const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door;
             const bool wholeInterior = version != "native-inventory-3";
@@ -108,9 +111,37 @@ namespace TES3MP::Native
                 itemId = ItemPrototypeId::fromValue(MWWorld::inventoryRecordId(shirt));
             }
             key("loot"); int lootLevel = 0; uint64_t lootSeed = 0; in >> lootLevel >> lootSeed;
-            std::string cell, plugin; uint64_t index = 0;
-            if (wholeInterior) { key("interior"); in >> std::quoted(cell); }
-            else { key("container"); in >> std::quoted(cell) >> std::quoted(plugin) >> index; }
+            const auto readCell = [&]() {
+                std::string kind; in >> kind;
+                if (kind == "interior")
+                {
+                    std::string name; in >> std::quoted(name);
+                    return interiorCell(name);
+                }
+                if (exteriorCells && kind == "exterior")
+                {
+                    int64_t x = 0, y = 0; in >> x >> y;
+                    if (!in || x < -32768 || x > 32767 || y < -32768 || y > 32767)
+                        throw std::invalid_argument("Native exterior coordinates outside supported bounds");
+                    return ESM::RefId::esm3ExteriorCell(int32_t(x), int32_t(y));
+                }
+                throw std::invalid_argument("Native cell selection invalid for descriptor version");
+            };
+            const auto matches = [](ESM::RefId engine, CellId wire) {
+                if (const auto* ext = engine.getIf<ESM::ESM3ExteriorCellRefId>())
+                    return wire.asExterior() && wire.asExterior()->gridX() == ext->getX()
+                        && wire.asExterior()->gridY() == ext->getY();
+                return wire.kind() == CellId::Kind::Interior;
+            };
+            ESM::RefId cell;
+            std::string plugin; uint64_t index = 0;
+            if (wholeInterior) cell = readCell();
+            else
+            {
+                std::string name;
+                key("container"); in >> std::quoted(name) >> std::quoted(plugin) >> index;
+                cell = interiorCell(name);
+            }
             std::string doorPlugin;
             uint64_t doorIndex = 0;
             if (door)
@@ -123,32 +154,31 @@ namespace TES3MP::Native
             }
             key("cell"); std::string cellText; in >> cellText;
             const auto cells = parseContentCells(cellText);
-            std::string secondCell, secondCellText;
+            ESM::RefId secondCell;
+            std::string secondCellText;
             std::optional<CellId> secondWireCell;
             if (twoCells)
             {
-                key("interior"); in >> std::quoted(secondCell);
+                secondCell = readCell();
                 key("cell"); in >> secondCellText;
                 const auto second = parseContentCells(secondCellText);
-                if (!in || secondCell.empty() || secondCell.size() > 256
-                    || secondCell.find_first_of("\r\n\t") != std::string::npos || secondCell.find('\0') != std::string::npos
-                    || !second || second->size() != 1 || !manifest.contains(second->front())
-                    || second->front().kind() != CellId::Kind::Interior
+                if (!in || !second || second->size() != 1 || !manifest.contains(second->front())
+                    || !matches(secondCell, second->front())
                     || (cells && cells->size() == 1 && cells->front() == second->front()))
-                    throw std::invalid_argument("Second native interior mapping invalid");
+                    throw std::invalid_argument("Second native cell mapping invalid");
                 secondWireCell = second->front();
             }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
-                || cell.empty() || cell.size() > 256 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
+                || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
                 || !cells || cells->size() != 1 || !manifest.contains(cells->front())
-                || cells->front().kind() != CellId::Kind::Interior)
+                || !matches(cell, cells->front()))
                 throw std::invalid_argument("Native inventory placed selection or cell mapping invalid");
             InventoryServiceBinding binding{{*first, *second}, itemId,
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
-            if (version == "native-inventory-11") binding.mTeleportDoors.emplace();
+            if (version == "native-inventory-11" || version == "native-inventory-12" || exteriorCells) binding.mTeleportDoors.emplace();
             // Hash semantic bindings, never local configuration paths or
             // descriptor whitespace, so moving the same loadout preserves saves.
             std::ostringstream semantic;
@@ -167,13 +197,13 @@ namespace TES3MP::Native
         Loadout loadout;
         std::array<std::unique_ptr<PlacementScene>, 2> scenes;
         InventoryService inventory;
+        std::unique_ptr<Environment> environment;
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
             std::array<std::unique_ptr<PlacementScene>, 2>& scenes)
         {
-            std::array<std::string, 2> names{start.cell, start.secondCell};
-            if (start.secondWireCell && loadout.store().get<ESM::Cell>().find(start.cell)->mId
-                    == loadout.store().get<ESM::Cell>().find(start.secondCell)->mId)
-                throw std::invalid_argument("Native cell mappings resolve to the same interior");
+            std::array<ESM::RefId, 2> names{start.cell, start.secondCell};
+            if (start.secondWireCell && start.cell == start.secondCell)
+                throw std::invalid_argument("Native cell mappings resolve to the same cell");
             std::array<std::vector<ESM::CellRef>, 2> domains;
             std::array<std::string, 2> fingerprints;
             std::ostringstream placement;
@@ -203,7 +233,7 @@ namespace TES3MP::Native
                     start.binding.mContainers.push_back({ContainerId::fromValue(placed.mIdentity).value(),
                         wireCell, position, placed.mRef.mRefID, placed.mRef});
                     if (start.binding.mContainers.size() > 1) placement << '\n';
-                    placement << std::quoted(loadout.store().get<ESM::Cell>().find(cell)->mId.serializeText())
+                    placement << std::quoted(cell.serializeText())
                         << ':' << placed.mIdentity << ':' << placed.mRef.mRefID << ':'
                         << position.x() << ':' << position.y() << ':' << position.z();
                 }
@@ -226,7 +256,7 @@ namespace TES3MP::Native
                     placement << fingerprints[cellIndex];
                     world->mPlacement = [&scenes, cellIndex](const auto& actor, const auto& item,
                         const auto& view, auto world) {
-                        if (!scenes[cellIndex]) throw std::invalid_argument("Native interior is not active");
+                        if (!scenes[cellIndex]) throw std::invalid_argument("Native cell is not active");
                         return scenes[cellIndex]->resolve(actor, item, view, world);
                     };
                 }
@@ -235,12 +265,12 @@ namespace TES3MP::Native
                     const auto door = loadout.resolveDoor(start.cell, start.doorPlugin, start.doorIndex);
                     start.binding.mDoor = door.mRef;
                     start.binding.mDoorId = door.mIdentity;
-                    placement << "\ndoor:" << std::quoted(loadout.store().get<ESM::Cell>().find(start.cell)->mId.serializeText())
+                    placement << "\ndoor:" << std::quoted(start.cell.serializeText())
                         << ':' << door.mIdentity << ':' << door.mRef.mRefID;
                 }
-                // Bind even an empty second interior's resolved engine identity.
+                // Bind even an empty second cell's engine identity.
                 if (start.secondWireCell)
-                    placement << "\narea:" << cellIndex << ':' << std::quoted(loadout.store().get<ESM::Cell>().find(cell)->mId.serializeText());
+                    placement << "\narea:" << cellIndex << ':' << std::quoted(cell.serializeText());
                 if (start.binding.mTeleportDoors)
                 {
                     const auto angle = [](float radians) {
@@ -297,10 +327,12 @@ namespace TES3MP::Native
                 start.binding.mContent[i] = std::to_integer<unsigned char>(digest.bytes[i]);
             return start.binding;
         }
-        Impl(Startup start, CredentialCrypto& crypto, std::span<const std::byte> restored)
+        Impl(Startup start, ContentManifestId manifest, CredentialCrypto& crypto, std::span<const std::byte> restored)
             : loadout(std::move(start.options)),
               inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes), !restored.empty())
         {
+            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13"))
+                environment = std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed);
             if (!restored.empty())
             {
                 std::vector<ESM::RefId> references{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase};
@@ -318,7 +350,8 @@ namespace TES3MP::Native
     };
     InventoryHost::InventoryHost(const std::filesystem::path& descriptor, const ContentManifest& manifest,
         const PlayerIdentityRegistry& players, CredentialCrypto& crypto, std::span<const std::byte> restored)
-        : mImpl(std::make_unique<Impl>(startup(descriptor, manifest, players), crypto, restored)) {}
+        : mImpl(std::make_unique<Impl>(startup(descriptor, manifest, players), manifest.id(), crypto, restored)) {}
     InventoryHost::~InventoryHost() = default;
+    ServerApp::NativeEnvironmentService* InventoryHost::environment() noexcept { return mImpl->environment.get(); }
     ServerApp::NativeInventoryService& InventoryHost::service() noexcept { return mImpl->inventory; }
 }

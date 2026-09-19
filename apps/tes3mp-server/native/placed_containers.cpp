@@ -19,13 +19,14 @@
 
 namespace TES3MP::Native
 {
-    std::vector<Loadout::PlacedInventory> Loadout::placedItems(std::string_view cell, size_t limit)
+    std::vector<Loadout::PlacedInventory> Loadout::placedItems(ESM::RefId cell, size_t limit)
     {
-        if (cell.empty() || cell.size() > 256 || limit > 64)
+        validateCell(cell);
+        if (limit > 64)
             throw std::invalid_argument("Native world item discovery bound invalid");
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
-        auto& loaded = world.getInterior(cell);
+        auto& loaded = world.getCell(cell);
         std::vector<PlacedInventory> result;
         loaded.forEach([&](const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
@@ -52,13 +53,12 @@ namespace TES3MP::Native
         return result;
     }
 
-    std::vector<Loadout::PlacedInventory> Loadout::placedContainers(std::string_view cell)
+    std::vector<Loadout::PlacedInventory> Loadout::placedContainers(ESM::RefId cell)
     {
-        if (cell.empty() || cell.size() > 256)
-            throw std::invalid_argument("Native placed container cell invalid");
+        validateCell(cell);
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
-        auto& loaded = world.getInterior(cell);
+        auto& loaded = world.getCell(cell);
         std::vector<PlacedInventory> result;
         loaded.forEachType<ESM::Container>([&](const MWWorld::Ptr& ptr) {
             if (result.size() == 4096)
@@ -80,7 +80,7 @@ namespace TES3MP::Native
         return result;
     }
 
-    Loadout::PlacedInventory Loadout::resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index)
+    Loadout::PlacedInventory Loadout::resolveContainer(ESM::RefId cell, std::string_view plugin, uint32_t index)
     {
         auto references = placedContainers(cell);
         const auto found = std::ranges::find_if(references, [&](const auto& ref) {
@@ -93,13 +93,12 @@ namespace TES3MP::Native
         return *found;
     }
 
-    std::vector<Loadout::PlacedInventory> Loadout::placedActors(std::string_view cell)
+    std::vector<Loadout::PlacedInventory> Loadout::placedActors(ESM::RefId cell)
     {
-        if (cell.empty() || cell.size() > 256)
-            throw std::invalid_argument("Native placed actor cell invalid");
+        validateCell(cell);
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
-        auto& loaded = world.getInterior(cell);
+        auto& loaded = world.getCell(cell);
         std::vector<PlacedInventory> result;
         const auto visit = [&]<class T>(const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
@@ -129,7 +128,7 @@ namespace TES3MP::Native
         return result;
     }
 
-    std::vector<Loadout::PlacedInventory> Loadout::resolveActors(std::string_view cell, size_t limit)
+    std::vector<Loadout::PlacedInventory> Loadout::resolveActors(ESM::RefId cell, size_t limit)
     {
         auto references = placedActors(cell);
         if (references.size() > limit) throw std::invalid_argument("Native interior actor inventory budget exceeded");
@@ -140,7 +139,7 @@ namespace TES3MP::Native
         return references;
     }
 
-    std::vector<Loadout::PlacedInventory> Loadout::resolveContainers(std::string_view cell, size_t limit)
+    std::vector<Loadout::PlacedInventory> Loadout::resolveContainers(ESM::RefId cell, size_t limit)
     {
         auto references = placedContainers(cell);
         if (references.empty() || references.size() > limit)

@@ -1,4 +1,5 @@
 #include "globals.hpp"
+#include "defaultglobals.hpp"
 
 #include <stdexcept>
 
@@ -9,6 +10,26 @@
 
 namespace MWWorld
 {
+    std::vector<std::pair<GlobalVariableName, ESM::Variant>> generateDefaultGlobals()
+    {
+        return {
+            // vanilla Morrowind does not define dayspassed.
+            { Globals::sDaysPassed, ESM::Variant(1) }, // but the addons start counting at 1 :(
+            { Globals::sWerewolfClawMult, ESM::Variant(25.f) },
+            { Globals::sPCKnownWerewolf, ESM::Variant(0) },
+            // following should exist in all versions of MW, but not necessarily in TCs
+            { Globals::sGameHour, ESM::Variant(0) },
+            { Globals::sTimeScale, ESM::Variant(30.f) },
+            { Globals::sDay, ESM::Variant(1) },
+            { Globals::sYear, ESM::Variant(1) },
+            { Globals::sPCRace, ESM::Variant(0) },
+            { Globals::sPCHasCrimeGold, ESM::Variant(0) },
+            { Globals::sCrimeGoldDiscount, ESM::Variant(0) },
+            { Globals::sCrimeGoldTurnIn, ESM::Variant(0) },
+            { Globals::sPCHasTurnIn, ESM::Variant(0) },
+        };
+    }
+
     Globals::Collection::const_iterator Globals::find(std::string_view name) const
     {
         Collection::const_iterator iter = mVariables.find(name);
@@ -38,6 +59,14 @@ namespace MWWorld
         for (const ESM::Global& esmGlobal : globals)
         {
             mVariables.emplace(esmGlobal.mId, esmGlobal);
+        }
+        for (const auto& [name, value] : generateDefaultGlobals())
+        {
+            ESM::Global record;
+            record.mId = ESM::RefId::stringRefId(name.getValue());
+            record.mValue = value;
+            record.mRecordFlags = 0;
+            mVariables.emplace(record.mId, std::move(record));
         }
     }
 

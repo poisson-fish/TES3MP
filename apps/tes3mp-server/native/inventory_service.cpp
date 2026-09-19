@@ -22,12 +22,9 @@ namespace TES3MP::Native
         {
             if (binding.mSecondWorldItems && (!binding.mWorldItems || !binding.mDoor
                 || binding.mSecondWorldItems->mCell == binding.mWorldItems->mCell))
-                throw std::invalid_argument("Two-cell domain requires distinct interiors and the first cell's door");
+                throw std::invalid_argument("Two-cell domain requires distinct cells and the first cell's door");
             if (binding.mSecondWorldItems)
             {
-                if (binding.mWorldItems->mCell.kind() != CellId::Kind::Interior
-                    || binding.mSecondWorldItems->mCell.kind() != CellId::Kind::Interior)
-                    throw std::invalid_argument("Native cell lifecycle supports interiors only");
                 for (const auto& shared : binding.mContainers)
                     if (shared.mCell != binding.mWorldItems->mCell && shared.mCell != binding.mSecondWorldItems->mCell)
                         throw std::invalid_argument("Shared inventory outside the two-cell domain");

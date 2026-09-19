@@ -17,10 +17,11 @@ namespace
 
     bool validTime(const CanonicalWorldTimeState& time) noexcept
     {
-        return time.day >= 1 && time.day <= 30 && time.month <= 11 && time.year >= 0
+        return time.day >= 1 && time.day <= 31 && time.month <= 11 && time.year >= 0
             && time.millisecondsSinceMidnight < WorldMillisecondsPerDay
             && time.timeScaleUnits <= MaximumWorldTimeScaleUnits
-            && time.subMillisecondRemainder < WorldTimeScaleUnitsPerOne && time.lastChangeTick <= time.lastAdvanceTick;
+            && time.subMillisecondRemainder < WorldTimeScaleUnitsPerOne && time.lastChangeTick <= time.lastAdvanceTick
+            && (!time.daysPassed || *time.daysPassed <= 100000000);
     }
 
     bool sameValue(const GlobalVariableValue& left, const GlobalVariableValue& right) noexcept
@@ -153,7 +154,8 @@ namespace
 
     bool validWeatherState(const WeatherCatalog& catalog, const CanonicalWeatherState& weather) noexcept
     {
-        if (weather.regions.size() != catalog.regions().size())
+        if (weather.regions.size() != catalog.regions().size()
+            || weather.nativeEnvironment.size() > MaximumNativeEnvironmentBytes)
             return false;
         for (std::size_t index = 0; index < weather.regions.size(); ++index)
         {
@@ -572,6 +574,9 @@ namespace TES3MP
         const CanonicalWorldState& state, ServerTick tick, std::uint64_t tickIntervalMilliseconds) noexcept
     try
     {
+        if (state.weather() && !state.weather()->nativeEnvironment.empty())
+            return CanonicalWorldMutationError::InvalidState;
+
         const auto& current = state.time();
         if (!validTime(current) || tick < current.lastAdvanceTick)
             return CanonicalWorldMutationError::TickRegression;
@@ -626,6 +631,9 @@ namespace TES3MP
         const CanonicalWorldState& state, ServerTick tick, std::uint8_t hours) noexcept
     try
     {
+        if (state.weather() && !state.weather()->nativeEnvironment.empty())
+            return CanonicalWorldMutationError::InvalidState;
+
         const auto& current = state.time();
         if (!validTime(current) || hours == 0 || hours > MaximumWaitRestHours)
             return CanonicalWorldMutationError::InvalidState;
@@ -667,6 +675,9 @@ namespace TES3MP
         WorldTimeRevision expectedRevision, CanonicalWorldTimeState replacement, ServerTick tick) noexcept
     try
     {
+        if (state.weather() && !state.weather()->nativeEnvironment.empty())
+            return CanonicalWorldMutationError::InvalidState;
+
         const auto& current = state.time();
         if (expectedRevision != current.revision)
             return CanonicalWorldMutationError::RevisionMismatch;
@@ -969,6 +980,9 @@ namespace TES3MP
         WeatherRevision expectedRevision, WeatherId target, ServerTick tick) noexcept
     try
     {
+        if (state.weather() && !state.weather()->nativeEnvironment.empty())
+            return CanonicalWorldMutationError::InvalidState;
+
         if (!state.weatherCatalog() || !state.weather())
             return CanonicalWorldMutationError::UnknownWeatherRegion;
         const auto* declaration = state.weatherCatalog()->findRegion(region);
@@ -1017,6 +1031,9 @@ namespace TES3MP
     CanonicalWorldMutationResult advanceCanonicalWeather(const CanonicalWorldState& state, ServerTick tick) noexcept
     try
     {
+        if (state.weather() && !state.weather()->nativeEnvironment.empty())
+            return CanonicalWorldMutationError::InvalidState;
+
         if (!state.weatherCatalog() || !state.weather())
             return state;
         if (tick < state.weather()->lastAdvanceTick)

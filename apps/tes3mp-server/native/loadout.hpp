@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_LOADOUT_H
 
 #include "diagnostic.hpp"
+#include "cell_selection.hpp"
 
 #include <filesystem>
 #include <iosfwd>
@@ -22,6 +23,7 @@ namespace TES3MP::Native
         std::vector<std::string> mContent;
         std::vector<std::string> mArchives;
         std::string mEncoding;
+        std::map<std::string, std::string> mFallbacks;
         bool mSample = false;
         std::string mInventoryItem;
         std::string mEnchantment;
@@ -54,16 +56,28 @@ namespace TES3MP::Native
             std::string mPlugin;
             bool mEmptyBase, mScripted;
         };
-        // One interior's winning engine references, including barrels and chests.
+        // One interior/exterior cell's winning engine references, including moved refs.
         // No gameplay or base-inventory execution occurs during discovery.
-        std::vector<PlacedInventory> placedContainers(std::string_view cell);
-        PlacedInventory resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index);
-        std::vector<PlacedInventory> resolveContainers(std::string_view cell, size_t limit);
+        std::vector<PlacedInventory> placedContainers(ESM::RefId cell);
+        std::vector<PlacedInventory> placedContainers(std::string_view cell)
+        { return placedContainers(interiorCell(cell)); }
+        PlacedInventory resolveContainer(ESM::RefId cell, std::string_view plugin, uint32_t index);
+        PlacedInventory resolveContainer(std::string_view cell, std::string_view plugin, uint32_t index)
+        { return resolveContainer(interiorCell(cell), plugin, index); }
+        std::vector<PlacedInventory> resolveContainers(ESM::RefId cell, size_t limit);
+        std::vector<PlacedInventory> resolveContainers(std::string_view cell, size_t limit)
+        { return resolveContainers(interiorCell(cell), limit); }
         // Actor discovery never initializes custom data, AI, scripts or loot.
         // NPC and creature placements use the same stable reference namespace.
-        std::vector<PlacedInventory> placedActors(std::string_view cell);
-        std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit);
-        std::vector<PlacedInventory> placedItems(std::string_view cell, size_t limit);
+        std::vector<PlacedInventory> placedActors(ESM::RefId cell);
+        std::vector<PlacedInventory> placedActors(std::string_view cell)
+        { return placedActors(interiorCell(cell)); }
+        std::vector<PlacedInventory> resolveActors(ESM::RefId cell, size_t limit);
+        std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit)
+        { return resolveActors(interiorCell(cell), limit); }
+        std::vector<PlacedInventory> placedItems(ESM::RefId cell, size_t limit);
+        std::vector<PlacedInventory> placedItems(std::string_view cell, size_t limit)
+        { return placedItems(interiorCell(cell), limit); }
         struct PlacedDoor
         {
             ESM::CellRef mRef;
@@ -72,10 +86,14 @@ namespace TES3MP::Native
         };
         // Select one winning ordinary door; unrelated teleport/scripted doors
         // are not silently brought into the supported domain.
-        PlacedDoor resolveDoor(std::string_view cell, std::string_view plugin, uint32_t index);
+        PlacedDoor resolveDoor(ESM::RefId cell, std::string_view plugin, uint32_t index);
+        PlacedDoor resolveDoor(std::string_view cell, std::string_view plugin, uint32_t index)
+        { return resolveDoor(interiorCell(cell), plugin, index); }
         // Winning, unscripted, unlocked, untrapped teleport placements whose
-        // destination resolves to the other bound OpenMW interior.
-        std::vector<PlacedDoor> teleportDoors(std::string_view cell, std::string_view destination);
+        // destination resolves to the other bound OpenMW cell.
+        std::vector<PlacedDoor> teleportDoors(ESM::RefId cell, ESM::RefId destination);
+        std::vector<PlacedDoor> teleportDoors(std::string_view cell, std::string_view destination)
+        { return teleportDoors(interiorCell(cell), interiorCell(destination)); }
         void writeContainers(std::ostream& output, std::string_view cell);
         void enumerate(std::ostream& output) const;
         DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;

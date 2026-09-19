@@ -21,8 +21,9 @@ namespace
         std::uint32_t milliseconds = 43'200'000)
     {
         CanonicalWorldTimeState time;
-        time.day = 30;
-        time.month = 1;
+        time.day = 31;
+        time.month = 0;
+        time.daysPassed = 42;
         time.year = 427;
         time.millisecondsSinceMidnight = milliseconds;
         time.timeScaleUnits = 30 * WorldTimeScaleUnitsPerOne;
@@ -62,6 +63,18 @@ namespace
             || std::get<ReliableWorldTimeState>(decoded) != original
             || encoded.size() > ReliableOperationMaximumPayloadBytes
             || messageDescriptor(MessageKind::ReliableWorldTimeState)->messageClass != MessageClass::ReliableOperation)
+            return false;
+        auto legacy = original;
+        legacy.time.daysPassed.reset();
+        if (std::get<ReliableWorldTimeState>(decodeReliableWorldTimeState(encodeReliableWorldTimeState(legacy))) != legacy)
+            return false;
+        auto invalid = original;
+        invalid.time.day = 32;
+        if (!std::holds_alternative<WorldTimeReplicationDecodeError>(decodeReliableWorldTimeState(encodeReliableWorldTimeState(invalid))))
+            return false;
+        invalid = original;
+        invalid.time.daysPassed = 100000001;
+        if (!std::holds_alternative<WorldTimeReplicationDecodeError>(decodeReliableWorldTimeState(encodeReliableWorldTimeState(invalid))))
             return false;
         for (std::size_t size = 0; size < encoded.size(); ++size)
             if (!std::holds_alternative<WorldTimeReplicationDecodeError>(

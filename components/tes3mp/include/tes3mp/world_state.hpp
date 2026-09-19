@@ -28,6 +28,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumDialogueChoiceCatalogEntries = 16'384;
     inline constexpr std::size_t MaximumPlayerFactionStates = 256;
     inline constexpr std::size_t MaximumCanonicalFactionStates = 16'384;
+    inline constexpr std::size_t MaximumNativeEnvironmentBytes = 512 * 1024;
     inline constexpr std::size_t MaximumWeatherIdentities = 256;
     inline constexpr std::size_t MaximumWeatherRegions = 4'096;
     inline constexpr std::size_t MaximumWeatherEligibilityEntries = 65'536;
@@ -253,6 +254,8 @@ namespace TES3MP
         WorldTimeRevision revision = WorldTimeRevision::initial();
         ServerTick lastChangeTick = ServerTick::initial();
         ServerTick lastAdvanceTick = ServerTick::initial();
+        // Engine elapsed days are independent of the epoch date.
+        std::optional<std::uint32_t> daysPassed;
 
         double hour() const noexcept
         {
@@ -293,6 +296,10 @@ namespace TES3MP
         std::vector<CanonicalWeatherRegionState> regions;
         RandomStateV1 randomState;
         ServerTick lastAdvanceTick = ServerTick::initial();
+        // Opaque app-owned engine state. Time/weather above are committed wire
+        // projections; only the native environment service may advance this domain.
+        std::vector<std::byte> nativeEnvironment;
+
         friend bool operator==(const CanonicalWeatherState&, const CanonicalWeatherState&) noexcept = default;
     };
 

@@ -143,6 +143,20 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             violations.extend(f"{path}: {token}" for token in tokens if token in source)
         self.assertEqual([], violations)
 
+    def test_native_environment_boundaries(self):
+        checks = {
+            "apps/openmw/mwworld/calendar.cpp": ("mwbase", "Environment::", "mwrender", "mwgui"),
+            "apps/openmw/mwworld/regionalweather.cpp": ("mwbase", "Environment::", "mwrender", "mwgui"),
+            "apps/tes3mp-server/native/environment.cpp": ("mwbase", "MWBase::", "mwrender", "mwgui"),
+            "apps/tes3mp-server/native_environment_service.hpp": ("apps/openmw", "ESM::", "MWWorld::", "osg::"),
+            "components/tes3mp/include/tes3mp/world_state.hpp": ("apps/openmw", "ESM::", "MWWorld::", "osg::"),
+        }
+        violations = []
+        for path, forbidden in checks.items():
+            source = (REPOSITORY_ROOT / path).read_text(encoding="utf-8")
+            violations.extend(f"{path}: {token}" for token in forbidden if token in source)
+        self.assertEqual([], violations)
+
     def test_openmw_runtime_failure_is_visible_and_sanitized(self):
         source = OPENMW_MAIN_SOURCE.read_text(encoding="utf-8")
         status_body = source.split("class MultiplayerStatus final", 1)[1].split("};", 1)[0]

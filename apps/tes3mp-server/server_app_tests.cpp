@@ -651,7 +651,7 @@ namespace TES3MP::ServerApp::Testing
 {
     // Synthetic transport and registered profiles; production authentication,
     // credential matching, scheduling, mutation, join and owned delivery.
-    void nativeInventoryApplication(NativeInventoryService& native, CanonicalPersistenceFile& persistence)
+    void nativeInventoryApplication(NativeInventoryService& native, CanonicalPersistenceFile& persistence, NativeEnvironmentService* environment)
     {
         auto config = parsedConfig();
         FixedClock clock;
@@ -670,6 +670,12 @@ namespace TES3MP::ServerApp::Testing
         const auto catalog = ServerScriptStateCatalog::create({}).value();
         auto scripts = CanonicalScriptState::initial(catalog).value();
         const auto restored = persistence.restoredState();
+        std::optional<CanonicalWorldState> world;
+        if (environment)
+        {
+            world = persistence.restoredWorld() ? *persistence.restoredWorld() : environment->initialize(fixtureWeatherWorld());
+            environment->validate(*world);
+        }
         const auto baseTick = persistence.restoredCheckpointTick().value_or(ServerTick::initial());
         struct Collision final : ServerCollisionQuery
         {
@@ -680,7 +686,7 @@ namespace TES3MP::ServerApp::Testing
             persistence.restoredStateVersion().value_or(CanonicalStateVersion::initial()),
             persistence.restoredCanonicalRevision().value_or(CanonicalRevision::initial()), baseTick,
             observability, {}, testContentManifest(), collision);
-        assert(reducer.configureDurability(persistence, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &native));
+        assert(reducer.configureDurability(persistence, nullptr, nullptr, nullptr, nullptr, world ? &*world : nullptr, &scripts, &native));
         struct IdentityStorage final : PlayerIdentityPersistence
         { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } identityStorage;
         CharacterDerivedState derived;
@@ -710,16 +716,26 @@ namespace TES3MP::ServerApp::Testing
         auto lifecycle = ServerLifecycleCoordinator::create(30'000'000'000, reducer).value();
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
         std::vector capabilities{inventoryReplicationCapability()};
+        if (environment)
+        {
+            capabilities.push_back(weatherReplicationCapability());
+            capabilities.push_back(worldTimeReplicationCapability());
+            capabilities.push_back(nativeEnvironmentCapability());
+        }
         if (native.hasNativeDoor()) capabilities.push_back(nativeDoorCapability());
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
         ConnectionSessionCoordinator sessions(clock, observability,
             SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
-            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &native);
+            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, world ? &*world : nullptr, &native);
         ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(baseTick.value() + 1),
             IngressOrdinal::initial(), restored ? TickEpoch::NextTick : TickEpoch::Zero);
         FakeRuntime runtime;
         ServerApplicationWiring wiring{sessions, joins, crypto, queues, clock, intake, reducer, lifecycle};
         wiring.nativeInventory = &native;
+        wiring.nativeEnvironment = environment;
+        wiring.world = world ? &*world : nullptr;
+        const auto environmentGlobals = GlobalVariableCatalog::create({}).value();
+        wiring.globalCatalog = world ? &environmentGlobals : nullptr;
         ServerApplication application(runtime, config, wiring);
         assert(application.start());
         auto send = [&](uint64_t connection, MessageClass category, MessageKind kind, std::vector<std::byte> body) {
@@ -751,6 +767,35 @@ namespace TES3MP::ServerApp::Testing
                         resumeToken.emplace(accepted.takeToken());
                     }
                 }
+            if (environment)
+            {
+                bool timeReceived = false, weatherReceived = false;
+                for (size_t index = 0; index < runtime.sent.size(); ++index)
+                {
+                    if (runtime.sentConnections[index] != id<TransportConnectionId>(connection)) continue;
+                    const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[index]));
+                    if (frame.messageKind() == MessageKind::ReliableWorldTimeState)
+                    {
+                        const auto value = std::get<ReliableWorldTimeState>(decodeReliableWorldTimeState(frame.payload()));
+                        timeReceived |= value.completeBaseline && value.time == world->time();
+                    }
+                    if (frame.messageKind() == MessageKind::ReliableWeatherState)
+                    {
+                        const auto value = std::get<ReliableWeatherState>(decodeReliableWeatherState(frame.payload()));
+                        bool matches = value.header().completeBaseline && value.regions().size() == world->weather()->regions.size();
+                        for (const auto& region : value.regions())
+                        {
+                            const auto* expected = world->findWeather(region.region);
+                            matches &= expected && expected->currentWeather == region.currentWeather
+                                && expected->targetWeather == region.targetWeather && expected->revision == region.revision
+                                && expected->transitionStartTick == region.transitionStartTick
+                                && expected->transitionEndTick == region.transitionEndTick;
+                        }
+                        weatherReceived |= matches;
+                    }
+                }
+                assert(timeReceived && weatherReceived);
+            }
         };
         auto command = [&](uint64_t session, bool put, uint32_t count, uint64_t sequence) {
             const auto view = native.projectInventory(reducer.state(), id<SessionId>(session), reducer.checkpointTick(), reducer.canonicalRevision()).value();
@@ -766,16 +811,35 @@ namespace TES3MP::ServerApp::Testing
             for (uint64_t now = 0; now < 16; ++now)
                 (void)queues.pump(runtime, id<TransportConnectionId>(connection), clock.nanoseconds / 1'000'000);
             bool found = false;
+            bool environmentTime = false, environmentWeather = false;
             for (size_t i = 0; i < runtime.sent.size(); ++i)
             {
                 if (runtime.sentConnections[i] != id<TransportConnectionId>(connection)) continue;
                 const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[i]));
+                if (environment && frame.messageKind() == MessageKind::ReliableWorldTimeState)
+                {
+                    const auto received = std::get<ReliableWorldTimeState>(decodeReliableWorldTimeState(frame.payload()));
+                    assert(received.time.daysPassed.has_value());
+                    environmentTime = true;
+                }
+                if (environment && frame.messageKind() == MessageKind::ReliableWeatherState)
+                {
+                    const auto received = std::get<ReliableWeatherState>(decodeReliableWeatherState(frame.payload()));
+                    assert(received.regions().size() == world->weather()->regions.size());
+                    environmentWeather = true;
+                }
                 if (frame.messageKind() != MessageKind::ReliableContainerInventoryBaseline) continue;
                 const auto baseline = std::get<ReliableContainerInventoryBaseline>(decodeReliableContainerInventoryBaseline(frame.payload()));
                 if ((count == 0 && baseline.stacks.empty())
                     || (baseline.stacks.size() == 1 && baseline.stacks[0].count == count)) found = true;
             }
             assert(found);
+            if (environment)
+            {
+                environment->validate(*world);
+                assert(persistence.restoredWorld() && *persistence.restoredWorld() == *world);
+                if (environmentTime) assert(environmentWeather);
+            }
         };
         if (native.hasNativeDoor())
         {

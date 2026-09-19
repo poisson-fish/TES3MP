@@ -40,7 +40,8 @@ namespace TES3MP::Native
         std::optional<WorldItems> mWorldItems;
         std::optional<ESM::CellRef> mDoor;
         uint64_t mDoorId = 0;
-        // V10: exactly two interiors, one ordinary door in the first. Budgets
+        // V10: two interiors; V13 also permits exterior cells. One ordinary door
+        // belongs to the first cell. Budgets
         // (32 shared stores / 64 ground references) remain campaign-wide.
         std::optional<WorldItems> mSecondWorldItems;
         std::function<void(const std::array<bool, 2>&)> mCellActivity;

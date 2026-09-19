@@ -314,7 +314,7 @@ namespace MWWorld
         void setWorldTimeAuthority(bool authoritative) override;
         bool applyAuthoritativeWorldTime(
             int day, int month, int year, std::uint32_t millisecondsSinceMidnight,
-            std::uint32_t timeScaleUnits) override;
+            std::uint32_t timeScaleUnits, std::optional<std::uint32_t> daysPassed = std::nullopt) override;
 
         bool toggleSky() override;
         ///< \return Resulting mode

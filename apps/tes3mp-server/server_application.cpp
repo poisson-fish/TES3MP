@@ -1375,35 +1375,41 @@ namespace TES3MP::ServerApp
             if (mWiring->world)
             {
                 const auto& baseWorld = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
-                auto advancedWorld = advanceCanonicalWorldTime(
-                    baseWorld, batch.scheduledTick().value(), mConfig.tickIntervalMilliseconds);
-                auto* worldValue = std::get_if<CanonicalWorldState>(&advancedWorld);
-                if (!worldValue)
+                if (mWiring->nativeEnvironment)
+                    worldCandidate = mWiring->nativeEnvironment->advance(baseWorld,
+                        batch.scheduledTick().value(), waitRestApplied ? waitRestCommit->hours() : 0);
+                else
                 {
-                    mFailure = "world time simulation failed";
-                    return false;
-                }
-                auto advancedWeather = advanceCanonicalWeather(*worldValue, batch.scheduledTick().value());
-                auto* weatherValue = std::get_if<CanonicalWorldState>(&advancedWeather);
-                if (!weatherValue)
-                {
-                    mFailure = "weather simulation failed";
-                    return false;
-                }
-                if (waitRestApplied)
-                {
-                    auto advancedWaitRest = advanceCanonicalWorldTimeByHours(
-                        *weatherValue, batch.scheduledTick().value(), waitRestCommit->hours());
-                    auto* waitedWorld = std::get_if<CanonicalWorldState>(&advancedWaitRest);
-                    if (!waitedWorld)
+                    auto advancedWorld = advanceCanonicalWorldTime(
+                        baseWorld, batch.scheduledTick().value(), mConfig.tickIntervalMilliseconds);
+                    auto* worldValue = std::get_if<CanonicalWorldState>(&advancedWorld);
+                    if (!worldValue)
                     {
-                        mFailure = "wait/rest world time advance failed";
+                        mFailure = "world time simulation failed";
                         return false;
                     }
-                    worldCandidate.emplace(std::move(*waitedWorld));
+                    auto advancedWeather = advanceCanonicalWeather(*worldValue, batch.scheduledTick().value());
+                    auto* weatherValue = std::get_if<CanonicalWorldState>(&advancedWeather);
+                    if (!weatherValue)
+                    {
+                        mFailure = "weather simulation failed";
+                        return false;
+                    }
+                    if (waitRestApplied)
+                    {
+                        auto advancedWaitRest = advanceCanonicalWorldTimeByHours(
+                            *weatherValue, batch.scheduledTick().value(), waitRestCommit->hours());
+                        auto* waitedWorld = std::get_if<CanonicalWorldState>(&advancedWaitRest);
+                        if (!waitedWorld)
+                        {
+                            mFailure = "wait/rest world time advance failed";
+                            return false;
+                        }
+                        worldCandidate.emplace(std::move(*waitedWorld));
+                    }
+                    else
+                        worldCandidate.emplace(std::move(*weatherValue));
                 }
-                else
-                    worldCandidate.emplace(std::move(*weatherValue));
             }
             std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>> combatViews;
             std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> combatEvents;

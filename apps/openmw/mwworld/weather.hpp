@@ -1,6 +1,8 @@
 #ifndef GAME_MWWORLD_WEATHER_H
 #define GAME_MWWORLD_WEATHER_H
 
+#include "regionalweather.hpp"
+
 #include <cstdint>
 #include <map>
 #include <string>
@@ -235,28 +237,6 @@ namespace MWWorld
         void flashDecrement(const float elapsedSeconds);
         float thunderChance(const float transitionRatio, const float elapsedSeconds) const;
         void lightningAndThunder(void);
-    };
-
-    /// A class for storing a region's weather.
-    class RegionWeather
-    {
-    public:
-        explicit RegionWeather(const ESM::Region& region);
-        explicit RegionWeather(const ESM::RegionWeatherState& state);
-
-        operator ESM::RegionWeatherState() const;
-
-        void setChances(const std::vector<uint8_t>& chances);
-
-        void setWeather(int weatherID);
-
-        int getWeather();
-
-    private:
-        int mWeather;
-        std::vector<uint8_t> mChances;
-
-        void chooseNewWeather();
     };
 
     /// A class that acts as a model for the moons.

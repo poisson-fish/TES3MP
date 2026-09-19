@@ -1,4 +1,6 @@
 #include "placement_tests.hpp"
+#include "environment.hpp"
+#include "environment_tests.hpp"
 #include <components/esm3/loadstat.hpp>
 #include "inventory_service_tests.hpp"
 #include "inventory_service.hpp"
@@ -21,6 +23,7 @@
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <components/esm3/esmwriter.hpp>
+#include <components/esm3/loadland.hpp>
 #include <components/esm3/formatversion.hpp>
 #include <iostream>
 #include <bit>
@@ -31,7 +34,7 @@
 
 namespace TES3MP::ServerApp::Testing
 {
-    void nativeInventoryApplication(NativeInventoryService&, CanonicalPersistenceFile&);
+    void nativeInventoryApplication(NativeInventoryService&, CanonicalPersistenceFile&, NativeEnvironmentService* = nullptr);
 }
 
 namespace TES3MP::Native::Testing
@@ -235,7 +238,8 @@ namespace TES3MP::Native::Testing
                 CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                 pickup ? InventoryTransactionKind::PickupItem : InventoryTransactionKind::DropItem,
                 {}, stack.prototypeId, stack.stackId, pickup ? stack.count : count, {}, inventory.revision, {},
-                pickup ? std::optional{ground.items.at(index).revision} : std::nullopt, Position3(0, 0, 0)};
+                pickup ? std::optional{ground.items.at(index).revision} : std::nullopt,
+                state.findPlayer(state.findActiveSession(id<SessionId>(session))->playerId())->transform().position()};
         }
     }
     namespace
@@ -243,12 +247,13 @@ namespace TES3MP::Native::Testing
         // Real reducer, durability file, baseline codec and client receiver;
         // synthetic transport/authentication, no graphical presentation claim.
         void teleportRoundTrip(InventoryService& service, CanonicalServerState initial,
-            const std::filesystem::path& scratch)
+            const std::filesystem::path& scratch, bool exterior = false)
         {
             NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
             const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
-                CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
-            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+                CellSpaceDeclaration{id<CellSpaceId>(8), exterior ? CellSpaceKind::Exterior : CellSpaceKind::Interior}};
+            const auto second = exterior ? CellId::exterior(id<CellSpaceId>(8), -1, 50) : CellId::interior(id<CellSpaceId>(8));
+            const std::array cells{CellId::interior(id<CellSpaceId>(7)), second};
             const auto manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
             CanonicalCommandReducer reducer(initial, observability, manifest);
             const auto catalog = ServerScriptStateCatalog::create({}).value();
@@ -281,7 +286,7 @@ namespace TES3MP::Native::Testing
                 "Teleport canonical composition failed");
             Clock clock; Delivery delivery(clock, SessionGeneration::initial());
             uint64_t tick = 1;
-            const auto first = CellId::interior(id<CellSpaceId>(7)), second = CellId::interior(id<CellSpaceId>(8));
+            const auto first = CellId::interior(id<CellSpaceId>(7));
             const auto aliceId = initial.players()[0].playerId(), bobId = initial.players()[1].playerId();
             const auto view = [&](uint64_t session) {
                 return service.projectInventory(reducer.state(), id<SessionId>(session), id<ServerTick>(tick), id<CanonicalRevision>(tick)).value();
@@ -380,7 +385,8 @@ namespace TES3MP::Native::Testing
             require(leaving.result().dispositions()[1].disposition() == CommandDisposition::AuthorityEpochMismatch,
                 "Pre-teleport movement overwrote destination");
             const auto expected = *leaving.candidateNativeInventory()->playerDestination();
-            require(expected.cell() == second && expected.position() == Position3(32 * 1024, 0, 0)
+            require(expected.cell() == second && expected.position() == Position3((exterior ? -8192 + 32 : 32) * 1024,
+                    exterior ? (409600 + 64) * 1024 : 0, 0)
                 && std::abs(int64_t(expected.orientation().z().value()) - int64_t(0xc0000000)) < 64,
                 "OpenMW destination pose was not preserved");
             const auto staged = service.projectInventory(leaving.candidateState(), id<SessionId>(1), id<ServerTick>(tick),
@@ -414,11 +420,22 @@ namespace TES3MP::Native::Testing
                 && delivery.clients[1]->confirmedGroundItemBaseline()->cell == first
                 && delivery.clients[0]->confirmedGroundItemBaseline()->teleportDoors == std::vector{inward},
                 "Split wire clients retained old-cell activators");
-            mutate(worldWire(service, reducer.state(), 1, true));
-            auto drop = worldWire(service, reducer.state(), 1, false);
+            const auto pickedUp = worldWire(service, reducer.state(), 1, true);
+            mutate(pickedUp);
+            const auto inventory = view(1).playerInventory[0];
+            const auto pickedStack = std::ranges::find(inventory.stacks, pickedUp.prototypeId, &CanonicalItemStack::prototypeId);
+            require(pickedStack != inventory.stacks.end(), "Picked item missing from destination inventory");
+            auto drop = worldWire(service, reducer.state(), 1, false, size_t(pickedStack - inventory.stacks.begin()));
             drop.placement = placementTestView(0, 0, true);
             mutate(drop);
             const auto savedDrop = view(1).groundItems[0].items;
+            if (exterior)
+            {
+                require(savedDrop.size() == 1, "Exterior drop membership changed");
+                if (savedDrop[0].position.z() != -66 * 1024)
+                    throw std::runtime_error("Exterior LAND drop height mismatch: "
+                        + std::to_string(savedDrop[0].position.z()));
+            }
             while (!view(2).groundItems[0].items.empty()) mutate(worldWire(service, reducer.state(), 2, true));
             const auto shared = view(2).containers[0];
             if (!shared.stacks.empty())
@@ -2123,15 +2140,16 @@ namespace TES3MP::Native::Testing
     }
 
     void checkInventoryHost(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement, bool door, bool twoCells, bool teleports)
+        bool wholeInterior, bool baseInventory, bool worldActors, bool worldItems, bool stockPlacement, bool door, bool twoCells, bool teleports, bool environment, bool exterior)
     {
         require(std::filesystem::create_directory(scratch), "Native host scratch already exists");
         auto manifest = testContentManifest();
         if (twoCells)
         {
             const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
-                CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
-            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+                CellSpaceDeclaration{id<CellSpaceId>(8), exterior ? CellSpaceKind::Exterior : CellSpaceKind::Interior}};
+            const std::array cells{CellId::interior(id<CellSpaceId>(7)),
+                exterior ? CellId::exterior(id<CellSpaceId>(8), -1, 50) : CellId::interior(id<CellSpaceId>(8))};
             manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
         }
         auto crypto = makeProductionCredentialCrypto();
@@ -2251,7 +2269,17 @@ namespace TES3MP::Native::Testing
                         placed.mDoorDest.rot[2] = osg::DegreesToRadians(90.f);
                         if (variant == 1) { placed.mIsLocked = true; placed.mLockLevel = 0; }
                         if (variant == 2) placed.mTrap = ESM::RefId::stringRefId("test_trap");
-                        if (variant == 3) placed.mDestCell.clear();
+                        if (exterior)
+                        {
+                            placed.mDestCell.clear();
+                            placed.mDoorDest.pos[0] -= 8192;
+                            placed.mDoorDest.pos[1] = 409600 + 64;
+                        }
+                        if (variant == 3)
+                        {
+                            placed.mDestCell.clear();
+                            if (exterior) placed.mDoorDest.pos[0] = 8192; // unbound exterior
+                        }
                         if (variant == 4) placed.mDestCell = "unbound interior";
                         placed.save(out);
                     }
@@ -2259,12 +2287,28 @@ namespace TES3MP::Native::Testing
                 out.endRecord(ESM::Cell::sRecordId);
                 if (twoCells)
                 {
-                    cell.mName = "vNext second interior"; cell.updateId();
+                    cell.mName = "vNext second interior";
+                    if (exterior)
+                    {
+                        cell.mName = "vNext exterior";
+                        cell.mData.mFlags = 0; cell.mData.mX = -1; cell.mData.mY = 50;
+                        ESM::Land land; land.blank(); land.mX = -1; land.mY = 50;
+                        land.mFlags = ESM::Land::Flag_HeightsNormals;
+                        land.mLandData->mHeights.fill(-64.f);
+                        land.mLandData->mMinHeight = land.mLandData->mMaxHeight = -64.f;
+                        out.startRecord(ESM::Land::sRecordId, 0); land.save(out); out.endRecord(ESM::Land::sRecordId);
+                    }
+                    cell.updateId();
                     out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
                     for (auto base : {ESM::RefId::stringRefId("vnext_dead_actor"), ESM::RefId::stringRefId("iron dagger"),
                             ESM::RefId::stringRefId("placement-floor")})
                     {
                         ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = base;
+                        if (exterior)
+                        {
+                            if (base == "placement-floor") continue; // exercise LAND, not a fixture mesh floor
+                            placed.mPos.pos[0] = -8192 + 32; placed.mPos.pos[1] = 409600 + 64;
+                        }
                         if (base == "placement-floor") placed.mPos.pos[2] = -60.f;
                         placed.save(out);
                     }
@@ -2273,6 +2317,7 @@ namespace TES3MP::Native::Testing
                         ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
                         placed.mRefID = ESM::RefId::stringRefId("in_c_door_arched");
                         placed.mTeleport = true; placed.mDestCell = "vNext actor inventory test";
+                        if (exterior) { placed.mPos.pos[0] = -8192 + 32; placed.mPos.pos[1] = 409600 + 64; }
                         placed.save(out);
                     }
                     out.endRecord(ESM::Cell::sRecordId);
@@ -2305,7 +2350,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (teleports ? "native-inventory-11" : twoCells ? "native-inventory-10" : door ? "native-inventory-9" : stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
+            out << (exterior ? "native-inventory-13" : environment ? "native-inventory-12" : teleports ? "native-inventory-11" : twoCells ? "native-inventory-10" : door ? "native-inventory-9" : stockPlacement ? "native-inventory-8" : worldItems ? "native-inventory-7" : worldActors ? "native-inventory-6" : baseInventory ? "native-inventory-5" : wholeInterior ? "native-inventory-4" : "native-inventory-3") << "\nmanifest ";
             const auto manifestId = testContentManifestId();
             for (auto byte : manifestId.bytes())
                 out << std::hex << std::setfill('0') << std::setw(2) << std::to_integer<unsigned>(byte);
@@ -2317,22 +2362,55 @@ namespace TES3MP::Native::Testing
                 : "container \"Imperial Prison Ship\" \"Morrowind.esm\" 421490\n");
             if (door) out << "door \"StartingInventories.esp\" 10\n";
             out << "cell interior:7\n";
-            if (twoCells) out << "interior \"vNext second interior\"\ncell interior:8\n";
+            if (twoCells) out << (exterior ? "exterior -1 50\ncell exterior:8:-1:50\n"
+                : "interior \"vNext second interior\"\ncell interior:8\n");
         }
         if (twoCells)
         {
             auto authority = players(SessionGeneration::initial(), 1, 2);
             InventoryHost host(descriptor, manifest, *registry, *crypto, {});
             auto& service = dynamic_cast<InventoryService&>(host.service());
+            if (environment && !exterior)
+            {
+                InventoryHost recovered(descriptor, manifest, *registry, *crypto, service.inventoryImage());
+                require(host.environment() && recovered.environment(), "V12 host did not bind native environment");
+                checkHostedEnvironment(*host.environment(), *recovered.environment());
+                require(std::ranges::equal(service.inventoryImage(), recovered.service().inventoryImage()),
+                    "V12 environment recovery regenerated inventory");
+                std::cout << "V12 host: OpenMW content, environment initialization, native inventory and environment recovery passed\n";
+                return;
+            }
             service.synchronizeCells(authority);
             unequipStartingItems(service, authority);
             if (teleports)
             {
-                teleportRoundTrip(service, authority, scratch);
+                teleportRoundTrip(service, authority, scratch, exterior);
                 InventoryHost recovered(descriptor, manifest, *registry, *crypto, service.inventoryImage());
                 require(std::ranges::equal(recovered.service().inventoryImage(), service.inventoryImage()),
                     "OpenMW teleport host recovery regenerated loot");
-                std::cout << "Teleport host: Morrowind/generated winning placements and destination resolution; no graphical clients\n";
+                if (exterior)
+                {
+                    require(host.environment() && recovered.environment(), "V13 lost native environment");
+                    checkHostedEnvironment(*host.environment(), *recovered.environment());
+                    std::ifstream source(descriptor);
+                    const std::string text{std::istreambuf_iterator<char>(source), {}};
+                    for (const auto& [from, to] : {
+                        std::pair{std::string("native-inventory-13"), std::string("native-inventory-12")},
+                        std::pair{std::string("exterior -1 50"), std::string("exterior -2 50")},
+                        std::pair{std::string("exterior -1 50"), std::string("exterior 2147483648 50")},
+                        std::pair{std::string("exterior:8:-1:50"), std::string("interior:8")}})
+                    {
+                        auto invalid = text;
+                        invalid.replace(invalid.find(from), from.size(), to);
+                        const auto path = scratch / "invalid.txt";
+                        { std::ofstream out(path); out << invalid; }
+                        bool rejected = false;
+                        try { InventoryHost bad(path, manifest, *registry, *crypto, service.inventoryImage()); }
+                        catch (const std::invalid_argument&) { rejected = true; }
+                        require(rejected, "Exterior descriptor version/bounds/mapping validation failed");
+                    }
+                }
+                std::cout << "Teleport host: Morrowind/generated winning placements, terrain and destination resolution; no graphical clients\n";
                 return;
             }
             uint64_t tick = 1;
@@ -2911,10 +2989,18 @@ namespace TES3MP::Native::Testing
         std::cout << "real-loadout host: placed barrel_01_empty 421490, recovery rejects another placement; synthetic transport\n";
     }
 
-    void checkInventoryApplication(const std::filesystem::path& scratch)
+    void checkInventoryApplication(const std::filesystem::path& scratch, bool environment)
     {
         require(std::filesystem::create_directory(scratch), "Native application scratch already exists");
         Content content;
+        std::unique_ptr<Environment> nativeEnvironment;
+        auto crypto = makeProductionCredentialCrypto();
+        if (environment)
+        {
+            populateEnvironment(content.store);
+            nativeEnvironment = std::make_unique<Environment>(content.store, environmentFallbacks(), "application-fixture",
+                testContentManifestId(), *crypto, 17);
+        }
         auto binding = content.binding();
         binding.mPlayers = {id<PlayerId>(1), id<PlayerId>(2)};
         InventoryService service(content.store, content.readers, binding);
@@ -2925,7 +3011,7 @@ namespace TES3MP::Native::Testing
         const auto path = scratch / "application.bin";
         auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
             ServerApp::CanonicalPersistenceFile::open(path, identity));
-        ServerApp::Testing::nativeInventoryApplication(service, *file);
+        ServerApp::Testing::nativeInventoryApplication(service, *file, nativeEnvironment.get());
         auto opened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
             ServerApp::CanonicalPersistenceFile::open(path, identity));
         InventoryService recovered(content.store, content.readers, binding, true);
@@ -2933,7 +3019,7 @@ namespace TES3MP::Native::Testing
         recovered.recover(opened->prefix().latest()->nativeInventory(), references);
         require(std::ranges::equal(recovered.inventoryImage(), service.inventoryImage()),
             "ServerApplication recovery did not restore both actors and container coherently");
-        ServerApp::Testing::nativeInventoryApplication(recovered, *opened);
+        ServerApp::Testing::nativeInventoryApplication(recovered, *opened, nativeEnvironment.get());
     }
 
     void checkDoorService(const std::filesystem::path& scratch)

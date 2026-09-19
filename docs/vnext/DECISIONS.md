@@ -221,29 +221,33 @@ One registry/counter and stock initial-loot stream cover players then placements
 in stable order. Recovery never reloads, rerolls or auto-equips initial loot.
 Record-derived identities preserve raw condition/light-time/charge bits.
 
-**Versioned native domains.** V3 binds initial-loot level/seed and replaces manual
-prototypes; v4 adds 1–32 shared containers in one interior; v5 uses NPC inventory
-templates, owner-first initialization and stock starting equipment with explicit
-skills, allowing empty inventories; v6 adds placed actor stores/equipment and
-content-defined corpse access, without AI or living access. V7 adds up to 64 ordinary
-world items in the same image (session format 4), fresh drop identities, stock pickup/
-gold normalization and player-position drops. V8 shares stock cursor/floor placement
-and rendered bounds; resolved model bytes join saved identity. Clients install
-committed positions without repositioning. Scripts, animation, changed geometry
-and tumbling require separate services. Unsupported bootstrap content fails visibly.
-V9 adds one bound ordinary door using stock position/ANIM fields in session format 5;
-recovery installs it with inventories. V8 remains unchanged; no implicit migration.
-V10/session format 6 binds two interiors and ground-reference cell membership,
-retaining campaign-wide budgets and one door. Active sessions pin cell resources;
-empty cells release them and freeze motion. Canonical stores remain; reentry cannot
-initialize loot. New campaign required; v8/v9 remain unchanged.
-V11 adds 32 immutable OpenMW teleport doors between those interiors, without scripts/
-locks/traps/followers. Commit the requester's destination/authority epoch before
-publication; reject old motion/direct cell changes. Requires a new campaign and
-native-teleport capability. Format 6 and older domains stay unchanged.
-V3/v4 seeded meanings and older descriptor meanings remain intact; domain changes
-require explicit migration/new campaigns and matching builds. The format-6 inventory
-cutover deliberately rejects older development saves; never reset automatically.
+**Versioned native domains.** Versions require explicit migration/new campaigns;
+never discard mismatched saves. V3 binds initial-loot level/seed; v4 supports
+1–32 containers in one interior. V5 uses NPC inventory templates and stock
+starting equipment, including empty inventories. V6 adds placed NPC/creature stores,
+equipment and corpse access; no living access, AI, scripts or respawn.
+V7 adds 64 world items, pickup/gold normalization and fresh drop identities
+(session format 4). V8 shares stock placement queries and rendered bounds;
+model bytes bind recovery. V9 adds one ordinary door (format 5).
+V10 binds two interiors, ground membership and occupancy-controlled resources
+(format 6); empty cells freeze doors without losing state. V11 adds 32 immutable,
+unscripted/unlocked/untrapped intercell teleport doors. Commit requester destination
+and authority epoch before publication; reject direct transitions/old motion.
+Older descriptor/seed meanings remain intact; format 6 rejects older development saves.
+
+**Native time/weather (v12).** Fresh campaign, V11 fields, native-environment
+capability. OpenMW calendar/default globals, REGN probabilities and fallbacks drive
+30 Hz simulation. Up to 4,096 regions advance independently of occupancy/menus.
+Dedicated engine RNG, clock, elapsed days, selection timer and queued transitions
+share the world transaction. Wire projections cannot author state; legacy script
+modules reject. Tagged format-6 extensions preserve older encodings; older readers
+reject new tags. Recovery binds content/settings/seed; no wall-clock catch-up.
+
+**Bounded exteriors (v13).** Fresh campaigns may bind TES3 exterior cells in the
+two-cell domain. OpenMW resolves references/destinations; placement uses ESMTerrain
+vertices and stock triangles. Occupancy releases scenes/terrain while retaining
+canonical state; cross-edge drops reject. Adjacent-area streaming, automatic
+bootstrap and Tamriel Rebuilt acceptance remain pending.
 
 **Transfers and equipment.** Take All binds a witnessed source stack and both
 revisions, uses stock order/stacking and corpse slot removal on detached stores,

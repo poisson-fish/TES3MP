@@ -39,7 +39,7 @@ namespace TES3MP::OpenMWAdapter
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
                 authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability() };
+                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));

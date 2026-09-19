@@ -3,6 +3,33 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M3-007",
+      "slice": "native shared calendar and regional weather",
+      "owner": "OpenMW server runtime and desktop adapter",
+      "purpose": "Separate the stock calendar, weighted regional selection, selection timer and queued transition rules from presentation. The stock manager and native server use the same operations. Native v12 persists precise clock fields, elapsed days, timers, queued transitions and the dedicated engine RNG with committed projections; clients derive weather mappings from loaded records and receive elapsed days.",
+      "paths": [
+        "apps/openmw/mwworld/calendar.cpp",
+        "apps/openmw/mwworld/calendar.hpp",
+        "apps/openmw/mwworld/regionalweather.cpp",
+        "apps/openmw/mwworld/regionalweather.hpp",
+        "apps/openmw/mwworld/datetimemanager.cpp",
+        "apps/openmw/mwworld/datetimemanager.hpp",
+        "apps/openmw/mwworld/defaultglobals.hpp",
+        "apps/openmw/mwworld/globals.cpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests environment-clock",
+        "tes3mp_native_loadout_tests environment-weather",
+        "tes3mp_native_loadout_tests environment-durability",
+        "tes3mp_native_loadout_tests environment-application",
+        "tes3mp_native_loadout_tests environment-loadout",
+        "openmw RelWithDebInfo link",
+        "tes3mp_native_loadout_tests environment-host"
+      ],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent independent calendar and regional weather simulation services"
+    },
+    {
       "id": "M3-006",
       "slice": "stock stationary item placement",
       "owner": "OpenMW server runtime and desktop adapter",
@@ -487,7 +514,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the committed calendar/time-scale and optional engine elapsed days directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe. Native v12 derives regional/weather identities from loaded records and uses shared engine selection/transition helpers for stock single-player.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",

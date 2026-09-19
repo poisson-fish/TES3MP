@@ -29,6 +29,7 @@ add_library(tes3mp_server_app STATIC
     inventory_interest_projection.hpp
     inventory_interest_projection.cpp
     native_inventory_service.hpp
+    native_environment_service.hpp
     inventory_command_binding.hpp
     inventory_command_binding.cpp
     inventory_content.hpp

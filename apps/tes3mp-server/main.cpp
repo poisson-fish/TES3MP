@@ -508,35 +508,6 @@ int main(int argc, char** argv)
         }
         combatContent->world = std::move(*restored);
     }
-    if (const auto* restoredWorld = persistenceFile->restoredWorld())
-    {
-        if (!restoredWorld->questJournalCatalog() || !restoredWorld->factionDialogueCatalog()
-            || !restoredWorld->weatherCatalog() || !restoredWorld->weather()
-            || *restoredWorld->questJournalCatalog() != worldContent.questJournal
-            || *restoredWorld->factionDialogueCatalog() != worldContent.factionDialogue
-            || *restoredWorld->weatherCatalog() != worldContent.weather)
-        {
-            std::cerr << "persisted quest/journal catalog validation failed\n";
-            return 2;
-        }
-        auto restored = TES3MP::restoreCanonicalWorldState(worldContent.globals, worldContent.questJournal,
-            worldContent.factionDialogue, worldContent.weather, restoredWorld->time(), restoredWorld->globals(),
-            *restoredWorld->questJournalCatalog(), *restoredWorld->factionDialogueCatalog(),
-            *restoredWorld->weatherCatalog(), restoredWorld->questJournal(), restoredWorld->factionStates(),
-            *restoredWorld->weather());
-        auto* world = std::get_if<TES3MP::CanonicalWorldState>(&restored);
-        if (!world)
-        {
-            std::cerr << "persisted world catalog validation failed\n";
-            return 2;
-        }
-        worldContent.world = std::move(*world);
-    }
-    else if (persistenceFile->prefix().latest())
-    {
-        std::cerr << "persisted time/global/quest/journal/faction/weather domain is missing\n";
-        return 2;
-    }
     std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(
         identityFile->records().begin(), identityFile->records().end());
     if (restoredState)
@@ -570,6 +541,7 @@ int main(int argc, char** argv)
         return 3;
     }
     TES3MP::ServerApp::NativeInventoryService* nativeInventory = nullptr;
+    TES3MP::ServerApp::NativeEnvironmentService* nativeEnvironment = nullptr;
     const auto nativeImage = persistenceFile->prefix().latest()
         ? persistenceFile->prefix().latest()->nativeInventory() : std::span<const std::byte>{};
     if (!nativeImage.empty() && config.nativeInventoryFile.empty())
@@ -591,6 +563,13 @@ int main(int argc, char** argv)
             nativeHost = std::make_unique<TES3MP::Native::InventoryHost>(config.nativeInventoryFile,
                 config.contentManifest, *playerIdentities, *crypto, nativeImage);
             nativeInventory = &nativeHost->service();
+            nativeEnvironment = nativeHost->environment();
+            if (nativeEnvironment)
+            {
+                if (scriptContent) throw std::invalid_argument("Native environment cannot run legacy script modules");
+                worldContent.world = nativeEnvironment->initialize(worldContent.world);
+                worldContent.weather = *worldContent.world.weatherCatalog();
+            }
         }
         catch (const std::exception& error)
         {
@@ -605,6 +584,46 @@ int main(int argc, char** argv)
         return 2;
     }
 #endif
+    if (const auto* restoredWorld = persistenceFile->restoredWorld())
+    {
+        if (!restoredWorld->questJournalCatalog() || !restoredWorld->factionDialogueCatalog()
+            || !restoredWorld->weatherCatalog() || !restoredWorld->weather()
+            || *restoredWorld->questJournalCatalog() != worldContent.questJournal
+            || *restoredWorld->factionDialogueCatalog() != worldContent.factionDialogue
+            || *restoredWorld->weatherCatalog() != worldContent.weather)
+        {
+            std::cerr << "persisted quest/journal catalog validation failed\n";
+            return 2;
+        }
+        auto restored = TES3MP::restoreCanonicalWorldState(worldContent.globals, worldContent.questJournal,
+            worldContent.factionDialogue, worldContent.weather, restoredWorld->time(), restoredWorld->globals(),
+            *restoredWorld->questJournalCatalog(), *restoredWorld->factionDialogueCatalog(),
+            *restoredWorld->weatherCatalog(), restoredWorld->questJournal(), restoredWorld->factionStates(),
+            *restoredWorld->weather());
+        auto* world = std::get_if<TES3MP::CanonicalWorldState>(&restored);
+        if (!world)
+        {
+            std::cerr << "persisted world catalog validation failed\n";
+            return 2;
+        }
+        worldContent.world = std::move(*world);
+    }
+    else if (persistenceFile->prefix().latest())
+    {
+        std::cerr << "persisted time/global/quest/journal/faction/weather domain is missing\n";
+        return 2;
+    }
+    try
+    {
+        if (nativeEnvironment) nativeEnvironment->validate(worldContent.world);
+        else if (worldContent.world.weather() && !worldContent.world.weather()->nativeEnvironment.empty())
+            throw std::invalid_argument("Persisted native environment requires its configured engine service");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "native environment recovery failed: " << error.what() << '\n';
+        return 2;
+    }
     auto queues = TES3MP::OutboundQueueSet::create(
         TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
@@ -643,8 +662,17 @@ int main(int argc, char** argv)
     {
         requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
         if (nativeInventory->requiresDoorTraversal()) requiredCapabilities.push_back(TES3MP::nativeTeleportCapability());
+        if (nativeEnvironment)
+        {
+            requiredCapabilities.push_back(TES3MP::weatherReplicationCapability());
+            requiredCapabilities.push_back(TES3MP::worldTimeReplicationCapability());
+            requiredCapabilities.push_back(TES3MP::nativeEnvironmentCapability());
+            std::erase(optionalCapabilities, TES3MP::weatherReplicationCapability());
+            std::erase(optionalCapabilities, TES3MP::worldTimeReplicationCapability());
+        }
         std::erase(optionalCapabilities, TES3MP::inventoryReplicationCapability());
     }
+    std::ranges::sort(requiredCapabilities);
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,
         requiredCapabilities, config.contentManifest.id());
     std::vector<TES3MP::Transform> spawns;
@@ -723,7 +751,7 @@ int main(int argc, char** argv)
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
             combatContent ? &combatContent->securitySettings : nullptr, &scripts, &worldContent.globals,
-            &worldContent.world, &*scriptStateCatalog, &*scriptState, nativeInventory });
+            &worldContent.world, &*scriptStateCatalog, &*scriptState, nativeInventory, nativeEnvironment });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

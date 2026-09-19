@@ -33,6 +33,7 @@ namespace TES3MP
     inline constexpr std::uint32_t AuthoritativeTimedAreaMagicCapabilityValue = 13;
     inline constexpr std::uint32_t NativeDoorCapabilityValue = 14;
     inline constexpr std::uint32_t NativeTeleportCapabilityValue = 15;
+    inline constexpr std::uint32_t NativeEnvironmentCapabilityValue = 16;
 
     class CapabilityId
     {
@@ -84,6 +85,11 @@ namespace TES3MP
     inline constexpr CapabilityId nativeTeleportCapability() noexcept
     {
         return *CapabilityId::fromValue(NativeTeleportCapabilityValue);
+    }
+
+    inline constexpr CapabilityId nativeEnvironmentCapability() noexcept
+    {
+        return *CapabilityId::fromValue(NativeEnvironmentCapabilityValue);
     }
 
     inline constexpr CapabilityId combatReplicationCapability() noexcept

@@ -82,7 +82,7 @@ add_openmw_dir (mwworld
     actionequip timestamp actionalchemy cellstore actionapply actioneat
     store esmstore fallback actionrepair actionsoulgem livecellref actiondoor
     contentloader esmloader actiontrap cellreflist cellref weather projectilemanager
-    cellpreloader datetimemanager groundcoverstore magiceffects cell ptrregistry
+    cellpreloader datetimemanager calendar regionalweather groundcoverstore magiceffects cell ptrregistry
     positioncellgrid
     )
 

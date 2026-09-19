@@ -1,6 +1,7 @@
 #ifndef TES3MP_NATIVE_INVENTORY_HOST_HPP
 #define TES3MP_NATIVE_INVENTORY_HOST_HPP
 #include "../native_inventory_service.hpp"
+#include "../native_environment_service.hpp"
 #include <tes3mp/player_identity.hpp>
 #include <filesystem>
 
@@ -16,6 +17,22 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V13 uses native-inventory-13 with V12 fields and a fresh campaign. Either
+    // interior selector may instead be `exterior X Y`, with the matching wire
+    // `cell exterior:WORLDSPACE_ID:X:Y`. TES3 coordinates are bounded to
+    // [-32768,32767]. OpenMW resolves winning/moved references and teleport
+    // destinations; terrain queries reuse ESMTerrain vertices and stock triangles.
+    // Two occupied cells pin their scenes; empty cells release scene/terrain
+    // resources without reloading loot. The existing campaign-wide reference
+    // budgets, selected ordinary door and door-only traversal still apply.
+    // Drops crossing a bound exterior edge reject before mutation. This is not
+    // adjacent-cell streaming or an automatically discovered world bootstrap.
+    // V12 uses native-inventory-12 with V11 fields and a new campaign. OpenMW
+    // globals initialize shared time; winning REGN records and imported weather
+    // fallbacks initialize regional weather. One coherent world transaction saves
+    // clock, selection timer, queued transitions and a dedicated OpenMW RNG stream.
+    // All loaded regions advance at 30 Hz, including empty/interior-only sessions.
+    // Legacy world-file time/weather fields no longer drive this domain.
     // V10 uses native-inventory-10, the V9 fields, then appends:
     // interior "SECOND_INTERIOR_NAME"
     // cell interior:SECOND_SPACE_ID
@@ -85,6 +102,7 @@ namespace TES3MP::Native
             const PlayerIdentityRegistry& players, CredentialCrypto& crypto, std::span<const std::byte> restored);
         ~InventoryHost();
         ServerApp::NativeInventoryService& service() noexcept;
+        ServerApp::NativeEnvironmentService* environment() noexcept;
     };
 }
 #endif

@@ -13,35 +13,43 @@
 
 namespace TES3MP::Native
 {
-    std::vector<Loadout::PlacedDoor> Loadout::teleportDoors(std::string_view cell, std::string_view destination)
+    std::vector<Loadout::PlacedDoor> Loadout::teleportDoors(ESM::RefId cell, ESM::RefId destination)
     {
-        if (cell.empty() || destination.empty() || cell.size() > 256 || destination.size() > 256
-            || cell.find('\0') != std::string_view::npos || destination.find('\0') != std::string_view::npos
-            || !mStore.getLuaScriptsCfg().mScripts.empty())
+        validateCell(cell);
+        validateCell(destination);
+        if (!mStore.getLuaScriptsCfg().mScripts.empty())
             throw std::invalid_argument("Native teleport cell bounds or Lua services invalid");
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
-        const auto destinationId = world.getInterior(destination).getCell()->getId();
-        auto& loaded = world.getInterior(cell);
+        const auto destinationId = world.getCell(destination).getCell()->getId();
+        auto& loaded = world.getCell(cell);
         if (loaded.getCell()->getId() == destinationId)
-            throw std::invalid_argument("Native teleport requires two distinct interiors");
+            throw std::invalid_argument("Native teleport requires two distinct cells");
         std::vector<PlacedDoor> result;
         loaded.forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
             const auto& ref = ptr.getCellRef();
-            if (!ref.getTeleport() || ref.getDestCell().empty() || ref.isLocked() || !ref.getTrap().empty()
+            if (!ref.getTeleport() || ref.isLocked() || !ref.getTrap().empty()
                 || !ptr.get<ESM::Door>()->mBase->mScript.empty()) return true;
+            ESM::DoorState state;
+            ref.writeState(state);
+            const auto& dest = state.mRef.mDoorDest;
+            for (float value : dest.pos)
+                if (!std::isfinite(value) || std::abs(double(value)) >= double(INT64_MAX) / 1024)
+                    throw std::invalid_argument("Native teleport destination outside wire bounds");
+            if (state.mRef.mDestCell.empty())
+                for (int i = 0; i < 2; ++i)
+                    if (double(dest.pos[i]) < -32768.0 * 8192 || double(dest.pos[i]) >= 32768.0 * 8192)
+                        throw std::invalid_argument("Native teleport exterior destination outside bounds");
             // The engine resolves case/overrides and validates the destination;
-            // exterior and unrelated doors never enter this bounded domain.
+            // unrelated doors never enter this bounded domain.
             if (ref.getDestCell() != destinationId) return true;
-            if (world.getInterior(ref.getDestCell().getRefIdString()).getCell()->getId() != destinationId)
+            if (world.getCell(ref.getDestCell()).getCell()->getId() != destinationId)
                 throw std::invalid_argument("Native teleport destination resolution changed");
             const auto refNum = ref.getRefNum();
             const auto id = MWWorld::placedRefId(refNum, mOptions.mContent);
             if (!id || result.size() == 32)
                 throw std::invalid_argument("Native teleport identity or count outside bounds");
-            ESM::DoorState state;
-            ref.writeState(state);
             if (state.mRef.mCount != 1 || state.mRef.mReferenceBlocked > 0)
                 throw std::invalid_argument("Unsupported native teleport placement");
             for (const auto& position : {state.mRef.mPos, state.mRef.mDoorDest})
@@ -56,10 +64,10 @@ namespace TES3MP::Native
         return result;
     }
 
-    Loadout::PlacedDoor Loadout::resolveDoor(std::string_view cell, std::string_view plugin, uint32_t index)
+    Loadout::PlacedDoor Loadout::resolveDoor(ESM::RefId cell, std::string_view plugin, uint32_t index)
     {
-        if (cell.empty() || cell.size() > 256 || cell.find('\0') != std::string_view::npos
-            || plugin.empty() || plugin.size() > 256 || plugin.find('\0') != std::string_view::npos)
+        validateCell(cell);
+        if (plugin.empty() || plugin.size() > 256 || plugin.find('\0') != std::string_view::npos)
             throw std::invalid_argument("Native door selection outside bounds");
         // Global or attached Lua could mutate a door even without an MWScript.
         // No Lua services are composed for this preparation-only slice.
@@ -67,7 +75,7 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native door Lua services unavailable");
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
-        auto& loaded = world.getInterior(cell);
+        auto& loaded = world.getCell(cell);
         std::optional<PlacedDoor> result;
         loaded.forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;

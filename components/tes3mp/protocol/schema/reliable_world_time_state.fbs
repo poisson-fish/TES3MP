@@ -15,6 +15,7 @@ table ReliableWorldTimeState {
   last_change_tick:ulong (id: 11);
   last_advance_tick:ulong (id: 12);
   complete_baseline:bool (id: 13);
+  days_passed:uint = null (id: 14);
 }
 
 root_type ReliableWorldTimeState;

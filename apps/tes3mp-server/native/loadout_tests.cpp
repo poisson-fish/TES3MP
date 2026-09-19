@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "environment_tests.hpp"
 #include "door_tests.hpp"
 #include "equipment_tests.hpp"
 #include "inventory_service_tests.hpp"
@@ -6224,6 +6225,17 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "environment-clock" || filter == "environment-weather" || filter == "environment-durability")
+        {
+            TES3MP::Native::Testing::checkEnvironment(root, filter);
+            return;
+        }
+        if (filter == "environment-application")
+        {
+            TES3MP::Native::Testing::checkInventoryApplication(root, true);
+            return;
+        }
+
         if (filter == "teleport-traversal")
         {
             TES3MP::Native::Testing::checkTeleportTraversal(root);
@@ -6252,6 +6264,11 @@ namespace
         if (filter == "item-placement")
         {
             TES3MP::Native::Testing::checkItemPlacement();
+            return;
+        }
+        if (filter == "exterior-references")
+        {
+            TES3MP::Native::Testing::checkExteriorReferences(root);
             return;
         }
         if (filter == "placed-items")
@@ -6502,6 +6519,26 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 4 && std::string_view(argv[1]) == "exterior-host")
+        {
+            TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])), true, true, true, true, true, true, true, true, true, true);
+            std::cout << "PASS exterior-host\n";
+            return 0;
+        }
+        if (argc == 4 && std::string_view(argv[1]) == "environment-host")
+        {
+            TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),
+                std::filesystem::absolute(std::filesystem::u8path(argv[3])), true, true, true, true, true, true, true, true, true);
+            std::cout << "PASS environment-host\n";
+            return 0;
+        }
+        if (argc == 3 && std::string_view(argv[1]) == "environment-loadout")
+        {
+            TES3MP::Native::Testing::checkEnvironmentLoadout(std::filesystem::absolute(std::filesystem::u8path(argv[2])));
+            std::cout << "PASS environment-loadout\n";
+            return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "ordinary-door-loadout")
         {
             TES3MP::Native::Testing::checkDoorLoadout(std::filesystem::absolute(std::filesystem::u8path(argv[2])), argv[3]);

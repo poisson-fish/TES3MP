@@ -37,7 +37,8 @@ struct ReliableWorldTimeState FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
     VT_WORLD_TIME_REVISION = 24,
     VT_LAST_CHANGE_TICK = 26,
     VT_LAST_ADVANCE_TICK = 28,
-    VT_COMPLETE_BASELINE = 30
+    VT_COMPLETE_BASELINE = 30,
+    VT_DAYS_PASSED = 32
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -81,6 +82,9 @@ struct ReliableWorldTimeState FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
   bool complete_baseline() const {
     return GetField<uint8_t>(VT_COMPLETE_BASELINE, 0) != 0;
   }
+  ::flatbuffers::Optional<uint32_t> days_passed() const {
+    return GetOptional<uint32_t, uint32_t>(VT_DAYS_PASSED);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -98,6 +102,7 @@ struct ReliableWorldTimeState FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
            VerifyField<uint64_t>(verifier, VT_LAST_CHANGE_TICK, 8) &&
            VerifyField<uint64_t>(verifier, VT_LAST_ADVANCE_TICK, 8) &&
            VerifyField<uint8_t>(verifier, VT_COMPLETE_BASELINE, 1) &&
+           VerifyField<uint32_t>(verifier, VT_DAYS_PASSED, 4) &&
            verifier.EndTable();
   }
 };
@@ -148,6 +153,9 @@ struct ReliableWorldTimeStateBuilder {
   void add_complete_baseline(bool complete_baseline) {
     fbb_.AddElement<uint8_t>(ReliableWorldTimeState::VT_COMPLETE_BASELINE, static_cast<uint8_t>(complete_baseline), 0);
   }
+  void add_days_passed(uint32_t days_passed) {
+    fbb_.AddElement<uint32_t>(ReliableWorldTimeState::VT_DAYS_PASSED, days_passed);
+  }
   explicit ReliableWorldTimeStateBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -174,7 +182,8 @@ inline ::flatbuffers::Offset<ReliableWorldTimeState> CreateReliableWorldTimeStat
     uint64_t world_time_revision = 0,
     uint64_t last_change_tick = 0,
     uint64_t last_advance_tick = 0,
-    bool complete_baseline = false) {
+    bool complete_baseline = false,
+    ::flatbuffers::Optional<uint32_t> days_passed = ::flatbuffers::nullopt) {
   ReliableWorldTimeStateBuilder builder_(_fbb);
   builder_.add_last_advance_tick(last_advance_tick);
   builder_.add_last_change_tick(last_change_tick);
@@ -183,6 +192,7 @@ inline ::flatbuffers::Offset<ReliableWorldTimeState> CreateReliableWorldTimeStat
   builder_.add_server_tick(server_tick);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
+  if(days_passed) { builder_.add_days_passed(*days_passed); }
   builder_.add_time_scale_units(time_scale_units);
   builder_.add_milliseconds_since_midnight(milliseconds_since_midnight);
   builder_.add_year(year);

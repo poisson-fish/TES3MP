@@ -2,6 +2,7 @@
 #include "loadout.hpp"
 #include "inventory_service.hpp"
 #include "../canonical_persistence_file.hpp"
+#include "../native_environment_service.hpp"
 #include <apps/openmw/mwworld/placedrefid.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
@@ -15,10 +16,11 @@
 #include <components/esm3/loadrace.hpp>
 #include <fstream>
 #include <stdexcept>
+#include <limits>
 
 namespace TES3MP::ServerApp::Testing
 {
-    void nativeInventoryApplication(NativeInventoryService&, CanonicalPersistenceFile&);
+    void nativeInventoryApplication(NativeInventoryService&, CanonicalPersistenceFile&, NativeEnvironmentService* = nullptr);
 }
 
 namespace TES3MP::Native::Testing
@@ -30,7 +32,7 @@ namespace TES3MP::Native::Testing
         {
             out.startRecord(T::sRecordId, 0); value.save(out); out.endRecord(T::sRecordId);
         }
-        void plugin(const std::filesystem::path& path, bool patch)
+        void plugin(const std::filesystem::path& path, bool patch, bool invalidTeleport = false)
         {
             std::ofstream stream(path, std::ios::binary);
             ESM::ESMWriter out;
@@ -56,6 +58,7 @@ namespace TES3MP::Native::Testing
                 shirt.mData.mType = ESM::Clothing::Shirt; write(out, shirt);
                 shirt.mId = ESM::RefId::stringRefId("scripted_item"); shirt.mScript = script.mId; write(out, shirt);
                 ESM::Light fixed; fixed.blank(); fixed.mId = ESM::RefId::stringRefId("fixed_light"); write(out, fixed);
+                ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("door"); write(out, door);
                 ESM::ItemLevList items; items.blank(); items.mId = ESM::RefId::stringRefId("leveled_item"); write(out, items);
             }
             ESM::Cell cell; cell.blank(); cell.mName = "Placed test"; cell.mData.mFlags = ESM::Cell::Interior;
@@ -111,8 +114,77 @@ namespace TES3MP::Native::Testing
                 }
                 out.endRecord(ESM::REC_CELL);
             }
+            cell.mName = "Exterior references"; cell.mData.mFlags = 0;
+            cell.mData.mX = -2; cell.mData.mY = -3; cell.updateId();
+            out.startRecord(ESM::REC_CELL, 0); cell.save(out);
+            for (uint32_t i = 301; i <= 308; ++i)
+            {
+                ESM::CellRef ref; ref.blank(); ref.mRefNum = {i, patch ? 1 : 0};
+                ref.mRefID = ESM::RefId::stringRefId(i < 305 ? "chest" : i == 305 ? "actor" : i == 306 ? "shirt" : "door");
+                ref.mPos.pos[0] = -16384 + (patch ? 64.f : 32.f); ref.mPos.pos[1] = -24576 + 64.f;
+                if (i == 308)
+                {
+                    ref.mTeleport = true; ref.mDestCell = "sHaReD tEsT";
+                    if (invalidTeleport)
+                    {
+                        ref.mDestCell.clear(); ref.mDoorDest.pos[0] = std::numeric_limits<float>::infinity();
+                    }
+                }
+                if (patch && i == 304)
+                {
+                    out.writeHNT("MVRF", uint32_t(0x01000000 | i));
+                    const int32_t target[2]{-1, -3}; out.writeHNT("CNDT", target);
+                    ref.mPos.pos[0] += 8192;
+                }
+                ref.save(out, false, false, patch && i == 303);
+            }
+            out.endRecord(ESM::REC_CELL);
+            cell.mData.mX = -1; cell.updateId();
+            out.startRecord(ESM::REC_CELL, 0); cell.save(out); out.endRecord(ESM::REC_CELL);
             out.close();
         }
+    }
+
+    void checkExteriorReferences(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Exterior reference scratch already exists");
+        plugin(scratch / "Base.esm", false); plugin(scratch / "Patch.esp", true);
+        { std::ofstream out(scratch / "empty.omwscripts"); out << "# no scripts\n"; }
+        LoadoutOptions options; options.mDataPaths = {scratch};
+        options.mContent = {"Base.esm", "empty.omwscripts", "Patch.esp"}; options.mEncoding = "win1252";
+        Loadout loadout(options);
+        const auto source = ESM::RefId::esm3ExteriorCell(-2, -3), target = ESM::RefId::esm3ExteriorCell(-1, -3);
+        const auto containers = loadout.resolveContainers(source, 32);
+        const auto moved = loadout.resolveContainers(target, 32);
+        require(containers.size() == 2 && containers[0].mRef.mRefNum == ESM::RefNum{301, 0}
+            && containers[1].mRef.mRefNum == ESM::RefNum{302, 0} && containers[0].mRef.mPos.pos[0] == -16320
+            && moved.size() == 1 && moved[0].mRef.mRefNum == ESM::RefNum{304, 0}
+            && moved[0].mRef.mPos.pos[0] == -8128, "Exterior override/deletion/moved-reference resolution failed");
+        require(loadout.resolveActors(source, 32).size() == 1 && loadout.placedItems(source, 64).size() == 1,
+            "Exterior actor or item reference discovery failed");
+        const auto ordinary = loadout.resolveDoor(source, "BASE.ESM", 307);
+        const auto teleports = loadout.teleportDoors(source, interiorCell("Shared test"));
+        require(ordinary.mRef.mRefNum == ESM::RefNum{307, 0} && teleports.size() == 1
+            && teleports[0].mRef.mRefNum == ESM::RefNum{308, 0}
+            && loadout.teleportDoors(source, target).empty(), "Exterior ordinary/teleport door resolution failed");
+        const std::vector<std::string> desktop{"builtin.omwscripts", "Base.esm", "empty.omwscripts", "Patch.esp"};
+        require(MWWorld::localPlacedRef(moved[0].mIdentity, desktop) == ESM::RefNum{304, 1},
+            "Exterior reference identity changed with script reader slots");
+        for (auto invalid : {ESM::RefId{}, ESM::RefId::generated(1), ESM::RefId::esm3ExteriorCell(INT32_MAX, 0)})
+        {
+            bool rejected = false;
+            try { loadout.placedContainers(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "Unbounded or invalid native cell accepted");
+        }
+        bool rejected = false;
+        try { loadout.resolveContainers(source, 1); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected && loadout.resolveContainers(source, 32).size() == 2,
+            "Exterior over-budget discovery mutated the next result");
+        plugin(scratch / "Bad.esp", true, true); options.mContent.push_back("Bad.esp");
+        Loadout bad(options);
+        rejected = false;
+        try { bad.teleportDoors(source, target); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "Nonfinite exterior destination reached engine coordinate conversion");
     }
 
     void checkPlacedItems(const std::filesystem::path& scratch)

@@ -1,3 +1,4 @@
+#include "../mwworld/regionalweather.hpp"
 #include "desktop_providers.hpp"
 #include "movement_mapping.hpp"
 
@@ -1469,7 +1470,7 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult applyWeather(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick)
         {
-            if (!mapping || mapping->weatherRegions.size() != regions.size())
+            if (!mapping || regions.empty())
                 return ProviderResult::ContentMappingFailed;
             struct Mapped
             {
@@ -1485,17 +1486,39 @@ namespace TES3MP::OpenMWAdapter
             auto store = MWBase::Environment::get().getESMStore();
             if (!world)
                 return ProviderResult::PresentationFailed;
+            std::vector<DesktopWeatherRegionMapping> nativeRegions;
+            std::vector<DesktopWeatherMapping> nativeWeather;
+            const bool native = (regions.front().region.value() & 0xc000000000000000ull) == 0xc000000000000000ull;
+            if (native)
+            {
+                for (const auto& region : store->get<ESM::Region>())
+                {
+                    if (nativeRegions.size() == MaximumWeatherRegions) return ProviderResult::ContentMappingFailed;
+                    nativeRegions.push_back({*WeatherRegionId::fromValue(MWWorld::environmentRecordId(region.mId)),
+                        std::string(region.mId.getRefIdString())});
+                }
+                for (const auto name : MWWorld::WeatherNames)
+                    nativeWeather.push_back({*WeatherId::fromValue(MWWorld::environmentRecordId(ESM::RefId::stringRefId(name))),
+                        std::string(name)});
+                std::ranges::sort(nativeRegions, {}, &DesktopWeatherRegionMapping::id);
+                std::ranges::sort(nativeWeather, {}, &DesktopWeatherMapping::id);
+                for (size_t i = 1; i < nativeRegions.size(); ++i)
+                    if (nativeRegions[i - 1].id == nativeRegions[i].id) return ProviderResult::ContentMappingFailed;
+            }
+            const auto& regionMappings = native ? nativeRegions : mapping->weatherRegions;
+            const auto& weatherMappings = native ? nativeWeather : mapping->weather;
+            if (regionMappings.size() != regions.size()) return ProviderResult::ContentMappingFailed;
             for (const auto& state : regions)
             {
                 const auto region = std::ranges::lower_bound(
-                    mapping->weatherRegions, state.region, {}, &DesktopWeatherRegionMapping::id);
+                    regionMappings, state.region, {}, &DesktopWeatherRegionMapping::id);
                 const auto current
-                    = std::ranges::lower_bound(mapping->weather, state.currentWeather, {}, &DesktopWeatherMapping::id);
+                    = std::ranges::lower_bound(weatherMappings, state.currentWeather, {}, &DesktopWeatherMapping::id);
                 const auto target
-                    = std::ranges::lower_bound(mapping->weather, state.targetWeather, {}, &DesktopWeatherMapping::id);
-                if (region == mapping->weatherRegions.end() || region->id != state.region
-                    || current == mapping->weather.end() || current->id != state.currentWeather
-                    || target == mapping->weather.end() || target->id != state.targetWeather)
+                    = std::ranges::lower_bound(weatherMappings, state.targetWeather, {}, &DesktopWeatherMapping::id);
+                if (region == regionMappings.end() || region->id != state.region
+                    || current == weatherMappings.end() || current->id != state.currentWeather
+                    || target == weatherMappings.end() || target->id != state.targetWeather)
                     return ProviderResult::ContentMappingFailed;
                 const auto localRegion = refId(region->record);
                 const auto localCurrent = refId(current->record);
@@ -1539,7 +1562,7 @@ namespace TES3MP::OpenMWAdapter
             world->setWorldTimeAuthority(true);
             const auto& time = state.time;
             return world->applyAuthoritativeWorldTime(
-                       time.day, time.month, time.year, time.millisecondsSinceMidnight, time.timeScaleUnits)
+                       time.day, time.month, time.year, time.millisecondsSinceMidnight, time.timeScaleUnits, time.daysPassed)
                 ? ProviderResult::Accepted
                 : ProviderResult::PresentationFailed;
         }

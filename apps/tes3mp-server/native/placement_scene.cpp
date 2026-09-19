@@ -12,6 +12,8 @@
 #include <apps/openmw/mwrender/objects.hpp>
 #include <apps/openmw/mwrender/vismask.hpp>
 #include <components/files/hash.hpp>
+#include <components/esmterrain/storage.hpp>
+#include <components/terrain/buffercache.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/nifosg/nifloader.hpp>
@@ -23,12 +25,76 @@
 #include <cmath>
 #include <set>
 #include <sstream>
+#include <osg/Geometry>
 
 namespace TES3MP::Native
 {
+    namespace
+    {
+        // Adapt the retained ESM store to OpenMW's terrain conversion. No global
+        // World/renderer, terrain textures, or alternate height interpolation.
+        class TerrainStorage final : public ESMTerrain::Storage
+        {
+            const MWWorld::ESMStore& mStore;
+        public:
+            TerrainStorage(const MWWorld::ESMStore& store, const VFS::Manager& vfs)
+                : ESMTerrain::Storage(&vfs), mStore(store) {}
+            osg::ref_ptr<const ESMTerrain::LandObject> getLand(ESM::ExteriorCellLocation cell) override
+            {
+                const auto* land = mStore.get<ESM::Land>().search(cell.mX, cell.mY);
+                return land ? new ESMTerrain::LandObject(*land,
+                    ESM::Land::DATA_VHGT | ESM::Land::DATA_VNML | ESM::Land::DATA_VCLR) : nullptr;
+            }
+            const std::string* getLandTexture(uint16_t index, int plugin) override
+            { return mStore.get<ESM::LandTexture>().search(index, plugin); }
+            void getBounds(float& minX, float& maxX, float& minY, float& maxY, ESM::RefId) override
+            {
+                minX = maxX = minY = maxY = 0;
+                for (const auto& land : mStore.get<ESM::Land>())
+                {
+                    minX = std::min(minX, float(land.mX)); maxX = std::max(maxX, float(land.mX));
+                    minY = std::min(minY, float(land.mY)); maxY = std::max(maxY, float(land.mY));
+                }
+                ++maxX; ++maxY;
+            }
+        };
+
+        std::string addTerrain(osg::Group& scene, Loadout& loadout, const VFS::Manager& vfs,
+            const ESM::ESM3ExteriorCellRefId& cell)
+        {
+            TerrainStorage terrain(loadout.store(), vfs);
+            const auto worldspace = ESM::Cell::sDefaultWorldspaceId;
+            const osg::Vec2f center(cell.getX() + .5f, cell.getY() + .5f);
+            osg::ref_ptr<osg::Vec3Array> positions = new osg::Vec3Array, normals = new osg::Vec3Array;
+            osg::ref_ptr<osg::Vec4ubArray> colours = new osg::Vec4ubArray;
+            terrain.fillVertexBuffers(0, 1.f, center, worldspace, *positions, *normals, *colours);
+            std::string heights;
+            for (const auto& position : *positions)
+            {
+                if (!std::isfinite(position.z())) throw std::invalid_argument("Native terrain height is not finite");
+                const float height = position.z();
+                heights.append(reinterpret_cast<const char*>(&height), sizeof(height));
+            }
+            Terrain::BufferCache buffers;
+            osg::ref_ptr<osg::Geometry> mesh = new osg::Geometry;
+            mesh->setVertexArray(positions);
+            mesh->addPrimitiveSet(buffers.getIndexBuffer(terrain.getCellVertices(worldspace), 0));
+            osg::ref_ptr<SceneUtil::PositionAttitudeTransform> node = new SceneUtil::PositionAttitudeTransform;
+            node->setPosition({center.x() * terrain.getCellWorldSize(worldspace),
+                center.y() * terrain.getCellWorldSize(worldspace), 0});
+            node->setNodeMask(MWRender::Mask_Terrain);
+            node->addChild(mesh);
+            scene.addChild(node);
+            std::istringstream input(heights);
+            const auto digest = Files::getHash("native-terrain", input);
+            return "\nstock-terrain-1:" + std::to_string(cell.getX()) + ':' + std::to_string(cell.getY())
+                + ':' + std::to_string(digest[0]) + ':' + std::to_string(digest[1]) + '\n';
+        }
+    }
     struct PlacementScene::Impl
     {
         Loadout& mLoadout;
+        ESM::RefId mCell;
         VFS::Manager mVfs;
         Resource::ResourceSystem mResources;
         MWWorld::WorldModel mWorld;
@@ -49,10 +115,11 @@ namespace TES3MP::Native
             return result;
         }
 
-        Impl(Loadout& loadout, std::string_view cell, std::span<const ESM::CellRef> worldDomain)
-            : mLoadout(loadout), mResources(&mVfs, 0, &loadout.encoder()),
+        Impl(Loadout& loadout, ESM::RefId cell, std::span<const ESM::CellRef> worldDomain)
+            : mLoadout(loadout), mCell(cell), mResources(&mVfs, 0, &loadout.encoder()),
               mWorld(loadout.store(), loadout.readers(), 1)
         {
+            validateCell(cell);
             MWClass::registerClasses();
             VFS::registerArchives(&mVfs, Files::Collections(loadout.options().mDataPaths),
                 loadout.options().mArchives, true, &loadout.encoder());
@@ -75,7 +142,7 @@ namespace TES3MP::Native
                 remember(item.getPtr());
             }
             size_t count = 0;
-            mWorld.getInterior(cell).forEach([&](const MWWorld::Ptr& ptr) {
+            mWorld.getCell(cell).forEach([&](const MWWorld::Ptr& ptr) {
                 if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()
                     || ptr.getClass().isActor() || suppressed.contains(ptr.getCellRef().getRefNum())
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
@@ -103,6 +170,8 @@ namespace TES3MP::Native
                 fingerprint << '\n';
             }
             mFingerprint = fingerprint.str();
+            if (const auto* exterior = cell.getIf<ESM::ESM3ExteriorCellRefId>())
+                mFingerprint += addTerrain(*mStatic, loadout, mVfs, *exterior);
         }
 
         ESM::Position resolve(const ESM::Position& actor, const MWWorld::Ptr& item,
@@ -161,10 +230,16 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Resolved placement outside world bounds");
                 value = float(double(std::llround(double(value) * 1024)) / 1024);
             }
+            // Until adjacent-cell streaming owns membership, an exterior drop
+            // cannot create a reference in a different cell's coordinate range.
+            if (const auto* exterior = mCell.getIf<ESM::ESM3ExteriorCellRefId>())
+                if (std::floor(double(position.pos[0]) / ESM::Cell::sSize) != exterior->getX()
+                    || std::floor(double(position.pos[1]) / ESM::Cell::sSize) != exterior->getY())
+                    throw std::invalid_argument("Native exterior drop crosses the bound cell");
             return position;
         }
     };
-    PlacementScene::PlacementScene(Loadout& loadout, std::string_view cell, std::span<const ESM::CellRef> worldDomain)
+    PlacementScene::PlacementScene(Loadout& loadout, ESM::RefId cell, std::span<const ESM::CellRef> worldDomain)
         : mImpl(std::make_unique<Impl>(loadout, cell, worldDomain)) {}
     PlacementScene::~PlacementScene() = default;
     const std::string& PlacementScene::fingerprint() const { return mImpl->mFingerprint; }

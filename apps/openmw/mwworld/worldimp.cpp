@@ -100,6 +100,7 @@
 #include "cellstore.hpp"
 #include "containerstore.hpp"
 #include "datetimemanager.hpp"
+#include "defaultglobals.hpp"
 #include "inventorystore.hpp"
 #include "manualref.hpp"
 #include "player.hpp"
@@ -111,29 +112,6 @@
 
 namespace MWWorld
 {
-    namespace
-    {
-        std::vector<std::pair<GlobalVariableName, ESM::Variant>> generateDefaultGlobals()
-        {
-            return {
-                // vanilla Morrowind does not define dayspassed.
-                { Globals::sDaysPassed, ESM::Variant(1) }, // but the addons start counting at 1 :(
-                { Globals::sWerewolfClawMult, ESM::Variant(25.f) },
-                { Globals::sPCKnownWerewolf, ESM::Variant(0) },
-                // following should exist in all versions of MW, but not necessarily in TCs
-                { Globals::sGameHour, ESM::Variant(0) },
-                { Globals::sTimeScale, ESM::Variant(30.f) },
-                { Globals::sDay, ESM::Variant(1) },
-                { Globals::sYear, ESM::Variant(1) },
-                { Globals::sPCRace, ESM::Variant(0) },
-                { Globals::sPCHasCrimeGold, ESM::Variant(0) },
-                { Globals::sCrimeGoldDiscount, ESM::Variant(0) },
-                { Globals::sCrimeGoldTurnIn, ESM::Variant(0) },
-                { Globals::sPCHasTurnIn, ESM::Variant(0) },
-            };
-        }
-    }
-
     struct GameContentLoader : public ContentLoader
     {
         void addLoader(std::string&& extension, ContentLoader& loader)
@@ -1854,13 +1832,15 @@ namespace MWWorld
     }
 
     bool World::applyAuthoritativeWorldTime(
-        int day, int month, int year, std::uint32_t millisecondsSinceMidnight, std::uint32_t timeScaleUnits)
+        int day, int month, int year, std::uint32_t millisecondsSinceMidnight, std::uint32_t timeScaleUnits, std::optional<std::uint32_t> daysPassed)
     {
-        if (day < 1 || day > 30 || month < 0 || month >= 12 || millisecondsSinceMidnight >= 86'400'000
+        if (day < 1 || day > 31 || month < 0 || month >= 12 || millisecondsSinceMidnight >= 86'400'000
             || timeScaleUnits > 1'000'000)
             return false;
-        const float hour = static_cast<float>(millisecondsSinceMidnight) / 3'600'000.f;
-        const auto totalDays = static_cast<std::int64_t>(year) * 360 + month * 30 + (day - 1);
+        const float hour = static_cast<float>(std::min(static_cast<double>(millisecondsSinceMidnight) / 3'600'000.0,
+            static_cast<double>(std::nextafter(24.f, 0.f))));
+        const auto totalDays = daysPassed ? static_cast<std::int64_t>(*daysPassed)
+            : static_cast<std::int64_t>(year) * 360 + month * 30 + (day - 1);
         if (totalDays < std::numeric_limits<int>::min() || totalDays > std::numeric_limits<int>::max())
             return false;
         mTimeManager->mDay = day;

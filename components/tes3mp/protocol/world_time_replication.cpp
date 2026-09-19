@@ -45,7 +45,7 @@ namespace TES3MP
             input.targetSessionGeneration.value(), input.serverTick.value(), input.canonicalRevision.value(),
             time.day, time.month, time.year, time.millisecondsSinceMidnight, time.timeScaleUnits,
             time.subMillisecondRemainder, time.revision.value(), time.lastChangeTick.value(),
-            time.lastAdvanceTick.value(), input.completeBaseline);
+            time.lastAdvanceTick.value(), input.completeBaseline, time.daysPassed);
         Schema::FinishSizePrefixedReliableWorldTimeStateBuffer(builder, root);
         const auto* begin = reinterpret_cast<const std::byte*>(builder.GetBufferPointer());
         return { begin, begin + builder.GetSize() };
@@ -86,12 +86,13 @@ namespace TES3MP
                 return *failure;
         CanonicalWorldTimeState time{ root->day(), root->month(), root->year(), root->milliseconds_since_midnight(),
             root->time_scale_units(), root->sub_millisecond_remainder(), *value(revision), *value(lastChange),
-            *value(lastAdvance) };
-        if (time.day < 1 || time.day > 30 || time.month >= 12
+            *value(lastAdvance), root->days_passed() };
+        if (time.day < 1 || time.day > 31 || time.month >= 12
             || time.millisecondsSinceMidnight >= WorldMillisecondsPerDay
             || time.timeScaleUnits > MaximumWorldTimeScaleUnits
             || time.subMillisecondRemainder >= WorldTimeScaleUnitsPerOne
-            || time.lastChangeTick > time.lastAdvanceTick)
+            || time.lastChangeTick > time.lastAdvanceTick
+            || (time.daysPassed && *time.daysPassed > 100000000))
             return error(Code::InvalidWorldTime);
         return ReliableWorldTimeState{ *value(session), *value(generation), *value(tick), *value(canonicalRevision),
             time, root->complete_baseline() };
