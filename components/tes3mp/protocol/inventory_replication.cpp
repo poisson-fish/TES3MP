@@ -1,4 +1,5 @@
 #include <cmath>
+#include <stdexcept>
 #include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_frame.hpp>
 
@@ -11,6 +12,7 @@
 #include <flatbuffers/flatbuffers.h>
 
 #include <algorithm>
+#include <set>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -301,7 +303,7 @@ namespace TES3MP
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
         InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
         std::span<const uint64_t> nativePlacements, std::span<const GroundItemPresentation> presentation, bool nativeWorld,
-        std::optional<NativeDoorSnapshot> door, std::span<const uint64_t> teleportDoors)
+        std::optional<NativeDoorSnapshot> door, std::span<const uint64_t> teleportDoors, std::span<const NativeDoorSnapshot> doors, std::span<const ReliableGroundItemBaseline> neighbors, std::span<const NativeActorSpawn> actorSpawns)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
@@ -315,7 +317,7 @@ namespace TES3MP
                 return error(Code::EntriesNotStrictlySorted, items[index].stack.stackId.value(),
                     items[index - 1].stack.stackId.value(), index);
         }
-        if (nativePlacements.size() > 64 || presentation.size() > 64
+        if (nativePlacements.size() > MaximumGroundItemBaselineChunkItems || presentation.size() > MaximumGroundItemBaselineChunkItems
             || (nativeWorld && (header.chunkCount != 1 || presentation.size() != items.size()))
             || (!nativeWorld && (!nativePlacements.empty() || !presentation.empty())))
             return error(Code::InvalidCommandShape);
@@ -338,9 +340,69 @@ namespace TES3MP
                 || (door && door->placement == teleportDoors[i])
                 || std::ranges::find(nativePlacements, teleportDoors[i]) != nativePlacements.end())
                 return error(Code::InvalidCommandShape);
+        if (doors.size() > 128 || (!doors.empty() && (!nativeWorld || door))) return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < doors.size(); ++i)
+        {
+            const auto& value = doors[i];
+            if (!(value.placement >> 63) || !value.motion || !std::isfinite(value.angle)
+                || !std::isfinite(value.stepSeconds) || value.stepSeconds <= 0 || value.stepSeconds > 1
+                || value.direction > 2 || (!value.direction && value.blocked)
+                || (i && doors[i - 1].placement >= value.placement)
+                || std::ranges::binary_search(teleportDoors, value.placement)
+                || std::ranges::binary_search(nativePlacements, value.placement)) return error(Code::InvalidCommandShape);
+        }
+        if (actorSpawns.size() > MaximumEquipmentSnapshotActors || (!actorSpawns.empty() && !nativeWorld))
+            return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < actorSpawns.size(); ++i)
+        {
+            const auto& value = actorSpawns[i];
+            if (!(value.placement >> 63) || (value.record && (value.record >> 62) != 2)
+                || (i && actorSpawns[i - 1].placement >= value.placement)
+                || std::ranges::binary_search(nativePlacements, value.placement)
+                || std::ranges::binary_search(teleportDoors, value.placement)
+                || (door && door->placement == value.placement)
+                || std::ranges::find(doors, value.placement, &NativeDoorSnapshot::placement) != doors.end())
+                return error(Code::InvalidCommandShape);
+        }
+        if (neighbors.size() > 8 || (!neighbors.empty() && (!nativeWorld || !cell.asExterior())))
+            return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < neighbors.size(); ++i)
+        {
+            const auto& neighbor = neighbors[i];
+            const auto* exterior = neighbor.cell.asExterior();
+            if (!neighbor.nativeWorld || !neighbor.neighbors.empty() || neighbor.header != header || !exterior
+                || neighbor.cell == cell || (i && neighbors[i - 1].cell >= neighbor.cell)
+                || exterior->worldspace() != cell.asExterior()->worldspace()
+                || std::abs(int64_t(exterior->gridX()) - cell.asExterior()->gridX()) > 1
+                || std::abs(int64_t(exterior->gridY()) - cell.asExterior()->gridY()) > 1)
+                return error(Code::InvalidCommandShape);
+            auto leaf = create(neighbor.header, neighbor.cell, neighbor.items, neighbor.nativePlacements,
+                neighbor.presentation, true, neighbor.door, neighbor.teleportDoors, neighbor.doors, {}, neighbor.actorSpawns);
+            if (const auto* failure = std::get_if<InventoryReplicationDecodeError>(&leaf)) return *failure;
+        }
+        // A reference belongs to one cell in a coherent neighborhood. Reject
+        // aliases before a client can delete/materialize the same identity twice.
+        std::set<uint64_t> seenPlacements, seenItems;
+        size_t spawnCount = 0;
+        const auto uniqueDomain = [&](auto placed, auto loot, auto teleports, auto movingDoors, auto singleDoor, auto spawns) {
+            spawnCount += spawns.size();
+            if (spawnCount > MaximumEquipmentSnapshotActors) return false;
+            for (const auto id : placed) if (!seenPlacements.insert(id).second) return false;
+            for (const auto& item : loot) if (!seenItems.insert(item.stack.stackId.value()).second) return false;
+            for (const auto id : teleports) if (!seenPlacements.insert(id).second) return false;
+            for (const auto& value : movingDoors) if (!seenPlacements.insert(value.placement).second) return false;
+            if (singleDoor && !seenPlacements.insert(singleDoor->placement).second) return false;
+            for (const auto& value : spawns) if (!seenPlacements.insert(value.placement).second) return false;
+            return true;
+        };
+        if (!uniqueDomain(nativePlacements, items, teleportDoors, doors, door, actorSpawns)) return error(Code::InvalidCommandShape);
+        for (const auto& neighbor : neighbors)
+            if (!uniqueDomain(std::span(neighbor.nativePlacements), std::span(neighbor.items), std::span(neighbor.teleportDoors),
+                    std::span(neighbor.doors), neighbor.door, std::span(neighbor.actorSpawns))) return error(Code::InvalidCommandShape);
         return ReliableGroundItemBaseline{ header, std::move(cell), { items.begin(), items.end() },
             {nativePlacements.begin(), nativePlacements.end()}, {presentation.begin(), presentation.end()}, nativeWorld, door,
-            {teleportDoors.begin(), teleportDoors.end()} };
+            {teleportDoors.begin(), teleportDoors.end()}, {doors.begin(), doors.end()}, {neighbors.begin(), neighbors.end()},
+            {actorSpawns.begin(), actorSpawns.end()} };
     }
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
@@ -424,9 +486,24 @@ namespace TES3MP
         std::optional<GroundSchema::NativeDoor> door;
         if (input.door) door.emplace(input.door->placement, input.door->motion, input.door->angle,
             input.door->stepSeconds, input.door->direction, uint8_t(input.door->blocked));
+        std::vector<GroundSchema::NativeDoor> doors;
+        for (const auto& value : input.doors) doors.emplace_back(value.placement, value.motion, value.angle,
+            value.stepSeconds, value.direction, uint8_t(value.blocked));
+        std::vector<flatbuffers::Offset<GroundSchema::NativeNeighbor>> neighbors;
+        if (input.neighbors.size() > 8) throw std::invalid_argument("Native neighborhood exceeds bound");
+        for (const auto& neighbor : input.neighbors)
+        {
+            if (!neighbor.neighbors.empty()) throw std::invalid_argument("Nested native neighborhoods forbidden");
+            const auto bytes = encodeReliableGroundItemBaseline(neighbor);
+            const auto data = builder.CreateVector(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+            neighbors.push_back(GroundSchema::CreateNativeNeighbor(builder, data));
+        }
+        std::vector<GroundSchema::ActorSpawn> actorSpawns;
+        for (const auto& spawn : input.actorSpawns) actorSpawns.emplace_back(spawn.placement, spawn.record);
         const auto root = GroundSchema::CreateReliableGroundItemBaselineDirect(builder, header, &cell, &items,
             &input.nativePlacements, &presentation, input.nativeWorld, door ? &*door : nullptr,
-            input.teleportDoors.empty() ? nullptr : &input.teleportDoors);
+            input.teleportDoors.empty() ? nullptr : &input.teleportDoors, doors.empty() ? nullptr : &doors, neighbors.empty() ? nullptr : &neighbors,
+            actorSpawns.empty() ? nullptr : &actorSpawns);
         GroundSchema::FinishSizePrefixedReliableGroundItemBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -607,19 +684,22 @@ namespace TES3MP
             h->capacity_weight(), stacks, equipment);
     }
 
-    GroundItemBaselineDecodeResult decodeReliableGroundItemBaseline(std::span<const std::byte> payload)
+    static GroundItemBaselineDecodeResult decodeGround(std::span<const std::byte> payload, bool allowNeighbors)
     {
-        if (const auto failure = validatePrefix(payload, ReliableOperationMaximumPayloadBytes))
+        if (const auto failure = validatePrefix(payload, NativeGroundMaximumPayloadBytes))
             return *failure;
         const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
         if (!GroundSchema::SizePrefixedReliableGroundItemBaselineBufferHasIdentifier(bytes))
             return error(Code::InvalidIdentifier);
-        auto checked = verifier(payload, ReliableOperationMaximumPayloadBytes);
+        auto checked = verifier(payload, NativeGroundMaximumPayloadBytes);
         if (!GroundSchema::VerifySizePrefixedReliableGroundItemBaselineBuffer(checked))
             return error(Code::VerificationFailed);
         const auto* root = GroundSchema::GetSizePrefixedReliableGroundItemBaseline(bytes);
         if (!root->header() || !root->cell())
             return error(Code::MissingRequiredField);
+        const auto* encodedNeighbors = root->neighbors();
+        if (encodedNeighbors && (encodedNeighbors->size() > 8 || (!allowNeighbors && encodedNeighbors->size())))
+            return error(Code::InvalidCommandShape);
         const auto* h = root->header();
         auto header = decodeHeader(h->target_session_id(), h->target_session_generation(), h->server_tick(),
             h->canonical_revision(), h->chunk_index(), h->chunk_count());
@@ -639,6 +719,17 @@ namespace TES3MP
                 || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
                 || door->direction > 2 || (!door->direction && door->blocked)) return error(Code::InvalidCommandShape);
         }
+        const auto* encodedDoors = root->doors();
+        if (encodedDoors && (encodedDoors->size() > 128 || (encodedDoors->size() && (!root->native_world() || door))))
+            return error(Code::InvalidCommandShape);
+        std::vector<NativeDoorSnapshot> doors;
+        if (encodedDoors)
+            for (size_t i = 0; i < encodedDoors->size(); ++i)
+            {
+                const auto value = copyStruct(encodedDoors, i);
+                if (value.blocked() > 1) return error(Code::InvalidCommandShape);
+                doors.push_back({value.placement(), value.motion(), value.angle(), value.step_seconds(), value.direction(), value.blocked() != 0});
+            }
         const auto* encodedTeleports = root->teleport_doors();
         if (encodedTeleports && (encodedTeleports->size() > 32
                 || (encodedTeleports->size() && !root->native_world()))) return error(Code::InvalidCommandShape);
@@ -671,12 +762,12 @@ namespace TES3MP
         std::vector<GroundItemPresentation> presentation;
         if (const auto* encoded = root->native_placements())
         {
-            if (encoded->size() > 64) return error(Code::TooManyEntries);
+            if (encoded->size() > MaximumGroundItemBaselineChunkItems) return error(Code::TooManyEntries);
             placements.assign(encoded->begin(), encoded->end());
         }
         if (const auto* encoded = root->presentation())
         {
-            if (encoded->size() > 64) return error(Code::TooManyEntries);
+            if (encoded->size() > MaximumGroundItemBaselineChunkItems) return error(Code::TooManyEntries);
             for (size_t i = 0; i < encoded->size(); ++i)
             {
                 const auto current = copyStruct(encoded, i);
@@ -685,11 +776,35 @@ namespace TES3MP
                 presentation.push_back({*stack, {current.rx(), current.ry(), current.rz()}, current.scale()});
             }
         }
+        std::vector<NativeActorSpawn> actorSpawns;
+        if (const auto* encoded = root->actor_spawns())
+        {
+            if (encoded->size() > MaximumEquipmentSnapshotActors || (encoded->size() && !root->native_world()))
+                return error(Code::InvalidCommandShape);
+            for (size_t i = 0; i < encoded->size(); ++i)
+            {
+                const auto value = copyStruct(encoded, i);
+                actorSpawns.push_back({value.placement(), value.record()});
+            }
+        }
         std::vector<uint64_t> teleports;
         if (encodedTeleports) teleports.assign(encodedTeleports->begin(), encodedTeleports->end());
+        std::vector<ReliableGroundItemBaseline> neighbors;
+        if (encodedNeighbors)
+            for (const auto* entry : *encodedNeighbors)
+            {
+                const auto* bytes = entry->baseline();
+                auto decoded = decodeGround(std::as_bytes(std::span(bytes->data(), bytes->size())), false);
+                auto* child = std::get_if<ReliableGroundItemBaseline>(&decoded);
+                if (!child) return std::get<Error>(decoded);
+                neighbors.push_back(std::move(*child));
+            }
         return ReliableGroundItemBaseline::create(
-            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world(), door, teleports);
+            std::get<InventoryBaselineHeader>(header), std::get<CellId>(cell), items, placements, presentation, root->native_world(), door, teleports, doors, neighbors, actorSpawns);
     }
+
+    GroundItemBaselineDecodeResult decodeReliableGroundItemBaseline(std::span<const std::byte> payload)
+    { return decodeGround(payload, true); }
 
     EquipmentSnapshotDecodeResult decodeLatestWinsEquipmentSnapshot(std::span<const std::byte> payload)
     {

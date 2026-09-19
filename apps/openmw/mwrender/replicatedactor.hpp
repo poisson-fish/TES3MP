@@ -97,7 +97,7 @@ namespace MWRender
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,
             const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
-            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt) noexcept;
+            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt, float scale = 1.f) noexcept;
 
     private:
         class Impl;

@@ -1,5 +1,7 @@
 #include "../mwworld/regionalweather.hpp"
 #include "desktop_providers.hpp"
+#include <apps/openmw/mwclass/creaturelevlist.hpp>
+#include <components/esm3/loadlevlist.hpp>
 #include "movement_mapping.hpp"
 
 #include "../mwbase/environment.hpp"
@@ -712,6 +714,8 @@ namespace TES3MP::OpenMWAdapter
             return std::nullopt;
         auto captured = std::move(mImpl->pendingInventoryTransaction);
         mImpl->pendingInventoryTransaction.reset();
+        Log(Debug::Verbose) << "TES3MP inventory proposal: kind=" << unsigned(captured->kind)
+            << " expected_revision=" << captured->expectedInventoryRevision.value();
         return captured;
     }
 
@@ -908,8 +912,18 @@ namespace TES3MP::OpenMWAdapter
         RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
         std::map<EntityId, ActorRemote> actorRemotes;
+        struct LeveledPresentation
+        {
+            MWWorld::CellStore* cell;
+            uint64_t record;
+            std::vector<ESM::RefId> equipment;
+            std::unique_ptr<MWRender::ReplicatedActor> actor;
+            std::optional<MonotonicInstant> lastAdvance;
+        };
+        std::map<uint64_t, LeveledPresentation> leveledActors;
+        MWWorld::InventoryRecordMap nativeActorRecords;
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
-        std::optional<NativeDoorSnapshot> nativeDoor;
+        std::map<uint64_t, NativeDoorSnapshot> nativeDoors;
         std::optional<ReliableGroundItemBaseline> presentedGroundBaseline;
         std::map<ItemStackId, ObservedInventoryStack> observedInventoryStacks;
         std::map<ContainerId, ContainerRevision> observedContainerRevisions;
@@ -936,8 +950,10 @@ namespace TES3MP::OpenMWAdapter
                 remote.motion.clear();
             }
             actorRemotes.clear();
+            leveledActors.clear();
+            nativeActorRecords.clear();
             observedDoors.clear();
-            nativeDoor.reset();
+            nativeDoors.clear();
             presentedGroundBaseline.reset();
             try
             {
@@ -970,6 +986,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     world->setWeatherAuthority(false);
                     world->setWorldTimeAuthority(false);
+                    world->setLeveledActorAuthority(false);
                 }
             }
             catch (...)
@@ -1017,14 +1034,70 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot)
         {
             auto world = MWBase::Environment::get().getWorld();
+            std::set<uint64_t> desiredSpawns;
+            std::vector<const ReliableGroundItemBaseline*> areas;
+            if (presentedGroundBaseline)
+            {
+                areas.push_back(&*presentedGroundBaseline);
+                for (const auto& neighbor : presentedGroundBaseline->neighbors) areas.push_back(&neighbor);
+            }
+            for (const auto* area : areas)
+                for (const auto& spawn : area->actorSpawns) if (spawn.record) desiredSpawns.insert(spawn.placement);
+            std::erase_if(leveledActors, [&](const auto& entry) { return !desiredSpawns.contains(entry.first); });
+            for (const auto* area : areas)
+            {
+                if (area->actorSpawns.empty()) continue;
+                auto* cell = resolveCell(area->cell, *mapping);
+                auto scene = MWBase::Environment::get().getWorldScene();
+                if (!cell || !scene) return ProviderResult::ContentMappingFailed;
+                if (!scene->getActiveCells().contains(cell)) continue;
+                std::map<uint64_t, MWWorld::Ptr> markers;
+                cell->forEachType<ESM::CreatureLevList>([&](const MWWorld::Ptr& ptr) {
+                    const auto id = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
+                    if (id) markers.emplace(*id, ptr);
+                    return true;
+                });
+                if (nativeActorRecords.empty()) nativeActorRecords = MWWorld::actorRecords(*MWBase::Environment::get().getESMStore());
+                for (const auto& spawn : area->actorSpawns)
+                {
+                    const auto marker = markers.find(spawn.placement);
+                    if (marker == markers.end()) return ProviderResult::ContentMappingFailed;
+                    static_cast<const MWClass::CreatureLevList&>(marker->second.getClass()).suppressLocalSpawn(marker->second);
+                    if (!spawn.record) continue;
+                    const auto record = nativeActorRecords.find(spawn.record);
+                    const auto equipment = std::ranges::find(snapshot.actors, spawn.placement,
+                        [](const auto& member) { return member.actor.value(); });
+                    if (record == nativeActorRecords.end() || equipment == snapshot.actors.end())
+                        return ProviderResult::ContentMappingFailed;
+                    std::vector<ESM::RefId> records;
+                    for (size_t slot = 0; slot < equipment->slots.size(); ++slot)
+                        if (equipment->slots[slot] && slot != static_cast<size_t>(EquipmentSlot::Ammunition))
+                        {
+                            const auto item = nativeItemRecords.find(equipment->slots[slot]->value());
+                            if (item == nativeItemRecords.end()) return ProviderResult::ContentMappingFailed;
+                            records.push_back(item->second);
+                        }
+                    const auto found = leveledActors.find(spawn.placement);
+                    if (found != leveledActors.end() && found->second.cell == cell && found->second.record == spawn.record
+                        && found->second.equipment == records && found->second.actor->ptr().getRefData().getBaseNode()) continue;
+                    leveledActors.erase(spawn.placement);
+                    auto [result, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
+                        *MWBase::Environment::get().getESMStore(), record->second, *cell,
+                        marker->second.getCellRef().getPosition(), std::span<const ESM::RefId>(records),
+                        marker->second.getCellRef().getScale());
+                    if (!MWRender::replicatedActorResultAccepted(result) || !actor) return mapReplicatedActorResult(result);
+                    leveledActors.emplace(spawn.placement, LeveledPresentation{cell, spawn.record, std::move(records), std::move(actor)});
+                }
+            }
             for (const auto& member : snapshot.actors)
             {
+                if (desiredSpawns.contains(member.actor.value())) continue;
                 const auto ref = MWWorld::localPlacedRef(member.actor.value(), world->getContentFiles());
                 if (!ref) return ProviderResult::ContentMappingFailed;
                 auto ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
                 // A not-yet-active reference is retried on subsequent snapshots.
                 if (ptr.isEmpty()) continue;
-                if (!ptr.getClass().isActor() || ptr.getCell() != world->getPlayerPtr().getCell()
+                if (!ptr.getClass().isActor() || !ptr.getCell()
                     || ptr.getClass().getCreatureStats(ptr).isDead())
                     return ProviderResult::ContentMappingFailed;
                 std::vector<std::pair<int, ESM::RefId>> records;
@@ -1102,6 +1175,7 @@ namespace TES3MP::OpenMWAdapter
             if (allowLocalCellCorrection && player.getCell() != targetCell)
             {
                 clear();
+                world->setLeveledActorAuthority(true);
                 world->changeToCell(targetCell->getCell()->getId(), selfPosition, false, false);
                 player = world->getPlayerPtr();
                 // With adjustPlayerPos disabled, changing cells retains the old
@@ -1114,6 +1188,7 @@ namespace TES3MP::OpenMWAdapter
             }
             else if (player.getCell() == targetCell)
             {
+                world->setLeveledActorAuthority(true);
                 if (sessionBootstrapPending)
                 {
                     world->moveObject(player, selfPosition.asVec3());
@@ -1138,8 +1213,11 @@ namespace TES3MP::OpenMWAdapter
                 const auto entry = std::ranges::find_if(snapshot.view().entries(), [&](const auto& candidate) {
                     return candidate.playerId() == observed.playerId && candidate.entityId() == observed.entityId;
                 });
-                if (entry == snapshot.view().entries().end() || entry->transform().cell() != self->transform().cell())
+                if (entry == snapshot.view().entries().end()
+                    || !sharesCellNeighborhood(entry->transform().cell(), self->transform().cell()))
                     continue;
+                auto* remoteCell = resolveCell(entry->transform().cell(), content);
+                if (!remoteCell) return ProviderResult::ContentMappingFailed;
                 if (entry->appearanceId() != content.appearanceId)
                     return ProviderResult::ContentMappingFailed;
                 if (desiredCount == desired.size())
@@ -1147,12 +1225,12 @@ namespace TES3MP::OpenMWAdapter
                 desired[desiredCount++].emplace(observed.entityId);
                 auto found = remotes.find(observed.entityId);
                 const auto position = toOpenMW(entry->transform());
-                if (found == remotes.end() || found->second.cell != targetCell)
+                if (found == remotes.end() || found->second.cell != remoteCell)
                 {
                     if (found != remotes.end())
                         erase(found);
                     auto [actorResult, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
-                        *MWBase::Environment::get().getESMStore(), refId(content.avatarNpc), *targetCell, position);
+                        *MWBase::Environment::get().getESMStore(), refId(content.avatarNpc), *remoteCell, position);
                     const ProviderResult mappedResult = mapReplicatedActorResult(actorResult);
                     if (mappedResult != ProviderResult::Accepted || !actor)
                     {
@@ -1161,7 +1239,7 @@ namespace TES3MP::OpenMWAdapter
                             << " result=" << replicatedActorResultName(actorResult);
                         return mappedResult;
                     }
-                    found = remotes.try_emplace(observed.entityId, targetCell, std::move(actor), metrics).first;
+                    found = remotes.try_emplace(observed.entityId, remoteCell, std::move(actor), metrics).first;
                 }
                 if (found->second.lastObserved
                     && entry->entityRevision() == found->second.lastObserved->entityRevision())
@@ -1833,6 +1911,17 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult advance(MonotonicInstant now)
         {
+            for (auto& [identity, remote] : leveledActors)
+            {
+                if (!remote.actor->ptr().getRefData().getBaseNode()) continue; // Recreated on scene reentry.
+                float seconds = 0;
+                if (remote.lastAdvance && now >= *remote.lastAdvance)
+                    seconds = std::min(1.f, float(now.nanoseconds() - remote.lastAdvance->nanoseconds()) / 1e9f);
+                remote.lastAdvance = now;
+                const auto result = remote.actor->update(remote.actor->ptr().getRefData().getPosition(),
+                    MWRender::ReplicatedActorLocomotion::Idle, seconds);
+                if (!MWRender::replicatedActorResultAccepted(result)) return mapReplicatedActorResult(result);
+            }
             for (auto& [entity, remote] : remotes)
             {
                 (void)entity;
@@ -2235,11 +2324,13 @@ namespace TES3MP::OpenMWAdapter
                 return value.second.container && !desiredContainers.contains(*value.second.container);
             });
 
-            if (!presentedGroundBaseline || presentedGroundBaseline->cell != groundItems.cell
-                || presentedGroundBaseline->items != groundItems.items
-                || presentedGroundBaseline->nativePlacements != groundItems.nativePlacements
-                || presentedGroundBaseline->presentation != groundItems.presentation
-                || presentedGroundBaseline->nativeWorld != groundItems.nativeWorld)
+            const auto sameGround = [](const auto& left, const auto& right) {
+                return left.cell == right.cell && left.items == right.items && left.nativePlacements == right.nativePlacements
+                    && left.presentation == right.presentation && left.nativeWorld == right.nativeWorld
+                    && left.actorSpawns == right.actorSpawns;
+            };
+            if (!presentedGroundBaseline || !sameGround(*presentedGroundBaseline, groundItems)
+                || !std::ranges::equal(presentedGroundBaseline->neighbors, groundItems.neighbors, sameGround))
             {
                 for (const auto& [stack, ptr] : presentedGroundItems)
                 {
@@ -2249,52 +2340,65 @@ namespace TES3MP::OpenMWAdapter
                 }
                 presentedGroundItems.clear();
                 std::erase_if(observedInventoryStacks, [](const auto& value) { return value.second.ground; });
-                auto* cell = resolveCell(groundItems.cell, *mapping);
-                if (!cell)
-                    return ProviderResult::ContentMappingFailed;
-                // The complete bound placement domain suppresses original content
-                // references on initial entry, reconnect and restart, even if empty.
-                std::vector<MWWorld::Ptr> originals;
-                cell->forEach([&](const MWWorld::Ptr& ptr) {
-                    if (!MWWorld::ContainerStore::isStorableType(ptr.getType())) return true;
-                    const auto placed = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
-                    if (placed && std::ranges::binary_search(groundItems.nativePlacements, *placed))
-                        originals.push_back(ptr);
-                    return true;
-                });
-                for (const auto& ptr : originals) world->deleteObject(ptr);
-                for (const auto& member : groundItems.items)
+                std::vector<const ReliableGroundItemBaseline*> areas{&groundItems};
+                for (const auto& neighbor : groundItems.neighbors) areas.push_back(&neighbor);
+                for (const auto* area : areas)
                 {
-                    ESM::Position position{};
-                    const auto visual = std::ranges::find(groundItems.presentation, member.stack.stackId,
-                        &GroundItemPresentation::stack);
-                    if (visual != groundItems.presentation.end())
-                        std::copy(visual->rotation.begin(), visual->rotation.end(), position.rot);
-                    position.pos[0] = static_cast<float>(member.position.x()) / static_cast<float>(PositionScale);
-                    position.pos[1] = static_cast<float>(member.position.y()) / static_cast<float>(PositionScale);
-                    position.pos[2] = static_cast<float>(member.position.z()) / static_cast<float>(PositionScale);
-                    auto local = materializeItem(
-                        member.stack, [&](const MWWorld::Ptr& ptr) {
-                            if (visual != groundItems.presentation.end()) ptr.getCellRef().setScale(visual->scale);
-                            return world->placeObject(ptr, cell, position);
-                        });
-                    if (!local)
+                    auto* cell = resolveCell(area->cell, *mapping);
+                    if (!cell)
                         return ProviderResult::ContentMappingFailed;
-                    auto ptr = *local;
-                    presentedGroundItems.emplace(member.stack.stackId, ptr);
-                    if (!observedInventoryStacks
-                            .emplace(member.stack.stackId,
-                                ObservedInventoryStack{
-                                    member.stack, ptr, std::nullopt, true, std::nullopt, member.revision })
-                            .second)
-                        return ProviderResult::PresentationFailed;
+                    // The complete bound placement domain suppresses original content
+                    // references on initial entry, reconnect and restart, even if empty.
+                    std::vector<MWWorld::Ptr> originals;
+                    cell->forEach([&](const MWWorld::Ptr& ptr) {
+                        if (!MWWorld::ContainerStore::isStorableType(ptr.getType())) return true;
+                        const auto placed = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
+                        if (placed && std::ranges::binary_search(area->nativePlacements, *placed))
+                            originals.push_back(ptr);
+                        return true;
+                    });
+                    for (const auto& ptr : originals) world->deleteObject(ptr);
+                    for (const auto& member : area->items)
+                    {
+                        ESM::Position position{};
+                        const auto visual = std::ranges::find(area->presentation, member.stack.stackId,
+                            &GroundItemPresentation::stack);
+                        if (visual != area->presentation.end())
+                            std::copy(visual->rotation.begin(), visual->rotation.end(), position.rot);
+                        position.pos[0] = static_cast<float>(member.position.x()) / static_cast<float>(PositionScale);
+                        position.pos[1] = static_cast<float>(member.position.y()) / static_cast<float>(PositionScale);
+                        position.pos[2] = static_cast<float>(member.position.z()) / static_cast<float>(PositionScale);
+                        auto local = materializeItem(
+                            member.stack, [&](const MWWorld::Ptr& ptr) {
+                                if (visual != area->presentation.end()) ptr.getCellRef().setScale(visual->scale);
+                                return world->placeObject(ptr, cell, position);
+                            });
+                        if (!local)
+                            return ProviderResult::ContentMappingFailed;
+                        auto ptr = *local;
+                        presentedGroundItems.emplace(member.stack.stackId, ptr);
+                        if (!observedInventoryStacks
+                                .emplace(member.stack.stackId,
+                                    ObservedInventoryStack{
+                                        member.stack, ptr, std::nullopt, true, std::nullopt, member.revision })
+                                .second)
+                            return ProviderResult::PresentationFailed;
+                    }
                 }
                 presentedGroundBaseline = groundItems;
             }
             observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
-            if (groundItems.door)
+            auto nextDoors = groundItems.doors;
+            for (const auto& neighbor : groundItems.neighbors) nextDoors.insert(nextDoors.end(), neighbor.doors.begin(), neighbor.doors.end());
+            if (groundItems.door) nextDoors.push_back(*groundItems.door);
+            if (std::ranges::any_of(nativeDoors, [&](const auto& entry) {
+                    return std::ranges::none_of(nextDoors, [&](const auto& next) { return next.placement == entry.first; });
+                })) world->clearDoorAuthority();
+            std::map<uint64_t, NativeDoorSnapshot> installedDoors;
+            for (const auto& next : nextDoors)
             {
-                const auto& next = *groundItems.door;
+                const auto prior = nativeDoors.find(next.placement);
+                const NativeDoorSnapshot* nativeDoor = prior == nativeDoors.end() ? nullptr : &prior->second;
                 const auto ref = MWWorld::localPlacedRef(next.placement, world->getContentFiles());
                 const auto ptr = ref ? findActiveDoor(ref->mIndex, ref->mContentFile) : MWWorld::Ptr{};
                 if (ptr.isEmpty()) return ProviderResult::ContentMappingFailed;
@@ -2303,7 +2407,6 @@ namespace TES3MP::OpenMWAdapter
                 if (next.angle < closed || next.angle > opened) return ProviderResult::ContentMappingFailed;
                 // Cancel the stock local scheduler before installing the exact
                 // committed angle. Local collision never chooses a door position.
-                if (nativeDoor && nativeDoor->placement != next.placement) world->clearDoorAuthority();
                 if (!world->applyDoorAngle(ptr, next.angle)) return ProviderResult::PresentationFailed;
                 auto sounds = MWBase::Environment::get().getSoundManager();
                 const auto* base = ptr.get<ESM::Door>()->mBase;
@@ -2322,13 +2425,9 @@ namespace TES3MP::OpenMWAdapter
                     const auto sound = next.direction == 1 ? base->mOpenSound : base->mCloseSound;
                     if (!sound.empty()) sounds->stopSound3D(ptr, sound);
                 }
-                nativeDoor = next;
+                installedDoors.emplace(next.placement, next);
             }
-            else
-            {
-                world->clearDoorAuthority();
-                nativeDoor.reset();
-            }
+            nativeDoors.swap(installedDoors);
             return applyPublicEquipment(equipment);
         }
 
@@ -2485,8 +2584,8 @@ namespace TES3MP::OpenMWAdapter
                 auto doorPtr = findActiveDoor(refNumIndex, refNumContentFile);
                 if (doorPtr.isEmpty())
                     continue;
-                if (nativeDoor && nativeDoor->placement
-                    == MWWorld::placedRefId(doorPtr.getCellRef().getRefNum(), world->getContentFiles()))
+                if (const auto placed = MWWorld::placedRefId(doorPtr.getCellRef().getRefNum(), world->getContentFiles());
+                    placed && nativeDoors.contains(*placed))
                     continue;
                 const bool teleportDoor = doorPtr.getCellRef().getTeleport();
                 if (teleportDoor && member.doorState != TES3MP::DoorState::Closed)
@@ -2559,7 +2658,7 @@ namespace TES3MP::OpenMWAdapter
 
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept
         {
-            if (nativeDoor && id.value() == nativeDoor->placement) return ObjectRevision::fromValue(nativeDoor->motion);
+            if (const auto door = nativeDoors.find(id.value()); door != nativeDoors.end()) return ObjectRevision::fromValue(door->second.motion);
             if (presentedGroundBaseline && std::ranges::find(presentedGroundBaseline->teleportDoors, id.value())
                     != presentedGroundBaseline->teleportDoors.end()) return ObjectRevision::initial();
             const auto found = observedDoors.find(id);
@@ -2577,7 +2676,8 @@ namespace TES3MP::OpenMWAdapter
     std::optional<bool> DesktopPresentation::nativeDoorObstruction(const NativeDoorSnapshot& door) const noexcept
     try
     {
-        if (!mImpl->nativeDoor || *mImpl->nativeDoor != door || !door.direction) return {};
+        const auto found = mImpl->nativeDoors.find(door.placement);
+        if (found == mImpl->nativeDoors.end() || found->second != door || !door.direction) return {};
         auto world = MWBase::Environment::get().getWorld();
         if (!world) return {};
         const auto ref = MWWorld::localPlacedRef(door.placement, world->getContentFiles());

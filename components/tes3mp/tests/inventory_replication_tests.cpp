@@ -8,6 +8,8 @@
 #include <iostream>
 #include <span>
 #include <vector>
+#include <string_view>
+#include "../protocol/generated/reliable_ground_item_baseline_generated.h"
 
 namespace
 {
@@ -30,11 +32,74 @@ namespace
     {
         return { id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2), id<CanonicalRevision>(3), 0, 1 };
     }
+
+    void neighborhoods()
+    {
+        const auto cell = [](int x, int y = 0) { return CellId::exterior(id<CellSpaceId>(7), x, y); };
+        auto root = std::get<ReliableGroundItemBaseline>(ReliableGroundItemBaseline::create(header(), cell(0), {}, {}, {}, true));
+        auto child = std::get<ReliableGroundItemBaseline>(ReliableGroundItemBaseline::create(header(), cell(1), {}, {}, {}, true));
+        child.actorSpawns = {{0x8000000000000021, 0x8000000000000041}, {0x8000000000000022, 0}};
+        root.neighbors.push_back(child);
+        const auto encoded = encodeReliableGroundItemBaseline(root);
+        assert(decodeReliableGroundItemBaseline(encoded) == GroundItemBaselineDecodeResult(root));
+        for (size_t size = 0; size < encoded.size(); ++size)
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(std::span(encoded).first(size))));
+        for (int test = 0; test < 15; ++test)
+        {
+            auto bad = root;
+            auto& neighbor = bad.neighbors[0];
+            switch (test)
+            {
+                case 0: neighbor.cell = cell(0); break;
+                case 1: neighbor.cell = cell(2); break;
+                case 2: neighbor.cell = CellId::exterior(id<CellSpaceId>(8), 1, 0); break;
+                case 3: neighbor.cell = CellId::interior(id<CellSpaceId>(7)); break;
+                case 4: neighbor.header.canonicalRevision = id<CanonicalRevision>(4); break;
+                case 5: neighbor.nativeWorld = false; break;
+                case 6: bad.neighbors.push_back(neighbor); break;
+                case 7: bad.cell = CellId::interior(id<CellSpaceId>(7)); break;
+                case 8: bad.actorSpawns = neighbor.actorSpawns; break;
+                case 9: neighbor.actorSpawns[1] = neighbor.actorSpawns[0]; break;
+                case 10: neighbor.actorSpawns[0].record = 1; break;
+                case 11: neighbor.actorSpawns[0].placement = 1; break;
+                case 12: neighbor.nativePlacements = {neighbor.actorSpawns[0].placement}; break;
+                case 13: neighbor.actorSpawns.resize(129, neighbor.actorSpawns[0]); break;
+                case 14:
+                    neighbor.actorSpawns.clear();
+                    for (uint64_t i = 0; i < 128; ++i) neighbor.actorSpawns.push_back({0x8000000000000100 + i, 0});
+                    bad.actorSpawns = {{0x8000000000000021, 0}};
+                    break;
+            }
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(
+                decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(bad))));
+        }
+        // Build hostile recursive/oversized envelopes without the trusted encoder.
+        namespace S = TES3MP::Protocol::Schema::GroundItemBaseline;
+        const auto wrap = [](std::span<const std::byte> bytes, size_t count) {
+            flatbuffers::FlatBufferBuilder builder;
+            const auto h = S::CreateGroundItemBaselineHeader(builder, 1, 1, 2, 3, 0, 1);
+            const S::Cell cell(7, 0, 0, S::CellKind::Exterior, 0, 0, 0);
+            std::vector<flatbuffers::Offset<S::NativeNeighbor>> children;
+            for (size_t i = 0; i < count; ++i)
+                children.push_back(S::CreateNativeNeighbor(builder,
+                    builder.CreateVector(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size())));
+            auto root = S::CreateReliableGroundItemBaselineDirect(builder, h, &cell, nullptr, nullptr, nullptr,
+                true, nullptr, nullptr, nullptr, &children);
+            S::FinishSizePrefixedReliableGroundItemBaselineBuffer(builder, root);
+            const auto* begin = reinterpret_cast<const std::byte*>(builder.GetBufferPointer());
+            return std::vector<std::byte>(begin, begin + builder.GetSize());
+        };
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(wrap(encoded, 1))));
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(wrap(encoded, 9))));
+        std::cout << "PASS neighborhoods: bounded wire, truncated/nested/foreign/duplicate cells and actor identities\n";
+    }
 }
 
-int main()
+int main(int argc, char** argv)
 {
     using namespace TES3MP;
+    if (argc == 2 && std::string_view(argv[1]) == "neighborhoods") { neighborhoods(); return 0; }
+    assert(argc == 1);
     const CanonicalItemStack stack{ id<ItemStackId>(10), id<ItemPrototypeId>(20), 2, 30, 40, id<ActorPrototypeId>(50) };
     const EquipmentBinding binding{ EquipmentSlot::CarriedRight, stack.stackId };
     auto player = ReliablePlayerInventoryBaseline::create(

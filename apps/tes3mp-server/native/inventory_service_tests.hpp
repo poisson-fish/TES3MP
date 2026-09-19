@@ -3,12 +3,16 @@
 #include <filesystem>
 namespace TES3MP::Native::Testing
 {
-    void checkDoorService(const std::filesystem::path& scratch);
+    void checkDoorService(const std::filesystem::path& scratch, bool streaming = false);
+    void checkAreaCrossings(const std::filesystem::path& scratch);
     void checkCellLifecycle(const std::filesystem::path& scratch);
     void checkTeleportTraversal(const std::filesystem::path& scratch);
     void checkExteriorReferences(const std::filesystem::path& scratch);
+    void checkPlayerAreas(const std::filesystem::path& scratch);
     void checkPlacedContainers(const std::filesystem::path& scratch);
     void checkPlacedActors(const std::filesystem::path& scratch);
+    void checkLeveledActors(const std::filesystem::path& scratch);
+    void checkLeveledActorPersistence(const std::filesystem::path& scratch);
     void checkStockedInventory(const std::filesystem::path& scratch);
     void checkCellInventories(const std::filesystem::path& scratch);
     void checkPlayerInventories(const std::filesystem::path& scratch);

@@ -143,6 +143,7 @@ namespace MWWorld
     {
         // A bounded source may gain one split node.
         static constexpr size_t MaxItems = 65, MaxAnimations = 256, MaxText = 4096;
+        static constexpr size_t MaxWorldItems = 8192;
         ESM::RefNum mActor;
         std::array<ESM::RefNum, InventoryStore::Slots> mSlots{};
         ESM::RefNum mSelected, mLastGenerated;
@@ -153,7 +154,7 @@ namespace MWWorld
         std::optional<EquipmentNpcStatsValues> mNpcStats;
 
         void validate(const ESMStore& content, ESM::RefNum expectedActor,
-            const EquipmentScriptLocals* scripts = nullptr) const;
+            const EquipmentScriptLocals* scripts = nullptr, size_t maximumItems = MaxItems) const;
         void swap(PlainEquipmentValues& other) noexcept;
     };
 

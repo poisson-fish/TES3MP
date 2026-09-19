@@ -221,33 +221,34 @@ One registry/counter and stock initial-loot stream cover players then placements
 in stable order. Recovery never reloads, rerolls or auto-equips initial loot.
 Record-derived identities preserve raw condition/light-time/charge bits.
 
-**Versioned native domains.** Versions require explicit migration/new campaigns;
-never discard mismatched saves. V3 binds initial-loot level/seed; v4 supports
-1–32 containers in one interior. V5 uses NPC inventory templates and stock
-starting equipment, including empty inventories. V6 adds placed NPC/creature stores,
-equipment and corpse access; no living access, AI, scripts or respawn.
-V7 adds 64 world items, pickup/gold normalization and fresh drop identities
-(session format 4). V8 shares stock placement queries and rendered bounds;
-model bytes bind recovery. V9 adds one ordinary door (format 5).
-V10 binds two interiors, ground membership and occupancy-controlled resources
-(format 6); empty cells freeze doors without losing state. V11 adds 32 immutable,
-unscripted/unlocked/untrapped intercell teleport doors. Commit requester destination
-and authority epoch before publication; reject direct transitions/old motion.
-Older descriptor/seed meanings remain intact; format 6 rejects older development saves.
+**Versioned domains.** V3–V13 retain their documented
+[meanings](../../apps/tes3mp-server/native/inventory_host.hpp). Descriptor changes
+require fresh campaigns or explicit migration; recovery never resets, rerolls loot
+or auto-equips.
 
-**Native time/weather (v12).** Fresh campaign, V11 fields, native-environment
-capability. OpenMW calendar/default globals, REGN probabilities and fallbacks drive
-30 Hz simulation. Up to 4,096 regions advance independently of occupancy/menus.
-Dedicated engine RNG, clock, elapsed days, selection timer and queued transitions
-share the world transaction. Wire projections cannot author state; legacy script
-modules reject. Tagged format-6 extensions preserve older encodings; older readers
-reject new tags. Recovery binds content/settings/seed; no wall-clock catch-up.
+**Native time/weather (v12+).** OpenMW calendar, REGN and fallbacks advance up to
+4,096 regions at 30 Hz regardless of occupancy/menus. RNG, clock, timers and queued
+transitions share durability and content/settings/seed binding. No wall-clock
+catch-up, client writers or legacy script modules.
 
-**Bounded exteriors (v13).** Fresh campaigns may bind TES3 exterior cells in the
-two-cell domain. OpenMW resolves references/destinations; placement uses ESMTerrain
-vertices and stock triangles. Occupancy releases scenes/terrain while retaining
-canonical state; cross-edge drops reject. Adjacent-area streaming, automatic
-bootstrap and Tamriel Rebuilt acceptance remain pending.
+**Player-area streaming (v14).** OpenMW discovers 1–256 cells. Canonical state stays
+resident; occupied interiors and player 3×3 exterior neighborhoods retain scenes.
+Unloading freezes doors without losing inventories. Positions select adjacent
+bound exteriors; teleports commit destination/epoch. Neighborhood baselines carry
+loot, doors, player visibility and equipment. Ordinary doors share inventory
+durability. References, payloads and persistence remain bounded. A new capability
+excludes older clients. Fixture-free bootstrap requires established identities and
+uses engine environment with inherited client movement; physics remains M4.
+It does not authorize unsupported scripts. M3 still requires TR acceptance and
+latency measurements.
+
+**Initial leveled actors (v15).** A separate campaign-seeded OpenMW RNG stream and
+explicit loot level select initial NPC/creature records in stable cell/reference
+order. Persist every marker's selected record or chance-none outcome in the same
+inventory/door image. Recovery reads choices without rolling. Marker identity owns
+the selected actor; clients suppress local spawning and render the committed
+selection. This supports initially living unscripted actors, not respawn, AI or
+leveled authored corpses. V15 requires fresh campaigns and the leveled-actor capability.
 
 **Transfers and equipment.** Take All binds a witnessed source stack and both
 revisions, uses stock order/stacking and corpse slot removal on detached stores,

@@ -104,7 +104,9 @@ int main(int argc, char** argv)
     resolve(config.characterContentFile);
     resolve(config.worldContentFile);
     resolve(config.scriptPackageContentFile);
-    auto loadedWorld = TES3MP::ServerApp::loadWorldContent(config.worldContentFile, config.contentManifest);
+    auto loadedWorld = config.worldContentFile.empty() && !config.nativeInventoryFile.empty()
+        ? TES3MP::ServerApp::WorldContentLoadResult(TES3MP::ServerApp::nativeWorldContent(config.contentManifest))
+        : TES3MP::ServerApp::loadWorldContent(config.worldContentFile, config.contentManifest);
     auto* worldValue = std::get_if<TES3MP::ServerApp::WorldContent>(&loadedWorld);
     if (!worldValue)
     {
@@ -138,9 +140,14 @@ int main(int argc, char** argv)
     TES3MP::ServerApp::ExecutableScriptModules executableScriptModules;
     if (scriptContent)
     {
+        if (!worldContent.weather)
+        {
+            std::cerr << "native environment cannot run legacy script modules\n";
+            return 2;
+        }
         auto loadedModules = TES3MP::ServerApp::loadExecutableScriptModules(config.scriptPackageContentFile,
             *scriptContent, worldContent.globals, worldContent.questJournal, worldContent.factionDialogue,
-            worldContent.weather, scripts);
+            *worldContent.weather, scripts);
         auto* modules = std::get_if<TES3MP::ServerApp::ExecutableScriptModules>(&loadedModules);
         if (!modules)
         {
@@ -149,8 +156,10 @@ int main(int argc, char** argv)
         }
         executableScriptModules = std::move(*modules);
     }
-    auto collisionResult
-        = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
+    auto collisionResult = config.collisionContentFile.empty() && !config.nativeInventoryFile.empty()
+        ? decltype(TES3MP::ServerApp::ContentCollisionProvider::load({}, config.contentManifest))(
+            TES3MP::ServerApp::ContentCollisionProvider::nativeMovement(config.contentManifest))
+        : TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
     auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(&collisionResult);
     auto collision = collisionValue ? std::move(*collisionValue) : nullptr;
     if (!collision
@@ -181,7 +190,9 @@ int main(int argc, char** argv)
         }
         characterContent.emplace(std::move(*catalog));
     }
-    auto actorContent = TES3MP::ServerApp::loadActorContent(config.actorContentFile, config.contentManifest);
+    auto actorContent = config.actorContentFile.empty() && !config.nativeInventoryFile.empty()
+        ? TES3MP::ServerApp::ActorContentLoadResult(TES3MP::ActorCatalog::create(config.contentManifest, {}).value())
+        : TES3MP::ServerApp::loadActorContent(config.actorContentFile, config.contentManifest);
     auto* actorCatalogValue = std::get_if<TES3MP::ActorCatalog>(&actorContent);
     if (!actorCatalogValue)
     {
@@ -584,6 +595,11 @@ int main(int argc, char** argv)
         return 2;
     }
 #endif
+    if (!worldContent.weather)
+    {
+        std::cerr << "native startup without world_content_file requires a native environment descriptor\n";
+        return 2;
+    }
     if (const auto* restoredWorld = persistenceFile->restoredWorld())
     {
         if (!restoredWorld->questJournalCatalog() || !restoredWorld->factionDialogueCatalog()
@@ -596,7 +612,7 @@ int main(int argc, char** argv)
             return 2;
         }
         auto restored = TES3MP::restoreCanonicalWorldState(worldContent.globals, worldContent.questJournal,
-            worldContent.factionDialogue, worldContent.weather, restoredWorld->time(), restoredWorld->globals(),
+            worldContent.factionDialogue, *worldContent.weather, restoredWorld->time(), restoredWorld->globals(),
             *restoredWorld->questJournalCatalog(), *restoredWorld->factionDialogueCatalog(),
             *restoredWorld->weatherCatalog(), restoredWorld->questJournal(), restoredWorld->factionStates(),
             *restoredWorld->weather());
@@ -661,6 +677,8 @@ int main(int argc, char** argv)
     if (nativeInventory && nativeInventory->hasNativeDoor())
     {
         requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
+        if (nativeInventory->hasLeveledActors()) requiredCapabilities.push_back(TES3MP::nativeLeveledActorsCapability());
+        if (nativeInventory->streamsPlayerAreas()) requiredCapabilities.push_back(TES3MP::nativeStreamingCapability());
         if (nativeInventory->requiresDoorTraversal()) requiredCapabilities.push_back(TES3MP::nativeTeleportCapability());
         if (nativeEnvironment)
         {
@@ -712,7 +730,9 @@ int main(int argc, char** argv)
         std::cerr << "canonical persistence composition failed\n";
         return 3;
     }
-    const auto nextTick = persistenceFile->restoredCheckpointTick()
+    // Native environment initialization already represents tick zero. Its first
+    // simulation step must advance to tick one, just like recovered campaigns.
+    const auto nextTick = (persistenceFile->restoredCheckpointTick() || nativeEnvironment)
         ? restoredTick.next()
         : std::optional<TES3MP::ServerTick>(TES3MP::ServerTick::initial());
     if (!nextTick)

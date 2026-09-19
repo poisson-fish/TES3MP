@@ -371,13 +371,13 @@ namespace TES3MP::ServerApp
             begin = end + 1;
         }
         for (std::size_t slot = 0; slot < 14; ++slot)
-            if (!seen[slot])
+            if (!seen[slot] && (nativeInventoryPath.empty() || (slot != 11 && slot != 12)))
                 return error(ConfigErrorCode::MissingKey, 0,
                     std::array<std::string_view, 14>{ "bind_address", "port", "tick_interval_ms", "disconnect_grace_ms",
                         "join_password_file", "content_manifest_id", "cell_spaces", "allowed_cells", "spawn_cell",
                         "default_appearance_id", "movement_profile", "collision_content_file", "actor_content_file",
                         "player_identity_file" }[slot]);
-        if (!seen[20])
+        if (!seen[20] && nativeInventoryPath.empty())
             return error(ConfigErrorCode::MissingKey, 0, "world_content_file");
         auto endpoint = ListenerEndpoint::create(bindAddress, port);
         if (!endpoint)

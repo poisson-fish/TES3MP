@@ -86,6 +86,8 @@ namespace TES3MP::Native
         std::vector<ESM::CellRef> mPlacedItems;
         std::optional<EquipmentSessionValues::WorldCells> mWorldCells;
         EquipmentSessionValues::WorldCells mPlacedItemCells;
+        size_t mCellCount = 1;
+        size_t mWorldCapacity = PreparedPlainEquipment::MaxItems;
         std::optional<DoorBinding> mDoorBinding;
         std::shared_ptr<const ESM::DoorState> mDoorState;
         uint64_t mDoorMotion = 1; // Volatile: reconnect/restart establishes a new session generation.
@@ -297,7 +299,8 @@ namespace TES3MP::Native
             std::optional<size_t> restartActor = {}, bool connected = false,
             std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0,
             std::optional<std::vector<ESM::CellRef>> worldItems = {}, std::optional<ESM::CellRef> door = {},
-            std::optional<EquipmentSessionValues::WorldCells> cells = {});
+            std::optional<EquipmentSessionValues::WorldCells> cells = {}, size_t cellCount = 2,
+            size_t worldCapacity = PreparedPlainEquipment::MaxItems);
         // Diagnostic convenience; delegates to the same multi-owner runtime.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,

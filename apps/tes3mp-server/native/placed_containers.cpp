@@ -5,6 +5,8 @@
 #include <apps/openmw/mwworld/placedrefid.hpp>
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/class.hpp>
+#include <apps/openmw/mwworld/inventoryrecordid.hpp>
+#include <apps/openmw/mwmechanics/levelledlist.hpp>
 #include <components/esm3/objectstate.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadclot.hpp>
@@ -22,7 +24,7 @@ namespace TES3MP::Native
     std::vector<Loadout::PlacedInventory> Loadout::placedItems(ESM::RefId cell, size_t limit)
     {
         validateCell(cell);
-        if (limit > 64)
+        if (limit > 192)
             throw std::invalid_argument("Native world item discovery bound invalid");
         MWClass::registerClasses();
         MWWorld::WorldModel world(mStore, mReaders, 1);
@@ -118,10 +120,21 @@ namespace TES3MP::Native
         };
         loaded.forEachType<ESM::NPC>([&](const auto& ptr) { return visit.template operator()<ESM::NPC>(ptr); });
         loaded.forEachType<ESM::Creature>([&](const auto& ptr) { return visit.template operator()<ESM::Creature>(ptr); });
-        // A leveled actor requires persistent spawning/RNG and cannot be silently skipped.
-        loaded.forEachType<ESM::CreatureLevList>([](const auto& ptr) {
-            if (ptr.getRefData().isEnabled() && !ptr.getRefData().isDeletedByContentFile())
-                throw std::invalid_argument("Native leveled actor spawning services unavailable");
+        loaded.forEachType<ESM::CreatureLevList>([&](const auto& ptr) {
+            if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
+            if (result.size() == 4096) throw std::invalid_argument("Native placed actor discovery budget exceeded");
+            ESM::ObjectState state;
+            ptr.getCellRef().writeState(state);
+            const auto id = MWWorld::placedRefId(state.mRef.mRefNum, mOptions.mContent);
+            if (!id) throw std::invalid_argument("Native leveled actor identity unavailable");
+            for (float value : state.mRef.mPos.pos)
+                if (!std::isfinite(value) || std::abs(double(value)) >= double(INT64_MAX) / 1024)
+                    throw std::invalid_argument("Native leveled actor position outside wire range");
+            for (float value : state.mRef.mPos.rot)
+                if (!std::isfinite(value)) throw std::invalid_argument("Native leveled actor rotation invalid");
+            if (!std::isfinite(state.mRef.mScale) || state.mRef.mScale <= 0 || state.mRef.mCount != 1)
+                throw std::invalid_argument("Native leveled actor scale or count invalid");
+            result.push_back({state.mRef, *id, mOptions.mContent.at(state.mRef.mRefNum.mContentFile), false, false, true});
             return true;
         });
         std::ranges::sort(result, {}, &PlacedInventory::mIdentity);
@@ -133,9 +146,71 @@ namespace TES3MP::Native
         auto references = placedActors(cell);
         if (references.size() > limit) throw std::invalid_argument("Native interior actor inventory budget exceeded");
         for (const auto& ref : references)
-            if (ref.mScripted)
+            if (ref.mScripted || ref.mLeveled)
                 throw std::invalid_argument("Native placed actor " + std::to_string(ref.mIdentity)
                     + " (" + ref.mRef.mRefID.toDebugString() + ") requires script services");
+        return references;
+    }
+
+    std::vector<Loadout::PlacedInventory> Loadout::resolveActors(ESM::RefId cell, size_t limit, int level,
+        Misc::Rng::Generator& rng, std::vector<ActorSpawnSelection>& selections,
+        const std::vector<ActorSpawnSelection>* restored)
+    {
+        if (limit > 4096 || level < 1 || level > 1000 || selections.size() > MaximumActorSpawns)
+            throw std::invalid_argument("Native actor selection bounds invalid");
+        if (restored) validateActorSpawns(*restored);
+        auto references = placedActors(cell);
+        if (references.size() > limit) throw std::invalid_argument("Native actor placement budget exceeded");
+        const auto records = MWWorld::actorRecords(mStore);
+        auto stagedRng = rng;
+        auto staged = selections;
+        for (auto& placed : references)
+        {
+            if (placed.mLeveled)
+            {
+                ESM::RefId selected;
+                if (restored)
+                {
+                    const auto saved = std::ranges::find(*restored, placed.mIdentity, &ActorSpawnSelection::mPlacement);
+                    if (saved == restored->end()) throw std::invalid_argument("Missing saved leveled actor selection");
+                    if (saved->mRecord)
+                    {
+                        const auto record = records.find(saved->mRecord);
+                        if (record == records.end()) throw std::invalid_argument("Saved leveled actor record unavailable");
+                        selected = record->second;
+                    }
+                }
+                else
+                    selected = MWMechanics::getLevelledItem(mStore.get<ESM::CreatureLevList>().find(placed.mRef.mRefID),
+                        true, stagedRng, level, mStore);
+                if (staged.size() == MaximumActorSpawns) throw std::invalid_argument("Native actor spawn budget exceeded");
+                staged.push_back({placed.mIdentity, selected.empty() ? 0 : MWWorld::inventoryRecordId(selected)});
+                // Stock spawning copies only the marker's pose/scale onto a fresh actor.
+                ESM::CellRef actor; actor.blank();
+                actor.mRefNum = placed.mRef.mRefNum; actor.mRefID = selected;
+                actor.mPos = placed.mRef.mPos; actor.mScale = placed.mRef.mScale; actor.mCount = 1;
+                placed.mRef = std::move(actor);
+                if (selected.empty()) continue;
+                if (const auto* npc = mStore.get<ESM::NPC>().search(selected))
+                {
+                    if (npc->mNpdtType != ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS && npc->mNpdt.mHealth < 1)
+                        throw std::invalid_argument("Leveled authored-corpse presentation requires actor lifecycle services");
+                    placed.mScripted = !npc->mScript.empty(); placed.mEmptyBase = npc->mInventory.mList.empty();
+                }
+                else if (const auto* creature = mStore.get<ESM::Creature>().search(selected))
+                {
+                    if (creature->mData.mHealth < 1)
+                        throw std::invalid_argument("Leveled authored-corpse presentation requires actor lifecycle services");
+                    placed.mScripted = !creature->mScript.empty(); placed.mEmptyBase = creature->mInventory.mList.empty();
+                }
+                else throw std::invalid_argument("Leveled actor selected a non-actor record");
+            }
+            if (placed.mScripted)
+                throw std::invalid_argument("Native placed actor " + placed.mRef.mRefID.toDebugString() + " requires script services");
+        }
+        std::erase_if(references, [](const auto& placed) { return placed.mRef.mRefID.empty(); });
+        rng = stagedRng;
+        selections.swap(staged);
         return references;
     }
 

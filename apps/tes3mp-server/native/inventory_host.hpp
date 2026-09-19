@@ -17,6 +17,28 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V15 uses native-inventory-15 with V14 fields and a fresh campaign. The
+    // initial campaign level and a separate seed stream drive OpenMW leveled
+    // actor selection. Persist chosen records and chance-none in the area image;
+    // recovery never rolls. Clients require native-leveled-actors capability.
+    // Initially living unscripted actors only; AI/respawn/leveled corpses remain
+    // unsupported. Marker identities own the chosen actors; at most 1024 markers
+    // per campaign and 128 appearances/markers per neighborhood.
+    // V14 uses native-inventory-14 and replaces the selected door with `doors auto`.
+    // After the first wire cell comes `areas COUNT`, then COUNT-1 selector/cell
+    // pairs. COUNT is 1..256. OpenMW discovers ordinary/teleport doors, shared
+    // stores and placed items; tes3mp_native_bootstrap exports this descriptor
+    // and matching manifest/client mappings from the real configuration.
+    // Active scenes are the union of occupied interiors and player 3x3 exterior
+    // neighborhoods. State survives resource release without rerolling loot.
+    // Exterior position updates cross adjacent bound cells; interior travel
+    // still uses committed teleports. Ground/doors and nearby player appearance
+    // share neighborhood baselines. V14 requires the native-streaming capability
+    // and a fresh campaign; its outer image saves every discovered ordinary door.
+    // Bounds: 1024 shared stores, 8192 ground references, 192 ground references
+    // per cell, 128 ordinary doors per cell / 4096 total, 32 teleports per cell.
+    // Initial publication additionally limits each cell to 128 shared owners
+    // and each player neighborhood to 128 actor appearances.
     // V13 uses native-inventory-13 with V12 fields and a fresh campaign. Either
     // interior selector may instead be `exterior X Y`, with the matching wire
     // `cell exterior:WORLDSPACE_ID:X:Y`. TES3 coordinates are bounded to

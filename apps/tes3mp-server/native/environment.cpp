@@ -238,7 +238,9 @@ namespace TES3MP::Native
             time.lastChangeTick = tick;
         }
         time.lastAdvanceTick = tick;
-        auto weather = *base.weather();
+        auto weather = base.weather().value_or(CanonicalWeatherState{{},
+            Xoshiro256StarStar::fromWorldSeed(mSeed,
+                RandomStreamKey::fromValues(0x5745415448455231ULL, 0).value()).snapshot()});
         weather.lastAdvanceTick = tick;
         weather.regions.clear();
         for (size_t i = 0; i < state.regions.size(); ++i)
@@ -283,7 +285,8 @@ namespace TES3MP::Native
     }
     CanonicalWorldState Environment::initialize(const CanonicalWorldState& base) const
     {
-        require(base.weather() && base.weather()->nativeEnvironment.empty() && base.time().lastAdvanceTick == ServerTick::initial(),
+        require((!base.weather() || base.weather()->nativeEnvironment.empty())
+            && base.time().lastAdvanceTick == ServerTick::initial(),
             "Native environment requires a fresh campaign");
         return project(base, initial(), ServerTick::initial(), true);
     }

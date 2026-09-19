@@ -71,6 +71,7 @@ namespace MWClass
 
     void CreatureLevList::respawn(const MWWorld::Ptr& ptr) const
     {
+        if (MWBase::Environment::get().getWorld()->hasLeveledActorAuthority()) return;
         ensureCustomData(ptr);
 
         CreatureLevListCustomData& customData = ptr.getRefData().getCustomData()->asCreatureLevListCustomData();
@@ -102,6 +103,11 @@ namespace MWClass
     void CreatureLevList::insertObjectRendering(
         const MWWorld::Ptr& ptr, const std::string& model, MWRender::RenderingInterface& renderingInterface) const
     {
+        if (MWBase::Environment::get().getWorld()->hasLeveledActorAuthority())
+        {
+            suppressLocalSpawn(ptr);
+            return;
+        }
         ensureCustomData(ptr);
 
         CreatureLevListCustomData& customData = ptr.getRefData().getCustomData()->asCreatureLevListCustomData();
@@ -131,6 +137,16 @@ namespace MWClass
         }
         else
             customData.mSpawn = false;
+    }
+
+    void CreatureLevList::suppressLocalSpawn(const MWWorld::Ptr& ptr) const
+    {
+        ensureCustomData(ptr);
+        auto& data = ptr.getRefData().getCustomData()->asCreatureLevListCustomData();
+        const auto previous = data.getSpawnedPtr();
+        if (!previous.isEmpty()) MWBase::Environment::get().getWorld()->deleteObject(previous);
+        data.mSpawnedActor = {};
+        data.mSpawn = false;
     }
 
     void CreatureLevList::ensureCustomData(const MWWorld::Ptr& ptr) const

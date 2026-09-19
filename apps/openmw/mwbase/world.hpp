@@ -213,6 +213,8 @@ namespace MWBase
         ///< Return current in-game time and number of day since new game start.
 
         virtual void setWorldTimeAuthority(bool) {}
+        virtual void setLeveledActorAuthority(bool) {}
+        virtual bool hasLeveledActorAuthority() const { return false; }
         virtual bool applyAuthoritativeWorldTime(int, int, int, std::uint32_t, std::uint32_t,
             std::optional<std::uint32_t> = std::nullopt) { return false; }
 

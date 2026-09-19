@@ -41,7 +41,7 @@ namespace MWWorld
     {
     public:
         explicit WorldModel(ESMStore& store, ESM::ReadersCache& reader);
-        // Offline runtime composition without initializing all Settings categories.
+        // Offline runtime composition without Settings or live Lua cell events.
         WorldModel(ESMStore& store, ESM::ReadersCache& reader, std::size_t pointersCacheSize);
 
         WorldModel(const WorldModel&) = delete;
@@ -123,6 +123,7 @@ namespace MWWorld
         ESM::Cell mDraftCell;
         std::vector<std::pair<ESM::RefId, CellStore*>> mIdCache;
         std::size_t mIdCacheIndex = 0;
+        bool mExteriorCreationEvents = false;
 
         CellStore& getOrInsertCellStore(const ESM::Cell& cell);
 

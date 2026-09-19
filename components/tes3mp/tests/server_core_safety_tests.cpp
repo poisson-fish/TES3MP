@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -329,6 +331,46 @@ namespace
             == crc64Ecma182(bytes);
     }
 
+    bool crc64_bulk_compatibility()
+    {
+        const auto reference = [](std::span<const std::uint8_t> bytes) {
+            std::uint64_t checksum = 0;
+            for (const auto byte : bytes)
+            {
+                checksum ^= std::uint64_t(byte) << 56;
+                for (unsigned bit = 0; bit < 8; ++bit)
+                    checksum = checksum & 0x8000000000000000ULL
+                        ? (checksum << 1) ^ 0x42F0E1EBA9EA3693ULL : checksum << 1;
+            }
+            return checksum;
+        };
+        if (!crc64_ecma_check_vector_and_canonical_checksum_are_stable()
+            || crc64Ecma182({}).value() != 0) return false;
+        for (unsigned value = 0; value < 256; ++value)
+        {
+            const std::array byte{static_cast<std::uint8_t>(value)};
+            if (crc64Ecma182(byte).value() != reference(byte)) return false;
+        }
+        std::vector<std::uint8_t> payload(1024 * 1024);
+        for (std::size_t i = 0; i < payload.size(); ++i)
+            payload[i] = static_cast<std::uint8_t>((i * 37) ^ (i >> 8) ^ (i >> 16));
+        for (const std::size_t size : {1, 7, 8, 9, 255, 256, 257, 4095, 4096, 65537, 1048575})
+        {
+            const auto bytes = std::span(payload).subspan(1, size);
+            if (crc64Ecma182(bytes).value() != reference(bytes)) return false;
+        }
+        const auto start = std::chrono::steady_clock::now();
+        std::uint64_t fold = 0;
+        for (unsigned round = 0; round < 32; ++round)
+        {
+            payload[0] = static_cast<std::uint8_t>(round);
+            fold ^= crc64Ecma182(payload).value();
+        }
+        std::cout << "crc64 32 MiB elapsed_us=" << std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count() << " fold=" << fold << '\n';
+        return true;
+    }
+
     CanonicalServerState fieldState(std::uint64_t playerValue, std::uint64_t revision, std::uint64_t epoch,
         std::uint64_t acknowledgement, std::uint64_t commandIdValue)
     {
@@ -450,8 +492,14 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "crc64-bulk")
+    {
+        if (!crc64_bulk_compatibility()) { std::cerr << "FAIL crc64-bulk\n"; return 1; }
+        std::cout << "PASS crc64-bulk: golden vector, all byte values, unaligned boundaries and persistence-sized payloads\n";
+        return 0;
+    }
     const std::array tests{
         std::pair{ "cross_batch_reused_command_id_is_finalized_once_without_player_change",
             &cross_batch_reused_command_id_is_finalized_once_without_player_change },
@@ -471,6 +519,7 @@ int main()
             &canonical_v3_bytes_are_explicit_stable_and_cover_locomotion_state },
         std::pair{ "crc64_ecma_check_vector_and_canonical_checksum_are_stable",
             &crc64_ecma_check_vector_and_canonical_checksum_are_stable },
+        std::pair{ "crc64_bulk_compatibility", &crc64_bulk_compatibility },
         std::pair{ "identity_revision_epoch_ack_history_version_or_tick_change_changes_bytes",
             &identity_revision_epoch_ack_history_version_or_tick_change_changes_bytes },
         std::pair{ "observability_allocation_and_publication_handle_do_not_change_checksum",

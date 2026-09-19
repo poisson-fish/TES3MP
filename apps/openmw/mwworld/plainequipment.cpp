@@ -178,9 +178,9 @@ namespace MWWorld
         }
 
         void validateValues(const PlainEquipmentValues& input, const ESMStore& content, ESM::RefNum expectedActor,
-            const EquipmentScriptLocals* scripts)
+            const EquipmentScriptLocals* scripts, size_t maximumItems = PlainEquipmentValues::MaxItems)
         {
-            if (input.mObjects.size() > PlainEquipmentValues::MaxItems || input.mActor != expectedActor
+            if (maximumItems > PlainEquipmentValues::MaxWorldItems || input.mObjects.size() > maximumItems || input.mActor != expectedActor
                 || !input.mActor.isSet() || input.mLastGenerated.mContentFile >= 0)
                 throw std::invalid_argument("Invalid equipment owner, membership or counter");
             counterCovers(input.mLastGenerated, input.mActor);
@@ -486,9 +486,9 @@ namespace MWWorld
     }
 
     void PlainEquipmentValues::validate(const ESMStore& content, ESM::RefNum expectedActor,
-        const EquipmentScriptLocals* scripts) const
+        const EquipmentScriptLocals* scripts, size_t maximumItems) const
     {
-        validateValues(*this, content, expectedActor, scripts);
+        validateValues(*this, content, expectedActor, scripts, maximumItems);
     }
 
     void PlainEquipmentValues::swap(PlainEquipmentValues& other) noexcept

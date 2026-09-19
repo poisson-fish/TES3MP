@@ -90,6 +90,17 @@ namespace TES3MP
         std::variant<InteriorCell, ExteriorCell> mValue;
     };
 
+    constexpr bool sharesCellNeighborhood(const CellId& first, const CellId& second) noexcept
+    {
+        if (first == second) return true;
+        const auto* a = first.asExterior();
+        const auto* b = second.asExterior();
+        if (!a || !b || a->worldspace() != b->worldspace()) return false;
+        const auto x = int64_t(a->gridX()) - b->gridX();
+        const auto y = int64_t(a->gridY()) - b->gridY();
+        return x >= -1 && x <= 1 && y >= -1 && y <= 1;
+    }
+
     class Position3
     {
     public:

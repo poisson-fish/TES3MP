@@ -24,15 +24,15 @@ namespace TES3MP::ServerApp
         LatestWinsSnapshot view;
     };
 
-    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source) noexcept;
+    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods = false) noexcept;
     std::optional<InterestBaselineDelivery> projectInterestBaseline(const CanonicalServerState& state,
-        SessionId target, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion);
+        SessionId target, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods = false);
     bool admitInterestBaseline(OutboundQueueSet& queues, TransportConnectionId connection,
         const InterestBaselineDelivery& delivery);
 
     std::optional<std::vector<InterestDelivery>> projectInterestChanges(
         const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
-        CanonicalRevision revision);
+        CanonicalRevision revision, bool neighborhoods = false);
 
     bool admitInterestChange(OutboundQueueSet& queues, TransportConnectionId connection,
         const InterestDelivery& delivery);
@@ -40,7 +40,7 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& deliveries);
 
     std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectInterestViews(
-        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision);
+        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision, bool neighborhoods = false);
     bool admitInterestViewsAtomically(OutboundQueueSet& queues,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries);
     bool admitInterestTickAtomically(OutboundQueueSet& queues,

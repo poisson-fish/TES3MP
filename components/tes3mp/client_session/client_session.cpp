@@ -677,7 +677,7 @@ namespace TES3MP
             return InventoryReplicationReceiveResult::InvalidChunkSequence;
         const auto& native = *mPendingGroundItems->chunks.front();
         auto created = ReliableGroundItemBaseline::create(header, mPendingGroundItems->cell, items,
-            native.nativePlacements, native.presentation, native.nativeWorld, native.door, native.teleportDoors);
+            native.nativePlacements, native.presentation, native.nativeWorld, native.door, native.teleportDoors, native.doors, native.neighbors, native.actorSpawns);
         auto* complete = std::get_if<ReliableGroundItemBaseline>(&created);
         if (!complete)
             return InventoryReplicationReceiveResult::InvalidChunkSequence;

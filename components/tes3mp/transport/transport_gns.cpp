@@ -419,7 +419,7 @@ namespace
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
             options[2].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,
-                static_cast<std::int32_t>(TES3MP::LatestWinsMaximumMessageBytes));
+                static_cast<std::int32_t>(std::max(TES3MP::ReliableOrderedMaximumMessageBytes, TES3MP::LatestWinsMaximumMessageBytes)));
             options[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,
                 static_cast<std::int32_t>(TES3MP::TransportRuntime::MaxMessagesPerReceive));
             const HSteamListenSocket handle = SteamAPI_ISteamNetworkingSockets_CreateListenSocketIP(
@@ -1000,7 +1000,7 @@ namespace
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
             options[2].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,
-                static_cast<std::int32_t>(TES3MP::LatestWinsMaximumMessageBytes));
+                static_cast<std::int32_t>(std::max(TES3MP::ReliableOrderedMaximumMessageBytes, TES3MP::LatestWinsMaximumMessageBytes)));
             options[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,
                 static_cast<std::int32_t>(TES3MP::TransportRuntime::MaxMessagesPerReceive));
             const HSteamNetConnection handle = SteamAPI_ISteamNetworkingSockets_ConnectByIPAddress(

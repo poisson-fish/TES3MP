@@ -34,7 +34,7 @@ tes3mp_verify_target_includes(tes3mp_native_placement_scene
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwphysics")
 
 # Concrete application adapter; engine/network types meet only in this leaf.
-add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp)
+add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp area_doors.cpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_service PUBLIC tes3mp_server_app PRIVATE tes3mp_native_equipment_runtime openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_inventory_service
@@ -52,6 +52,9 @@ tes3mp_verify_target_includes(tes3mp_native_inventory_host
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
 add_executable(tes3mp_native_loadout_probe main.cpp)
+add_executable(tes3mp_native_bootstrap bootstrap.cpp)
+target_link_libraries(tes3mp_native_bootstrap PRIVATE tes3mp_native_loadout tes3mp_server_core)
+tes3mp_verify_target_dependencies(tes3mp_native_bootstrap ALLOWED tes3mp_native_loadout tes3mp_server_core)
 target_link_libraries(tes3mp_native_loadout_probe PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_native_loadout)
 

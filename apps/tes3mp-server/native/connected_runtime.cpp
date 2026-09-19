@@ -151,8 +151,9 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
+        auto worldBinding = bindings[0]; worldBinding.mMaximumItems = mWorldCapacity;
+        encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &worldBinding : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value(), mCellCount);
     }
 
     InventoryTransferCommand EquipmentRuntime::transferCommand(size_t source, InventoryInstanceId item, int quantity) const
@@ -516,12 +517,13 @@ namespace TES3MP::Native
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
             containerBindings.push_back({containerEnvelopes[i], mStore, referenceIds, mScriptLocals, inventoryStorage(i + 2) != nullptr});
-        decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
+        auto worldBinding = bindings[0]; worldBinding.mMaximumItems = mWorldCapacity;
+        decodeEquipmentSession(accepted, bindings, values, containerBindings, mWorldItems ? &worldBinding : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value(), mCellCount);
         validateWorldItems(values);
         EquipmentBytes canonical;
-        encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &bindings[0] : nullptr,
-            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value());
+        encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &worldBinding : nullptr,
+            mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value(), mCellCount);
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;

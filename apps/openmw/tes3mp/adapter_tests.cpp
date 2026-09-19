@@ -716,7 +716,7 @@ namespace
 
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
-void teleportPresentation()
+void teleportPresentation(bool pickupBarrier = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -752,7 +752,7 @@ void teleportPresentation()
         const auto original = selfSnapshot(generation, false, revision, revision);
         const auto& self = original.view().entries()[0];
         const std::array entries{SpatialEntitySnapshot(self.serverTick(), self.playerId(), self.entityId(), self.appearanceId(),
-            value<EntityRevision>(revision), value<AuthorityEpoch>(revision), Transform(cell, Position3(32 * 1024, 0, 0),
+            value<EntityRevision>(revision), value<AuthorityEpoch>(pickupBarrier ? 1 : revision), Transform(cell, Position3(32 * 1024, 0, 0),
                 self.transform().orientation()), LinearVelocity3(0,0,0))};
         wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
             encodeLatestWinsSnapshot(LatestWinsSnapshot(original.header(), std::get<SpatialWorldView>(SpatialWorldView::create(entries)))),
@@ -770,6 +770,39 @@ void teleportPresentation()
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (pickupBarrier)
+    {
+        // Reliable inventory and ground updates can span frames. Picking up
+        // during that gap must retain the proposal instead of closing transport.
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+            encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(generation, 2, 2)),
+            TransportChannel::ReliableOrdered);
+        input.nextInventory = InventoryTransactionCapture{ .kind = InventoryTransactionKind::PickupItem,
+            .prototypeId = value<ItemPrototypeId>(20), .stackId = value<ItemStackId>(12), .count = 1,
+            .expectedInventoryRevision = value<InventoryRevision>(1), .interactionOrigin = Position3(0, 0, 0),
+            .expectedWorldItemRevision = value<WorldItemRevision>(1) };
+        const auto sentBeforePickup = wire->sentFrames.size();
+        coordinator->frame(.01f);
+        require(input.nextInventory && status.last != ConnectionStatus::TransportFailed);
+        require(presentation.inventories == 1);
+        sendSpatial(2, first); sendInventory(2, first); coordinator->frame(.01f);
+        require(!input.nextInventory && status.last != ConnectionStatus::TransportFailed);
+        require(presentation.inventories == 2);
+        unsigned pickups = 0;
+        for (size_t i = sentBeforePickup; i < wire->sentFrames.size(); ++i)
+        {
+            const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(wire->sentFrames[i]));
+            if (frame.messageKind() != MessageKind::ClientInventoryTransactionCommand) continue;
+            const auto command = std::get<ClientInventoryTransactionCommand>(decodeClientInventoryTransactionCommand(frame.payload()));
+            require(command.kind == InventoryTransactionKind::PickupItem
+                && command.expectedInventoryRevision == value<InventoryRevision>(1)
+                && command.expectedWorldItemRevision == value<WorldItemRevision>(1));
+            ++pickups;
+        }
+        require(pickups == 1);
+        std::cout << "PASS inventory-pickup-barrier: partial updates defer one revision-bound pickup\n";
+        return;
+    }
     // Spatial correction wins the race. The previous cell's complete inventory
     // must not be reinstalled while the destination baseline is still in flight.
     sendSpatial(2, second); coordinator->frame(.01f);
@@ -799,9 +832,10 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
-    if (argc == 2 && std::string_view(argv[1]) == "teleport-presentation")
+    if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
+        || std::string_view(argv[1]) == "inventory-pickup-barrier"))
     {
-        teleportPresentation();
+        teleportPresentation(std::string_view(argv[1]) == "inventory-pickup-barrier");
         return 0;
     }
 

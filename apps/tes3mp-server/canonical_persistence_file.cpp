@@ -277,7 +277,11 @@ namespace TES3MP::ServerApp
             return CanonicalDurabilityResult::Rejected;
         std::vector<CanonicalDurableTick> transactions(mPrefix.transactions().begin(), mPrefix.transactions().end());
         transactions.push_back(std::move(*transaction));
-        if (transactions.size() > MaximumPersistenceTransactions)
+        // Leave one maximum record of headroom for prefix metadata. Large native
+        // images must compact before the file limit, not fail permanently while
+        // waiting for the old transaction-count threshold.
+        constexpr auto fileBound = MaximumPersistenceFileBytes / MaximumPersistenceRecordBytes - 1;
+        if (transactions.size() > std::min(MaximumPersistenceTransactions, fileBound))
         {
             const auto& previous = transactions[transactions.size() - 2];
             auto checkpoint = CanonicalDurableTick::create(previous.stateVersion(), previous.canonicalRevision(),

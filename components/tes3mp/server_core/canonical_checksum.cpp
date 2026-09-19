@@ -1,5 +1,6 @@
 #include <tes3mp/canonical_checksum.hpp>
 
+#include <array>
 #include <type_traits>
 #include <utility>
 
@@ -7,12 +8,21 @@ namespace
 {
     constexpr std::uint64_t Crc64EcmaPolynomial = 0x42F0E1EBA9EA3693ULL;
 
+    constexpr auto Crc64EcmaTable = [] {
+        std::array<std::uint64_t, 256> table{};
+        for (std::size_t byte = 0; byte < table.size(); ++byte)
+        {
+            auto checksum = static_cast<std::uint64_t>(byte) << 56;
+            for (unsigned bit = 0; bit < 8; ++bit)
+                checksum = checksum & 0x8000000000000000ULL ? (checksum << 1) ^ Crc64EcmaPolynomial : checksum << 1;
+            table[byte] = checksum;
+        }
+        return table;
+    }();
+
     constexpr std::uint64_t updateCrc64Ecma(std::uint64_t checksum, std::uint8_t byte) noexcept
     {
-        checksum ^= static_cast<std::uint64_t>(byte) << 56;
-        for (unsigned bit = 0; bit < 8; ++bit)
-            checksum = checksum & 0x8000000000000000ULL ? (checksum << 1) ^ Crc64EcmaPolynomial : checksum << 1;
-        return checksum;
+        return (checksum << 8) ^ Crc64EcmaTable[static_cast<std::uint8_t>(checksum >> 56) ^ byte];
     }
 
     class CanonicalByteWriter

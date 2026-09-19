@@ -229,6 +229,9 @@ namespace TES3MP::ServerApp
                     return false;
             return true;
         }
+        // Sends can fail after pump has committed several catch-up ticks. The
+        // disconnect barrier must not precede the world it will persist.
+        tick = std::max(tick, mWiring->reducer.checkpointTick());
         const auto before = mWiring->reducer.state();
         auto prepared = mWiring->lifecycle.prepareDisconnectBatch(sessionIds, mWiring->clock.now(), tick);
         auto* lifecycle = std::get_if<ServerLifecycleBatchPreparation>(&prepared);
@@ -238,7 +241,7 @@ namespace TES3MP::ServerApp
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
         auto projected
-            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()) : std::nullopt;
         if (!projected)
         {
             cancel();
@@ -331,7 +334,7 @@ namespace TES3MP::ServerApp
             if (!targetState || targetState->state() != ServerSessionState::Established || !targetState->sessionId()
                 || !supportsPose(*targetState))
                 continue;
-            if (!sharesInterest(canonical, *targetState->sessionId(), *sourceState->sessionId()))
+            if (!sharesInterest(canonical, *targetState->sessionId(), *sourceState->sessionId(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()))
                 continue;
             ServerVrPoseSnapshot snapshot(*targetState->sessionId(), targetState->generation(),
                 sourcePlayer->playerId(), pose->sourceSessionId(), pose->sourceSessionGeneration(),
@@ -380,10 +383,10 @@ namespace TES3MP::ServerApp
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
         const auto stateVersion = mWiring->lifecycle.candidateStateVersion(lifecycle->id);
         auto baseline = candidate && revision && stateVersion
-            ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion)
+            ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas())
             : std::nullopt;
         auto observations
-            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
         const auto* resumedSession = candidate ? candidate->findActiveSession(*session->sessionId()) : nullptr;
         const auto* resumedProfile
@@ -575,7 +578,7 @@ namespace TES3MP::ServerApp
             return false;
         auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(),
             resolved.publication()->checkpointTick(), mWiring->reducer.canonicalRevision(),
-            resolved.publication()->stateVersion());
+            resolved.publication()->stateVersion(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
         if (!delivery)
             return false;
         const bool wantActors = supportsActors(connection);
@@ -718,7 +721,7 @@ namespace TES3MP::ServerApp
             const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
             const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
             auto projected
-                = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+                = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()) : std::nullopt;
             if (!projected)
             {
                 cancel();
@@ -1178,7 +1181,8 @@ namespace TES3MP::ServerApp
             if (prepared.candidateRevision() != revisionBefore)
             {
                 auto projected = projectInterestChanges(
-                    before, prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision());
+                    before, prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision(),
+                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
                 if (!projected)
                 {
                     mFailure = "observation projection failed";
@@ -1196,7 +1200,8 @@ namespace TES3MP::ServerApp
                     routed.emplace_back(*connection, std::move(delivery));
                 }
                 auto views = projectInterestViews(
-                    prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision());
+                    prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision(),
+                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
                 if (!views)
                 {
                     mFailure = "movement view projection failed";
@@ -1261,6 +1266,10 @@ namespace TES3MP::ServerApp
                         }
                         objectBaselines.emplace_back(*connection, std::move(*baseline));
                     }
+                if (mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas())
+                    for (const auto& player : prepared.candidateState().players())
+                        if (const auto* previous = before.findPlayer(player.playerId()); previous
+                            && previous->transform().cell() != player.transform().cell()) refreshInventoryBaselines = true;
                 if (mWiring->inventory || mWiring->nativeInventory)
                     for (const auto& target : prepared.candidateState().activeSessions())
                     {

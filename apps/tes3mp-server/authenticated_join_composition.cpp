@@ -28,8 +28,9 @@ namespace TES3MP::ServerApp
                            TransportChannel::LatestWins, snapshot)
                     == TransportResult::Accepted;
             const auto revision = join.initialSnapshot.header().canonicalRevision();
-            auto baseline = projectInterestBaseline(after, join.session, tick, revision, stateVersion);
-            auto projected = projectInterestChanges(before, after, tick, revision);
+            const bool neighborhoods = mNativeInventory && mNativeInventory->streamsPlayerAreas();
+            auto baseline = projectInterestBaseline(after, join.session, tick, revision, stateVersion, neighborhoods);
+            auto projected = projectInterestChanges(before, after, tick, revision, neighborhoods);
             if (!baseline || !projected)
                 return false;
             const auto* joiningSession = mSessions->session(mConnection);
@@ -127,9 +128,8 @@ namespace TES3MP::ServerApp
                 : std::optional<LatestWinsCombatSnapshot>{};
             if (combatCapable && (!mPendingCombat || !mActors || !combatSnapshot))
                 return false;
-            if (mInventory || mPendingInventory)
+            if (mInventory || mPendingInventory || mNativeInventory)
             {
-                const auto& projectedInventory = mPendingInventory ? *mPendingInventory : *mInventory;
                 for (const auto& target : after.activeSessions())
                 {
                     if (target.sessionId() == join.session)
@@ -141,8 +141,10 @@ namespace TES3MP::ServerApp
                             inventoryReplicationCapability());
                     if (!connection || !capable)
                         continue;
-                    auto delivery = projectInventoryInterestBaseline(
-                        after, projectedInventory, target.sessionId(), tick, revision);
+                    auto delivery = mNativeInventory
+                        ? mNativeInventory->projectInventory(after, target.sessionId(), tick, revision)
+                        : projectInventoryInterestBaseline(after, mPendingInventory ? *mPendingInventory : *mInventory,
+                            target.sessionId(), tick, revision);
                     if (!delivery)
                         return false;
                     inventoryBaselines.emplace_back(*connection, std::move(*delivery));

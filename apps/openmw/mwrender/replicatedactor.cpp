@@ -693,15 +693,16 @@ namespace MWRender
     public:
         Impl(RenderingManager& rendering, const MWWorld::ESMStore& store, const ESM::RefId& npcRecord,
             MWWorld::CellStore& cell, const ESM::Position& position,
-            std::optional<std::span<const ESM::RefId>> equipment)
+            std::optional<std::span<const ESM::RefId>> equipment, float scale)
             : mRendering(rendering)
             , mReference(store, npcRecord)
             , mPtr(mReference.getPtr().mRef, &cell)
         {
             if (mPtr.getType() != ESM::REC_NPC_ && mPtr.getType() != ESM::REC_CREA)
                 throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
-            if (!isValidReplicatedActorPose(position))
+            if (!isValidReplicatedActorPose(position) || !std::isfinite(scale) || scale <= 0)
                 throw BuildFailure(ReplicatedActorResult::InvalidPose);
+            mPtr.getCellRef().setScale(scale);
             mPtr.getRefData().setPosition(position);
             mCreateResult = mRendering.getObjects().insertReplicatedActor(mPtr, store, equipment);
             if (!replicatedActorResultAccepted(mCreateResult))
@@ -772,7 +773,7 @@ namespace MWRender
 
     ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering, const MWWorld::ESMStore& store,
         const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
-        std::optional<std::span<const ESM::RefId>> equipment) noexcept
+        std::optional<std::span<const ESM::RefId>> equipment, float scale) noexcept
     {
         try
         {
@@ -781,7 +782,7 @@ namespace MWRender
             const int recType = store.find(npcRecord);
             if (recType != ESM::NPC::sRecordId && recType != ESM::Creature::sRecordId)
                 return { ReplicatedActorResult::InvalidAppearanceRecord, nullptr };
-            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position, equipment);
+            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position, equipment, scale);
             const ReplicatedActorResult result = impl->createResult();
             return { result, std::unique_ptr<ReplicatedActor>(new ReplicatedActor(std::move(impl))) };
         }

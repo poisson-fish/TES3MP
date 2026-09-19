@@ -112,6 +112,7 @@ namespace MWWorld
         bool mScriptsEnabled;
         bool mDiscardMovements;
         bool mWorldTimeAuthority = false;
+        bool mLeveledActorAuthority = false;
         std::vector<std::string> mContentFiles;
 
         std::filesystem::path mUserDataPath;
@@ -312,6 +313,8 @@ namespace MWWorld
         ///< Return current in-game time and number of day since new game start.
 
         void setWorldTimeAuthority(bool authoritative) override;
+        void setLeveledActorAuthority(bool value) override { mLeveledActorAuthority = value; }
+        bool hasLeveledActorAuthority() const override { return mLeveledActorAuthority; }
         bool applyAuthoritativeWorldTime(
             int day, int month, int year, std::uint32_t millisecondsSinceMidnight,
             std::uint32_t timeScaleUnits, std::optional<std::uint32_t> daysPassed = std::nullopt) override;

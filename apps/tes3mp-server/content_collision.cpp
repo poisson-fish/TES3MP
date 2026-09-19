@@ -10,6 +10,11 @@
 
 namespace TES3MP::ServerApp
 {
+    std::unique_ptr<ContentCollisionProvider> ContentCollisionProvider::nativeMovement(const ContentManifest& manifest)
+    {
+        return std::unique_ptr<ContentCollisionProvider>(new ContentCollisionProvider(manifest.id(),
+            std::vector<CellId>(manifest.cells().begin(), manifest.cells().end()), {}));
+    }
     namespace
     {
         constexpr std::string_view Header = "TES3MP_COLLISION_V1";

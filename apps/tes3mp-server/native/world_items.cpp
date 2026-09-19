@@ -14,10 +14,10 @@ namespace TES3MP::Native
         if (bool(values.mWorldCells) != bool(mWorldCells)
             || (values.mWorldCells && values.mWorldCells->size() != world.mObjects.size()))
             throw std::invalid_argument("World membership domain changed");
-        if (world.mObjects.size() > PreparedPlainEquipment::MaxItems || world.mNpcStats
+        if (world.mObjects.size() > mWorldCapacity || world.mNpcStats
             || world.mSelected.isSet() || std::ranges::any_of(world.mSlots, [](auto id) { return id.isSet(); }))
             throw std::invalid_argument("Invalid world item storage shape");
-        world.validate(mStore, ownerPtr(0).getCellRef().getRefNum());
+        world.validate(mStore, ownerPtr(0).getCellRef().getRefNum(), nullptr, mWorldCapacity);
         for (const auto& object : world.mObjects)
         {
             const auto& ref = object.mRef;
@@ -25,7 +25,7 @@ namespace TES3MP::Native
             {
                 const auto cell = values.mWorldCells->find(ref.mRefNum);
                 const auto placedCell = mPlacedItemCells.find(ref.mRefNum);
-                if (cell == values.mWorldCells->end() || cell->second > 1
+                if (cell == values.mWorldCells->end() || cell->second >= mCellCount
                     || (ref.mRefNum.hasContentFile() && (placedCell == mPlacedItemCells.end() || placedCell->second != cell->second)))
                     throw std::invalid_argument("Saved world cell differs from bound content");
             }
@@ -95,13 +95,13 @@ namespace TES3MP::Native
     {
         if (actor >= 2 || !mConnected || mFailedClosed || mRestartActor || !mWorldItems
             || expected != mWorld.getPtrRegistryRevision() || count <= 0 || count > 1000000
-            || cell > (mWorldCells ? 1 : 0))
+            || cell >= mCellCount)
             throw std::invalid_argument("World transfer unavailable, stale or invalid");
         const ESM::RefNum identity{item.mIndex, item.mContentFile};
         const auto found = std::ranges::find(mWorldItems->mObjects, identity,
             [](const auto& object) { return object.mRef.mRefNum; });
         if ((pickup && (found == mWorldItems->mObjects.end() || worldCell(identity) != cell))
-            || (!pickup && mWorldItems->mObjects.size() == PreparedPlainEquipment::MaxItems))
+            || (!pickup && mWorldItems->mObjects.size() == mWorldCapacity))
             throw std::invalid_argument("World item missing or world capacity exhausted");
         for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
         auto [inventory, world] = PreparedPlainEquipment::prepareWorldTransfer(

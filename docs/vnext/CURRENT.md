@@ -1,55 +1,54 @@
 # Current state and next action
 
-## Handoff
+M3 in [PLAN.md](PLAN.md) remains open. Live verification is deferred by request.
+**Noran Grotto** TR travel setup is ready: one interior, nine exteriors (x=37–39/y=-31–-29),
+Nedothril/Padomaic Ocean regions. Level 1/seed 0 inspection found no scripts or
+unsupported containers. Next: live travel/weather acceptance. Noran has return
+teleports but no swinging doors; door checks need another location.
+Warehouse's 26-area campaign rejects `contain_corpse10` in exterior 11,-33.
+Scripts/Lua remain deferred to M5.
 
-M3 in [PLAN.md](PLAN.md); rules: [DEVELOPMENT.md](DEVELOPMENT.md).
-**Fresh-session visuals deferred by request:** time/weather, teleport round trips,
-ordinary-door contacts, latency, late join, reconnect and restart.
-Next integration slice: replace the fixed two-cell domain with bounded player-area
-streaming and retire fixture-only bootstrap. Named Tamriel Rebuilt two-client
-acceptance remains missing; M3 is open.
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-15**
+requires fresh campaigns and leveled-actor-capable clients. OpenMW selects initial
+unscripted living actors using campaign level/seed. Selected/none outcomes persist
+with inventories/doors; recovery never rerolls. Clients suppress local spawning.
+AI, combat, respawn, leveled authored corpses, scripts/Lua and locked/trapped
+inventories remain unsupported.
 
-## Native runtime
+V14 streaming remains: 1–256 cells, occupied interiors and both players' 3×3
+exterior neighborhoods; unloaded doors freeze, weather continues, inventories persist.
+Bounds: 1,024 stores/leveled markers, 128 actors per neighborhood, 8,192 ground
+references, 192 items/cell, 128 ordinary doors/cell, 4,096 doors total.
+[Bootstrap](../../apps/tes3mp-server/native/bootstrap.cpp) exports V15 atomically.
+`--help` covers discovery/spawn/single-cell mode. Read-only
+`--inspect-area CONFIG START [RADIUS]` reports connected cells, scripts, inventories,
+actors, doors and regions; runtime startup remains required.
 
-[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-13**,
-V12 fields; either selector accepts `exterior X Y` with matching
-`cell exterior:WORLDSPACE_ID:X:Y`. Requires a fresh campaign and native-environment
-clients. Older domains retain their meanings.
+Build: `build/vnext-product`; **openmw.exe** rebuilt.
+Inspector compiled/linked against existing libraries. Older Ninja reset the build
+log during cost inspection; unrelated rebuilding was stopped. Future builds may
+recompile dependencies.
 
-Two cells retain two players, 32 inventories, 64 world items, one selected ordinary
-door and 32 teleport doors. OpenMW resolves overrides/deletions/moved references,
-terrain vertices/triangles and teleport destinations. Drops crossing exterior
-edges reject. Empty cells release scenes/terrain and freeze doors; reentry/recovery
-never reload loot. Teleports durably commit destination/epoch before publication.
+Passing: `tes3mp_native_loadout_tests` filters `leveled-actors`,
+`leveled-actor-persistence`, `player-area-discovery`;
+`tes3mp_inventory_replication_tests neighborhoods`. Evidence in `build/logs`:
+`m3-leveled-actors-04.log`, `m3-leveled-persistence-03.log`,
+`m3-area-discovery-02.log`, `m3-neighborhoods-01.log`,
+`m3-bootstrap-fixture.log`, `m3-bootstrap-failures.log`.
 
-[Environment](../../apps/tes3mp-server/native/environment.cpp) shares OpenMW calendar,
-REGN weather and dedicated RNG, persisted coherently at 30 Hz. Up to 4,096 regions
-advance regardless of occupancy/menus. Legacy environment/script writers reject.
+TR runtime: `build/m3-tr-noran`, radius 1, incoming-door spawn
+`338.515:-184.765:-836`, mod Lua excluded. Alice/Bob credentials/configs prepared;
+`launch.ps1 -Role server|Alice|Bob`, loopback port 25616. Startup/restart passed:
+UDP listener, advancing canonical save, empty stderr. Servers stopped; save retained;
+no clients launched. Evidence: `build/logs/m3-tr-noran/startup.json`.
+Inspection: `build/logs/m3-inspect-noran-grotto.log`. CLI discovery/argument checks:
+`build/logs/m3-inspect-area-check.log`. Ordered plugin hashes/manifest/logs:
+`build/logs/m3-v15-acceptance.json`.
 
-No scripts/Lua, locked/trapped/unbound teleports, followers, server physics/NPC
-contacts, AI/combat, respawn, adjacent-area streaming or native wait/rest UI.
-Cell/ordinary-door startup selection remains; movement is inherited and intercell
-traversal requires doors.
+Inherited Warehouse acceptance: two-client visuals, loot/container transfers,
+reconnect/restart; observed transfer/drop latency 164–166 ms.
+Saves: `build/acceptance-v14-tr-warehouse`; evidence: matching `build/logs` directory.
 
-## Verification
-
-Windows RelWithDebInfo, `build/vnext-product`; logs in `build/logs`.
-Passed `tes3mp_native_loadout_tests` filters:
-
-| Filter | Evidence/log |
-|---|---|
-| exterior-references | overrides/deletion/moved refs, identities, malformed rejection; exterior-references.log |
-| exterior-host | terrain drop, durable teleport, split baselines, unload/reentry, recovery, descriptors/environment; exterior-host.log |
-| teleport-host | interior regression; exterior-interior-regression.log |
-
-Builds: `exterior-{build,server-build}.log`; docs: `docs-{budget,links}.log`.
-Boundary: `test_inventory_and_object_migration_sources_remain_engine_independent`
-(`exterior-boundary.log`) passed.
-Model fixtures need `OSG_LIBRARY_PATH=deps/installed/x64-windows/bin`.
-Host tests take a fresh scratch directory and config file; verified config:
-`build/environment-loadout-config/openmw.cfg`. Evidence uses Morrowind/generated
-plugins, not TR or graphical clients.
-
-Inherited logs: `environment-{clock,weather,durability,application,loadout,host,time-wire,boundary,patch-registry}.log`;
-`teleport-{traversal,host,presentation}.log`. Graphical V11 fixture:
-`build/teleport-graphical-v11-20260918/{launch,control}.py`; V13 needs a fresh campaign.
+Pending live: exterior crossings, teleports, separation, unload/return; matching
+door motion, obstruction/reversal, latency; regional weather transition on both
+clients. Doors/weather must also converge after late join and reconnect.

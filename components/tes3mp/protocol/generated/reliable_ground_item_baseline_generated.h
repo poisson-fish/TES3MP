@@ -31,6 +31,11 @@ struct ItemPresentation;
 
 struct NativeDoor;
 
+struct NativeNeighbor;
+struct NativeNeighborBuilder;
+
+struct ActorSpawn;
+
 struct ReliableGroundItemBaseline;
 struct ReliableGroundItemBaselineBuilder;
 
@@ -345,6 +350,29 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeDoor FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(NativeDoor, 32);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorSpawn FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t placement_;
+  uint64_t record_;
+
+ public:
+  ActorSpawn()
+      : placement_(0),
+        record_(0) {
+  }
+  ActorSpawn(uint64_t _placement, uint64_t _record)
+      : placement_(::flatbuffers::EndianScalar(_placement)),
+        record_(::flatbuffers::EndianScalar(_record)) {
+  }
+  uint64_t placement() const {
+    return ::flatbuffers::EndianScalar(placement_);
+  }
+  uint64_t record() const {
+    return ::flatbuffers::EndianScalar(record_);
+  }
+};
+FLATBUFFERS_STRUCT_END(ActorSpawn, 16);
+
 struct GroundItemBaselineHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GroundItemBaselineHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -437,6 +465,59 @@ inline ::flatbuffers::Offset<GroundItemBaselineHeader> CreateGroundItemBaselineH
   return builder_.Finish();
 }
 
+struct NativeNeighbor FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef NativeNeighborBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_BASELINE = 4
+  };
+  const ::flatbuffers::Vector<uint8_t> *baseline() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_BASELINE);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_BASELINE) &&
+           verifier.VerifyVector(baseline()) &&
+           verifier.EndTable();
+  }
+};
+
+struct NativeNeighborBuilder {
+  typedef NativeNeighbor Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_baseline(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> baseline) {
+    fbb_.AddOffset(NativeNeighbor::VT_BASELINE, baseline);
+  }
+  explicit NativeNeighborBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<NativeNeighbor> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<NativeNeighbor>(end);
+    fbb_.Required(o, NativeNeighbor::VT_BASELINE);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<NativeNeighbor> CreateNativeNeighbor(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> baseline = 0) {
+  NativeNeighborBuilder builder_(_fbb);
+  builder_.add_baseline(baseline);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<NativeNeighbor> CreateNativeNeighborDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<uint8_t> *baseline = nullptr) {
+  auto baseline__ = baseline ? _fbb.CreateVector<uint8_t>(*baseline) : 0;
+  return TES3MP::Protocol::Schema::GroundItemBaseline::CreateNativeNeighbor(
+      _fbb,
+      baseline__);
+}
+
 struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ReliableGroundItemBaselineBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -447,7 +528,10 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
     VT_PRESENTATION = 12,
     VT_NATIVE_WORLD = 14,
     VT_DOOR = 16,
-    VT_TELEPORT_DOORS = 18
+    VT_TELEPORT_DOORS = 18,
+    VT_DOORS = 20,
+    VT_NEIGHBORS = 22,
+    VT_ACTOR_SPAWNS = 24
   };
   const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::GroundItemBaseline::GroundItemBaselineHeader *>(VT_HEADER);
@@ -473,6 +557,15 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
   const ::flatbuffers::Vector<uint64_t> *teleport_doors() const {
     return GetPointer<const ::flatbuffers::Vector<uint64_t> *>(VT_TELEPORT_DOORS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *> *doors() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *> *>(VT_DOORS);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>> *neighbors() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>> *>(VT_NEIGHBORS);
+  }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn *> *actor_spawns() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn *> *>(VT_ACTOR_SPAWNS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -489,6 +582,13 @@ struct ReliableGroundItemBaseline FLATBUFFERS_FINAL_CLASS : private ::flatbuffer
            VerifyField<TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor>(verifier, VT_DOOR, 8) &&
            VerifyOffset(verifier, VT_TELEPORT_DOORS) &&
            verifier.VerifyVector(teleport_doors()) &&
+           VerifyOffset(verifier, VT_DOORS) &&
+           verifier.VerifyVector(doors()) &&
+           VerifyOffset(verifier, VT_NEIGHBORS) &&
+           verifier.VerifyVector(neighbors()) &&
+           verifier.VerifyVectorOfTables(neighbors()) &&
+           VerifyOffset(verifier, VT_ACTOR_SPAWNS) &&
+           verifier.VerifyVector(actor_spawns()) &&
            verifier.EndTable();
   }
 };
@@ -521,6 +621,15 @@ struct ReliableGroundItemBaselineBuilder {
   void add_teleport_doors(::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> teleport_doors) {
     fbb_.AddOffset(ReliableGroundItemBaseline::VT_TELEPORT_DOORS, teleport_doors);
   }
+  void add_doors(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *>> doors) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_DOORS, doors);
+  }
+  void add_neighbors(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>>> neighbors) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_NEIGHBORS, neighbors);
+  }
+  void add_actor_spawns(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn *>> actor_spawns) {
+    fbb_.AddOffset(ReliableGroundItemBaseline::VT_ACTOR_SPAWNS, actor_spawns);
+  }
   explicit ReliableGroundItemBaselineBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -541,8 +650,14 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation *>> presentation = 0,
     bool native_world = false,
     const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> teleport_doors = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> teleport_doors = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *>> doors = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>>> neighbors = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn *>> actor_spawns = 0) {
   ReliableGroundItemBaselineBuilder builder_(_fbb);
+  builder_.add_actor_spawns(actor_spawns);
+  builder_.add_neighbors(neighbors);
+  builder_.add_doors(doors);
   builder_.add_teleport_doors(teleport_doors);
   builder_.add_door(door);
   builder_.add_presentation(presentation);
@@ -563,11 +678,17 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
     const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation> *presentation = nullptr,
     bool native_world = false,
     const TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor *door = nullptr,
-    const std::vector<uint64_t> *teleport_doors = nullptr) {
+    const std::vector<uint64_t> *teleport_doors = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor> *doors = nullptr,
+    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>> *neighbors = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn> *actor_spawns = nullptr) {
   auto items__ = items ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::GroundItem>(*items) : 0;
   auto native_placements__ = native_placements ? _fbb.CreateVector<uint64_t>(*native_placements) : 0;
   auto presentation__ = presentation ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::ItemPresentation>(*presentation) : 0;
   auto teleport_doors__ = teleport_doors ? _fbb.CreateVector<uint64_t>(*teleport_doors) : 0;
+  auto doors__ = doors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::NativeDoor>(*doors) : 0;
+  auto neighbors__ = neighbors ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::GroundItemBaseline::NativeNeighbor>>(*neighbors) : 0;
+  auto actor_spawns__ = actor_spawns ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::GroundItemBaseline::ActorSpawn>(*actor_spawns) : 0;
   return TES3MP::Protocol::Schema::GroundItemBaseline::CreateReliableGroundItemBaseline(
       _fbb,
       header,
@@ -577,7 +698,10 @@ inline ::flatbuffers::Offset<ReliableGroundItemBaseline> CreateReliableGroundIte
       presentation__,
       native_world,
       door,
-      teleport_doors__);
+      teleport_doors__,
+      doors__,
+      neighbors__,
+      actor_spawns__);
 }
 
 inline const TES3MP::Protocol::Schema::GroundItemBaseline::ReliableGroundItemBaseline *GetReliableGroundItemBaseline(const void *buf) {

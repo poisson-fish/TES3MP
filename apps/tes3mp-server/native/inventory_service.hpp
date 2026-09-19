@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_INVENTORY_SERVICE_HPP
 
 #include "equipment_runtime.hpp"
+#include "actor_spawns.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -36,6 +37,7 @@ namespace TES3MP::Native
             // Trusted composition. The query reads the committed world and never mutates it.
             std::function<ESM::Position(const ESM::Position&, const MWWorld::Ptr&,
                 const DropPlacementView&, std::span<const ESM::ObjectState>)> mPlacement;
+            std::vector<NativeActorSpawn> mActorSpawns;
         };
         std::optional<WorldItems> mWorldItems;
         std::optional<ESM::CellRef> mDoor;
@@ -54,6 +56,28 @@ namespace TES3MP::Native
         };
         // V11: immutable, OpenMW-resolved doors, at most 32 across both cells.
         std::optional<std::vector<TeleportDoor>> mTeleportDoors;
+        // V14 expands the content-bound domain. The first two fields remain
+        // compatibility inputs for older descriptors; every cell uses the same
+        // registry and durable image. Only occupied player areas retain scenes.
+        std::vector<WorldItems> mAdditionalWorldItems;
+        struct OrdinaryDoorPlacement
+        {
+            uint64_t mId;
+            CellId mCell;
+            ESM::CellRef mRef;
+        };
+        std::vector<OrdinaryDoorPlacement> mDoors;
+        bool mStreamExteriors = false;
+        std::function<void(const std::vector<bool>&)> mAreaActivity;
+        std::optional<std::vector<ActorSpawnSelection>> mActorSelections;
+        std::vector<const WorldItems*> worldDomains() const
+        {
+            std::vector<const WorldItems*> result;
+            if (mWorldItems) result.push_back(&*mWorldItems);
+            if (mSecondWorldItems) result.push_back(&*mSecondWorldItems);
+            for (const auto& area : mAdditionalWorldItems) result.push_back(&area);
+            return result;
+        }
     };
 
     // One long-lived engine service group for all shared inventories. Loaded
@@ -72,9 +96,29 @@ namespace TES3MP::Native
         class WorldTransaction;
         class DoorTransaction;
         class TeleportTransaction;
+        class AreaDoorTransaction;
+        struct AreaDoor
+        {
+            DoorBinding binding;
+            std::shared_ptr<const ESM::DoorState> state;
+            uint64_t motion = 1;
+            bool blocked = false;
+            std::array<std::optional<ClientDoorObstruction>, 2> reports;
+        };
+        std::vector<AreaDoor> mAreaDoors;
+        EquipmentBytes mCoreImage;
+        EquipmentBytes sealInventory(std::span<const char> core,
+            std::span<const std::shared_ptr<const ESM::DoorState>> doors = {}) const;
+        void initializeAreaDoors();
+        std::unique_ptr<PreparedNativeInventory> prepareAreaDoor(size_t index, bool activation,
+            const CanonicalServerState& players, ServerTick tick, float seconds);
+        std::vector<NativeDoorSnapshot> areaDoorSnapshots(CellId cell, const PreparedNativeInventory* candidate) const;
+        bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
+        void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references);
         std::array<std::optional<ClientDoorObstruction>, 2> mDoorReports;
         float mDoorStepSeconds = 1.f / 30.f;
         std::array<bool, 2> mActiveCells{};
+        std::vector<bool> mActiveAreas;
         const InventoryServiceBinding::WorldItems* worldDomain(CellId cell) const;
         uint8_t worldIndex(CellId cell) const;
         PlainEquipmentValues cellWorldValues(CellId cell,
@@ -113,16 +157,22 @@ namespace TES3MP::Native
         std::span<const std::byte> inventoryImage() const noexcept override;
         void synchronizeCells(const CanonicalServerState& players) override;
         std::array<bool, 2> activeCells() const noexcept { return mActiveCells; }
-        bool hasNativeDoor() const noexcept override { return mBinding.mDoor.has_value(); }
+        const std::vector<bool>& activeAreas() const noexcept { return mActiveAreas; }
+        bool hasNativeDoor() const noexcept override { return mBinding.mDoor.has_value() || mBinding.mStreamExteriors; }
         bool ownsNativeDoor(InteractiveObjectId id) const noexcept override
         {
             if (mBinding.mDoor && id.value() == mBinding.mDoorId) return true;
+            for (const auto& door : mBinding.mDoors) if (door.mId == id.value()) return true;
             if (mBinding.mTeleportDoors)
                 for (const auto& door : *mBinding.mTeleportDoors)
                     if (door.mId == id.value()) return true;
             return false;
         }
         bool requiresDoorTraversal() const noexcept override { return mBinding.mTeleportDoors.has_value(); }
+        bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
+        bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
+        std::optional<CellId> movementCell(CellId current, Position3 position) const override;
+        bool allowsCellTransition(CellId current, CellId requested, Position3 position) const override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorStep(
@@ -139,7 +189,7 @@ namespace TES3MP::Native
             const PreparedCommand* candidate = nullptr,
             const EquipmentRuntime::PreparedEquipment* equipment = nullptr,
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
-            const EquipmentRuntime::PreparedDoor* door = nullptr) const;
+            const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {}) const;
     };
 }
 #endif

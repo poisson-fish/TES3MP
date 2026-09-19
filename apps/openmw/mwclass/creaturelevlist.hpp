@@ -14,6 +14,8 @@ namespace MWClass
         void ensureCustomData(const MWWorld::Ptr& ptr) const;
 
     public:
+        // Multiplayer presentation can retire a pre-connection local spawn.
+        void suppressLocalSpawn(const MWWorld::Ptr& ptr) const;
         std::string_view getName(const MWWorld::ConstPtr& ptr) const override;
         ///< \return name or ID; can return an empty string.
 

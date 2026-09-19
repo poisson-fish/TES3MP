@@ -19,6 +19,7 @@ namespace TES3MP
 
     inline constexpr std::size_t SessionControlMaximumPayloadBytes = 4 * 1024;
     inline constexpr std::size_t ReliableOperationMaximumPayloadBytes = 16 * 1024;
+    inline constexpr std::size_t NativeGroundMaximumPayloadBytes = 512 * 1024 - ProtocolFrameHeaderBytes;
     inline constexpr std::size_t LatestWinsSnapshotMaximumPayloadBytes = 64 * 1024;
     inline constexpr std::size_t PresentationSampleMaximumPayloadBytes = 1024;
 
@@ -96,7 +97,6 @@ namespace TES3MP
             case MessageKind::ClientInteractObjectCommand:
             case MessageKind::ReliablePlayerInventoryBaseline:
             case MessageKind::ReliableContainerInventoryBaseline:
-            case MessageKind::ReliableGroundItemBaseline:
             case MessageKind::ClientInventoryTransactionCommand:
             case MessageKind::ClientMeleeAttackCommand:
             case MessageKind::ReliableCombatEventBatch:
@@ -109,6 +109,8 @@ namespace TES3MP
             case MessageKind::ClientMagicUseCommand:
             case MessageKind::ClientDoorObstruction:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
+            case MessageKind::ReliableGroundItemBaseline:
+                return MessageDescriptor{ kind, MessageClass::ReliableOperation, NativeGroundMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
             case MessageKind::LatestWinsActorSnapshot:
             case MessageKind::LatestWinsEquipmentSnapshot:
@@ -130,7 +132,7 @@ namespace TES3MP
             case MessageClass::SessionControl:
                 return SessionControlMaximumPayloadBytes;
             case MessageClass::ReliableOperation:
-                return ReliableOperationMaximumPayloadBytes;
+                return NativeGroundMaximumPayloadBytes;
             case MessageClass::LatestWinsSnapshot:
                 return LatestWinsSnapshotMaximumPayloadBytes;
             case MessageClass::PresentationSample:

@@ -188,6 +188,7 @@ void MWWorld::WorldModel::writeCell(ESM::ESMWriter& writer, CellStore& cell) con
 MWWorld::WorldModel::WorldModel(MWWorld::ESMStore& store, ESM::ReadersCache& readers)
     : WorldModel(store, readers, Settings::cells().mPointersCacheSize)
 {
+    mExteriorCreationEvents = true;
 }
 
 MWWorld::WorldModel::WorldModel(MWWorld::ESMStore& store, ESM::ReadersCache& readers, std::size_t pointersCacheSize)
@@ -202,7 +203,7 @@ namespace MWWorld
 {
     CellStore& WorldModel::getExterior(ESM::ExteriorCellLocation location, bool forceLoad) const
     {
-        CellStore* cellStore = getOrCreateExterior(location, mExteriors, mStore, mReaders, mCells, true);
+        CellStore* cellStore = getOrCreateExterior(location, mExteriors, mStore, mReaders, mCells, mExteriorCreationEvents);
 
         if (forceLoad && cellStore->getState() != CellStore::State_Loaded)
             cellStore->load();

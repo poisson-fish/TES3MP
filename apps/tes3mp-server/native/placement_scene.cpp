@@ -148,7 +148,9 @@ namespace TES3MP::Native
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
                 if (++count > 8192) throw std::invalid_argument("Native placement scene exceeds reference budget");
                 if (!ptr.getClass().getScript(ptr).empty())
-                    throw std::invalid_argument("Native placement scene requires unavailable script services");
+                    throw std::invalid_argument("Native placement scene requires unavailable script services in "
+                        + cell.toDebugString() + " for " + ptr.getCellRef().getRefId().toDebugString()
+                        + " (" + ptr.getClass().getScript(ptr).toDebugString() + ")");
                 remember(ptr);
                 mStatic->addChild(node(ptr, ptr.getRefData().getPosition()));
                 return true;
@@ -177,7 +179,7 @@ namespace TES3MP::Native
         ESM::Position resolve(const ESM::Position& actor, const MWWorld::Ptr& item,
             const DropPlacementView& input, std::span<const ESM::ObjectState> worldItems)
         {
-            if (!validDropPlacementView(input) || worldItems.size() > 64)
+            if (!validDropPlacementView(input) || worldItems.size() > 192)
                 throw std::invalid_argument("Placement input outside representation bounds");
             osg::Matrixd view(input.view.data()), projection(input.projection.data()), inverse;
             for (const auto& matrix : {view,projection})

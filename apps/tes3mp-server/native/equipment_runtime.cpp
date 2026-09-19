@@ -21,7 +21,7 @@ namespace TES3MP::Native
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
         std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
         int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems, std::optional<ESM::CellRef> door,
-        std::optional<EquipmentSessionValues::WorldCells> cells)
+        std::optional<EquipmentSessionValues::WorldCells> cells, size_t cellCount, size_t worldCapacity)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
         , mScriptLocals(std::move(locals)), mConnected(connected)
     {
@@ -58,14 +58,15 @@ namespace TES3MP::Native
             throw std::invalid_argument("Shared container budget exceeded");
         if (cells)
         {
-            if (!worldItems || !door || cells->size() != worldItems->size())
-                throw std::invalid_argument("Two-cell runtime requires complete world membership and a door");
+            if (!worldItems || !cellCount || cellCount > MaxEquipmentCells || cells->size() != worldItems->size())
+                throw std::invalid_argument("Native runtime requires bounded complete world membership");
             for (const auto& ref : *worldItems)
             {
                 const auto found = cells->find(ref.mRefNum);
-                if (found == cells->end() || found->second > 1)
+                if (found == cells->end() || found->second >= cellCount)
                     throw std::invalid_argument("Invalid placed cell membership");
             }
+            mCellCount = cellCount;
             mPlacedItemCells = *cells;
             mWorldCells = restartActor ? EquipmentSessionValues::WorldCells{} : std::move(*cells);
         }
@@ -170,7 +171,10 @@ namespace TES3MP::Native
         }
         if (worldItems)
         {
-            if (!connected || worldItems->size() > PreparedPlainEquipment::MaxItems)
+            if (!worldCapacity || worldCapacity > PlainEquipmentValues::MaxWorldItems)
+                throw std::invalid_argument("Native world storage capacity invalid");
+            mWorldCapacity = worldCapacity;
+            if (!connected || worldItems->size() > mWorldCapacity)
                 throw std::invalid_argument("World item domain exceeds its bound");
             mPlacedItems = std::move(*worldItems);
             mWorldItems.emplace();
@@ -186,7 +190,7 @@ namespace TES3MP::Native
                 object.mHasCustomState = false;
                 if (!restartActor) mWorldItems->mObjects.push_back(std::move(object));
             }
-            mWorldItems->validate(content, mWorldItems->mActor);
+            mWorldItems->validate(content, mWorldItems->mActor, nullptr, mWorldCapacity);
         }
         if (restartActor)
         {

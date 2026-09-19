@@ -11,6 +11,18 @@
 
 namespace TES3MP::ServerApp
 {
+    WorldContent nativeWorldContent(const ContentManifest& manifest)
+    {
+        auto globals = GlobalVariableCatalog::create({}).value();
+        auto quests = QuestJournalCatalog::create(manifest.id(), {}, {}).value();
+        auto factions = FactionDialogueCatalog::create(manifest.id(), {}, {}).value();
+        const auto random = Xoshiro256StarStar::fromWorldSeed(0,
+            RandomStreamKey::fromValues(0x5745415448455231ULL, 0).value()).snapshot();
+        // The native Environment replaces time/weather from OpenMW before a
+        // campaign can publish or persist. No synthetic quest/global catalog.
+        auto world = CanonicalWorldState::initial({}, globals, quests, factions).value();
+        return {std::move(globals), std::move(quests), std::move(factions), std::nullopt, random, std::move(world)};
+    }
     namespace
     {
         constexpr std::string_view Header = "TES3MP_WORLD_V4";

@@ -11,7 +11,8 @@ namespace TES3MP::Native
     // All use the existing stock field codec, one counter and registry revision.
     // None of these images is independently durable in a connected session.
     inline constexpr size_t MaxEquipmentSessionBytes = 3 * MaxEquipmentBytes + 40;
-    inline constexpr size_t MaxEquipmentContainers = 32;
+    inline constexpr size_t MaxEquipmentContainers = 1024;
+    inline constexpr size_t MaxEquipmentCells = 256;
     struct EquipmentSessionValues
     {
         std::array<PlainEquipmentValues, 2> mActors;
@@ -40,10 +41,10 @@ namespace TES3MP::Native
     void encodeEquipmentSession(const EquipmentSessionValues& values,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentBytes& output,
         std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
-        const DoorBinding* door = nullptr, bool cells = false);
+        const DoorBinding* door = nullptr, bool cells = false, size_t cellCount = 2);
     void decodeEquipmentSession(std::span<const char> bytes,
         const std::array<EquipmentBindings, 2>& bindings, EquipmentSessionValues& output,
         std::span<const EquipmentBindings> containers = {}, const EquipmentBindings* world = nullptr,
-        const DoorBinding* door = nullptr, bool cells = false);
+        const DoorBinding* door = nullptr, bool cells = false, size_t cellCount = 2);
 }
 #endif

@@ -206,10 +206,10 @@ namespace TES3MP::Native
                 stats.mAbilityMagnitude = std::bit_cast<float>(equipment.field(ESM::fourCC("ABMG"), 4).number());
                 stats.validate(bindings.mContent);
             }
-            valid(equipment.empty() && result.mCount <= PlainEquipmentValues::MaxItems && records == result.mCount + 1
+            valid(equipment.empty() && bindings.mMaximumItems <= PlainEquipmentValues::MaxWorldItems && result.mCount <= bindings.mMaximumItems && records == result.mCount + 1
                 && result.mActor == bindings.mEnvelope.mActor && result.mCounter.mContentFile < 0);
             covers(result.mCounter, result.mActor);
-            std::array<ESM::RefNum, PlainEquipmentValues::MaxItems> identities;
+            std::array<ESM::RefNum, PlainEquipmentValues::MaxWorldItems> identities;
             bool shirtFound = result.mSlots[InventoryStore::Slot_Shirt] == ESM::RefNum{};
             bool selectedFound = result.mSelected == ESM::RefNum{};
             int64_t total = 0;
@@ -401,7 +401,7 @@ namespace TES3MP::Native
     void encodeEquipment(const PlainEquipmentValues& input, const EquipmentBindings& bindings, EquipmentBytes& output)
     {
         validateBindings(bindings);
-        input.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get());
+        input.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get(), bindings.mMaximumItems);
         for (const auto& object : input.mObjects)
             for (const auto& id : { object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul, object.mRef.mFaction,
                      object.mRef.mKey, object.mRef.mTrap })
@@ -509,7 +509,7 @@ namespace TES3MP::Native
             valid(!reader.hasMoreSubs());
         }
         valid(!reader.hasMoreRecs());
-        staged.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get());
+        staged.validate(bindings.mContent, bindings.mEnvelope.mActor, bindings.mScriptLocals.get(), bindings.mMaximumItems);
         // Reject redundant default fields and inconsistent stock/lossless fields.
         EquipmentBytes canonical;
         encodeEquipment(staged, bindings, canonical);

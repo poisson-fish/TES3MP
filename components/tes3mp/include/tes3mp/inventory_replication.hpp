@@ -18,7 +18,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumInventoryBaselineChunkStacks = 256;
     inline constexpr std::size_t MaximumGroundItemBaselineChunkItems = 192;
     inline constexpr std::size_t MaximumEquipmentSnapshotPlayers = 256;
-    inline constexpr std::size_t MaximumEquipmentSnapshotActors = 32;
+    inline constexpr std::size_t MaximumEquipmentSnapshotActors = 128;
 
     enum class InventoryReplicationDecodeErrorCode : std::uint8_t
     {
@@ -118,6 +118,11 @@ namespace TES3MP
         float scale = 1;
         friend bool operator==(const GroundItemPresentation&, const GroundItemPresentation&) noexcept = default;
     };
+    struct NativeActorSpawn
+    {
+        uint64_t placement = 0, record = 0; // Zero record is an authoritative chance-none outcome.
+        friend bool operator==(const NativeActorSpawn&, const NativeActorSpawn&) noexcept = default;
+    };
     struct ReliableGroundItemBaseline
     {
         InventoryBaselineHeader header;
@@ -131,12 +136,17 @@ namespace TES3MP
         std::optional<NativeDoorSnapshot> door;
         // Immutable teleport activators in this cell; destinations stay server-side.
         std::vector<uint64_t> teleportDoors;
+        std::vector<NativeDoorSnapshot> doors;
+        // One coherent exterior neighborhood; children are single-cell leaves.
+        std::vector<ReliableGroundItemBaseline> neighbors;
+        std::vector<NativeActorSpawn> actorSpawns;
 
         static std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> create(
             InventoryBaselineHeader header, CellId cell, std::span<const GroundItemInterestMember> items,
             std::span<const uint64_t> nativePlacements = {}, std::span<const GroundItemPresentation> presentation = {},
             bool nativeWorld = false, std::optional<NativeDoorSnapshot> door = {},
-            std::span<const uint64_t> teleportDoors = {});
+            std::span<const uint64_t> teleportDoors = {}, std::span<const NativeDoorSnapshot> doors = {},
+            std::span<const ReliableGroundItemBaseline> neighbors = {}, std::span<const NativeActorSpawn> actorSpawns = {});
         friend bool operator==(const ReliableGroundItemBaseline&, const ReliableGroundItemBaseline&) noexcept = default;
     };
 

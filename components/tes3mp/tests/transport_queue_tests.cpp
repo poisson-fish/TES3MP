@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <iostream>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -23,6 +24,9 @@ namespace
         bool blockLatest = false;
         bool blockPresentation = false;
         bool closed = false;
+        std::size_t reliableAccepted = 0;
+        std::size_t reliableAttempts = 0;
+        std::size_t blockReliableAfter = std::numeric_limits<std::size_t>::max();
         std::vector<TES3MP::TransportMessage> sent;
 
         TES3MP::TransportAdmission<TES3MP::ListenerId> startListener(const TES3MP::ListenerEndpoint&) override
@@ -41,12 +45,20 @@ namespace
         TES3MP::TransportResult send(
             TES3MP::TransportConnectionId, TES3MP::TransportChannel channel, std::span<const std::byte> bytes) override
         {
+            if (channel == TES3MP::TransportChannel::ReliableOrdered)
+            {
+                ++reliableAttempts;
+                if (reliableAccepted >= blockReliableAfter)
+                    return TES3MP::TransportResult::WouldBlock;
+            }
             if ((channel == TES3MP::TransportChannel::ReliableOrdered && blockReliable)
                 || (channel == TES3MP::TransportChannel::LatestWins && blockLatest)
                 || (channel == TES3MP::TransportChannel::PresentationLatest && blockPresentation))
                 return TES3MP::TransportResult::WouldBlock;
             if (sendResult != TES3MP::TransportResult::Accepted)
                 return sendResult;
+            if (channel == TES3MP::TransportChannel::ReliableOrdered)
+                ++reliableAccepted;
             sent.push_back({ channel, { bytes.begin(), bytes.end() } });
             return TES3MP::TransportResult::Accepted;
         }
@@ -84,6 +96,45 @@ namespace
     TES3MP::OutboundQueuePolicy policy()
     {
         return *TES3MP::OutboundQueuePolicy::create(4, 64, 4, 2, 4, 10, 1, 10, 3, 100);
+    }
+
+    bool inventoryBurstUsesBudget()
+    {
+        using namespace TES3MP;
+        OutboundTransportQueue queue(OutboundQueuePolicy{});
+        FakeRuntime runtime;
+        const auto connection = TransportConnectionId::initial();
+        for (unsigned i = 0; i < 80; ++i)
+            if (!check(queue.enqueue(TransportChannel::ReliableOrdered, bytes(i)) == TransportResult::Accepted,
+                    "inventory burst enqueue failed")) return false;
+        queue.enqueue(TransportChannel::LatestWins, bytes(200));
+        queue.enqueue(TransportChannel::PresentationLatest, bytes(201));
+        if (!check(queue.pump(runtime, connection, 0) == OutboundPumpResult::Progress
+                    && runtime.sent.size() == 32 && queue.reliableMessages() == 50,
+                "inventory burst left unused send budget")
+            || !check(runtime.sent[4].channel == TransportChannel::LatestWins
+                    && runtime.sent[5].channel == TransportChannel::PresentationLatest,
+                "bulk inventory starved latest-state traffic")) return false;
+        queue.pump(runtime, connection, 33);
+        queue.pump(runtime, connection, 66);
+        if (!check(queue.reliableMessages() == 0, "80-message burst did not drain in three bounded pumps")) return false;
+        unsigned expected = 0;
+        for (const auto& message : runtime.sent)
+            if (message.channel == TransportChannel::ReliableOrdered
+                && !check(message.bytes == bytes(expected++), "burst changed reliable FIFO order")) return false;
+
+        OutboundTransportQueue blocked(OutboundQueuePolicy{});
+        FakeRuntime slow;
+        slow.blockReliableAfter = 5; // Block during the post-latest drain.
+        for (unsigned i = 0; i < 8; ++i) blocked.enqueue(TransportChannel::ReliableOrdered, bytes(i));
+        blocked.enqueue(TransportChannel::LatestWins, bytes(200));
+        blocked.pump(slow, connection, 0);
+        if (!check(slow.reliableAccepted == 5 && slow.reliableAttempts == 6 && blocked.reliableMessages() == 3,
+                "post-latest backpressure retried or lost reliable data")) return false;
+        slow.blockReliableAfter = 8;
+        blocked.pump(slow, connection, 33);
+        return check(blocked.reliableMessages() == 0 && slow.reliableAccepted == 8,
+            "post-latest blocked inventory did not recover");
     }
 
     bool policyAndBounds()
@@ -192,12 +243,13 @@ namespace
             TES3MP::MessageKind::LatestWinsActorSnapshot, TES3MP::MessageKind::LatestWinsEquipmentSnapshot,
             TES3MP::MessageKind::LatestWinsCombatSnapshot };
         std::array<std::vector<std::byte>, kinds.size()> frames;
-        std::array<TES3MP::OutboundQueueSet::AtomicMessage, kinds.size()> messages;
+        std::vector<TES3MP::OutboundQueueSet::AtomicMessage> messages;
+        messages.reserve(kinds.size());
         for (std::size_t index = 0; index < kinds.size(); ++index)
         {
             frames[index] = std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(
                 TES3MP::MessageClass::LatestWinsSnapshot, kinds[index], bytes(static_cast<unsigned>(index + 1))));
-            messages[index] = { connection, TES3MP::TransportChannel::LatestWins, frames[index] };
+            messages.push_back({ connection, TES3MP::TransportChannel::LatestWins, frames[index] });
         }
         const auto admitted = queues->enqueueMessagesAtomically(messages);
         for (std::uint64_t now = 0; now < 40; now += 10)
@@ -365,9 +417,17 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
-    return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
+    if (argc == 2 && std::string_view(argv[1]) == "inventory-burst")
+    {
+        if (!inventoryBurstUsesBudget()) return 1;
+        std::cout << "PASS inventory-burst: 80 reliable messages in 3 pumps (66 ms at 30 Hz), FIFO, fairness and backpressure\n";
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "queue-bounds")
+        return policyAndBounds() && limitsRateAndTime() && isolatedSlowPeerEviction() ? 0 : 1;
+    return inventoryBurstUsesBudget() && policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
             && actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly() && presentationIsCoalescedAndIndependent()
             && gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
             && pairAdmissionIsAtomic() && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()

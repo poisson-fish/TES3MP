@@ -4,6 +4,8 @@
 #include "../canonical_persistence_file.hpp"
 #include "../native_environment_service.hpp"
 #include <apps/openmw/mwworld/placedrefid.hpp>
+#include <apps/openmw/mwworld/inventoryrecordid.hpp>
+#include <apps/openmw/mwmechanics/levelledlist.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
 #include <components/esm3/loadcell.hpp>
@@ -15,6 +17,7 @@
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <fstream>
+#include <iomanip>
 #include <stdexcept>
 #include <limits>
 
@@ -114,17 +117,24 @@ namespace TES3MP::Native::Testing
                 }
                 out.endRecord(ESM::REC_CELL);
             }
+            cell.mName = "Travel room"; cell.updateId();
+            out.startRecord(ESM::REC_CELL, 0); cell.save(out);
+            ESM::CellRef exit; exit.blank(); exit.mRefNum = {900, patch ? 1 : 0};
+            exit.mRefID = ESM::RefId::stringRefId("door"); exit.mTeleport = true;
+            exit.mDoorDest.pos[0] = -16320; exit.mDoorDest.pos[1] = -24512;
+            exit.save(out); out.endRecord(ESM::REC_CELL);
             cell.mName = "Exterior references"; cell.mData.mFlags = 0;
             cell.mData.mX = -2; cell.mData.mY = -3; cell.updateId();
             out.startRecord(ESM::REC_CELL, 0); cell.save(out);
-            for (uint32_t i = 301; i <= 308; ++i)
+            for (uint32_t i = 301; i <= 309; ++i)
             {
                 ESM::CellRef ref; ref.blank(); ref.mRefNum = {i, patch ? 1 : 0};
                 ref.mRefID = ESM::RefId::stringRefId(i < 305 ? "chest" : i == 305 ? "actor" : i == 306 ? "shirt" : "door");
                 ref.mPos.pos[0] = -16384 + (patch ? 64.f : 32.f); ref.mPos.pos[1] = -24576 + 64.f;
-                if (i == 308)
+                if (i >= 308)
                 {
-                    ref.mTeleport = true; ref.mDestCell = "sHaReD tEsT";
+                    ref.mTeleport = true; ref.mDestCell = i == 308 ? "sHaReD tEsT" : "Travel room";
+                    if (i == 309) ref.mDoorDest.pos[0] = 77;
                     if (invalidTeleport)
                     {
                         ref.mDestCell.clear(); ref.mDoorDest.pos[0] = std::numeric_limits<float>::infinity();
@@ -143,6 +153,44 @@ namespace TES3MP::Native::Testing
             out.startRecord(ESM::REC_CELL, 0); cell.save(out); out.endRecord(ESM::REC_CELL);
             out.close();
         }
+    }
+
+    void checkPlayerAreas(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Area discovery scratch already exists");
+        plugin(scratch / "Base.esm", false); plugin(scratch / "Patch.esp", true);
+        { std::ofstream out(scratch / "empty.omwscripts"); out << "# no scripts\n"; }
+        LoadoutOptions options; options.mDataPaths = {scratch}; options.mEncoding = "win1252";
+        options.mContent = {"Base.esm", "empty.omwscripts", "Patch.esp"}; Loadout loadout(options);
+        const auto start = interiorCell("Travel room"), exterior = ESM::RefId::esm3ExteriorCell(-2, -3);
+        const auto cells = loadout.playerAreas(start, 1, 256);
+        require(cells.size() == 11 && cells.front() == start && std::is_sorted(cells.begin() + 1, cells.end())
+            && std::ranges::find(cells, exterior) != cells.end(), "Automatic area graph lost its bounded neighborhood/cycle/order");
+        require(loadout.playerSpawn(start, cells).pos[0] == 77 && loadout.playerSpawn(start, std::array{start}).pos[0] == 77,
+            "Bootstrap did not infer the winning incoming door spawn");
+        const auto doors = loadout.ordinaryDoors(exterior, 128);
+        require(doors.size() == 1 && doors[0].mRef.mRefNum.mIndex == 307, "Automatic ordinary door discovery diverged");
+        for (int test = 0; test < 7; ++test)
+        {
+            bool rejected = false;
+            try
+            {
+                if (test == 0) loadout.playerAreas(start, 1, 10);
+                if (test == 1) loadout.playerAreas(start, 8, 256);
+                if (test == 2) loadout.playerAreas(ESM::RefId::esm3ExteriorCell(32767, 0), 1, 256);
+                if (test == 3) loadout.playerSpawn(interiorCell("Actor test"), std::array{interiorCell("Actor test")});
+                ESM::Position position{};
+                if (test == 4) loadout.playerSpawn(exterior, cells, position);
+                if (test == 5) { position.pos[0] = std::numeric_limits<float>::infinity(); loadout.playerSpawn(start, cells, position); }
+                if (test == 6) loadout.playerSpawn(start, std::array{exterior});
+            }
+            catch (const std::exception&) { rejected = true; }
+            require(rejected && loadout.playerAreas(start, 1, 256) == cells, "Failed discovery/bootstrap mutated results or accepted malformed bounds");
+        }
+        // Also leave a content-derived CLI fixture for the bootstrap executable.
+        std::ofstream config(scratch / "openmw.cfg");
+        config << "replace=data\nreplace=content\nreplace=fallback-archive\ndata=" << std::quoted(scratch.string())
+            << "\ncontent=Base.esm\ncontent=empty.omwscripts\ncontent=Patch.esp\nencoding=win1252\n";
     }
 
     void checkExteriorReferences(const std::filesystem::path& scratch)
@@ -280,6 +328,79 @@ namespace TES3MP::Native::Testing
                 ServerApp::CanonicalPersistenceFile::open(path, identity));
             ServerApp::Testing::nativeInventoryApplication(restored, *reopened);
         }
+    }
+
+    void checkLeveledActors(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Leveled actor scratch already exists");
+        plugin(scratch / "Base.esm", false); plugin(scratch / "Patch.esp", true);
+        LoadoutOptions options; options.mDataPaths = {scratch};
+        options.mContent = {"Base.esm", "Patch.esp"}; options.mEncoding = "win1252";
+        Loadout loadout(options);
+        const auto cell = interiorCell("Leveled actor test");
+        const auto id = [](const char* text) { return ESM::RefId::stringRefId(text); };
+        auto npc = *loadout.store().get<ESM::NPC>().find(id("actor")); npc.mNpdt.mHealth = 50;
+        loadout.store().overrideRecord(npc);
+        auto corpse = npc; corpse.mId = id("dead_actor"); corpse.mNpdt.mHealth = 0;
+        loadout.store().insertStatic(corpse);
+        npc = *loadout.store().get<ESM::NPC>().find(id("scripted_actor")); npc.mNpdt.mHealth = 50;
+        loadout.store().overrideRecord(npc);
+        auto creature = *loadout.store().get<ESM::Creature>().find(id("creature")); creature.mData.mHealth = 50;
+        loadout.store().overrideRecord(creature);
+        ESM::CreatureLevList list; list.blank(); list.mId = id("leveled_actor");
+        list.mList = {{id("creature"), 1}, {id("actor"), 4}};
+        for (int level : {1, 4})
+            for (int all : {0, int(ESM::CreatureLevList::AllLevels)})
+            {
+                list.mFlags = all; loadout.store().overrideRecord(list);
+                Misc::Rng::Generator rng{57}, expected{57};
+                std::vector<ActorSpawnSelection> choices;
+                const auto selected = loadout.resolveActors(cell, 3, level, rng, choices);
+                require(selected.size() == 3 && choices.size() == 3, "Winning leveled placement override/deletion lost");
+                for (size_t i = 0; i < selected.size(); ++i)
+                {
+                    const auto stock = MWMechanics::getLevelledItem(&list, true, expected, level, loadout.store());
+                    require(selected[i].mRef.mRefID == stock && choices[i].mRecord == MWWorld::inventoryRecordId(stock)
+                        && selected[i].mIdentity == choices[i].mPlacement && selected[i].mRef.mPos.pos[0] == 202 + 2 * i,
+                        "Leveled selection differs from stock level/flag/RNG or winning transform");
+                }
+                require(rng == expected, "Leveled selection consumed a different RNG stream");
+            }
+        // Nested lists, missing entries and chance-none use the stock resolver.
+        ESM::CreatureLevList nested = list; nested.mId = id("nested"); nested.mList = {{id("creature"), 1}};
+        loadout.store().insertStatic(nested); list.mList = {{nested.mId, 1}}; loadout.store().overrideRecord(list);
+        Misc::Rng::Generator rng{71}; std::vector<ActorSpawnSelection> saved;
+        const auto selected = loadout.resolveActors(cell, 3, 1, rng, saved);
+        require(selected.size() == 3 && selected.front().mRef.mRefID == id("creature"), "Nested creature list did not resolve");
+        // Make resolution fail now: recovery must not consume RNG or call it at all.
+        list.mList = {{list.mId, 1}}; loadout.store().overrideRecord(list);
+        const auto before = rng; std::vector<ActorSpawnSelection> recovered;
+        const auto restored = loadout.resolveActors(cell, 3, 1, rng, recovered, &saved);
+        require(recovered == saved && rng == before && restored.front().mRef.mRefID == selected.front().mRef.mRefID,
+            "Recovery rerolled a leveled actor");
+        for (const auto bad : {"leveled_actor", "scripted_actor", "shirt", "dead_actor"})
+        {
+            list.mList = {{id(bad), 1}}; loadout.store().overrideRecord(list);
+            bool rejected = false;
+            try { loadout.resolveActors(cell, 3, 1, rng, recovered); } catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected && rng == before && recovered == saved, "Failed spawn leaked RNG/choices or accepted recursion/script/non-actor");
+        }
+        for (bool chanceNone : {false, true})
+        {
+            list.mList = {{id(chanceNone ? "creature" : "missing_actor"), 1}};
+            list.mChanceNone = chanceNone ? 100 : 0; loadout.store().overrideRecord(list);
+            std::vector<ActorSpawnSelection> empty;
+            require(loadout.resolveActors(cell, 3, 1, rng, empty).empty() && empty.size() == 3
+                && std::ranges::all_of(empty, [](const auto& value) { return !value.mRecord; }), "No-spawn outcome was lost");
+            std::vector<ActorSpawnSelection> again;
+            const auto unchanged = rng;
+            require(loadout.resolveActors(cell, 3, 1, rng, again, &empty).empty() && again == empty && rng == unchanged,
+                "Saved chance-none rerolled");
+        }
+        std::vector<ActorSpawnSelection> missing;
+        bool rejected = false;
+        try { loadout.resolveActors(cell, 3, 1, rng, missing, &missing); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected && missing.empty(), "Missing saved marker accepted");
     }
 
     void checkPlacedActors(const std::filesystem::path& scratch)

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <ranges>
 
@@ -39,7 +40,7 @@ namespace TES3MP::OpenMWAdapter
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
                 authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability() };
+                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -701,8 +702,11 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
-                    && !captured.transition && inventoryNegotiated(*mRuntime))
+                    && !captured.transition && inventoryNegotiated(*mRuntime)
+                    && mRuntime->session().stateMachine().inventoryReplicationComplete())
                 {
+                    // Keep the bounded pending proposal while a new inventory
+                    // set is incomplete; that transient gap is not transport loss.
                     if (auto transaction = mInput.captureInventoryTransaction())
                     {
                         const auto queued
@@ -803,15 +807,18 @@ namespace TES3MP::OpenMWAdapter
                     && nativeDoorNegotiated(*mRuntime) && (!mNextDoorReport || now >= *mNextDoorReport))
                 {
                     const auto& ground = mRuntime->session().stateMachine().confirmedGroundItemBaseline();
-                    if (ground && ground->door && ground->door->direction)
+                    std::vector<NativeDoorSnapshot> doors;
+                    if (ground) { doors = ground->doors; if (ground->door) doors.push_back(*ground->door); }
+                    for (const auto& door : doors)
                     {
-                        if (auto blocked = mPresentation.nativeDoorObstruction(*ground->door))
+                        if (!door.direction) continue;
+                        if (auto blocked = mPresentation.nativeDoorObstruction(door))
                         {
                             if (mDoorReportSequence == std::numeric_limits<uint64_t>::max())
                             { closeTerminal(ConnectionStatus::TransportFailed); return; }
                             const ClientDoorObstruction report{ground->header.targetSessionId,
                                 ground->header.targetSessionGeneration, ground->header.serverTick,
-                                ground->door->placement, ground->door->motion, ++mDoorReportSequence, *blocked};
+                                door.placement, door.motion, ++mDoorReportSequence, *blocked};
                             if (mRuntime->queue(MessageClass::ReliableOperation, MessageKind::ClientDoorObstruction,
                                     encodeClientDoorObstruction(report)) != ClientRuntimeResult::Accepted)
                             { closeTerminal(ConnectionStatus::TransportFailed); return; }
@@ -1091,7 +1098,26 @@ namespace TES3MP::OpenMWAdapter
 
             void queueCellTransition(CellTransition transition) noexcept
             {
-                const auto queued = mRuntime->queueCellTransition(std::move(transition));
+                const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                const auto* self = snapshot ? selfEntry(*snapshot) : nullptr;
+                const auto* from = self ? self->transform().cell().asExterior() : nullptr;
+                const auto* to = transition.requestedCell().asExterior();
+                const bool walking = hello && std::ranges::binary_search(hello->negotiatedCapabilities(), nativeStreamingCapability())
+                    && from && to && from->worldspace() == to->worldspace()
+                    && std::abs(int64_t(from->gridX()) - to->gridX()) <= 1
+                    && std::abs(int64_t(from->gridY()) - to->gridY()) <= 1;
+                auto position = walking ? mInput.sampleCurrentIntent() : std::nullopt;
+                if (walking && (!position || !position->position()))
+                {
+                    closeForProviderFailure(ProviderResult::PresentationFailed);
+                    return;
+                }
+                // Exterior membership is derived by the server from the same
+                // position update that crosses the boundary. Keep the existing
+                // baseline barrier until that update has been acknowledged.
+                const auto queued = walking ? mRuntime->queueLocomotionIntent(std::move(*position))
+                    : mRuntime->queueCellTransition(std::move(transition));
                 if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);

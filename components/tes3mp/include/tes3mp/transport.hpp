@@ -274,7 +274,7 @@ namespace TES3MP
     };
 
     inline constexpr std::size_t ReliableOrderedMaximumMessageBytes
-        = ProtocolFrameHeaderBytes + ReliableOperationMaximumPayloadBytes;
+        = ProtocolFrameHeaderBytes + NativeGroundMaximumPayloadBytes;
     inline constexpr std::size_t LatestWinsMaximumMessageBytes
         = ProtocolFrameHeaderBytes + LatestWinsSnapshotMaximumPayloadBytes;
     inline constexpr std::size_t PresentationLatestMaximumMessageBytes

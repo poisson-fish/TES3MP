@@ -11,6 +11,7 @@
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
+#include <set>
 
 namespace TES3MP::Native
 {
@@ -20,7 +21,7 @@ namespace TES3MP::Native
         {
             std::ifstream input(path, std::ios::binary | std::ios::ate);
             const auto size = input.tellg();
-            if (size <= 0 || size > 16 * 1024) throw std::invalid_argument("Native inventory descriptor unavailable or oversized");
+            if (size <= 0 || size > 128 * 1024) throw std::invalid_argument("Native inventory descriptor unavailable or oversized");
             std::string text(static_cast<size_t>(size), '\0');
             input.seekg(0);
             if (!input.read(text.data(), size)) throw std::invalid_argument("Native inventory descriptor read failed");
@@ -42,6 +43,7 @@ namespace TES3MP::Native
             uint32_t doorIndex = 0;
             ESM::RefId secondCell;
             std::optional<CellId> secondWireCell;
+            std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -62,9 +64,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool exteriorCells = version == "native-inventory-13";
+            const bool streaming = version == "native-inventory-14" || version == "native-inventory-15";
+            const bool exteriorCells = streaming || version == "native-inventory-13";
             const bool twoCells = exteriorCells || version == "native-inventory-10" || version == "native-inventory-11" || version == "native-inventory-12";
             const bool door = version == "native-inventory-9" || twoCells;
             const bool baseInventory = version == "native-inventory-5" || version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door;
@@ -144,7 +147,12 @@ namespace TES3MP::Native
             }
             std::string doorPlugin;
             uint64_t doorIndex = 0;
-            if (door)
+            if (streaming)
+            {
+                key("doors"); std::string mode; in >> mode;
+                if (mode != "auto") throw std::invalid_argument("Native streaming doors require automatic discovery");
+            }
+            else if (door)
             {
                 key("door"); in >> std::quoted(doorPlugin) >> doorIndex;
                 if (!in || doorPlugin.empty() || doorPlugin.size() > 256
@@ -157,7 +165,15 @@ namespace TES3MP::Native
             ESM::RefId secondCell;
             std::string secondCellText;
             std::optional<CellId> secondWireCell;
-            if (twoCells)
+            std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
+            size_t areaCount = 2;
+            if (streaming)
+            {
+                key("areas"); in >> areaCount;
+                if (!in || areaCount < 1 || areaCount > MaxEquipmentCells)
+                    throw std::invalid_argument("Native area count outside bounds");
+            }
+            if (twoCells && (!streaming || areaCount > 1))
             {
                 secondCell = readCell();
                 key("cell"); in >> secondCellText;
@@ -167,6 +183,17 @@ namespace TES3MP::Native
                     || (cells && cells->size() == 1 && cells->front() == second->front()))
                     throw std::invalid_argument("Second native cell mapping invalid");
                 secondWireCell = second->front();
+                for (size_t i = 2; i < areaCount; ++i)
+                {
+                    const auto name = readCell();
+                    key("cell"); std::string areaText; in >> areaText;
+                    const auto area = parseContentCells(areaText);
+                    if (!in || !area || area->size() != 1 || !manifest.contains(area->front())
+                        || !matches(name, area->front()))
+                        throw std::invalid_argument("Native area mapping invalid");
+                    additionalCells.emplace_back(name, area->front());
+                    secondCellText += "\n" + areaText;
+                }
             }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
@@ -176,6 +203,8 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native inventory placed selection or cell mapping invalid");
             InventoryServiceBinding binding{{*first, *second}, itemId,
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
+            binding.mStreamExteriors = streaming;
+            if (version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
             if (version == "native-inventory-11" || version == "native-inventory-12" || exteriorCells) binding.mTeleportDoors.emplace();
@@ -185,45 +214,79 @@ namespace TES3MP::Native
             semantic << version << '\n' << identity << registration << '\n'
                 << actorA << ':' << countA << '\n' << actorB << ':' << countB << '\n'
                 << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
+            if (streaming) semantic << cell.serializeText() << ":" << areaCount << '\n';
             if (twoCells) semantic << secondCellText << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells)};
         }
     }
     struct InventoryHost::Impl
     {
         Loadout loadout;
-        std::array<std::unique_ptr<PlacementScene>, 2> scenes;
+        std::vector<std::unique_ptr<PlacementScene>> scenes;
         InventoryService inventory;
         std::unique_ptr<Environment> environment;
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
-            std::array<std::unique_ptr<PlacementScene>, 2>& scenes)
+            std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
-            std::array<ESM::RefId, 2> names{start.cell, start.secondCell};
+            std::optional<std::vector<ActorSpawnSelection>> savedSpawns;
+            if (start.binding.mActorSelections && !restored.empty())
+            {
+                if (restored.size() > MaximumNativeInventoryImageBytes)
+                    throw std::invalid_argument("Native spawn image exceeds bound");
+                const auto bytes = std::span(reinterpret_cast<const char*>(restored.data()), restored.size());
+                size_t offset = 0;
+                if (getAreaWord(bytes, offset) != SpawnAreaMagic)
+                    throw std::invalid_argument("Leveled actor recovery requires a V15 campaign image");
+                savedSpawns = readActorSpawns(bytes, offset);
+            }
+            Misc::Rng::Generator spawnRng{start.binding.mLootSeed};
+            std::vector<ESM::RefId> names{start.cell};
+            std::vector<CellId> wireCells{start.wireCell};
+            if (start.secondWireCell) { names.push_back(start.secondCell); wireCells.push_back(*start.secondWireCell); }
+            for (const auto& [name, wire] : start.additionalCells) { names.push_back(name); wireCells.push_back(wire); }
+            std::set<ESM::RefId> uniqueNames;
+            std::set<CellId> uniqueWire;
+            for (size_t i = 0; i < names.size(); ++i)
+                if (!uniqueNames.insert(names[i]).second || !uniqueWire.insert(wireCells[i]).second)
+                    throw std::invalid_argument("Duplicate native area mapping");
+            scenes.resize(names.size());
+            start.binding.mAdditionalWorldItems.reserve(start.additionalCells.size());
             if (start.secondWireCell && start.cell == start.secondCell)
                 throw std::invalid_argument("Native cell mappings resolve to the same cell");
-            std::array<std::vector<ESM::CellRef>, 2> domains;
-            std::array<std::string, 2> fingerprints;
+            std::vector<std::vector<ESM::CellRef>> domains(names.size());
+            std::vector<std::string> fingerprints(names.size());
+            std::vector<size_t> actorCounts(names.size());
             std::ostringstream placement;
-            for (size_t cellIndex = 0; cellIndex < (start.secondWireCell ? 2 : 1); ++cellIndex)
+            for (size_t cellIndex = 0; cellIndex < names.size(); ++cellIndex)
             {
                 const auto& cell = names[cellIndex];
-                const auto wireCell = cellIndex ? *start.secondWireCell : start.wireCell;
+                const auto wireCell = wireCells[cellIndex];
+                InventoryServiceBinding::WorldItems* world = nullptr;
                 auto references = start.plugin.empty()
                     ? (start.worldActors ? loadout.placedContainers(cell) : loadout.resolveContainers(cell, MaxEquipmentContainers))
                     : std::vector{loadout.resolveContainer(cell, start.plugin, start.index)};
                 if (start.worldActors)
                 {
-                    const auto actors = loadout.resolveActors(cell, MaxEquipmentContainers);
+                    const auto actors = start.binding.mActorSelections
+                        ? loadout.resolveActors(cell, 128, start.binding.mLootLevel, spawnRng,
+                            *start.binding.mActorSelections, savedSpawns ? &*savedSpawns : nullptr)
+                        : loadout.resolveActors(cell, MaxEquipmentContainers);
+                    actorCounts[cellIndex] = actors.size();
                     references.insert(references.end(), actors.begin(), actors.end());
                     std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
-                    if ((!start.worldItems && references.empty()) || references.size() + start.binding.mContainers.size() > MaxEquipmentContainers)
+                    if ((!start.worldItems && references.empty()) || references.size() + start.binding.mContainers.size() > (start.binding.mStreamExteriors ? MaxEquipmentContainers : 32))
                         throw std::invalid_argument("Native interior shared inventory count is empty or exceeds the startup budget");
+                    if (start.binding.mStreamExteriors && references.size() > 128)
+                        throw std::invalid_argument("Native cell inventory baseline exceeds 128 owners in " + cell.toDebugString());
                     for (const auto& ref : references)
                         if (ref.mScripted || ref.mRef.mIsLocked || !ref.mRef.mTrap.empty())
-                            throw std::invalid_argument("Native placed inventory requires script, lock or trap services");
+                            throw std::invalid_argument("Native placed inventory " + std::to_string(ref.mIdentity)
+                                + " (" + ref.mRef.mRefID.toDebugString() + ") in " + cell.toDebugString()
+                                + " requires services: script=" + std::to_string(ref.mScripted)
+                                + " locked=" + std::to_string(ref.mRef.mIsLocked) + " trap=" + ref.mRef.mTrap.toDebugString());
                 }
                 for (const auto& placed : references)
                 {
@@ -239,9 +302,22 @@ namespace TES3MP::Native
                 }
                 if (start.worldItems)
                 {
-                    auto& world = cellIndex ? start.binding.mSecondWorldItems : start.binding.mWorldItems;
-                    world.emplace(InventoryServiceBinding::WorldItems{wireCell, {}});
-                    for (const auto& item : loadout.placedItems(cell, PreparedPlainEquipment::MaxItems))
+                    if (cellIndex < 2)
+                    {
+                        auto& slot = cellIndex ? start.binding.mSecondWorldItems : start.binding.mWorldItems;
+                        world = &slot.emplace(InventoryServiceBinding::WorldItems{wireCell, {}});
+                    }
+                    else world = &start.binding.mAdditionalWorldItems.emplace_back(InventoryServiceBinding::WorldItems{wireCell, {}});
+                    if (start.binding.mActorSelections)
+                        for (const auto& marker : loadout.placedActors(cell))
+                            if (marker.mLeveled)
+                            {
+                                const auto selected = std::ranges::find(*start.binding.mActorSelections,
+                                    marker.mIdentity, &ActorSpawnSelection::mPlacement);
+                                world->mActorSpawns.push_back({marker.mIdentity, selected->mRecord});
+                                if (!selected->mRecord) ++actorCounts[cellIndex];
+                            }
+                    for (const auto& item : loadout.placedItems(cell, start.binding.mStreamExteriors ? MaximumGroundItemBaselineChunkItems : 64))
                     {
                         world->mPlacements.emplace_back(item.mIdentity, item.mRef);
                         placement << "\nworld-item:" << item.mIdentity << ':' << item.mRef.mRefID;
@@ -249,17 +325,25 @@ namespace TES3MP::Native
                 }
                 if (start.stockPlacement)
                 {
-                    auto& world = cellIndex ? start.binding.mSecondWorldItems : start.binding.mWorldItems;
                     for (const auto& [id, ref] : world->mPlacements) domains[cellIndex].push_back(ref);
                     scenes[cellIndex] = std::make_unique<PlacementScene>(loadout, cell, domains[cellIndex]);
                     fingerprints[cellIndex] = scenes[cellIndex]->fingerprint();
                     placement << fingerprints[cellIndex];
+                    if (start.binding.mStreamExteriors) scenes[cellIndex].reset();
                     world->mPlacement = [&scenes, cellIndex](const auto& actor, const auto& item,
                         const auto& view, auto world) {
                         if (!scenes[cellIndex]) throw std::invalid_argument("Native cell is not active");
                         return scenes[cellIndex]->resolve(actor, item, view, world);
                     };
                 }
+                if (start.binding.mStreamExteriors)
+                    for (const auto& door : loadout.ordinaryDoors(cell, 128))
+                    {
+                        if (start.binding.mDoors.size() == 4096)
+                            throw std::invalid_argument("Native ordinary door campaign budget exceeded");
+                        start.binding.mDoors.push_back({door.mIdentity, wireCell, door.mRef});
+                        placement << "\nordinary:" << cellIndex << ":" << door.mIdentity << ":" << door.mRef.mRefID;
+                    }
                 if (!cellIndex && !start.doorPlugin.empty())
                 {
                     const auto door = loadout.resolveDoor(start.cell, start.doorPlugin, start.doorIndex);
@@ -278,15 +362,15 @@ namespace TES3MP::Native
                         turns -= std::floor(turns);
                         return Turn32::fromValue(uint32_t(uint64_t(std::llround(turns * 4294967296.0))));
                     };
-                    for (const auto& door : loadout.teleportDoors(cell, names[1 - cellIndex]))
+                    for (const auto& door : loadout.teleportDoors(cell, names))
                     {
                         auto& doors = *start.binding.mTeleportDoors;
-                        if (doors.size() == 32) throw std::invalid_argument("Native teleport campaign budget exceeded");
+                        if (doors.size() == 32 * names.size()) throw std::invalid_argument("Native teleport campaign budget exceeded");
                         const auto& dest = door.mRef.mDoorDest;
                         const Position3 position(std::llround(double(door.mRef.mPos.pos[0]) * 1024),
                             std::llround(double(door.mRef.mPos.pos[1]) * 1024), std::llround(double(door.mRef.mPos.pos[2]) * 1024));
                         doors.push_back({door.mIdentity, wireCell, position,
-                            Transform(cellIndex ? start.wireCell : *start.secondWireCell,
+                            Transform(wireCells.at(size_t(std::ranges::find(names, door.mDestination) - names.begin())),
                                 Position3(std::llround(double(dest.pos[0]) * 1024), std::llround(double(dest.pos[1]) * 1024),
                                     std::llround(double(dest.pos[2]) * 1024)),
                                 Orientation3(angle(dest.rot[0]), angle(dest.rot[1]), angle(dest.rot[2])))});
@@ -294,20 +378,31 @@ namespace TES3MP::Native
                     }
                 }
             }
-            if (start.secondWireCell)
+            if (start.secondWireCell || start.binding.mStreamExteriors)
             {
-                if (domains[0].size() + domains[1].size() > PreparedPlainEquipment::MaxItems)
-                    throw std::invalid_argument("Two-cell world placement budget exceeded");
-                start.binding.mCellActivity = [&loadout, &scenes, names, domains, fingerprints](const auto& active) {
-                    std::array<std::unique_ptr<PlacementScene>, 2> staged;
-                    for (size_t i = 0; i < 2; ++i)
+                if (start.binding.mStreamExteriors)
+                    for (const auto& cell : wireCells)
+                    {
+                        size_t visibleActors = 0;
+                        for (size_t i = 0; i < wireCells.size(); ++i)
+                            if (sharesCellNeighborhood(cell, wireCells[i])) visibleActors += actorCounts[i];
+                        if (visibleActors > MaximumEquipmentSnapshotActors)
+                            throw std::invalid_argument("Native player neighborhood exceeds actor appearance budget");
+                    }
+                size_t itemCount = 0;
+                for (const auto& domain : domains) itemCount += domain.size();
+                if (itemCount > (start.binding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64))
+                    throw std::invalid_argument("Native area world placement budget exceeded");
+                start.binding.mAreaActivity = [&loadout, &scenes, names, domains, fingerprints](const auto& active) {
+                    std::vector<std::unique_ptr<PlacementScene>> staged(names.size());
+                    for (size_t i = 0; i < names.size(); ++i)
                         if (active[i] && !scenes[i])
                         {
                             staged[i] = std::make_unique<PlacementScene>(loadout, names[i], domains[i]);
                             if (staged[i]->fingerprint() != fingerprints[i])
                                 throw std::invalid_argument("Native cell resources changed after binding");
                         }
-                    for (size_t i = 0; i < 2; ++i)
+                    for (size_t i = 0; i < names.size(); ++i)
                     {
                         if (staged[i]) scenes[i].swap(staged[i]);
                         if (!active[i]) scenes[i].reset();
@@ -316,6 +411,16 @@ namespace TES3MP::Native
                 // Startup discovery validates both; occupancy controls loaded
                 // OpenMW CellStores/model scenes thereafter. Canonical stores stay.
                 for (auto& scene : scenes) scene.reset();
+            }
+            if (start.binding.mActorSelections)
+            {
+                auto& selections = *start.binding.mActorSelections;
+                std::ranges::sort(selections, {}, &ActorSpawnSelection::mPlacement);
+                validateActorSpawns(selections);
+                if (savedSpawns && *savedSpawns != selections)
+                    throw std::invalid_argument("Saved actor spawn domain differs from content placements");
+                for (const auto& spawn : selections)
+                    placement << "\nspawn:" << spawn.mPlacement << ':' << spawn.mRecord;
             }
             // Re-resolve before recovery. The image envelope binds resolved
             // placement plus actual ordered file bytes, encoding and player roles.
@@ -329,9 +434,9 @@ namespace TES3MP::Native
         }
         Impl(Startup start, ContentManifestId manifest, CredentialCrypto& crypto, std::span<const std::byte> restored)
             : loadout(std::move(start.options)),
-              inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes), !restored.empty())
+              inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes, restored), !restored.empty())
         {
-            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13"))
+            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13") || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15"))
                 environment = std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed);
             if (!restored.empty())
             {
@@ -339,8 +444,7 @@ namespace TES3MP::Native
                 for (const auto& shared : start.binding.mContainers) references.push_back(shared.mBase);
                 for (const auto& [id, record] : MWWorld::inventoryRecords(loadout.store())) references.push_back(record);
                 for (const auto& [id, record] : MWWorld::inventorySoulRecords(loadout.store())) references.push_back(record);
-                for (const auto* domain : {start.binding.mWorldItems ? &*start.binding.mWorldItems : nullptr,
-                         start.binding.mSecondWorldItems ? &*start.binding.mSecondWorldItems : nullptr})
+                for (const auto* domain : start.binding.worldDomains())
                     if (domain) for (const auto& [identity, ref] : domain->mPlacements)
                         for (auto id : {ref.mRefID, ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap})
                             if (!id.empty()) references.push_back(id);

@@ -977,6 +977,24 @@ namespace TES3MP::ServerApp::Testing
             clock.nanoseconds = tick * 33'333'334;
             assert(application.pump(id<ServerTick>(tick)));
         }
+        if (environment)
+        {
+            // A send can fail after this pump catches up several native world
+            // ticks. Disconnect persistence must include that advanced world,
+            // even though the caller supplied the tick before catch-up.
+            const auto entryTick = intake.nextTick();
+            runtime.failedSends = {id<TransportConnectionId>(3)};
+            assert(queues.enqueue(runtime.failedSends.front(), TransportChannel::ReliableOrdered, pending)
+                == TransportResult::Accepted);
+            clock.nanoseconds = 40 * 33'333'334ULL;
+            const bool disconnected = application.pump(entryTick);
+            if (!disconnected) std::cerr << "catch-up disconnect: " << application.failure() << '\n';
+            assert(disconnected);
+            assert(reducer.checkpointTick() > entryTick);
+            assert(!reducer.state().findActiveSession(id<SessionId>(1)));
+            assert(persistence.restoredWorld() && *persistence.restoredWorld() == *world);
+            assert(persistence.restoredCheckpointTick() == reducer.checkpointTick());
+        }
         assert(application.stop());
         std::cout << "ServerApplication with synthetic transport: production authentication, put/take, late join, two owned deliveries, retry, resync, resume and journal compaction\n";
     }

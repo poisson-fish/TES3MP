@@ -3022,7 +3022,195 @@ namespace TES3MP::Native::Testing
         ServerApp::Testing::nativeInventoryApplication(recovered, *opened, nativeEnvironment.get());
     }
 
-    void checkDoorService(const std::filesystem::path& scratch)
+    void checkLeveledActorPersistence(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Spawn persistence scratch already exists");
+        Content content;
+        auto living = *content.store.get<ESM::NPC>().find(content.actor);
+        living.mNpdt.mHealth = 50; content.store.overrideRecord(living);
+        auto binding = content.binding();
+        binding.mStreamExteriors = true;
+        const auto cell = binding.mContainers[0].mCell;
+        auto ref = ESM::makeBlankCellRef(); ref.mRefID = content.actor; ref.mRefNum = {701, 0};
+        const auto actorId = MWWorld::PlacedRefTag | 701, noneId = MWWorld::PlacedRefTag | 702;
+        const auto recordId = MWWorld::inventoryRecordId(content.actor);
+        binding.mContainers.push_back({id<ContainerId>(actorId), cell, Position3(0,0,0), content.actor, ref});
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{cell, {}});
+        binding.mWorldItems->mActorSpawns = {{actorId, recordId}, {noneId, 0}};
+        binding.mActorSelections = std::vector<ActorSpawnSelection>{{actorId, recordId}, {noneId, 0}};
+        InventoryService service(content.store, content.readers, binding);
+        auto authority = players(); service.synchronizeCells(authority);
+        const auto before = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+        require(before && before->equipment->actors.size() == 1 && before->equipment->actors[0].actor.value() == actorId
+            && before->groundItems[0].actorSpawns == binding.mWorldItems->mActorSpawns, "Spawn baseline lost identity or chance-none");
+        const auto wire = decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(before->groundItems[0]));
+        require(std::holds_alternative<ReliableGroundItemBaseline>(wire)
+            && std::get<ReliableGroundItemBaseline>(wire) == before->groundItems[0], "Actor spawn wire round trip changed choices");
+        Clock clock; Delivery delivery(clock, SessionGeneration::initial()); publish(service, authority, delivery, 1);
+        require(delivery.clients[0]->confirmedGroundItemBaseline()->actorSpawns == before->groundItems[0].actorSpawns
+            && delivery.clients[1]->confirmedGroundItemBaseline()->actorSpawns == before->groundItems[0].actorSpawns,
+            "Client session baseline assembly lost leveled actor selections");
+        const std::vector<std::byte> saved(service.inventoryImage().begin(), service.inventoryImage().end());
+        InventoryService restored(content.store, content.readers, binding, true);
+        const std::array refs{content.actor, content.shirt, content.container};
+        restored.recover(saved, refs);
+        require(std::ranges::equal(saved, restored.inventoryImage()), "Actor choices changed across inventory recovery");
+        service.synchronizeCells(std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {})));
+        authority = players(id<SessionGeneration>(2)); service.synchronizeCells(authority);
+        const auto resumed = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2));
+        require(resumed && resumed->groundItems[0].actorSpawns == before->groundItems[0].actorSpawns
+            && resumed->equipment->actors == before->equipment->actors, "Unload/reconnect reset spawned actors");
+        for (int test = 0; test < 6; ++test)
+        {
+            auto bad = saved;
+            if (test == 0) bad.resize(7);
+            if (test == 1) bad[8] = std::byte{255}; // Oversized/truncated count.
+            if (test == 2) bad[16] = std::byte{0}; // Unknown marker.
+            if (test == 3) bad[24] ^= std::byte{1}; // Altered selected actor.
+            if (test == 4) std::copy_n(bad.begin() + 16, 16, bad.begin() + 32); // Duplicate.
+            if (test == 5) bad.push_back(std::byte{0});
+            bool rejected = false;
+            try { restored.recover(bad, refs); } catch (const std::exception&) { rejected = true; }
+            require(rejected && std::ranges::equal(saved, restored.inventoryImage()), "Malformed spawn image mutated installed state");
+        }
+        std::cout << "Leveled actors: durable selected/none choices, wire appearance, unload/reconnect, restart and atomic malformed-image rejection passed\n";
+    }
+
+    void checkAreaCrossings(const std::filesystem::path& scratch)
+    {
+        require(std::filesystem::create_directory(scratch), "Area crossing scratch already exists");
+        Content content;
+        auto binding = content.binding();
+        binding.mStreamExteriors = true;
+        binding.mTeleportDoors.emplace();
+        const auto interior = binding.mContainers[0].mCell;
+        const auto exterior = [](int x) { return CellId::exterior(id<CellSpaceId>(8), x, 0); };
+        const std::array cells{interior, exterior(-1), exterior(0), exterior(1), exterior(2), exterior(8), exterior(9)};
+        binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{cells[0], {}});
+        binding.mSecondWorldItems.emplace(InventoryServiceBinding::WorldItems{cells[1], {}});
+        for (size_t i = 2; i < cells.size(); ++i)
+        {
+            auto ref = ESM::makeBlankCellRef(); ref.mRefID = content.shirt;
+            ref.mRefNum = {uint32_t(500 + i), 0};
+            ref.mPos.pos[0] = float(cells[i].asExterior()->gridX() * 8192 + 32);
+            binding.mAdditionalWorldItems.push_back({cells[i], {{MWWorld::PlacedRefTag | (500 + i), ref}}});
+        }
+        ESM::Door base; base.blank(); base.mId = ESM::RefId::stringRefId("area_door"); content.store.insertStatic(base);
+        auto doorRef = ESM::makeBlankCellRef(); doorRef.mRefID = base.mId; doorRef.mRefNum = {700, 0};
+        binding.mDoors.push_back({MWWorld::PlacedRefTag | 700, exterior(0), doorRef});
+        InventoryService service(content.store, content.readers, binding);
+        auto initial = players();
+        auto entities = std::vector(initial.players().begin(), initial.players().end());
+        for (size_t i = 0; i < entities.size(); ++i)
+            entities[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entities[i], id<ServerTick>(1),
+                Transform(exterior(i ? 8 : -1), Position3(i ? int64_t(8) * 8192 * 1024 : -1, 0, 0),
+                    entities[i].transform().orientation()), LinearVelocity3(0,0,0)));
+        initial = std::get<CanonicalServerState>(createCanonicalServerState(entities, initial.activeSessions()));
+        service.synchronizeCells(initial);
+        require(service.activeAreas() == std::vector<bool>({false, true, true, false, false, true, true}),
+            "Split players did not retain the union of exterior neighborhoods");
+        constexpr int64_t width = 8192 * 1024;
+        require(service.movementCell(exterior(0), Position3(-1,0,0)) == exterior(-1)
+            && service.movementCell(exterior(-1), Position3(0,0,0)) == exterior(0)
+            && service.movementCell(exterior(0), Position3(width-1,0,0)) == exterior(0)
+            && service.movementCell(exterior(0), Position3(width,0,0)) == exterior(1)
+            && !service.movementCell(exterior(0), Position3(2*width,0,0))
+            && !service.movementCell(exterior(2), Position3(3*width,0,0))
+            && !service.movementCell(exterior(0), Position3(0,-1,0))
+            && !service.allowsCellTransition(exterior(0), interior, Position3(0,0,0)),
+            "Exterior boundary, negative coordinate, adjacency or domain validation failed");
+        NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+        const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+            CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Exterior}};
+        const auto manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
+        CanonicalCommandReducer reducer(initial, observability, manifest);
+        const auto catalog = ServerScriptStateCatalog::create({}).value();
+        auto scripts = CanonicalScriptState::initial(catalog).value();
+        std::array<std::byte,32> config{}; config[0] = std::byte{1};
+        const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(config).value(), {}, catalog, {}).value();
+        const auto path = scratch / "crossings.bin";
+        auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(ServerApp::CanonicalPersistenceFile::open(path, identity));
+        require(reducer.configureDurability(*file, nullptr, nullptr, nullptr, nullptr, nullptr, &scripts, &service),
+            "Crossing durability composition failed");
+        Clock clock; Delivery delivery(clock, SessionGeneration::initial());
+        uint64_t tick = 1;
+        const auto execute = [&](auto payload, CommandDisposition expected) {
+            const auto& caller = *reducer.state().findActiveSession(id<SessionId>(1));
+            const auto& player = *reducer.state().findPlayer(caller.playerId());
+            const auto sequence = caller.highestContiguousFinalizedCommand()
+                ? *caller.highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+            ServerCommandProposal command(caller.sessionId(), caller.sessionGeneration(), sequence, id<CommandId>(sequence.value()),
+                reducer.canonicalRevision(), EntityPrecondition(player.entityId(), player.entityRevision(), player.authorityEpoch()), payload);
+            ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(++tick), IngressOrdinal::initial());
+            require(intake.submit(command) == CommandSubmissionResult::Accepted, "Crossing intake failed");
+            clock.value += tick * 33'333'334;
+            auto batches = intake.pump();
+            require(batches && batches.batches().size() == 1, "Crossing batch failed");
+            auto pending = reducer.prepareTick(batches.batches().front());
+            require(pending.result().dispositions()[0].disposition() == expected, "Crossing command disposition mismatch");
+            require(reducer.commit(std::move(pending)), "Crossing commit failed");
+            service.synchronizeCells(reducer.state());
+            publish(service, reducer.state(), delivery, ++tick);
+        };
+        const auto move = [&](int64_t x, CommandDisposition expected = CommandDisposition::Applied) {
+            execute(PlayerLocomotionCommandProposal(id<LocomotionInputTick>(tick+1), id<LocomotionInputSequence>(tick+1),
+                LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0,0,0), Position3(x,0,0))), expected);
+        };
+        move(0);
+        require(reducer.state().findPlayer(id<PlayerId>(11))->transform().cell() == exterior(0)
+            && service.activeAreas() == std::vector<bool>({false,true,true,true,false,true,true}),
+            "Position crossing did not atomically change cell and active neighborhoods");
+        auto baseline = *delivery.clients[0]->confirmedGroundItemBaseline();
+        require(baseline.cell == exterior(0) && baseline.neighbors.size() == 2 && baseline.doors.size() == 1
+            && baseline.items.size() == 1 && delivery.clients[1]->confirmedGroundItemBaseline()->cell == exterior(8),
+            "Crossing wire baselines lost neighborhood loot/door or changed the other player");
+        const auto item = baseline.items[0];
+        execute(InteractiveObjectCommandProposal(id<InteractiveObjectId>(binding.mDoors[0].mId), exterior(0), Position3(0,0,0),
+            ObjectRevision::initial(), ObjectInteractionKind::Activate, {}), CommandDisposition::Applied);
+        const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+        auto step = service.prepareDoorStep(reducer.state(), id<ServerTick>(++tick), .05f);
+        require(step && step->commit(accepted) == CanonicalDurabilityResult::Committed, "Active area door did not move");
+        const auto angle = service.projectInventory(reducer.state(), id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick))->groundItems[0].doors[0].angle;
+        move(width);
+        require(delivery.clients[0]->confirmedGroundItemBaseline()->cell == exterior(1), "Adjacent exterior crossing failed");
+        move(2*width);
+        require(!service.activeAreas()[2] && !service.prepareDoorStep(reducer.state(), id<ServerTick>(++tick), .05f),
+            "Unloaded exterior continued advancing its door");
+        const auto before = reducer.state().findPlayer(id<PlayerId>(11))->transform();
+        move(3*width, CommandDisposition::UnknownCell);
+        execute(CellTransitionCommandProposal(interior), CommandDisposition::ObjectInteractionRejected);
+        require(reducer.state().findPlayer(id<PlayerId>(11))->transform() == before, "Rejected crossing changed canonical position");
+        move(width); move(0);
+        baseline = *delivery.clients[0]->confirmedGroundItemBaseline();
+        require(baseline.items[0].stack == item.stack && baseline.items[0].position == item.position
+            && baseline.doors[0].angle == angle && baseline.doors[0].direction == 1,
+            "Area reload reset loot identity or frozen door motion");
+        Delivery late(clock, id<SessionGeneration>(2));
+        auto resumed = players(id<SessionGeneration>(2));
+        resumed = std::get<CanonicalServerState>(createCanonicalServerState(reducer.state().players(), resumed.activeSessions()));
+        publish(service, resumed, late, ++tick);
+        require(late.clients[0]->confirmedGroundItemBaseline()->doors == baseline.doors
+            && late.clients[0]->confirmedGroundItemBaseline()->neighbors.size() == baseline.neighbors.size()
+            && late.clients[0]->confirmedGroundItemBaseline()->items[0].stack == item.stack,
+            "Reconnected client did not converge to the area baseline");
+        InventoryService recovered(content.store, content.readers, binding, true);
+        const std::array refs{content.actor, content.shirt, base.mId};
+        recovered.recover(service.inventoryImage(), refs);
+        recovered.synchronizeCells(resumed);
+        const auto restored = recovered.projectInventory(resumed, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+        require(restored && restored->groundItems[0].doors[0].angle == angle && restored->groundItems[0].items[0].stack == item.stack,
+            "V14 restart lost area door or loot state");
+        auto reopened = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(ServerApp::CanonicalPersistenceFile::open(path, identity));
+        require(reopened->restoredState()->findPlayer(id<PlayerId>(11))->transform().cell() == exterior(0)
+            && reopened->restoredState()->findPlayer(id<PlayerId>(22))->transform() == initial.findPlayer(id<PlayerId>(22))->transform(),
+            "Crossings were not durable or moved the other player");
+        service.synchronizeCells(std::get<CanonicalServerState>(createCanonicalServerState(resumed.players(), {})));
+        require(std::ranges::none_of(service.activeAreas(), [](bool active) { return active; }), "Disconnected players pinned area scenes");
+        std::cout << "V14 crossings: signed boundaries, reducer rejection, split neighborhoods, wire loot/doors, unload/reentry, reconnect and persistence passed; synthetic clients\n";
+    }
+
+    void checkDoorService(const std::filesystem::path& scratch, bool streaming)
     {
         require(std::filesystem::create_directory(scratch), "Door scratch already exists");
         Content content;
@@ -3034,11 +3222,21 @@ namespace TES3MP::Native::Testing
         binding.mDoor->mRefNum = {700, 0};
         binding.mDoorId = MWWorld::PlacedRefTag | 700;
         binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{binding.mContainers[0].mCell, {}});
+        if (streaming)
+        {
+            binding.mStreamExteriors = true;
+            binding.mDoors.push_back({binding.mDoorId, binding.mWorldItems->mCell, *binding.mDoor});
+            binding.mDoor.reset();
+        }
         InventoryService service(content.store, content.readers, binding);
         auto authority = players();
+        service.synchronizeCells(authority);
         const auto view = [&](InventoryService& owner, const PreparedNativeInventory* pending = nullptr) {
-            return *owner.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1),
-                id<CanonicalRevision>(1), pending)->groundItems[0].door;
+            const auto projected = owner.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1),
+                id<CanonicalRevision>(1), pending);
+            require(projected.has_value(), "Door projection failed");
+            const auto& ground = projected->groundItems[0];
+            return streaming ? ground.doors.at(0) : *ground.door;
         };
         const auto command = [&](InventoryService& owner, uint64_t session = 1) {
             const auto* active = authority.findActiveSession(id<SessionId>(session));
@@ -3062,8 +3260,12 @@ namespace TES3MP::Native::Testing
             && std::ranges::equal(initialImage, service.inventoryImage()), "Rejected door activation changed state");
         require(activation->commit(accepted) == CanonicalDurabilityResult::Committed, "Door activation retry failed");
         require(contender->commit(accepted) == CanonicalDurabilityResult::Rejected, "Stale door contender committed");
-        require(inventoryBeforeDoor && inventoryBeforeDoor->commit(accepted) == CanonicalDurabilityResult::Rejected,
-            "Inventory prepared before door commit rewound the saved door");
+        const auto opened = view(service);
+        // V14 seals the latest independent area-door state at inventory commit;
+        // the legacy door shares the runtime revision and rejects that candidate.
+        require(inventoryBeforeDoor && inventoryBeforeDoor->commit(accepted)
+                == (streaming ? CanonicalDurabilityResult::Committed : CanonicalDurabilityResult::Rejected)
+            && view(service) == opened, "Inventory prepared before door commit changed the door state");
         const auto step = [&](uint64_t tick, const CanonicalServerState& state) {
             auto pending = service.prepareDoorStep(state, id<ServerTick>(tick), .05f);
             require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Door step failed");
@@ -3141,10 +3343,15 @@ namespace TES3MP::Native::Testing
         Delivery delivery(clock, SessionGeneration::initial());
         publish(service, authority, delivery, 21);
         for (auto& client : delivery.clients)
-            require(client->confirmedGroundItemBaseline()->door == view(service), "Door angle lost on client baseline assembly");
+        {
+            const auto& ground = *client->confirmedGroundItemBaseline();
+            require((streaming ? ground.doors.at(0) : *ground.door) == view(service),
+                "Door angle lost on client baseline assembly");
+        }
         InventoryService recovered(content.store, content.readers, binding, true);
         const std::array references{content.actor, content.shirt, base.mId};
         recovered.recover(service.inventoryImage(), references);
+        recovered.synchronizeCells(resumed);
         require(view(recovered).angle == view(service).angle && view(recovered).direction == view(service).direction,
             "Restart lost moving door state");
         require(!view(recovered).blocked, "Restart restored transient obstruction");
@@ -3160,6 +3367,7 @@ namespace TES3MP::Native::Testing
         // and retain command disposition + door image together for activation.
         NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
         InventoryService canonical(content.store, content.readers, binding);
+        canonical.synchronizeCells(authority);
         CanonicalCommandReducer reducer(players(), observability);
         const auto catalog = ServerScriptStateCatalog::create({}).value();
         auto scripts = CanonicalScriptState::initial(catalog).value();
@@ -3188,6 +3396,11 @@ namespace TES3MP::Native::Testing
             "Autonomous door step did not commit canonically");
         require(std::ranges::equal(file->prefix().latest()->nativeInventory(), canonical.inventoryImage()),
             "Canonical door image differs from durable image");
+        if (streaming)
+        {
+            std::cout << "V14 area door: atomic activation/motion, contention, two-player contacts, expiry/reversal/disconnect, wire and recovery passed\n";
+            return;
+        }
         auto applicationBinding = binding;
         applicationBinding.mPlayers = {id<PlayerId>(1), id<PlayerId>(2)};
         InventoryService applicationService(content.store, content.readers, applicationBinding);

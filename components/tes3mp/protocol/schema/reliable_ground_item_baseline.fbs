@@ -64,6 +64,15 @@ struct NativeDoor {
   blocked:ubyte;
 }
 
+table NativeNeighbor {
+  baseline:[ubyte] (required);
+}
+
+struct ActorSpawn {
+  placement:ulong;
+  record:ulong;
+}
+
 table ReliableGroundItemBaseline {
   header:GroundItemBaselineHeader (id: 0);
   cell:Cell (id: 1);
@@ -73,6 +82,9 @@ table ReliableGroundItemBaseline {
   native_world:bool (id: 5);
   door:NativeDoor (id: 6);
   teleport_doors:[ulong] (id: 7);
+  doors:[NativeDoor] (id: 8);
+  neighbors:[NativeNeighbor] (id: 9);
+  actor_spawns:[ActorSpawn] (id: 10);
 }
 
 root_type ReliableGroundItemBaseline;

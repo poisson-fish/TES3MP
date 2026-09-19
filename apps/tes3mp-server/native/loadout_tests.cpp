@@ -6236,6 +6236,31 @@ namespace
             return;
         }
 
+        if (filter == "area-crossings")
+        {
+            TES3MP::Native::Testing::checkAreaCrossings(root);
+            return;
+        }
+        if (filter == "leveled-actors")
+        {
+            TES3MP::Native::Testing::checkLeveledActors(root);
+            return;
+        }
+        if (filter == "player-area-discovery")
+        {
+            TES3MP::Native::Testing::checkPlayerAreas(root);
+            return;
+        }
+        if (filter == "leveled-actor-persistence")
+        {
+            TES3MP::Native::Testing::checkLeveledActorPersistence(root);
+            return;
+        }
+        if (filter == "area-door-service")
+        {
+            TES3MP::Native::Testing::checkDoorService(root, true);
+            return;
+        }
         if (filter == "teleport-traversal")
         {
             TES3MP::Native::Testing::checkTeleportTraversal(root);

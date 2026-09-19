@@ -31,6 +31,9 @@ namespace TES3MP::ServerApp
     public:
         static std::variant<std::unique_ptr<ContentCollisionProvider>, ContentCollisionError> load(
             const std::filesystem::path& path, const ContentManifest& manifest) noexcept;
+        // Native M3 retains inherited client movement until the engine physics
+        // cutover. This bounds membership without inventing fixture geometry.
+        static std::unique_ptr<ContentCollisionProvider> nativeMovement(const ContentManifest& manifest);
 
         bool canOccupy(const CellId& cell, Position3 position) const noexcept;
         bool segmentClear(const CellId& cell, Position3 start, Position3 end) const noexcept;

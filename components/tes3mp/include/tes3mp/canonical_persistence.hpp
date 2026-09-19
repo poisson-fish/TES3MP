@@ -27,11 +27,11 @@ namespace TES3MP
         = MaximumServerCommandsPerTick + MaximumServerScriptCommandsPerTick;
     inline constexpr std::size_t MaximumPersistenceJournalTransactions = 32;
     inline constexpr std::size_t MaximumPersistenceTransactions = MaximumPersistenceJournalTransactions + 1;
-    inline constexpr std::size_t MaximumPersistenceRecordBytes = 2 * 1024 * 1024;
+    inline constexpr std::size_t MaximumPersistenceRecordBytes = 18 * 1024 * 1024;
     inline constexpr std::size_t MaximumPersistenceFileBytes = 256 * 1024 * 1024;
 
     // Existing engine session encoding, bounded before copying into the tick.
-    inline constexpr std::size_t MaximumNativeInventoryImageBytes = 1024 * 1024;
+    inline constexpr std::size_t MaximumNativeInventoryImageBytes = 16 * 1024 * 1024;
 
     class ServerConfigurationId
     {

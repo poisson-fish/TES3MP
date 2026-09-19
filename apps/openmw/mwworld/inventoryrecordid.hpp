@@ -2,6 +2,7 @@
 #define OPENMW_MWWORLD_INVENTORYRECORDID_HPP
 #include "inventoryitem.hpp"
 #include <components/esm3/loadcrea.hpp>
+#include <components/esm3/loadnpc.hpp>
 #include <map>
 
 namespace MWWorld
@@ -42,6 +43,30 @@ namespace MWWorld
         for (const auto& record : store.get<ESM::Creature>())
             if (result.size() >= 262144 || !result.emplace(inventoryRecordId(record.mId), record.mId).second)
                 throw std::invalid_argument("Native soul record budget or identity collision");
+        return result;
+    }
+    inline InventoryRecordMap actorRecords(const ESMStore& store)
+    {
+        InventoryRecordMap result;
+        const auto add = [&]<class T>() {
+            for (const auto& record : store.get<T>())
+            {
+                const auto id = inventoryRecordId(record.mId);
+                const auto found = result.find(id);
+                if (found != result.end())
+                {
+                    // A dynamic override retains its record identity. Distinct
+                    // names sharing a hash are still an invalid loadout.
+                    if (found->second != record.mId) throw std::invalid_argument("Native actor record identity collision");
+                }
+                else
+                {
+                    if (result.size() >= 262144) throw std::invalid_argument("Native actor record budget exceeded");
+                    result.emplace(id, record.mId);
+                }
+            }
+        };
+        add.operator()<ESM::NPC>(); add.operator()<ESM::Creature>();
         return result;
     }
 }

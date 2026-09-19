@@ -891,7 +891,9 @@ namespace TES3MP
                                             disposition = CommandDisposition::Applied;
                                             requiresSpatialAdvance = false;
                                         }
-                                        else if (mNativeInventory && mNativeInventory->requiresDoorTraversal())
+                                        else if (mNativeInventory && mNativeInventory->requiresDoorTraversal()
+                                            && !mNativeInventory->allowsCellTransition(player->transform().cell(),
+                                                requested, player->transform().position()))
                                         {
                                             disposition = CommandDisposition::ObjectInteractionRejected;
                                             requiresSpatialAdvance = false;
@@ -1277,6 +1279,18 @@ namespace TES3MP
                                             else
                                                 disposition = CommandDisposition::CombatRejected;
                                         }
+                                    }
+                                    if (requiresSpatialAdvance && mNativeInventory)
+                                    {
+                                        const auto cell = mNativeInventory->movementCell(
+                                            replacementTransform.cell(), replacementTransform.position());
+                                        if (!cell || !mContentManifest.contains(*cell))
+                                        {
+                                            disposition = CommandDisposition::UnknownCell;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else replacementTransform = Transform(*cell, replacementTransform.position(),
+                                            replacementTransform.orientation());
                                     }
                                     const auto advanced = requiresSpatialAdvance
                                         ? std::optional<SpatialAdvanceResult>(

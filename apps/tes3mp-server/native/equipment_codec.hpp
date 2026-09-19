@@ -28,6 +28,7 @@ namespace TES3MP::Native
         std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
         // Trusted storage shape for a shared owner; never inferred from saved slots.
         bool mInventory = false;
+        size_t mMaximumItems = PlainEquipmentValues::MaxItems;
     };
 
     inline constexpr uint32_t EquipmentFormatVersion = 1;

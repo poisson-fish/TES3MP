@@ -26,7 +26,7 @@ namespace TES3MP::ServerApp
         GlobalVariableCatalog globals;
         QuestJournalCatalog questJournal;
         FactionDialogueCatalog factionDialogue;
-        WeatherCatalog weather;
+        std::optional<WeatherCatalog> weather;
         RandomStateV1 weatherRandomState;
         CanonicalWorldState world;
     };
@@ -34,6 +34,7 @@ namespace TES3MP::ServerApp
     using WorldContentLoadResult = std::variant<WorldContent, WorldContentError>;
     WorldContentLoadResult loadWorldContent(
         const std::filesystem::path& path, const ContentManifest& manifest) noexcept;
+    WorldContent nativeWorldContent(const ContentManifest& manifest);
 }
 
 #endif

@@ -510,32 +510,37 @@ namespace TES3MP
         refill(mPresentationRate, mPolicy.latestRateBurst, mPolicy.latestRefillMilliseconds, nowMilliseconds);
 
         std::size_t attempts = 0;
-        std::size_t reliableAttempts = 0;
         bool progressed = false;
         bool reliableBlocked = false;
-        while (!mReliable.empty() && attempts < mPolicy.sendAttemptsPerPump
-            && reliableAttempts < mPolicy.reliableBurstBeforeLatest && mReliableRate.tokens != 0)
-        {
-            const TransportResult result
-                = runtime.send(connection, TransportChannel::ReliableOrdered, mReliable.front());
-            ++attempts;
-            ++reliableAttempts;
-            --mReliableRate.tokens;
-            if (result == TransportResult::Accepted)
+        const auto sendReliable = [&](std::size_t burstLimit) {
+            std::size_t burstAttempts = 0;
+            while (!reliableBlocked && !mReliable.empty() && attempts < mPolicy.sendAttemptsPerPump
+                && burstAttempts < burstLimit && mReliableRate.tokens != 0)
             {
-                mReliableBytes -= mReliable.front().size();
-                mReliable.pop_front();
-                progressed = true;
-                continue;
+                const TransportResult result
+                    = runtime.send(connection, TransportChannel::ReliableOrdered, mReliable.front());
+                ++attempts;
+                ++burstAttempts;
+                --mReliableRate.tokens;
+                if (result == TransportResult::Accepted)
+                {
+                    mReliableBytes -= mReliable.front().size();
+                    mReliable.pop_front();
+                    progressed = true;
+                    continue;
+                }
+                if (result == TransportResult::WouldBlock)
+                {
+                    count(TransportTelemetryKind::WouldBlock, TransportChannel::ReliableOrdered);
+                    reliableBlocked = true;
+                    break;
+                }
+                return false;
             }
-            if (result == TransportResult::WouldBlock)
-            {
-                count(TransportTelemetryKind::WouldBlock, TransportChannel::ReliableOrdered);
-                reliableBlocked = true;
-                break;
-            }
+            return true;
+        };
+        if (!sendReliable(mPolicy.reliableBurstBeforeLatest))
             return OutboundPumpResult::TransportFailed;
-        }
 
         const auto sendLatest = [&](std::optional<std::vector<std::byte>>& slot) {
             if (!slot || attempts >= mPolicy.sendAttemptsPerPump || mLatestRate.tokens == 0)
@@ -589,6 +594,11 @@ namespace TES3MP
             else
                 count(TransportTelemetryKind::WouldBlock, TransportChannel::PresentationLatest);
         }
+
+        // The initial burst reserves an early opportunity for latest-state
+        // traffic. Spend the remaining bounded budget on reliable backlog.
+        if (!sendReliable(mPolicy.sendAttemptsPerPump))
+            return OutboundPumpResult::TransportFailed;
 
         if (reliableBlocked)
         {

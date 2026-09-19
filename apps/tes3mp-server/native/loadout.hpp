@@ -3,9 +3,12 @@
 
 #include "diagnostic.hpp"
 #include "cell_selection.hpp"
+#include "actor_spawns.hpp"
+#include <components/misc/rng.hpp>
 
 #include <filesystem>
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,6 +58,7 @@ namespace TES3MP::Native
             uint64_t mIdentity;
             std::string mPlugin;
             bool mEmptyBase, mScripted;
+            bool mLeveled = false;
         };
         // One interior/exterior cell's winning engine references, including moved refs.
         // No gameplay or base-inventory execution occurs during discovery.
@@ -73,6 +77,9 @@ namespace TES3MP::Native
         std::vector<PlacedInventory> placedActors(std::string_view cell)
         { return placedActors(interiorCell(cell)); }
         std::vector<PlacedInventory> resolveActors(ESM::RefId cell, size_t limit);
+        std::vector<PlacedInventory> resolveActors(ESM::RefId cell, size_t limit, int level,
+            Misc::Rng::Generator& rng, std::vector<ActorSpawnSelection>& selections,
+            const std::vector<ActorSpawnSelection>* restored = nullptr);
         std::vector<PlacedInventory> resolveActors(std::string_view cell, size_t limit)
         { return resolveActors(interiorCell(cell), limit); }
         std::vector<PlacedInventory> placedItems(ESM::RefId cell, size_t limit);
@@ -83,6 +90,7 @@ namespace TES3MP::Native
             ESM::CellRef mRef;
             uint64_t mIdentity;
             std::string mPlugin;
+            ESM::RefId mDestination;
         };
         // Select one winning ordinary door; unrelated teleport/scripted doors
         // are not silently brought into the supported domain.
@@ -92,6 +100,12 @@ namespace TES3MP::Native
         // Winning, unscripted, unlocked, untrapped teleport placements whose
         // destination resolves to the other bound OpenMW cell.
         std::vector<PlacedDoor> teleportDoors(ESM::RefId cell, ESM::RefId destination);
+        // An empty destination filter discovers all usable outgoing doors.
+        std::vector<PlacedDoor> teleportDoors(ESM::RefId cell, std::span<const ESM::RefId> destinations);
+        std::vector<ESM::RefId> playerAreas(ESM::RefId start, unsigned exteriorRadius, size_t limit);
+        ESM::Position playerSpawn(ESM::RefId start, std::span<const ESM::RefId> cells,
+            std::optional<ESM::Position> explicitPosition = {});
+        std::vector<PlacedDoor> ordinaryDoors(ESM::RefId cell, size_t limit);
         std::vector<PlacedDoor> teleportDoors(std::string_view cell, std::string_view destination)
         { return teleportDoors(interiorCell(cell), interiorCell(destination)); }
         void writeContainers(std::ostream& output, std::string_view cell);
