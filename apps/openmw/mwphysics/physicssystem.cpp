@@ -941,7 +941,6 @@ namespace MWPhysics
         , mMovement(projectile.velocity())
         , mCaster(projectile.getCasterCollisionObject())
         , mCollisionObject(projectile.getCollisionObject())
-        , mProjectile(&projectile)
     {
     }
 

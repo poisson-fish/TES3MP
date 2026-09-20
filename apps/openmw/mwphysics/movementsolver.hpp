@@ -2,6 +2,7 @@
 #define OPENMW_MWPHYSICS_MOVEMENTSOLVER_H
 
 #include <osg/Vec3f>
+#include "collisioneffects.hpp"
 
 #include <components/misc/constants.hpp>
 
@@ -44,8 +45,10 @@ namespace MWPhysics
         static osg::Vec3f traceDown(const MWWorld::Ptr& ptr, const osg::Vec3f& position, Actor* actor,
             btCollisionWorld* collisionWorld, float maxHeight);
         static void move(
-            ActorFrameData& actor, float time, const btCollisionWorld* collisionWorld, const WorldFrameData& worldData);
-        static void move(ProjectileFrameData& projectile, float time, const btCollisionWorld* collisionWorld);
+            ActorFrameData& actor, float time, const btCollisionWorld* collisionWorld, const WorldFrameData& worldData,
+            CollisionEffects& effects = stockCollisionEffects());
+        static void move(ProjectileFrameData& projectile, float time, const btCollisionWorld* collisionWorld,
+            CollisionEffects& effects = stockCollisionEffects());
         static void unstuck(ActorFrameData& actor, const btCollisionWorld* collisionWorld);
     };
 }

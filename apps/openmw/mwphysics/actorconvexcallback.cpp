@@ -5,7 +5,6 @@
 #include <BulletCollision/CollisionDispatch/btCollisionObject.h>
 #include <components/misc/convert.hpp>
 
-#include "projectile.hpp"
 
 namespace MWPhysics
 {
@@ -73,11 +72,11 @@ namespace MWPhysics
         if (convexResult.m_hitCollisionObject->getBroadphaseHandle()->m_collisionFilterGroup
             == CollisionType_Projectile)
         {
-            auto* projectileHolder = static_cast<Projectile*>(convexResult.m_hitCollisionObject->getUserPointer());
-            if (!projectileHolder->isActive())
+            const auto* projectile = convexResult.m_hitCollisionObject;
+            if (!mEffects.projectileActive(projectile))
                 return 1;
-            if (projectileHolder->isValidTarget(mMe))
-                projectileHolder->hit(mMe, convexResult.m_hitPointLocal, convexResult.m_hitNormalLocal);
+            if (mEffects.validProjectileTarget(projectile, mMe))
+                mEffects.hit(projectile, mMe, convexResult.m_hitPointLocal, convexResult.m_hitNormalLocal);
             return 1;
         }
 

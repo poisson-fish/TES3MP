@@ -22,9 +22,12 @@ namespace MWPhysics
         return stepper.mHitObject->getBroadphaseHandle()->m_collisionFilterGroup != CollisionType_Actor;
     }
 
-    Stepper::Stepper(const btCollisionWorld* colWorld, const btCollisionObject* colObj)
+    Stepper::Stepper(const btCollisionWorld* colWorld, const btCollisionObject* colObj, CollisionEffects& effects)
         : mColWorld(colWorld)
         , mColObj(colObj)
+        , mTracer(effects)
+        , mUpStepper(effects)
+        , mDownStepper(effects)
     {
     }
 
@@ -107,7 +110,7 @@ namespace MWPhysics
                 // safely eject from what we hit by the safety margin
                 auto tempDest = tracerDest + mTracer.mPlaneNormal * sCollisionMargin * 2;
 
-                ActorTracer tempTracer;
+                ActorTracer tempTracer{ mTracer.mEffects };
                 tempTracer.doTrace(mColObj, tracerDest, tempDest, mColWorld);
 
                 if (tempTracer.mFraction > 0.5f) // distance to any object is greater than sCollisionMargin (we checked

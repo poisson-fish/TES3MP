@@ -50,7 +50,6 @@ namespace MWPhysics
         osg::Vec3f mMovement;
         const btCollisionObject* mCaster;
         const btCollisionObject* mCollisionObject;
-        Projectile* mProjectile;
     };
 
     struct WorldFrameData

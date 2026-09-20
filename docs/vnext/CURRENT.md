@@ -1,28 +1,37 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active. M3 was accepted on 2026-09-19.**
-M4 groundwork: stock OpenMW movement now accepts explicit actor/weather frames;
-physics workers no longer read the global store for storm movement.
-The stock caller supplies the same actor inputs and captures the winning GMST
-before scheduling. Player movement authority is unchanged. Computer-use tools
-remain disabled by request.
+M4 binds one content-derived NPC to a detached interior collision scene. Stock
+movement/sweeps/stair stepping accept an explicit collision-effect owner; stock
+callers retain effects, while the native scene journals bounded contacts. NPC model
+selection and hull construction are shared. Player movement authority is unchanged;
+computer-use remains disabled.
 
-Next: isolate stock collision side effects and bind a content-derived interior
-collision scene/actor in the app-local runtime. Then reuse engine navigation for
-the first server-controlled NPC proof: smooth two-client replication under
-latency/jitter/loss, continuing when either disconnects. Follow DECISIONS.md's
-movement cutover requirements.
+Next: reuse engine navigation, then compose actor physics with the native host's
+authoritative actor/inventory state and durable tick installation. Prove smooth
+two-client replication under latency/jitter/loss, continuing when either disconnects.
+Live navigation and replication remain pending; follow DECISIONS.md's cutover rules.
 
-Verified 2026-09-20: `tes3mp_native_actor_tests` built in
-`build/vnext-desktop-evidence`; filters `movement-collision` and
-`movement-environment` passed separately. Synthetic geometry exercises stock
-wall/actor obstruction, sliding, steps, gravity, slow fall and storm settings
-without constructing Environment/World/player/rendering. Logs:
-`build/logs/m4-physics-build.log`, `build/logs/m4-movement-collision.log`,
-`build/logs/m4-movement-environment.log`.
-This is a physics-input seam, not native NPC AI, navigation, transactional physics
-or live replication. Stock object/projectile collision callbacks still have side
-effects; the probe's broad engine link does not prove production headless packaging.
+Verified 2026-09-20 in `build/vnext-desktop-evidence`:
+
+- `tes3mp_native_actor_tests` filters `collision-effects` and `movement-collision`
+  passed separately: isolated effects, invalid/inactive projectile targets, hull
+  selection, wall/actor obstruction, sliding and steps. Logs under `build/logs`:
+  `m4-collision-build.log`, `m4-collision-effects.log`, `m4-collision-movement.log`.
+  Earlier environment evidence: `m4-movement-environment.log`.
+- `tes3mp_native_actor_probe`: Raflod the Braggart in **Seyda Neen, Arrille's
+  Tradehouse**, using the retained Morrowind/Tribunal/Bloodmoon/Tamriel_Data/TR_Mainland
+  loadout. 206 collision bodies, 900 movement steps, 888 grounded, seven contacted
+  objects; invalid velocity left the snapshot unchanged. Logs:
+  `build/logs/m4-interior-build.log`, `build/logs/m4-interior-npc.log`;
+  the latter records placement and content/model fingerprints.
+
+`tes3mp_native_actor_runtime` remains a frozen dry-interior physics diagnostic:
+no AI, gameplay animation, live authority or durability. It constructs no
+Environment/World/player/rendering services. Only the selected living unscripted
+NPC moves. Water, corpses, non-NPC/unresolved leveled actors, projectiles and animated
+object collision are unsupported. Inventories/scripts do not execute; production
+headless packaging remains unproved.
 
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-15**,
 campaign-seeded initial living actors; selections/none persist without rerolling.

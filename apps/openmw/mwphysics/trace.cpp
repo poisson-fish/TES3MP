@@ -13,7 +13,7 @@ namespace MWPhysics
 {
 
     ActorConvexCallback sweepHelper(const btCollisionObject* actor, const btVector3& from, const btVector3& to,
-        const btCollisionWorld* world, bool actorFilter)
+        const btCollisionWorld* world, bool actorFilter, CollisionEffects& effects)
     {
         const btTransform& trans = actor->getWorldTransform();
         btTransform transFrom(trans);
@@ -26,7 +26,7 @@ namespace MWPhysics
 
         const btVector3 motion
             = from - to; // FIXME: this is backwards; means ActorConvexCallback is doing dot product tests backwards too
-        ActorConvexCallback traceCallback(actor, motion, btScalar(0.0), world);
+        ActorConvexCallback traceCallback(actor, motion, btScalar(0.0), world, effects);
         // Inherit the actor's collision group and mask
         traceCallback.m_collisionFilterGroup = actor->getBroadphaseHandle()->m_collisionFilterGroup;
         traceCallback.m_collisionFilterMask = actor->getBroadphaseHandle()->m_collisionFilterMask;
@@ -62,7 +62,7 @@ namespace MWPhysics
             doingShortTrace = true;
         }
 
-        const auto traceCallback = sweepHelper(actor, btstart, btend, world, false);
+        const auto traceCallback = sweepHelper(actor, btstart, btend, world, false, mEffects);
 
         // Copy the hit data over to our trace results struct:
         if (traceCallback.hasHit())
@@ -81,7 +81,7 @@ namespace MWPhysics
             if (doingShortTrace)
             {
                 btend = Misc::Convert::toBullet(end);
-                const auto newTraceCallback = sweepHelper(actor, btstart, btend, world, false);
+                const auto newTraceCallback = sweepHelper(actor, btstart, btend, world, false, mEffects);
 
                 if (newTraceCallback.hasHit())
                 {
@@ -106,7 +106,7 @@ namespace MWPhysics
         const Actor* actor, const osg::Vec3f& start, const osg::Vec3f& end, const btCollisionWorld* world)
     {
         const auto traceCallback = sweepHelper(
-            actor->getCollisionObject(), Misc::Convert::toBullet(start), Misc::Convert::toBullet(end), world, true);
+            actor->getCollisionObject(), Misc::Convert::toBullet(start), Misc::Convert::toBullet(end), world, true, mEffects);
         if (traceCallback.hasHit())
         {
             mFraction = static_cast<float>(traceCallback.m_closestHitFraction);

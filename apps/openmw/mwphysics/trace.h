@@ -2,6 +2,7 @@
 #define OENGINE_BULLET_TRACE_H
 
 #include <osg/Vec3f>
+#include "collisioneffects.hpp"
 
 class btCollisionObject;
 class btCollisionWorld;
@@ -12,6 +13,8 @@ namespace MWPhysics
 
     struct ActorTracer
     {
+        explicit ActorTracer(CollisionEffects& effects = stockCollisionEffects()) : mEffects(effects) {}
+        CollisionEffects& mEffects;
         osg::Vec3f mEndPos;
         osg::Vec3f mPlaneNormal;
         osg::Vec3f mHitPoint;

@@ -58,6 +58,17 @@ tes3mp_verify_target_dependencies(tes3mp_native_bootstrap ALLOWED tes3mp_native_
 target_link_libraries(tes3mp_native_loadout_probe PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_native_loadout)
 
+# Detached M4 interior collision binding; no network or live inventory writer.
+add_library(tes3mp_native_actor_runtime STATIC actor_scene.cpp actor_scene.hpp)
+target_compile_features(tes3mp_native_actor_runtime PUBLIC cxx_std_20)
+target_link_libraries(tes3mp_native_actor_runtime PRIVATE tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_actor_runtime ALLOWED tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_actor_runtime
+    FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+add_executable(tes3mp_native_actor_probe actor_probe.cpp)
+target_link_libraries(tes3mp_native_actor_probe PRIVATE tes3mp_native_actor_runtime tes3mp_native_loadout)
+tes3mp_verify_target_dependencies(tes3mp_native_actor_probe ALLOWED tes3mp_native_actor_runtime tes3mp_native_loadout)
+
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
 # M4 movement seam only: the stock solver is linked, without constructing its
 # World/renderer/player services. This does not yet install an NPC authority.

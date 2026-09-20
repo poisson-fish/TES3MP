@@ -22,7 +22,8 @@ namespace MWPhysics
         ActorTracer mTracer, mUpStepper, mDownStepper;
 
     public:
-        Stepper(const btCollisionWorld* colWorld, const btCollisionObject* colObj);
+        Stepper(const btCollisionWorld* colWorld, const btCollisionObject* colObj,
+            CollisionEffects& effects = stockCollisionEffects());
 
         bool step(osg::Vec3f& position, osg::Vec3f& velocity, float& remainingTime, const bool& onGround,
             bool firstIteration);

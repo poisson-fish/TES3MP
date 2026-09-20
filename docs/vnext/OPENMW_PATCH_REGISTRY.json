@@ -3,10 +3,40 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-002",
+      "slice": "isolated collision effects and native interior NPC binding",
+      "owner": "OpenMW physics and app-local actor runtime",
+      "purpose": "Route stock object flags and projectile effects through an explicit owner supplied to movement, sweeps and stair stepping. Stock callers retain immediate effects; the detached native scene journals bounded object contacts without interpreting engine user pointers. Extract stock actor hull selection and race-based NPC model selection for both callers. The native probe resolves one real interior NPC and frozen content collision resources; navigation, gameplay animation, live host transactions and replication remain pending. Movement frame/solver paths are shared with M4-001; npc.cpp with M2-001; PhysicsSystem with NATIVE-DOOR-001.",
+      "paths": [
+        "apps/openmw/mwphysics/collisioneffects.cpp",
+        "apps/openmw/mwphysics/collisioneffects.hpp",
+        "apps/openmw/mwphysics/actorshape.cpp",
+        "apps/openmw/mwphysics/actorshape.hpp",
+        "apps/openmw/mwphysics/actor.cpp",
+        "apps/openmw/mwphysics/actorconvexcallback.cpp",
+        "apps/openmw/mwphysics/actorconvexcallback.hpp",
+        "apps/openmw/mwphysics/projectileconvexcallback.cpp",
+        "apps/openmw/mwphysics/projectileconvexcallback.hpp",
+        "apps/openmw/mwphysics/trace.cpp",
+        "apps/openmw/mwphysics/trace.h",
+        "apps/openmw/mwphysics/stepper.cpp",
+        "apps/openmw/mwphysics/stepper.hpp",
+        "apps/openmw/mwphysics/movementsolver.hpp",
+        "apps/openmw/mwclass/npcmodel.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_actor_tests collision-effects",
+        "tes3mp_native_actor_tests movement-collision",
+        "tes3mp_native_actor_probe native-interior-npc (Raflod, Arrille's Tradehouse; retained TR loadout)"
+      ],
+      "disposition": "shared engine collision extraction; detached real-content NPC physics proof",
+      "removal_condition": "OpenMW supplies equivalent explicit collision effects and actor hull/model construction for detached simulation"
+    },
+    {
       "id": "M4-001",
       "slice": "explicit stock actor movement frame inputs",
       "owner": "OpenMW physics and native server probe",
-      "purpose": "Expose actor movement frames without constructing World, a player or presentation services. Capture the winning storm movement setting with weather before scheduling stock physics; MovementSolver no longer reads Environment or ESMStore. Stock physics builds the same actor fields explicitly. Synthetic native tests exercise the existing solver, traces and stepper; this is not NPC navigation, transactional physics, a production headless dependency graph or multiplayer acceptance. PhysicsSystem changes share the paths registered under NATIVE-DOOR-001.",
+      "purpose": "Expose actor movement frames without constructing World, a player or presentation services. Capture the winning storm movement setting with weather before scheduling stock physics; MovementSolver no longer reads Environment or ESMStore. Stock physics builds the same actor fields explicitly. Synthetic native tests exercise the existing solver, traces and stepper; this is not NPC navigation, transactional physics, a production headless dependency graph or multiplayer acceptance. PhysicsSystem changes share the paths registered under NATIVE-DOOR-001. M4-002 routes solver effects through an explicit owner and removes the obsolete live projectile pointer from frame data.",
       "paths": [
         "apps/openmw/mwphysics/movementdata.hpp",
         "apps/openmw/mwphysics/movementsolver.cpp",
@@ -209,7 +239,7 @@
       "id": "M2-001",
       "slice": "explicit actor constant-effect shirt mechanics",
       "owner": "OpenMW server runtime",
-      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface.",
+      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface. M4-002 also shares NPC race/model selection with the detached collision caller.",
       "paths": [
         "apps/openmw/mwclass/npc.cpp",
         "apps/openmw/mwmechanics/autocalcspell.cpp",
@@ -391,7 +421,7 @@
       "id": "P8-003",
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",
-      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement, scene-query and ordinary-door motion helpers; register M4's shared movement-frame header.",
+      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement, scene-query and ordinary-door motion helpers; register M4's shared movement frames, collision effects, actor hull and NPC model helpers.",
       "paths": [
         "apps/openmw/CMakeLists.txt"
       ],
@@ -629,7 +659,7 @@
       "id": "NATIVE-DOOR-001",
       "slice": "M3 native door motion and delegated player contacts",
       "owner": "OpenMW native runtime",
-      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling.",
+      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling. M4-002 removes the obsolete live projectile pointer from frame construction.",
       "paths": [
         "apps/openmw/mwclass/door.cpp",
         "apps/openmw/mwworld/doormotion.cpp",

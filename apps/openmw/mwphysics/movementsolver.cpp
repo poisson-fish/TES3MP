@@ -11,8 +11,6 @@
 #include "constants.hpp"
 #include "contacttestwrapper.h"
 #include "movementdata.hpp"
-#include "object.hpp"
-#include "projectile.hpp"
 #include "projectileconvexcallback.hpp"
 #include "stepper.hpp"
 #include "trace.h"
@@ -121,7 +119,7 @@ namespace MWPhysics
     }
 
     void MovementSolver::move(
-        ActorFrameData& actor, float time, const btCollisionWorld* collisionWorld, const WorldFrameData& worldData)
+        ActorFrameData& actor, float time, const btCollisionWorld* collisionWorld, const WorldFrameData& worldData, CollisionEffects& effects)
     {
         // Reset per-frame data
         actor.mWalkingOnWater = false;
@@ -143,7 +141,7 @@ namespace MWPhysics
 
         float swimlevel = actor.mSwimLevel + actor.mHalfExtentsZ;
 
-        ActorTracer tracer;
+        ActorTracer tracer{ effects };
 
         osg::Vec3f velocity;
 
@@ -177,7 +175,7 @@ namespace MWPhysics
             velocity *= 1.f + worldData.mStormWalkMultiplier * angleCos;
         }
 
-        Stepper stepper(collisionWorld, actor.mCollisionObject);
+        Stepper stepper(collisionWorld, actor.mCollisionObject, effects);
         osg::Vec3f origVelocity = velocity;
         osg::Vec3f newPosition = actor.mPosition;
         /*
@@ -245,12 +243,7 @@ namespace MWPhysics
                     // NOTE: this modifies newPosition and velocity on its own if successful
                     usedStepLogic = stepper.step(newPosition, velocity, remainingTime, seenGround, iterations == 0);
                 }
-                auto* ptrHolder = static_cast<PtrHolder*>(tracer.mHitObject->getUserPointer());
-                if (Object* hitObject = dynamic_cast<Object*>(ptrHolder))
-                {
-                    hitObject->addCollision(
-                        actor.mIsPlayer ? ScriptedCollisionType_Player : ScriptedCollisionType_Actor);
-                }
+                effects.objectCollision(tracer.mHitObject, actor.mIsPlayer);
             }
             if (usedStepLogic)
             {
@@ -439,7 +432,8 @@ namespace MWPhysics
         actor.mPosition.z() -= actor.mHalfExtentsZ; // vanilla-accurate
     }
 
-    void MovementSolver::move(ProjectileFrameData& projectile, float time, const btCollisionWorld* collisionWorld)
+    void MovementSolver::move(ProjectileFrameData& projectile, float time, const btCollisionWorld* collisionWorld,
+        CollisionEffects& effects)
     {
         btVector3 btFrom = Misc::Convert::toBullet(projectile.mPosition);
         btVector3 btTo = Misc::Convert::toBullet(projectile.mPosition + projectile.mMovement * time);
@@ -447,10 +441,8 @@ namespace MWPhysics
         if (btFrom == btTo)
             return;
 
-        assert(projectile.mProjectile != nullptr);
-
         ProjectileConvexCallback resultCallback(
-            projectile.mCaster, projectile.mCollisionObject, btFrom, btTo, *projectile.mProjectile);
+            projectile.mCaster, projectile.mCollisionObject, btFrom, btTo, effects);
         resultCallback.m_collisionFilterMask = CollisionType_AnyPhysical;
         resultCallback.m_collisionFilterGroup = CollisionType_Projectile;
 
@@ -462,7 +454,7 @@ namespace MWPhysics
             btTransform(btrot, btTo), resultCallback);
 
         projectile.mPosition
-            = Misc::Convert::toOsg(projectile.mProjectile->isActive() ? btTo : resultCallback.m_hitPointWorld);
+            = Misc::Convert::toOsg(effects.projectileActive(projectile.mCollisionObject) ? btTo : resultCallback.m_hitPointWorld);
     }
 
     btVector3 addMarginToDelta(btVector3 delta)

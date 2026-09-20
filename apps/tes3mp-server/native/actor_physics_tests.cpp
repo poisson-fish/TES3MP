@@ -1,6 +1,9 @@
 #include <apps/openmw/mwphysics/collisiontype.hpp>
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
+#include <apps/openmw/mwphysics/actorconvexcallback.hpp>
+#include <apps/openmw/mwphysics/projectileconvexcallback.hpp>
+#include <apps/openmw/mwphysics/actorshape.hpp>
 
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
@@ -82,12 +85,13 @@ namespace
                 .mWasOnGround = position.z() == 1.f };
         }
 
-        void step(MWPhysics::ActorFrameData& actor, const MWPhysics::WorldFrameData& world = {})
+        void step(MWPhysics::ActorFrameData& actor, const MWPhysics::WorldFrameData& world = {},
+            MWPhysics::CollisionEffects& effects = MWPhysics::stockCollisionEffects())
         {
             // Same ordering and 60 Hz step as stock physics. Installation here
             // updates only this fixture's body; it is not a server transaction.
             MWPhysics::MovementSolver::unstuck(actor, &mWorld);
-            MWPhysics::MovementSolver::move(actor, 1.f / 60.f, &mWorld, world);
+            MWPhysics::MovementSolver::move(actor, 1.f / 60.f, &mWorld, world, effects);
             auto transform = actor.mCollisionObject->getWorldTransform();
             transform.setOrigin({ actor.mPosition.x(), actor.mPosition.y(), actor.mPosition.z() + actor.mHalfExtentsZ });
             actor.mCollisionObject->setWorldTransform(transform);
@@ -97,6 +101,78 @@ namespace
                 "Stock movement produced nonfinite position");
         }
     };
+
+    class RecordedEffects final : public MWPhysics::CollisionEffects
+    {
+    public:
+        std::vector<const btCollisionObject*> mContacts;
+        std::vector<std::pair<const btCollisionObject*, const btCollisionObject*>> mHits;
+        const btCollisionObject* mInvalid = nullptr;
+        const btCollisionObject* mCaster = nullptr;
+        bool mActive = true;
+        bool mWater = false;
+        void objectCollision(const btCollisionObject* object, bool player) override
+        {
+            require(!player, "NPC collision was attributed to the player");
+            mContacts.push_back(object);
+        }
+        bool projectileActive(const btCollisionObject*) const override { return mActive; }
+        bool validProjectileTarget(const btCollisionObject*, const btCollisionObject* target) const override
+        { return target != mInvalid; }
+        const btCollisionObject* projectileCaster(const btCollisionObject*) const override { return mCaster; }
+        void hit(const btCollisionObject* projectile, const btCollisionObject* target, const btVector3&, const btVector3&) override
+        { mHits.emplace_back(projectile, target); }
+        void hitWater(const btCollisionObject*) override { mWater = true; }
+    };
+
+    void collisionEffects()
+    {
+        Scene wall;
+        wall.box({500,20,150}, {0,180,150});
+        auto actor = wall.actor();
+        RecordedEffects journal;
+        actor.mMovement = {0,120,0};
+        for (int i = 0; i < 180; ++i) wall.step(actor, {}, journal);
+        require(!journal.mContacts.empty() && actor.mPosition.y() < 145,
+            "Detached movement did not journal its object contacts");
+
+        btCollisionObject source, target, caster;
+        btBroadphaseProxy proxy;
+        target.setBroadphaseHandle(&proxy);
+        // Opaque non-engine user data must never be interpreted by either callback.
+        int sentinel = 17;
+        source.setUserPointer(&sentinel);
+        target.setUserPointer(&sentinel);
+        proxy.m_collisionFilterGroup = MWPhysics::CollisionType_Projectile;
+        btCollisionWorld::LocalConvexResult hit(&target, nullptr, {0,-1,0}, {0,10,0}, .5f);
+        MWPhysics::ActorConvexCallback sweep(&source, {0,-1,0}, 0, nullptr, journal);
+        sweep.addSingleResult(hit, true);
+        require(journal.mHits.size() == 1 && journal.mHits.back() == std::pair(&target, &source),
+            "Actor sweep did not route projectile contact");
+        journal.mActive = false;
+        sweep.addSingleResult(hit, true);
+        journal.mActive = true;
+        journal.mInvalid = &source;
+        sweep.addSingleResult(hit, true);
+        require(journal.mHits.size() == 1, "Inactive or invalid projectile contact leaked an effect");
+        journal.mInvalid = nullptr;
+        journal.mCaster = &caster;
+        MWPhysics::ProjectileConvexCallback projectile(&caster, &source, {0,0,0}, {0,20,0}, journal);
+        projectile.addSingleResult(hit, true);
+        require(journal.mHits.size() == 3 && journal.mHits.back() == std::pair(&source, &target),
+            "Projectile pair did not route both hits");
+        proxy.m_collisionFilterGroup = MWPhysics::CollisionType_Water;
+        projectile.addSingleResult(hit, true);
+        require(journal.mWater && sentinel == 17, "Water contact or collision isolation failed");
+        target.setBroadphaseHandle(nullptr);
+
+        const auto cylinder = MWPhysics::makeActorShape({16,16,32}, {0,0,32}, DetourNavigator::CollisionShapeType::Cylinder);
+        const auto box = MWPhysics::makeActorShape({16,32,32}, {0,0,32}, DetourNavigator::CollisionShapeType::Cylinder);
+        const auto offset = MWPhysics::makeActorShape({16,16,32}, {1,0,32}, DetourNavigator::CollisionShapeType::Cylinder);
+        require(cylinder.mShape->getShapeType() == CYLINDER_SHAPE_PROXYTYPE && cylinder.mRotationallyInvariant
+            && box.mShape->getShapeType() == BOX_SHAPE_PROXYTYPE && !box.mRotationallyInvariant
+            && !offset.mRotationallyInvariant, "Stock actor hull selection changed");
+    }
 
     void collision()
     {
@@ -184,12 +260,14 @@ int main(int argc, char** argv)
     try
     {
         if (argc != 2)
-            throw std::invalid_argument("Select movement-collision or movement-environment");
+            throw std::invalid_argument("Select movement-collision, movement-environment or collision-effects");
         const std::string_view filter = argv[1];
         if (filter == "movement-collision")
             collision();
         else if (filter == "movement-environment")
             environment();
+        else if (filter == "collision-effects")
+            collisionEffects();
         else
             throw std::invalid_argument("Unknown actor physics filter");
         std::cout << "PASS " << filter << " (synthetic geometry, stock OpenMW solver, no engine environment)\n";

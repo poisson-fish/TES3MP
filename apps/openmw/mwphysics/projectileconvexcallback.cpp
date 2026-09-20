@@ -1,7 +1,6 @@
 #include <BulletCollision/CollisionDispatch/btCollisionObject.h>
 
 #include "collisiontype.hpp"
-#include "projectile.hpp"
 #include "projectileconvexcallback.hpp"
 
 namespace MWPhysics
@@ -23,25 +22,24 @@ namespace MWPhysics
         {
             case CollisionType_Actor:
             {
-                if (!mProjectile.isValidTarget(hitObject))
+                if (!mEffects.validProjectileTarget(mMe, hitObject))
                     return 1.f;
                 break;
             }
             case CollisionType_Projectile:
             {
-                auto* target = static_cast<Projectile*>(hitObject->getUserPointer());
-                if (!mProjectile.isValidTarget(target->getCasterCollisionObject()))
+                if (!mEffects.validProjectileTarget(mMe, mEffects.projectileCaster(hitObject)))
                     return 1.f;
-                target->hit(mMe, m_hitPointWorld, m_hitNormalWorld);
+                mEffects.hit(hitObject, mMe, m_hitPointWorld, m_hitNormalWorld);
                 break;
             }
             case CollisionType_Water:
             {
-                mProjectile.setHitWater();
+                mEffects.hitWater(mMe);
                 break;
             }
         }
-        mProjectile.hit(hitObject, m_hitPointWorld, m_hitNormalWorld);
+        mEffects.hit(mMe, hitObject, m_hitPointWorld, m_hitNormalWorld);
 
         return result.m_hitFraction;
     }

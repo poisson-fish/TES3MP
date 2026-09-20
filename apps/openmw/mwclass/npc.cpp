@@ -1,4 +1,5 @@
 ﻿#include "npc.hpp"
+#include "npcmodel.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -247,9 +248,7 @@ namespace MWClass
         const MWWorld::LiveCellRef<ESM::NPC>* ref = ptr.get<ESM::NPC>();
         const VFS::Path::NormalizedView model = [&]() -> VFS::Path::NormalizedView {
             const ESM::Race* race = MWBase::Environment::get().getESMStore()->get<ESM::Race>().find(ref->mBase->mRace);
-            if (race->mData.mFlags & ESM::Race::Beast)
-                return Settings::models().mBaseanimkna.get();
-            return Settings::models().mBaseanim.get();
+            return npcModel(*race, Settings::models().mBaseanim.get(), Settings::models().mBaseanimkna.get());
         }();
         // Base animations should be in the meshes dir
         constexpr VFS::Path::NormalizedView prefix("meshes/");
@@ -264,10 +263,8 @@ namespace MWClass
         const MWWorld::LiveCellRef<ESM::NPC>* ref = ptr.get<ESM::NPC>();
 
         const ESM::Race* race = MWBase::Environment::get().getESMStore()->get<ESM::Race>().find(ref->mBase->mRace);
-        if (race->mData.mFlags & ESM::Race::Beast)
-            return Settings::models().mBaseanimkna.get();
-
-        return Settings::models().mBaseanim.get();
+        return VFS::Path::Normalized(npcModel(*race,
+            Settings::models().mBaseanim.get(), Settings::models().mBaseanimkna.get()));
     }
 
     void Npc::getModelsToPreload(const MWWorld::ConstPtr& ptr, std::vector<std::string_view>& models) const

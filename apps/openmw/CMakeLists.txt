@@ -87,13 +87,13 @@ add_openmw_dir (mwworld
     )
 
 add_openmw_dir (mwphysics
-    physicssystem trace collisiontype actor convert object heightfield closestnotmerayresultcallback
-    contacttestresultcallback stepper movementsolver movementdata projectile
+    physicssystem trace collisiontype actor actorshape convert object heightfield closestnotmerayresultcallback
+    contacttestresultcallback stepper movementsolver movementdata collisioneffects projectile
     actorconvexcallback raycasting mtphysics contacttestwrapper projectileconvexcallback
     )
 
 add_openmw_dir (mwclass
-    classes activator creature npc weapon armor potion apparatus book clothing container door
+    classes activator creature npc npcmodel weapon armor potion apparatus book clothing container door
     ingredient creaturelevlist itemlevlist light lockpick misc probe repair static actor bodypart
     esm4base esm4npc light4
     )

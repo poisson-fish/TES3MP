@@ -1,6 +1,5 @@
 #include "actor.hpp"
-
-#include <BulletCollision/CollisionShapes/btCylinderShape.h>
+#include "actorshape.hpp"
 
 #include <components/debug/debuglog.hpp>
 #include <components/misc/convert.hpp>
@@ -62,39 +61,11 @@ namespace MWPhysics
                                   << ptr.getCellRef().getRefId() << "\".";
         }
 
-        const btVector3 halfExtents = Misc::Convert::toBullet(mOriginalHalfExtents);
-        float extRatio = 0.f;
-        if (mOriginalHalfExtents.y() != 0.f)
-            extRatio = mOriginalHalfExtents.x() / mOriginalHalfExtents.y();
-
-        if (mMeshTranslation.x() == 0.0 && mMeshTranslation.y() == 0.0 && extRatio >= 1.f / 1.1f && extRatio <= 1.1f)
-        {
-            switch (collisionShapeType)
-            {
-                case DetourNavigator::CollisionShapeType::Aabb:
-                    mShape = std::make_unique<btBoxShape>(halfExtents);
-                    mRotationallyInvariant = true;
-                    break;
-                case DetourNavigator::CollisionShapeType::RotatingBox:
-                    mShape = std::make_unique<btBoxShape>(halfExtents);
-                    mRotationallyInvariant = false;
-                    break;
-                case DetourNavigator::CollisionShapeType::Cylinder:
-                    mShape = std::make_unique<btCylinderShapeZ>(halfExtents);
-                    mRotationallyInvariant = true;
-                    break;
-            }
-            mCollisionShapeType = collisionShapeType;
-        }
-        else
-        {
-            mShape = std::make_unique<btBoxShape>(halfExtents);
-            mRotationallyInvariant = false;
-            mCollisionShapeType = DetourNavigator::CollisionShapeType::RotatingBox;
-        }
-
-        mConvexShape = static_cast<btConvexShape*>(mShape.get());
-        mConvexShape->setMargin(0.001); // make sure bullet isn't using the huge default convex shape margin of 0.04
+        auto hull = makeActorShape(mOriginalHalfExtents, mMeshTranslation, collisionShapeType);
+        mCollisionShapeType = hull.mType;
+        mRotationallyInvariant = hull.mRotationallyInvariant;
+        mConvexShape = hull.mShape.get();
+        mShape = std::move(hull.mShape);
 
         mCollisionObject = std::make_unique<btCollisionObject>();
         mCollisionObject->setCollisionFlags(btCollisionObject::CF_KINEMATIC_OBJECT);
