@@ -1,4 +1,5 @@
 #include "physicssystem.hpp"
+#include "doorcontact.hpp"
 #include "../mwworld/doormotion.hpp"
 
 #include <algorithm>
@@ -359,32 +360,9 @@ namespace MWPhysics
         query.setCollisionShape(object->getCollisionObject()->getCollisionShape());
         query.setWorldTransform(btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(proposed)),
             Misc::Convert::toBullet(proposed.asVec3())));
-        struct Contact final : btCollisionWorld::ContactResultCallback
-        {
-            const btCollisionObject* query;
-            MWWorld::Ptr actor;
-            osg::Vec3f origin;
-            float delta;
-            bool blocked = false;
-            Contact(const btCollisionObject* q, MWWorld::Ptr a, osg::Vec3f o, float d)
-                : query(q), actor(a), origin(o), delta(d) {}
-            btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* a, int, int,
-                const btCollisionObjectWrapper* b, int, int) override
-            {
-                const bool first = a->getCollisionObject() == query;
-                const auto* other = first ? b->getCollisionObject() : a->getCollisionObject();
-                const auto* holder = static_cast<const PtrHolder*>(other->getUserPointer());
-                if (cp.getDistance() <= 0 && holder && holder->getPtr() == actor)
-                    blocked |= MWWorld::doorContactBlocks(delta, origin,
-                        Misc::Convert::toOsg(first ? cp.getPositionWorldOnB() : cp.getPositionWorldOnA()),
-                        Misc::Convert::toOsg(first ? cp.m_normalWorldOnB : -cp.m_normalWorldOnB));
-                return 0;
-            }
-        } contact(&query, actor, proposed.asVec3(), delta);
-        contact.m_collisionFilterGroup = CollisionType_Door;
-        contact.m_collisionFilterMask = CollisionType_Actor;
+        DoorContactResult contact(&query, getActor(actor)->getCollisionObject(), proposed.asVec3(), delta);
         mTaskScheduler->contactTest(&query, contact);
-        return contact.blocked;
+        return contact.mBlocked;
     }
 
     std::vector<ContactPoint> PhysicsSystem::getCollisionsPoints(

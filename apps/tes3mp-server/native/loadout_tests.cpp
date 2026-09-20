@@ -6551,6 +6551,11 @@ int main(int argc, char** argv)
             std::cout << "PASS exterior-host\n";
             return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-doors")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),std::filesystem::absolute(argv[4]));
+            std::cout << "PASS npc-doors\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "native-navigation")
         {
             TES3MP::Native::Testing::checkNavigatingActor(std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),std::filesystem::absolute(argv[4]));

@@ -6,6 +6,7 @@ namespace TES3MP::Native::Testing
 {
     void checkItemPlacement();
     void writePlacementFixtureModels(const std::filesystem::path& scratch);
+    void writeDoorFixtureModel(const std::filesystem::path& scratch);
     DropPlacementView placementTestView(float x, float z, bool miss = false);
 }
 #endif

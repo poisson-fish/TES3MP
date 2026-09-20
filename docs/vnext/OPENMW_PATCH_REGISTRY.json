@@ -3,6 +3,21 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-004",
+      "slice": "server-owned NPC door contact and composed collision angles",
+      "owner": "OpenMW physics and app-local native actor/door transaction",
+      "purpose": "Extract the player door contact callback for shared NPC queries. Normalize Bullet contacts to the door surface outward normal in either pair order; the previous player query used the actor normal and could block receding rotation. V17 stages ordinary-door proposals against retained NPC hulls and NPC movement against proposed door angles, with inventory in one durable tick. The existing door image owns angles; physics transforms are derived and restored atomically. AI avoidance and dynamic navigation mesh updates remain pending. PhysicsSystem is shared with NATIVE-DOOR-001.",
+      "paths": [
+        "apps/openmw/mwphysics/doorcontact.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_actor_tests door-contact",
+        "tes3mp_native_loadout_tests npc-doors"
+      ],
+      "disposition": "shared contact direction and isolated native collision transactions",
+      "removal_condition": "OpenMW supplies equivalent identity-independent door contact queries and detached actor/door simulation"
+    },
+    {
       "id": "M4-003",
       "slice": "native interior navigation and durable actor motion",
       "owner": "OpenMW navigation, app-local native authority and desktop adapter",
@@ -676,7 +691,7 @@
       "id": "NATIVE-DOOR-001",
       "slice": "M3 native door motion and delegated player contacts",
       "owner": "OpenMW native runtime",
-      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling. M4-002 removes the obsolete live projectile pointer from frame construction.",
+      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. M4-004 adds server NPC obstruction for V17 and corrects player query normal orientation; older domains retain player reports. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling. M4-002 removes the obsolete live projectile pointer from frame construction.",
       "paths": [
         "apps/openmw/mwclass/door.cpp",
         "apps/openmw/mwworld/doormotion.cpp",

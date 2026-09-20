@@ -17,6 +17,15 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V17 uses native-inventory-17 with V16 fields and a fresh campaign. Bind
+    // 1..128 automatically discovered ordinary doors to the same collision scene.
+    // Each 30 Hz tick stages door proposals against all retained NPC hulls, then
+    // two NPC physics steps against those door angles, alongside an inventory
+    // intent. The existing area image is the sole durable door-angle owner.
+    // Authenticated player reports still supplement server NPC contacts. Recovery
+    // restores actor/path and door collision transforms together. Background NPCs
+    // stay frozen; AI avoidance and navmesh updates for door rotation are pending.
+    // Unsupported doors remain frozen obstacles. Teleports remain unavailable.
     // V16 uses native-inventory-16 with V15 fields, one dry interior and a fresh
     // campaign. After `areas 1`, append `npc "NPC_BASE" "NAV_SETTINGS_FILE"`
     // and `destination X Y Z SPEED`. Exactly one living unscripted, nonleveled

@@ -121,10 +121,14 @@ namespace TES3MP::Native
             std::span<const std::shared_ptr<const ESM::DoorState>> doors = {}) const;
         void initializeAreaDoors();
         std::unique_ptr<PreparedNativeInventory> prepareAreaDoor(size_t index, bool activation,
-            const CanonicalServerState& players, ServerTick tick, float seconds);
+            const CanonicalServerState& players, ServerTick tick, float seconds,
+            std::unique_ptr<PreparedNativeInventory> command = {});
         std::vector<NativeDoorSnapshot> areaDoorSnapshots(CellId cell, const PreparedNativeInventory* candidate) const;
+        const PreparedNativeInventory* areaDoorCommand(const PreparedNativeInventory* candidate) const;
+        std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
-        void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references);
+        void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
+            std::span<const char> actor = {});
         std::array<std::optional<ClientDoorObstruction>, 2> mDoorReports;
         float mDoorStepSeconds = 1.f / 30.f;
         std::array<bool, 2> mActiveCells{};

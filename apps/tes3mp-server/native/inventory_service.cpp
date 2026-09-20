@@ -903,10 +903,8 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             const auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
-            auto step = mBinding.mNavigatingActor->prepareRestore(decoded.actor);
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
-            recoverAreas(std::as_bytes(decoded.inventory), references);
-            mBinding.mNavigatingActor->install(*step);
+            recoverAreas(std::as_bytes(decoded.inventory), references, decoded.actor);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             installActorPosition();
             return;
@@ -997,17 +995,19 @@ namespace TES3MP::Native
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
     {
         if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
-        if (std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
+        if (!std::isfinite(seconds) || std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
             throw std::invalid_argument("Native actor requires increasing 30 Hz durable ticks");
-        if (!command) command = prepareDoorStep(players, tick, seconds);
+        if (!mBinding.mDoors.empty()) command = prepareAreaDoor(0, false, players, tick, seconds, std::move(command));
+        else if (!command) command = prepareDoorStep(players, tick, seconds);
         const auto before = mBinding.mNavigatingActor->snapshot();
         const auto owner = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) { return value.mId.value()==before.mActor; });
         bool active = false;
         for (const auto& session : players.activeSessions())
             if (const auto* player = players.findPlayer(session.playerId()); player && player->transform().cell()==owner->mCell) active = true;
         // Both players leaving freezes this bounded slice; traveler activity is a later M4 slice.
-        auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed)
-            : mBinding.mNavigatingActor->prepareRestore(mBinding.mNavigatingActor->image());
+        const auto doors = actorDoorFrames(command.get());
+        auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)
+            : mBinding.mNavigatingActor->prepareRestore(mBinding.mNavigatingActor->image(), doors);
         const auto after = step->snapshot();
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
@@ -1021,6 +1021,8 @@ namespace TES3MP::Native
         const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
         if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage)) return {};
         if (moving) candidate = moving->command.get();
+        const auto* areaDoors = candidate;
+        if (ownsAreaDoorCandidate(candidate)) candidate = areaDoorCommand(candidate);
         const auto* transaction = dynamic_cast<const Transaction*>(candidate);
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(candidate);
         const auto* world = dynamic_cast<const WorldTransaction*>(candidate);
@@ -1035,8 +1037,8 @@ namespace TES3MP::Native
         if (result)
             for (auto& ground : result->groundItems)
             {
-                ground.doors = areaDoorSnapshots(ground.cell, candidate);
-                for (auto& neighbor : ground.neighbors) neighbor.doors = areaDoorSnapshots(neighbor.cell, candidate);
+                ground.doors = areaDoorSnapshots(ground.cell, areaDoors);
+                for (auto& neighbor : ground.neighbors) neighbor.doors = areaDoorSnapshots(neighbor.cell, areaDoors);
             }
         if (result && result->equipment && mBinding.mNavigatingActor)
         {

@@ -42,9 +42,8 @@ Reports bind authenticated session/generation,
 placement, motion, sequence and observed tick; any fresh block stalls progress.
 Expiry is ten ticks. Reports/motion IDs are transient; reversal/reconnect invalidates
 old reports. Collision is trusted like inherited movement. Latency can clip before
-a stall; no response barrier or rewind is promised. Defer server physics and NPC
-obstruction ownership to shared actor simulation; replacing reports must preserve
-transactions, persistence and replication.
+a stall; no response barrier or rewind is promised. Server NPC obstruction belongs to shared actor simulation; replacing player
+reports must preserve transactions, persistence and replication.
 
 **Presentation is separate.** Route UI, visual animation, audio and graphics to relevant
 clients. Pure visual replacements may vary; collision/bounds and script-affecting
@@ -78,6 +77,11 @@ transaction per tick: ordered intents, actor/door simulation, resources, effects
 wear, death/loot, RNG and receipts. Prove isolated staging; durability precedes
 installation/publication. Measure serialization, commit costs and overruns early;
 preserve acknowledgment guarantees during optimization.
+V17 stages ordinary-door proposals against committed NPC hulls before the two NPC
+physics steps; those steps see staged door angles. Inventory, doors and actor state
+install only after the same commit. Door angles have one durable owner in the area
+image; collision transforms are derived, including on recovery. Player contact
+reports supplement server NPC sensing until player movement cutover.
 
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding

@@ -9,6 +9,7 @@
 #include <apps/openmw/mwphysics/actorshape.hpp>
 #include <apps/openmw/mwphysics/collisioneffects.hpp>
 #include <apps/openmw/mwphysics/collisiontype.hpp>
+#include <apps/openmw/mwphysics/doorcontact.hpp>
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
 #include <apps/openmw/mwmechanics/pathfinding.hpp>
@@ -23,10 +24,12 @@
 #include <components/settings/categories/navigator.hpp>
 #include <components/settings/parser.hpp>
 #include <components/esm3/loadlevlist.hpp>
+#include <components/esm3/loaddoor.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/bulletshapemanager.hpp>
 #include <components/resource/resourcesystem.hpp>
+#include <components/resource/scenemanager.hpp>
 #include <components/vfs/manager.hpp>
 #include <components/vfs/registerarchives.hpp>
 
@@ -114,6 +117,34 @@ namespace TES3MP::Native
         std::unique_ptr<DetourNavigator::Navigator> mNavigator;
         MWMechanics::PathFinder mPath;
         std::vector<DetourNavigator::ObjectTransform> mTransforms;
+        std::map<uint64_t, size_t> mOrdinaryDoors;
+        std::vector<ActorSceneDoor> mDoors;
+
+        void validateDoors(std::span<const ActorSceneDoor> doors) const
+        {
+            if (doors.size() != mDoors.size()) throw std::invalid_argument("Actor door domain mismatch");
+            for (size_t i = 0; i < doors.size(); ++i)
+            {
+                if (doors[i].mId != mDoors[i].mId) throw std::invalid_argument("Actor door identity mismatch");
+                const auto closed = mTransforms[mOrdinaryDoors.at(doors[i].mId)].mPosition.rot[2];
+                const auto opened = MWWorld::doorMotion(MWWorld::DoorState::Opening, closed, closed, 1).mTargetAngle;
+                if (!std::isfinite(doors[i].mAngle) || doors[i].mAngle < closed || doors[i].mAngle > opened)
+                    throw std::invalid_argument("Actor door angle outside authored swing");
+            }
+        }
+        void applyDoors(std::span<const ActorSceneDoor> doors) noexcept
+        {
+            for (const auto& door : doors)
+            {
+                const auto index = mOrdinaryDoors.find(door.mId)->second;
+                auto position = mTransforms[index].mPosition;
+                position.rot[2] = door.mAngle;
+                auto* object = mBodies[index]->mObject.get();
+                object->setWorldTransform(btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(position)),
+                    Misc::Convert::toBullet(position.asVec3())));
+                mWorld.updateSingleAabb(object);
+            }
+        }
 
         Impl(Loadout& loadout, const std::string& cellName, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation)
@@ -127,6 +158,9 @@ namespace TES3MP::Native
                 || beastAnimation.empty() || beastAnimation.size() > 1024)
                 throw std::invalid_argument("Interior NPC binding outside bounds");
             MWClass::registerClasses();
+            // Non-NIF collision meshes use the stock scene importer; shader
+            // generation is presentation and must not initialize here.
+            mResources.getSceneManager()->setShaderGenerationEnabled(false);
             VFS::registerArchives(&mVfs, Files::Collections(loadout.options().mDataPaths),
                 loadout.options().mArchives, true, &loadout.encoder());
             auto& cell = mReferences.getCell(interiorCell(cellName));
@@ -210,6 +244,8 @@ namespace TES3MP::Native
                         Misc::Convert::toBullet(position.asVec3()), Misc::Convert::toBullet(rotation));
                 }
                 auto* object = body->mObject.get();
+                if (ptr.getType() == ESM::Door::sRecordId && !ptr.getCellRef().getTeleport())
+                    mOrdinaryDoors.emplace(id, mBodies.size());
                 mTransforms.push_back({position, scale});
                 mBodies.push_back(std::move(body));
                 mIdentities.emplace(object, id);
@@ -364,6 +400,50 @@ namespace TES3MP::Native
 
     bool InteriorActorScene::arrived() const { return mImpl->mPath.checkPathCompleted(); }
 
+    void InteriorActorScene::bindDoors(std::span<const uint64_t> doors)
+    {
+        if (mImpl->mNavigator || !mImpl->mDoors.empty() || doors.empty() || doors.size() > 128)
+            throw std::invalid_argument("Actor door binding outside startup bounds");
+        std::vector<ActorSceneDoor> bound;
+        auto fingerprint = mImpl->mFingerprint + "npc-door-contact-1\n";
+        for (auto id : doors)
+        {
+            const auto found = mImpl->mOrdinaryDoors.find(id);
+            if (found == mImpl->mOrdinaryDoors.end() || (!bound.empty() && bound.back().mId >= id))
+                throw std::invalid_argument("Actor door collision identity absent or unordered");
+            bound.push_back({id, mImpl->mTransforms[found->second].mPosition.rot[2]});
+            fingerprint += std::to_string(id) + '\n';
+        }
+        mImpl->mDoors.swap(bound);
+        mImpl->mFingerprint.swap(fingerprint);
+    }
+
+    bool InteriorActorScene::doorBlocked(uint64_t door, float proposedAngle, float delta) const
+    {
+        const auto bound = std::ranges::find(mImpl->mDoors, door, &ActorSceneDoor::mId);
+        if (bound == mImpl->mDoors.end() || !std::isfinite(delta) || std::abs(delta) > osg::PIf / 2)
+            throw std::invalid_argument("Actor door query outside domain");
+        const auto index = mImpl->mOrdinaryDoors.at(door);
+        auto position = mImpl->mTransforms[index].mPosition;
+        const auto opened = MWWorld::doorMotion(MWWorld::DoorState::Opening, position.rot[2], position.rot[2], 1).mTargetAngle;
+        if (!std::isfinite(proposedAngle) || proposedAngle < position.rot[2] || proposedAngle > opened)
+            throw std::invalid_argument("Actor door query angle outside authored swing");
+        position.rot[2] = proposedAngle;
+        btCollisionObject query;
+        query.setCollisionShape(mImpl->mBodies[index]->mObject->getCollisionShape());
+        query.setWorldTransform(btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(position)),
+            Misc::Convert::toBullet(position.asVec3())));
+        // All retained NPC hulls obstruct doors, including frozen background NPCs.
+        for (const auto& body : mImpl->mBodies)
+        {
+            if (!body->mHull) continue;
+            MWPhysics::DoorContactResult contact(&query, body->mObject.get(), position.asVec3(), delta);
+            mImpl->mWorld.contactPairTest(&query, body->mObject.get(), contact);
+            if (contact.mBlocked) return true;
+        }
+        return false;
+    }
+
     ActorSceneSnapshot InteriorActorScene::navigate(float speed)
     {
         auto frame=std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
@@ -394,6 +474,7 @@ namespace TES3MP::Native
         MWMechanics::PathFinder path;
         std::vector<uint64_t> contacts;
         std::vector<char> bytes;
+        std::vector<ActorSceneDoor> doors;
     };
     InteriorActorScene::Prepared::Prepared(std::unique_ptr<State> state) : mState(std::move(state)) {}
     InteriorActorScene::Prepared::~Prepared() = default;
@@ -429,12 +510,14 @@ namespace TES3MP::Native
 
     void InteriorActorScene::restore(std::span<const char> bytes)
     {
-        auto prepared = prepareRestore(bytes);
+        auto prepared = prepareRestore(bytes, mImpl->mDoors);
         install(*prepared);
     }
 
-    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareRestore(std::span<const char> bytes)
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareRestore(
+        std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
     {
+        mImpl->validateDoors(doors);
         if (bytes.size() > 64 * 1024) throw std::invalid_argument("Actor image exceeds bound");
         size_t offset = 0;
         const auto word = [&]() { return getAreaWord(bytes, offset); };
@@ -485,24 +568,38 @@ namespace TES3MP::Native
         }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
-            mImpl.get(), std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()}})));
+            mImpl.get(), std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
+            {doors.begin(), doors.end()}})));
     }
 
-    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(float speed)
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
+        float speed, std::span<const ActorSceneDoor> doors)
     {
+        mImpl->validateDoors(doors);
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         auto path = mImpl->mPath;
         std::vector<uint64_t> contacts;
+        // The staged angles participate in stock sweeps/stepping. Restore the
+        // committed broadphase even when a solver/allocation exception escapes.
+        struct RestoreDoors
+        {
+            Impl& scene;
+            ~RestoreDoors() { scene.applyDoors(scene.mDoors); }
+        } restore{*mImpl};
+        mImpl->applyDoors(doors);
         mImpl->navigate(*frame,path,contacts,speed); mImpl->navigate(*frame,path,contacts,speed);
         auto bytes = mImpl->encode(*frame,path,contacts);
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
-            mImpl.get(), std::move(frame), std::move(path), std::move(contacts), std::move(bytes)})));
+            mImpl.get(), std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
+            {doors.begin(), doors.end()}})));
     }
     void InteriorActorScene::install(Prepared& prepared) noexcept
     {
         auto& state = *prepared.mState;
         assert(state.owner == mImpl.get());
         mImpl->mActor.swap(state.frame); std::swap(mImpl->mPath, state.path); mImpl->mContacts.swap(state.contacts);
+        mImpl->mDoors.swap(state.doors);
+        mImpl->applyDoors(mImpl->mDoors);
         mImpl->updateTransform();
     }
 

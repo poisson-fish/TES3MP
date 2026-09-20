@@ -72,7 +72,8 @@ namespace TES3MP::Native
         return result;
     }
 
-    void InventoryService::recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references)
+    void InventoryService::recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
+        std::span<const char> actor)
     {
         const std::span bytes(reinterpret_cast<const char*>(image.data()), image.size());
         size_t offset = 0;
@@ -99,12 +100,21 @@ namespace TES3MP::Native
         for (size_t i = 0; i < count; ++i) states.push_back(decodeDoor(images[i], mAreaDoors[i].binding));
         auto sealed = sealInventory(core, states);
         if (!std::ranges::equal(sealed, bytes)) throw std::invalid_argument("Noncanonical native area image");
+        std::unique_ptr<InteriorActorScene::Prepared> step;
+        if (mBinding.mNavigatingActor)
+        {
+            std::vector<ActorSceneDoor> doors;
+            for (size_t i = 0; i < states.size(); ++i)
+                doors.push_back({mBinding.mDoors[i].mId, states[i]->mPosition.rot[2]});
+            step = mBinding.mNavigatingActor->prepareRestore(actor, doors);
+        }
         EquipmentBytes accepted(core.begin(), core.end()), restored;
         std::unique_ptr<const EquipmentSessionValues> values;
         mRuntime.restoreSession(std::move(accepted), references, values, restored);
         for (size_t i = 0; i < count; ++i) mAreaDoors[i].state.swap(states[i]);
         mCoreImage.swap(restored);
         mImage.swap(sealed);
+        if (step) mBinding.mNavigatingActor->install(*step);
     }
 
     class InventoryService::AreaDoorTransaction final : public PreparedNativeInventory
@@ -112,6 +122,7 @@ namespace TES3MP::Native
     public:
         InventoryService& service;
         EquipmentBytes before, image;
+        std::unique_ptr<PreparedNativeInventory> command;
         std::vector<std::shared_ptr<const ESM::DoorState>> states;
         std::vector<uint64_t> motions;
         std::vector<bool> blocked;
@@ -127,7 +138,20 @@ namespace TES3MP::Native
                 return CanonicalDurabilityResult::Rejected;
             try
             {
-                const auto result = persist(std::as_bytes(std::span(image)));
+                const auto compose = [&](std::span<const std::byte> input) {
+                    const std::span bytes(reinterpret_cast<const char*>(input.data()), input.size());
+                    size_t offset = 0;
+                    if (get(bytes, offset) != (service.mBinding.mActorSelections ? SpawnAreaMagic : AreaMagic))
+                        throw std::invalid_argument("Composed door inventory version mismatch");
+                    if (service.mBinding.mActorSelections && readActorSpawns(bytes, offset) != *service.mBinding.mActorSelections)
+                        throw std::invalid_argument("Composed door actor selections mismatch");
+                    const auto size = get(bytes, offset), count = get(bytes, offset);
+                    if (size > bytes.size() - offset || count != states.size())
+                        throw std::invalid_argument("Composed door inventory bounds mismatch");
+                    image = service.sealInventory(bytes.subspan(offset, size_t(size)), states);
+                    return persist(std::as_bytes(std::span(image)));
+                };
+                const auto result = command ? command->commit(compose) : persist(std::as_bytes(std::span(image)));
                 if (result == CanonicalDurabilityResult::Rejected) return result;
                 consumed = true;
                 if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
@@ -148,36 +172,45 @@ namespace TES3MP::Native
     };
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareAreaDoor(size_t index, bool activation,
-        const CanonicalServerState& players, ServerTick tick, float seconds)
+        const CanonicalServerState& players, ServerTick tick, float seconds,
+        std::unique_ptr<PreparedNativeInventory> command)
     {
         if (inventoryImage().empty()) return {};
         auto result = std::make_unique<AreaDoorTransaction>(*this);
-        bool changed = false;
+        bool changed = bool(command);
+        if (ownsAreaDoorCandidate(command.get()))
+            result.reset(static_cast<AreaDoorTransaction*>(command.release()));
+        else result->command = std::move(command);
         for (size_t i = 0; i < mAreaDoors.size(); ++i)
         {
             auto& door = mAreaDoors[i];
-            if (activation ? i != index : !door.state->mDoorState) continue;
+            const auto& state = *result->states[i];
+            if (activation ? i != index : !state.mDoorState) continue;
             const auto cell = mBinding.mDoors[i].mCell;
             if (!activation && (mActiveAreas.empty() || !mActiveAreas[worldIndex(cell)])) continue;
             bool blocked = false;
-            for (auto& report : door.reports)
+            for (const auto& report : door.reports)
             {
                 if (!report) continue;
                 const auto* session = players.findActiveSession(report->session);
                 const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
                 if (!player || session->sessionGeneration() != report->generation
-                    || player->transform().cell() != cell || report->motion != door.motion
+                    || player->transform().cell() != cell || report->motion != result->motions[i]
                     || report->observedTick > tick || tick.value() - report->observedTick.value() >= DoorObstructionLifetimeTicks)
-                { report.reset(); continue; }
+                    continue;
                 blocked |= report->blocked;
             }
             if (activation && door.motion == std::numeric_limits<uint64_t>::max())
                 throw std::invalid_argument("Native door motion exhausted");
-            auto next = activation ? door.binding.door().activate(*door.state)
-                : door.binding.door().advance(*door.state, seconds, [blocked](const auto&, float) { return blocked; });
+            auto next = activation ? door.binding.door().activate(state)
+                : door.binding.door().advance(state, seconds, [&](const auto& position, float delta) {
+                    if (mBinding.mNavigatingActor)
+                        blocked |= mBinding.mNavigatingActor->doorBlocked(mBinding.mDoors[i].mId, position.rot[2], delta);
+                    return blocked;
+                });
+            result->blocked[i] = !activation && blocked && state.mDoorState != 0;
             result->states[i] = std::make_shared<const ESM::DoorState>(std::move(next.mState));
             result->motions[i] += uint64_t(activation);
-            result->blocked[i] = !activation && blocked && door.state->mDoorState != 0;
             changed = true;
         }
         if (!changed) return {};
@@ -189,6 +222,23 @@ namespace TES3MP::Native
     {
         const auto* prepared = dynamic_cast<const AreaDoorTransaction*>(candidate);
         return prepared && &prepared->service == this && prepared->before == mImage && !prepared->consumed;
+    }
+
+    const PreparedNativeInventory* InventoryService::areaDoorCommand(const PreparedNativeInventory* candidate) const
+    {
+        const auto* prepared = dynamic_cast<const AreaDoorTransaction*>(candidate);
+        return prepared ? prepared->command.get() : candidate;
+    }
+
+    std::vector<ActorSceneDoor> InventoryService::actorDoorFrames(const PreparedNativeInventory* candidate) const
+    {
+        const auto* prepared = dynamic_cast<const AreaDoorTransaction*>(candidate);
+        if (prepared && !ownsAreaDoorCandidate(candidate)) throw std::invalid_argument("Stale actor door candidate");
+        std::vector<ActorSceneDoor> result;
+        for (size_t i = 0; i < mAreaDoors.size(); ++i)
+            result.push_back({mBinding.mDoors[i].mId,
+                (prepared ? prepared->states[i] : mAreaDoors[i].state)->mPosition.rot[2]});
+        return result;
     }
 
     std::vector<NativeDoorSnapshot> InventoryService::areaDoorSnapshots(CellId cell, const PreparedNativeInventory* candidate) const

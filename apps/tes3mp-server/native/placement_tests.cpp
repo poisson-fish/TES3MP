@@ -11,6 +11,12 @@
 
 namespace TES3MP::Native::Testing
 {
+    void writeDoorFixtureModel(const std::filesystem::path& scratch)
+    {
+        osg::ref_ptr<osg::ShapeDrawable> door = new osg::ShapeDrawable(new osg::Box({60, 0, 70}, 120, 4, 140));
+        if (!osgDB::writeNodeFile(*door, (scratch / "meshes" / "npc-door.osgt").string()))
+            throw std::runtime_error("Could not write synthetic door collision geometry");
+    }
     void writePlacementFixtureModels(const std::filesystem::path& scratch)
     {
         std::filesystem::create_directories(scratch / "meshes");

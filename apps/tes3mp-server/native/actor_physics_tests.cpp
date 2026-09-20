@@ -4,6 +4,7 @@
 #include <apps/openmw/mwphysics/actorconvexcallback.hpp>
 #include <apps/openmw/mwphysics/projectileconvexcallback.hpp>
 #include <apps/openmw/mwphysics/actorshape.hpp>
+#include <apps/openmw/mwphysics/doorcontact.hpp>
 
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
@@ -253,6 +254,36 @@ namespace
         require(normal.mIsOnGround && std::abs(normal.mPosition.z() - 1.f) < 1.f,
             "Falling actor did not land on the floor");
     }
+
+    void doorContact()
+    {
+        btDefaultCollisionConfiguration configuration;
+        btCollisionDispatcher dispatcher(&configuration);
+        btDbvtBroadphase broadphase;
+        btCollisionWorld world(&dispatcher, &broadphase, &configuration);
+        btBoxShape doorShape({40, 2, 70});
+        btCylinderShapeZ actorShape({16, 16, 32});
+        btCollisionObject door, actor, unrelated;
+        door.setCollisionShape(&doorShape);
+        actor.setCollisionShape(&actorShape);
+        door.setWorldTransform(btTransform(btQuaternion::getIdentity(), {40, 0, 70}));
+        actor.setWorldTransform(btTransform(btQuaternion::getIdentity(), {60, -16, 32}));
+        const auto priorDoor = door.getWorldTransform(), priorActor = actor.getWorldTransform();
+        const auto blocked = [&](float delta, bool reverse, const btCollisionObject* selected) {
+            MWPhysics::DoorContactResult query(&door, selected, {0, 0, 0}, delta);
+            if (reverse) world.contactPairTest(&actor, &door, query);
+            else world.contactPairTest(&door, &actor, query);
+            return query.mBlocked;
+        };
+        require(blocked(.05f, false, &actor), "Door failed to detect an approaching NPC contact");
+        require(blocked(.05f, true, &actor), "Reversed Bullet pair lost the NPC contact");
+        require(!blocked(-.05f, false, &actor), "Door contact blocked retreating rotation");
+        require(!blocked(.05f, false, &unrelated), "Door query accepted another actor's contact");
+        require(door.getWorldTransform() == priorDoor && actor.getWorldTransform() == priorActor,
+            "Door sensing mutated collision transforms");
+        actor.setWorldTransform(btTransform(btQuaternion::getIdentity(), {60, -80, 32}));
+        require(!blocked(.05f, false, &actor), "Separated NPC blocked the door");
+    }
 }
 
 int main(int argc, char** argv)
@@ -268,6 +299,8 @@ int main(int argc, char** argv)
             environment();
         else if (filter == "collision-effects")
             collisionEffects();
+        else if (filter == "door-contact")
+            doorContact();
         else
             throw std::invalid_argument("Unknown actor physics filter");
         std::cout << "PASS " << filter << " (synthetic geometry, stock OpenMW solver, no engine environment)\n";

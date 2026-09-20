@@ -5,6 +5,7 @@
 #include "inventory_service_tests.hpp"
 #include "inventory_service.hpp"
 #include "inventory_host.hpp"
+#include "actor_campaign.hpp"
 #include "loadout.hpp"
 #include <apps/openmw/tes3mp/remote_motion.hpp>
 #include <chrono>
@@ -3914,6 +3915,240 @@ namespace TES3MP::Native::Testing
                 << movementMetrics[1].summary(MovementMetricKey::HardSnaps).total << " end=" << end.position[0] << ',' << end.position[1]
                 << " rejection=atomic recovery=exact mid-path-recovery=exact inventory=composed\n";
         }
+    }
+
+    void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
+        writePlacementFixtureModels(scratch);
+        writeDoorFixtureModel(scratch);
+        std::filesystem::create_directory(scratch / "openmw");
+        std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw" / "openmw.cfg");
+        // Synthetic room/placements on the retained real loadout. NPC hull and
+        // inventory mechanics come from OpenMW; this is not a published-mod proof.
+        {
+            const auto directory = config.string();
+            const char* arguments[]{"npc-door-test", "--config", directory.c_str()};
+            Loadout base(readLoadoutOptions(3, arguments));
+            auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
+            npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
+            npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
+            std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
+            ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
+            out.addMaster("Morrowind.esm", 0); out.save(stream);
+            out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
+            floor.mModel = "placement-floor.osgt";
+            out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
+            ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("npc_door"); door.mModel = "npc-door.osgt";
+            out.startRecord(ESM::Door::sRecordId, 0); door.save(out); out.endRecord(ESM::Door::sRecordId);
+            ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
+            cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
+            out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+            uint32_t index = 0;
+            for (auto record : {npc.mId, floor.mId, door.mId})
+            {
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                if (record == npc.mId) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
+                placed.save(out);
+            }
+            out.endRecord(ESM::Cell::sRecordId);
+            cell.mName = "NPC Door Path Test"; cell.updateId();
+            out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+            for (auto record : {npc.mId, floor.mId, door.mId})
+            {
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                if (record == npc.mId) placed.mPos = {{0, -220, 1}, {0, 0, 0}};
+                placed.save(out);
+            }
+            out.endRecord(ESM::Cell::sRecordId); out.close();
+            std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
+            cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
+        }
+        {
+            const auto directory = (scratch / "openmw").string();
+            const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
+            Loadout loadout(readLoadoutOptions(3, arguments));
+            const auto cell = ESM::RefId::stringRefId("NPC Door Path Test");
+            const auto actor = loadout.placedActors(cell).at(0).mIdentity;
+            const auto door = loadout.ordinaryDoors(cell, 128).at(0).mIdentity;
+            InteriorActorScene scene(loadout, "NPC Door Path Test", actor, "meshes/base_anim.nif", "meshes/base_animkna.nif");
+            const std::array ids{door}; scene.bindDoors(ids); scene.enableNavigation(settings.string());
+            scene.travelTo({0, -40, 1});
+            const auto initial = scene.image();
+            const std::array closed{ActorSceneDoor{door, 0}}, opened{ActorSceneDoor{door, osg::PIf / 2}};
+            for (int tick = 0; tick < 60; ++tick)
+            {
+                auto step = scene.prepareNavigation(120, closed); scene.install(*step);
+            }
+            require(scene.snapshot().mPosition[1] > -65, "Closed door obstructed a path south of its geometry");
+            auto restored = scene.prepareRestore(initial, opened); scene.install(*restored);
+            bool contacted = false;
+            for (int tick = 0; tick < 60; ++tick)
+            {
+                const auto before = scene.image();
+                auto step = scene.prepareNavigation(120, opened);
+                require(scene.image() == before, "Door collision preparation mutated the NPC frame");
+                scene.install(*step);
+                const auto snapshot = scene.snapshot();
+                contacted |= std::ranges::find(snapshot.mContacts, door) != snapshot.mContacts.end();
+            }
+            require(contacted && scene.snapshot().mPosition[1] < -120, "NPC passed through the committed open door");
+            const auto before = scene.image();
+            const std::array invalid{ActorSceneDoor{door, std::numeric_limits<float>::quiet_NaN()}};
+            bool rejected = false;
+            try { (void)scene.prepareNavigation(120, invalid); } catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected && scene.image() == before, "Invalid door angle mutated the NPC scene");
+            std::cout << "npc-door collision: same path clear when closed, obstructed when open; invalid angle atomic\n";
+        }
+        auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "NPC door crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Door participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        auto authority = players(SessionGeneration::initial(), 1, 2);
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1, 2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            records.push_back({{id<PlayerId>(i),id<EntityId>(i == 1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
+                digest, *authority.findPlayer(id<PlayerId>(i)), profile});
+        }
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+        const auto descriptor = scratch / "native.txt";
+        {
+            std::ofstream out(descriptor); out << "native-inventory-17\nmanifest ";
+            for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
+            out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
+                << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
+                << "npc \"npc_door_actor\" " << std::quoted(settings.string()) << "\ndestination 60 -240 1 120\n";
+        }
+        InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+        require(host.environment() != nullptr, "V17 lost the native time/weather owner");
+        auto& service = host.service(); service.synchronizeCells(authority);
+        const auto view = [&](ServerApp::NativeInventoryService& owner, uint64_t tick, uint64_t session = 1,
+            const PreparedNativeInventory* pending = nullptr) {
+            auto value = owner.projectInventory(authority, id<SessionId>(session), id<ServerTick>(tick), id<CanonicalRevision>(tick), pending);
+            require(bool(value) && value->groundItems.size() == 1 && value->groundItems[0].doors.size() == 1
+                && value->equipment && value->equipment->motions.size() == 1, "NPC door projection domain incomplete");
+            return *value;
+        };
+        const auto doorView = [&](ServerApp::NativeInventoryService& owner, uint64_t tick, const PreparedNativeInventory* pending = nullptr) {
+            return view(owner, tick, 1, pending).groundItems[0].doors[0];
+        };
+        const auto activation = [&](ServerApp::NativeInventoryService& owner, uint64_t tick) {
+            const auto door = doorView(owner, tick);
+            const auto& player = *authority.findPlayer(id<PlayerId>(1));
+            const auto command = ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(tick), id<CanonicalRevision>(tick),
+                EntityPrecondition(player.entityId(), player.entityRevision(), player.authorityEpoch()),
+                InteractiveObjectCommandProposal(id<InteractiveObjectId>(door.placement), player.transform().cell(),
+                    player.transform().position(), id<ObjectRevision>(door.motion), ObjectInteractionKind::Activate, {}));
+            auto result = owner.prepareDoorActivation(authority, command);
+            require(bool(result), "NPC door activation rejected");
+            return result;
+        };
+        const NativeInventoryCommit rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+        const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+        const std::vector initial(service.inventoryImage().begin(), service.inventoryImage().end());
+        bool invalidTime = false;
+        try { (void)service.prepareNativeTick(authority, id<ServerTick>(1), std::numeric_limits<float>::quiet_NaN(), {}); }
+        catch (const std::invalid_argument&) { invalidTime = true; }
+        require(invalidTime && std::ranges::equal(initial, service.inventoryImage()), "Nonfinite composed tick accepted");
+        auto first = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, activation(service, 1));
+        const auto blocked = doorView(service, 1, first.get());
+        require(blocked.blocked && blocked.angle == 0 && blocked.direction == 1,
+            "NPC did not stall the proposed opening swing");
+        require(doorView(service, 1).direction == 0 && std::ranges::equal(initial, service.inventoryImage()),
+            "Staged NPC/door state leaked before durability");
+        require(first->commit(rejected) == CanonicalDurabilityResult::Rejected && std::ranges::equal(initial, service.inventoryImage()),
+            "Rejected NPC/door tick changed the live image");
+        require(first->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC/door retry failed");
+        const std::vector saved(service.inventoryImage().begin(), service.inventoryImage().end());
+        InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, saved);
+        auto& restored = recovered.service(); restored.synchronizeCells(authority);
+        require(std::ranges::equal(saved, restored.inventoryImage()), "NPC/door recovery changed durable bytes");
+        auto next = service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
+        auto replay = restored.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
+        std::vector<std::byte> expected, actual;
+        next->commit([&](auto bytes) { expected.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+        replay->commit([&](auto bytes) { actual.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+        require(!expected.empty() && expected == actual, "Recovered NPC/door physics changed the next tick");
+        // An inventory command must not steal the moving door's simulation slot.
+        const auto inventory = view(service, 2).playerInventory.front();
+        require(!inventory.equipment.empty(), "NPC door inventory fixture has no equipment");
+        const auto slot = inventory.equipment.front();
+        const auto item = std::ranges::find(inventory.stacks, slot.stackId, &CanonicalItemStack::stackId);
+        ClientInventoryTransactionCommand input{id<SessionId>(1),SessionGeneration::initial(),CommandSequence::initial(),id<CommandId>(2),
+            id<CanonicalRevision>(2),InventoryTransactionKind::UnequipItem,{},item->prototypeId,item->stackId,1,slot.slot,
+            inventory.revision,{},{},Position3(0,0,0)};
+        auto composed = service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30,
+            service.prepareInventory(authority, bind(authority, input).proposal()));
+        require(view(service, 2, 1, composed.get()).playerInventory.front().equipment.empty(), "Composed inventory projection lost unequip");
+        require(composed->commit(rejected) == CanonicalDurabilityResult::Rejected && std::ranges::equal(saved, service.inventoryImage()),
+            "Rejected inventory/NPC/door composition leaked");
+        require(composed->commit(accepted) == CanonicalDurabilityResult::Committed, "Inventory/NPC/door commit failed");
+        require(next->commit(accepted) == CanonicalDurabilityResult::Rejected, "Stale NPC/door candidate installed");
+        bool advanced = doorView(service, 2).angle > 0;
+        for (uint64_t tick = 3; tick <= 12; ++tick)
+        {
+            auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+            require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC door continuation failed");
+            const auto a = view(service, tick, 1), b = view(service, tick, 2);
+            require(a.groundItems[0].doors == b.groundItems[0].doors && a.equipment->motions == b.equipment->motions,
+                "Two player projections diverged on NPC/door state");
+            advanced |= a.groundItems[0].doors[0].angle > 0;
+        }
+        require(advanced, "Door remained blocked after the NPC moved clear");
+        {
+            InventoryHost midSwing(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+            midSwing.service().synchronizeCells(authority);
+            const auto restoredDoor = doorView(midSwing.service(), 12);
+            require(restoredDoor.angle == doorView(service, 12).angle && restoredDoor.angle > 0,
+                "Recovery lost a partially open door angle");
+            auto original = service.prepareNativeTick(authority, id<ServerTick>(13), 1.f/30, {});
+            auto resumed = midSwing.service().prepareNativeTick(authority, id<ServerTick>(13), 1.f/30, {});
+            expected.clear(); actual.clear();
+            original->commit([&](auto bytes) { expected.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+            resumed->commit([&](auto bytes) { actual.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+            require(!expected.empty() && expected == actual, "Mid-swing recovery changed composed door/actor continuation");
+        }
+        auto reversal = service.prepareNativeTick(authority, id<ServerTick>(13), 1.f/30, activation(service, 13));
+        require(doorView(service, 13, reversal.get()).angle < doorView(service, 12).angle,
+            "NPC door reversal did not retreat");
+        require(reversal->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC door reversal failed");
+        const auto dropSession = [&](uint64_t session) {
+            std::vector<CanonicalSessionProgress> sessions;
+            for (const auto& active : authority.activeSessions()) if (active.sessionId().value() != session) sessions.push_back(active);
+            const std::array actors{*authority.findPlayer(id<PlayerId>(1)), *authority.findPlayer(id<PlayerId>(2))};
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(actors, sessions));
+            service.synchronizeCells(authority);
+        };
+        dropSession(1);
+        const auto before = view(service, 14, 2).equipment->motions[0].position;
+        auto survivor = service.prepareNativeTick(authority, id<ServerTick>(14), 1.f/30, {});
+        require(survivor->commit(accepted) == CanonicalDurabilityResult::Committed
+            && view(service, 14, 2).equipment->motions[0].position != before, "Disconnect stopped the surviving player's simulation");
+        dropSession(2);
+        const auto frozen = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+        auto inactive = service.prepareNativeTick(authority, id<ServerTick>(15), 1.f/30, {});
+        require(inactive->commit(accepted) == CanonicalDurabilityResult::Committed, "Inactive NPC/door tick failed");
+        const auto oldImage = readActorCampaign({reinterpret_cast<const char*>(frozen.data()), frozen.size()});
+        const auto newImage = service.inventoryImage();
+        const auto newParts = readActorCampaign({reinterpret_cast<const char*>(newImage.data()), newImage.size()});
+        require(std::ranges::equal(oldImage.actor, newParts.actor) && std::ranges::equal(oldImage.inventory, newParts.inventory),
+            "Unoccupied NPC/door scene did not freeze coherently");
+        require(replay->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && restored.inventoryImage().empty(), "Uncertain NPC/door commit did not close the service");
+        auto truncated = saved; truncated.pop_back(); bool invalid = false;
+        try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, truncated); }
+        catch (const std::invalid_argument&) { invalid = true; }
+        require(invalid, "Truncated NPC/door campaign accepted");
+        std::cout << "npc-door contact=server-owned rejection=atomic inventory=composed reversal=shared recovery=exact "
+            << "disconnect=continued empty=freeze uncertain=closed (synthetic room on retained loadout)\n";
     }
 
 }
