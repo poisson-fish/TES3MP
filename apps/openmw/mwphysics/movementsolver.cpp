@@ -4,19 +4,14 @@
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionShapes/btConvexShape.h>
 
-#include <components/esm3/loadgmst.hpp>
 #include <components/misc/convert.hpp>
-
-#include "../mwbase/environment.hpp"
-
-#include "../mwworld/esmstore.hpp"
 
 #include "actor.hpp"
 #include "collisiontype.hpp"
 #include "constants.hpp"
 #include "contacttestwrapper.h"
+#include "movementdata.hpp"
 #include "object.hpp"
-#include "physicssystem.hpp"
 #include "projectile.hpp"
 #include "projectileconvexcallback.hpp"
 #include "stepper.hpp"
@@ -178,10 +173,8 @@ namespace MWPhysics
         // Now that we have the effective movement vector, apply wind forces to it
         if (worldData.mIsInStorm && velocity.length() > 0)
         {
-            const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
-            const float fStromWalkMult = store.get<ESM::GameSetting>().find("fStromWalkMult")->mValue.getFloat();
             const float angleCos = worldData.mStormDirection * velocity / velocity.length();
-            velocity *= 1.f + fStromWalkMult * angleCos;
+            velocity *= 1.f + worldData.mStormWalkMultiplier * angleCos;
         }
 
         Stepper stepper(collisionWorld, actor.mCollisionObject);

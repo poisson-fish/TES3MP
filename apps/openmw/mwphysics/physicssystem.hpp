@@ -21,6 +21,7 @@
 #include "../mwworld/ptr.hpp"
 
 #include "collisiontype.hpp"
+#include "movementdata.hpp"
 #include "raycasting.hpp"
 
 namespace osg
@@ -78,50 +79,7 @@ namespace MWPhysics
     };
     bool operator==(const LOSRequest& lhs, const LOSRequest& rhs) noexcept;
 
-    struct ActorFrameData
-    {
-        ActorFrameData(Actor& actor, bool inert, bool waterCollision, float slowFall, float waterlevel, bool isPlayer);
-        osg::Vec3f mPosition;
-        osg::Vec3f mInertia;
-        const btCollisionObject* mStandingOn;
-        bool mIsOnGround;
-        bool mIsOnSlope;
-        bool mWalkingOnWater;
-        const bool mInert;
-        btCollisionObject* mCollisionObject;
-        const float mSwimLevel;
-        const float mSlowFall;
-        osg::Vec2f mRotation;
-        osg::Vec3f mMovement;
-        osg::Vec3f mLastStuckPosition;
-        const float mWaterlevel;
-        const float mHalfExtentsZ;
-        float mOldHeight;
-        unsigned int mStuckFrames;
-        const bool mFlying;
-        const bool mWasOnGround;
-        const bool mIsAquatic;
-        const bool mWaterCollision;
-        const bool mSkipCollisionDetection;
-        const bool mIsPlayer;
-    };
-
-    struct ProjectileFrameData
-    {
-        explicit ProjectileFrameData(Projectile& projectile);
-        osg::Vec3f mPosition;
-        osg::Vec3f mMovement;
-        const btCollisionObject* mCaster;
-        const btCollisionObject* mCollisionObject;
-        Projectile* mProjectile;
-    };
-
-    struct WorldFrameData
-    {
-        WorldFrameData();
-        bool mIsInStorm;
-        osg::Vec3f mStormDirection;
-    };
+    WorldFrameData makeWorldFrameData();
 
     template <class Ptr, class FrameData>
     class SimulationImpl

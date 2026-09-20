@@ -1,49 +1,46 @@
 # Current state and next action
 
-**M3 is accepted and closed (2026-09-19); M4 in [PLAN.md](PLAN.md) is active.**
-Next: prove one server-controlled NPC navigating/colliding in one interior,
-replicated smoothly to two clients and continuing when either disconnects.
-Reuse OpenMW movement, navigation and collision; retain current player movement
-until DECISIONS.md's prediction/reconciliation cutover requirements are met.
-Computer-use tools are disabled by request.
+**M4 in [PLAN.md](PLAN.md) is active. M3 was accepted on 2026-09-19.**
+M4 groundwork: stock OpenMW movement now accepts explicit actor/weather frames;
+physics workers no longer read the global store for storm movement.
+The stock caller supplies the same actor inputs and captures the winning GMST
+before scheduling. Player movement authority is unchanged. Computer-use tools
+remain disabled by request.
 
-M3 acceptance: Varyon door motion, edge cases and restored state; Noran travel,
-matching weather and consistency after Bob's reconnect were visually confirmed.
-The user accepted the final door-latency check as passed; no new timing capture
-was produced. Fresh process rejoins exercise authenticated late-join baselines.
-Detailed split/unload/reentry coverage is synthetic, not individually confirmed live:
-`build/logs/m3-area-crossings-02.log`.
+Next: isolate stock collision side effects and bind a content-derived interior
+collision scene/actor in the app-local runtime. Then reuse engine navigation for
+the first server-controlled NPC proof: smooth two-client replication under
+latency/jitter/loss, continuing when either disconnects. Follow DECISIONS.md's
+movement cutover requirements.
 
-Client AI/local leveled spawning remain suppressed. Launchers await server readiness.
-
-`openmw_tes3mp_adapter_tests native-door-presentation` passes;
-`teleport-presentation` and `inventory-pickup-barrier` pass. Logs in `build/logs`:
-`m3-door-presentation-{before,fixed}.log`, `m3-door-{teleport,pickup}-regression.log`.
-Ninja log reset may trigger dependency rebuilds.
+Verified 2026-09-20: `tes3mp_native_actor_tests` built in
+`build/vnext-desktop-evidence`; filters `movement-collision` and
+`movement-environment` passed separately. Synthetic geometry exercises stock
+wall/actor obstruction, sliding, steps, gravity, slow fall and storm settings
+without constructing Environment/World/player/rendering. Logs:
+`build/logs/m4-physics-build.log`, `build/logs/m4-movement-collision.log`,
+`build/logs/m4-movement-environment.log`.
+This is a physics-input seam, not native NPC AI, navigation, transactional physics
+or live replication. Stock object/projectile collision callbacks still have side
+effects; the probe's broad engine link does not prove production headless packaging.
 
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-15**,
-fresh campaigns, campaign-seeded initial living actors; selections/none persist without
-rerolling. AI/combat/respawn, leveled corpses, scripts/Lua and locked/trapped inventories
-remain unsupported. Streaming: 1–256 cells, occupied interiors and both players' 3×3
-exteriors; unloaded doors freeze, weather continues, inventory persists.
+campaign-seeded initial living actors; selections/none persist without rerolling.
+AI/combat/respawn, leveled corpses, scripts/Lua and locked/trapped inventories
+remain unsupported. Client AI/local leveled spawning remain suppressed.
+Streaming retains occupied interiors/player 3×3 exteriors; unloaded doors freeze,
+weather continues, inventories persist.
 
-Setups use level 1/seed 0, exclude mod Lua and provide
-`launch.ps1 -Role server|Alice|Bob [-Evidence]`:
+Inherited M3 acceptance: Varyon doors/restoration and Noran travel/weather/reconnect;
+final door latency accepted without a new timing capture. Split/unload/reentry
+evidence is synthetic: `build/logs/m3-area-crossings-02.log`.
+Retained setups provide `launch.ps1 -Role server|Alice|Bob [-Evidence]`:
 
-- `build/m3-tr-varyon-doors`, port 25617, stopped: confirmed doors; campaign retained.
-- `build/m3-tr-noran-dry`, port 25616: server/two clients running. Land spawn
-  `(310272,-240512,200)` in exterior `(37,-30)` replaces the underwater grotto start.
-  Original `build/m3-tr-noran` campaign retained, stopped. Same interior/nine exteriors,
-  Nedothril/Padomaic regions. Test-only weather selection: one game hour (~2 real minutes),
-  stock transition rates. Alice's log reached 2,048 events.
-  Earlier 24 matching weather images show completed
-  Nedothril/Padomaic transitions; Bob's rejoin also records completion. Evidence:
-  `build/logs/m3-tr-noran-dry/{setup,live-start}.json`; terrain read through OpenMW in
-  `build/logs/m3-noran-dry-spawn.log`.
+- `build/m3-tr-varyon-doors`, port 25617, stopped at handoff; campaign retained.
+- `build/m3-tr-noran-dry`, port 25616, server/two clients running at prior handoff;
+  land spawn `(310272,-240512,200)`, exterior `(37,-30)`. Original
+  `build/m3-tr-noran` retained/stopped.
 
-Loadout hashes and setup/recovery evidence:
-`build/logs/m3-v15-acceptance.json`. Warehouse previously passed transfers/reconnect/restart
-at 164–166 ms; that does not measure the fixed door path.
-Reconnect: `build/logs/m3-tr-noran-dry/weather-reconnect.json` and
-`build/logs/m3-tr-varyon-doors/reconnect-20260919.json`. Immediate Varyon rejoin
-initially failed; retry after 36 seconds passed.
+Loadout/recovery: `build/logs/m3-v15-acceptance.json`. Reconnect evidence:
+`build/logs/m3-tr-noran-dry/weather-reconnect.json`,
+`build/logs/m3-tr-varyon-doors/reconnect-20260919.json`.

@@ -555,7 +555,7 @@ namespace MWPhysics
         mNextJob.store(0, std::memory_order_release);
 
         if (mAdvanceSimulation)
-            mWorldFrameData = std::make_unique<WorldFrameData>();
+            mWorldFrameData = std::make_unique<WorldFrameData>(makeWorldFrameData());
 
         if (mAdvanceSimulation)
             mBudgetCursor += 1;

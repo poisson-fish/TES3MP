@@ -718,8 +718,27 @@ namespace MWPhysics
             const bool inert = stats.isDead()
                 || (!godmode && stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getModifier() > 0);
 
-            simulations.emplace_back(ActorSimulation{
-                physicActor, ActorFrameData{ *physicActor, inert, waterCollision, slowFall, waterlevel, isPlayer } });
+            const float swimHeightScale = MWBase::Environment::get()
+                                              .getESMStore()
+                                              ->get<ESM::GameSetting>()
+                                              .find("fSwimHeightScale")
+                                              ->mValue.getFloat();
+            simulations.emplace_back(ActorSimulation{ physicActor,
+                ActorFrameData{ .mIsOnGround = physicActor->getOnGround(),
+                    .mIsOnSlope = physicActor->getOnSlope(),
+                    .mInert = inert,
+                    .mCollisionObject = physicActor->getCollisionObject(),
+                    .mSwimLevel = waterlevel - (physicActor->getRenderingHalfExtents().z() * 2 * swimHeightScale),
+                    .mSlowFall = slowFall,
+                    .mMovement = physicActor->velocity(),
+                    .mWaterlevel = waterlevel,
+                    .mHalfExtentsZ = physicActor->getHalfExtents().z(),
+                    .mFlying = world->isFlying(ptr),
+                    .mWasOnGround = physicActor->getOnGround(),
+                    .mIsAquatic = ptr.getClass().isPureWaterCreature(ptr),
+                    .mWaterCollision = waterCollision,
+                    .mSkipCollisionDetection = !physicActor->getCollisionMode(),
+                    .mIsPlayer = isPlayer } });
 
             // if the simulation will run, a jump request will be fulfilled. Update mechanics accordingly.
             if (willSimulate)
@@ -917,38 +936,6 @@ namespace MWPhysics
             mDebugDrawer->addCollision(position, normal);
     }
 
-    ActorFrameData::ActorFrameData(
-        Actor& actor, bool inert, bool waterCollision, float slowFall, float waterlevel, bool isPlayer)
-        : mPosition()
-        , mStandingOn(nullptr)
-        , mIsOnGround(actor.getOnGround())
-        , mIsOnSlope(actor.getOnSlope())
-        , mWalkingOnWater(false)
-        , mInert(inert)
-        , mCollisionObject(actor.getCollisionObject())
-        , mSwimLevel(waterlevel
-              - (actor.getRenderingHalfExtents().z() * 2
-                  * MWBase::Environment::get()
-                        .getESMStore()
-                        ->get<ESM::GameSetting>()
-                        .find("fSwimHeightScale")
-                        ->mValue.getFloat()))
-        , mSlowFall(slowFall)
-        , mRotation()
-        , mMovement(actor.velocity())
-        , mWaterlevel(waterlevel)
-        , mHalfExtentsZ(actor.getHalfExtents().z())
-        , mOldHeight(0)
-        , mStuckFrames(0)
-        , mFlying(MWBase::Environment::get().getWorld()->isFlying(actor.getPtr()))
-        , mWasOnGround(actor.getOnGround())
-        , mIsAquatic(actor.getPtr().getClass().isPureWaterCreature(actor.getPtr()))
-        , mWaterCollision(waterCollision)
-        , mSkipCollisionDetection(!actor.getCollisionMode())
-        , mIsPlayer(isPlayer)
-    {
-    }
-
     ProjectileFrameData::ProjectileFrameData(Projectile& projectile)
         : mPosition(projectile.getPosition())
         , mMovement(projectile.velocity())
@@ -958,10 +945,17 @@ namespace MWPhysics
     {
     }
 
-    WorldFrameData::WorldFrameData()
-        : mIsInStorm(MWBase::Environment::get().getWorld()->isInStorm())
-        , mStormDirection(MWBase::Environment::get().getWorld()->getStormDirection())
+    WorldFrameData makeWorldFrameData()
     {
+        const auto& environment = MWBase::Environment::get();
+        const auto& world = *environment.getWorld();
+        const bool inStorm = world.isInStorm();
+        // Snapshot the winning GMST on the main thread along with weather.
+        // The spelling is the original content key, retained for compatibility.
+        const float multiplier = inStorm
+            ? environment.getESMStore()->get<ESM::GameSetting>().find("fStromWalkMult")->mValue.getFloat()
+            : 0.f;
+        return { inStorm, world.getStormDirection(), multiplier };
     }
 
     LOSRequest::LOSRequest(const std::weak_ptr<Actor>& a1, const std::weak_ptr<Actor>& a2)

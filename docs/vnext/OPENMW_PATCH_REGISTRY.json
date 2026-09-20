@@ -3,6 +3,23 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-001",
+      "slice": "explicit stock actor movement frame inputs",
+      "owner": "OpenMW physics and native server probe",
+      "purpose": "Expose actor movement frames without constructing World, a player or presentation services. Capture the winning storm movement setting with weather before scheduling stock physics; MovementSolver no longer reads Environment or ESMStore. Stock physics builds the same actor fields explicitly. Synthetic native tests exercise the existing solver, traces and stepper; this is not NPC navigation, transactional physics, a production headless dependency graph or multiplayer acceptance. PhysicsSystem changes share the paths registered under NATIVE-DOOR-001.",
+      "paths": [
+        "apps/openmw/mwphysics/movementdata.hpp",
+        "apps/openmw/mwphysics/movementsolver.cpp",
+        "apps/openmw/mwphysics/mtphysics.cpp"
+      ],
+      "tests": [
+        "tes3mp_native_actor_tests movement-collision",
+        "tes3mp_native_actor_tests movement-environment"
+      ],
+      "disposition": "shared engine input extraction; synthetic headless collision proof",
+      "removal_condition": "OpenMW supplies equivalent explicit actor and world movement inputs independent of singleton services"
+    },
+    {
       "id": "M3-008",
       "slice": "persistent native leveled actor selection and offline area discovery",
       "owner": "OpenMW native runtime and desktop adapter",
@@ -374,7 +391,7 @@
       "id": "P8-003",
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",
-      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement, scene-query and ordinary-door motion helpers.",
+      "purpose": "Build the shared item-local service in openmw-lib. Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge. Build shared stock item-placement, scene-query and ordinary-door motion helpers; register M4's shared movement-frame header.",
       "paths": [
         "apps/openmw/CMakeLists.txt"
       ],
@@ -612,7 +629,7 @@
       "id": "NATIVE-DOOR-001",
       "slice": "M3 native door motion and delegated player contacts",
       "owner": "OpenMW native runtime",
-      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred.",
+      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. Server physics and NPC obstruction ownership remain deferred. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling.",
       "paths": [
         "apps/openmw/mwclass/door.cpp",
         "apps/openmw/mwworld/doormotion.cpp",
