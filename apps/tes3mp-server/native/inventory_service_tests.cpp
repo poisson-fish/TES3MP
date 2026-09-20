@@ -3918,7 +3918,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings)
+        const std::filesystem::path& settings, bool avoidance)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -3974,7 +3974,7 @@ namespace TES3MP::Native::Testing
             const auto actor = loadout.placedActors(cell).at(0).mIdentity;
             const auto door = loadout.ordinaryDoors(cell, 128).at(0).mIdentity;
             InteriorActorScene scene(loadout, "NPC Door Path Test", actor, "meshes/base_anim.nif", "meshes/base_animkna.nif");
-            const std::array ids{door}; scene.bindDoors(ids); scene.enableNavigation(settings.string());
+            const std::array ids{door}; scene.bindDoors(ids, avoidance); scene.enableNavigation(settings.string());
             scene.travelTo({0, -40, 1});
             const auto initial = scene.image();
             const std::array closed{ActorSceneDoor{door, 0}}, opened{ActorSceneDoor{door, osg::PIf / 2}};
@@ -3994,7 +3994,42 @@ namespace TES3MP::Native::Testing
                 const auto snapshot = scene.snapshot();
                 contacted |= std::ranges::find(snapshot.mContacts, door) != snapshot.mContacts.end();
             }
-            require(contacted && scene.snapshot().mPosition[1] < -120, "NPC passed through the committed open door");
+            require((avoidance || contacted) && scene.snapshot().mPosition[1] < -120,
+                "NPC passed through the committed open door");
+            if (avoidance)
+            {
+                // A rejected candidate must not leave a query using staged
+                // geometry, even though the derived navigator cache was warmed.
+                auto reset = scene.prepareRestore(initial, closed); scene.install(*reset);
+                const auto closedPath = scene.pathTo({0, -40, 1});
+                auto rejected = scene.prepareNavigation(120, opened);
+                require(scene.pathTo({0, -40, 1}) == closedPath && scene.image() == initial,
+                    "Rejected door navigation leaked into committed queries");
+                auto rotated = scene.prepareRestore(initial, opened); scene.install(*rotated);
+                const auto openPath = scene.pathTo({100, -40, 1});
+                auto unrotated = scene.prepareRestore(initial, closed); scene.install(*unrotated);
+                require(openPath != scene.pathTo({100, -40, 1}), "Door rotation did not change navigation geometry");
+                const std::array moving{ActorSceneDoor{door, 0, true, true}};
+                for (int tick = 0; tick < 40; ++tick)
+                {
+                    auto pending = scene.prepareNavigation(.01f, moving); scene.install(*pending);
+                }
+                const auto stuck = scene.image();
+                require(!std::equal(stuck.end()-8, stuck.end(), initial.end()-8),
+                    "Stuck avoidance did not advance its durable random stream");
+                auto future = scene.prepareNavigation(.01f, moving);
+                auto replay = scene.prepareRestore(stuck, moving); scene.install(*replay);
+                auto repeated = scene.prepareNavigation(.01f, moving);
+                require(std::ranges::equal(future->image(), repeated->image()), "Avoidance random/timer recovery diverged");
+                for (size_t tail : {size_t(8), size_t(16), size_t(48), size_t(56)})
+                {
+                    auto bad = stuck;
+                    std::fill(bad.end()-tail, bad.end()-tail+8, char(-1));
+                    bool invalid = false;
+                    try { (void)scene.prepareRestore(bad, moving); } catch (const std::invalid_argument&) { invalid = true; }
+                    require(invalid && scene.image() == stuck, "Invalid avoidance image changed committed state");
+                }
+            }
             const auto before = scene.image();
             const std::array invalid{ActorSceneDoor{door, std::numeric_limits<float>::quiet_NaN()}};
             bool rejected = false;
@@ -4020,7 +4055,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << "native-inventory-17\nmanifest ";
+            std::ofstream out(descriptor); out << (avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
@@ -4103,6 +4138,22 @@ namespace TES3MP::Native::Testing
             advanced |= a.groundItems[0].doors[0].angle > 0;
         }
         require(advanced, "Door remained blocked after the NPC moved clear");
+        if (avoidance)
+        {
+            require(view(service, 12).equipment->motions[0].position[0] > 62,
+                "Contact did not interrupt travel with an outward retreat");
+            InventoryHost continuation(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+            auto& resume = continuation.service(); resume.synchronizeCells(authority);
+            for (uint64_t tick = 13; tick <= 150; ++tick)
+            {
+                auto pending = resume.prepareNativeTick(authority, id<ServerTick>(tick), 1.f / 30, {});
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Avoidance continuation failed");
+            }
+            const auto end = view(resume, 150).equipment->motions[0].position;
+            require(std::abs(end[0] - 60) < 8 && std::abs(end[1] + 240) < 8
+                && doorView(resume, 150).direction == 0 && doorView(resume, 150).angle > 1.5f,
+                "NPC failed to resume its original destination after clearing the opening door");
+        }
         {
             InventoryHost midSwing(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
             midSwing.service().synchronizeCells(authority);

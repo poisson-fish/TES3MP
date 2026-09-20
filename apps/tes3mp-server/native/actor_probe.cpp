@@ -1,7 +1,9 @@
 #include "actor_scene.hpp"
 #include "loadout.hpp"
+#include "ordinary_door.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -15,7 +17,8 @@ int main(int argc, const char* const argv[])
         if (argc < 6)
             throw std::invalid_argument("Usage: actor_probe <interior> <npc-record|--list> <baseanim> <beastanim> <loadout options>");
         std::vector<const char*> arguments{argv[0]};
-        const bool navigation = argc >= 10 && std::string_view(argv[5]) == "--navigate";
+        const bool avoidance = argc >= 10 && std::string_view(argv[5]) == "--avoid-door";
+        const bool navigation = argc >= 10 && (std::string_view(argv[5]) == "--navigate" || avoidance);
         arguments.insert(arguments.end(), argv + (navigation ? 10 : 5), argv + argc);
         TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(
             static_cast<int>(arguments.size()), arguments.data()));
@@ -24,7 +27,12 @@ int main(int argc, const char* const argv[])
         {
             for (const auto& actor : actors)
                 std::cout << actor.mRef.mRefID.toDebugString() << " placement=" << actor.mIdentity
-                    << " scripted=" << actor.mScripted << " leveled=" << actor.mLeveled << '\n';
+                    << " scripted=" << actor.mScripted << " leveled=" << actor.mLeveled
+                    << " position=" << actor.mRef.mPos.pos[0] << ',' << actor.mRef.mPos.pos[1] << ',' << actor.mRef.mPos.pos[2] << '\n';
+            for (const auto& door : loadout.ordinaryDoors(ESM::RefId::stringRefId(argv[1]), 128))
+                std::cout << "door=" << door.mRef.mRefID << " placement=" << door.mIdentity
+                    << " position=" << door.mRef.mPos.pos[0] << ',' << door.mRef.mPos.pos[1] << ',' << door.mRef.mPos.pos[2]
+                    << " yaw=" << door.mRef.mPos.rot[2] << '\n';
             return 0;
         }
         const auto record = ESM::RefId::stringRefId(argv[2]);
@@ -35,6 +43,14 @@ int main(int argc, const char* const argv[])
         const auto original = scene.snapshot();
         if (navigation)
         {
+            const auto doors = avoidance ? loadout.ordinaryDoors(ESM::RefId::stringRefId(argv[1]), 128)
+                                         : std::vector<TES3MP::Native::Loadout::PlacedDoor>{};
+            if (avoidance)
+            {
+                std::vector<uint64_t> ids;
+                for (const auto& door : doors) ids.push_back(door.mIdentity);
+                scene.bindDoors(ids, true);
+            }
             scene.enableNavigation(argv[6]);
             for (int i = 0; i < 120; ++i) scene.step({0,0,0});
             const std::array destination{std::stof(argv[7]), std::stof(argv[8]), std::stof(argv[9])};
@@ -47,6 +63,44 @@ int main(int argc, const char* const argv[])
             std::cout << "navigation points=" << path.size() << " steps=" << steps
                 << " end=" << end.mPosition[0] << ',' << end.mPosition[1] << ',' << end.mPosition[2]
                 << " arrived=" << scene.arrived() << '\n';
+            if (avoidance)
+            {
+                std::vector<TES3MP::Native::ActorSceneDoor> frames;
+                for (const auto& door : doors) frames.push_back({door.mIdentity, door.mRef.mPos.rot[2]});
+                const auto& selected = doors.at(0);
+                TES3MP::Native::OrdinaryDoor door(*loadout.store().get<ESM::Door>().find(selected.mRef.mRefID), selected.mRef);
+                auto state = door.activate(door.initialState()).mState;
+                size_t blocked = 0;
+                float excursion = 0;
+                double maxTickMs = 0;
+                size_t overruns = 0;
+                for (int tick = 0; tick < 300; ++tick)
+                {
+                    const auto started = std::chrono::steady_clock::now();
+                    bool avoid = false;
+                    auto next = door.advance(state, 1.f / 30, [&](const auto& position, float delta) {
+                        const auto contact = scene.doorContact(selected.mIdentity, position.rot[2], delta);
+                        avoid = contact.mSelectedActor;
+                        blocked += contact.mBlocked;
+                        return contact.mBlocked;
+                    });
+                    state = std::move(next.mState);
+                    frames[0] = {selected.mIdentity, state.mPosition.rot[2], state.mDoorState != 0, avoid};
+                    auto pending = scene.prepareNavigation(120, frames); scene.install(*pending);
+                    const auto now = scene.snapshot();
+                    excursion = std::max(excursion, std::hypot(now.mPosition[0]-end.mPosition[0], now.mPosition[1]-end.mPosition[1]));
+                    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count();
+                    maxTickMs = std::max(maxTickMs, ms); overruns += ms > 1000. / 30;
+                }
+                const auto final = scene.snapshot();
+                std::cout << "avoidance blocked=" << blocked << " excursion=" << excursion << " direction=" << state.mDoorState
+                    << " final=" << final.mPosition[0] << ',' << final.mPosition[1] << ',' << final.mPosition[2]
+                    << " arrived=" << scene.arrived() << " max-tick-ms=" << maxTickMs << " overruns=" << overruns << '\n';
+                if (!blocked || excursion < 10 || state.mDoorState != 0 || !scene.arrived())
+                    throw std::runtime_error("Real door avoidance did not clear and resume destination");
+                std::cout << "PASS real-interior-door-avoidance\n";
+                return 0;
+            }
             if (!scene.arrived() || dx*dx + dy*dy > 32*32 || steps < 60)
                 throw std::runtime_error("Interior navigation failed to reach a distinct destination");
             std::cout << "PASS native-interior-navigation\n" << scene.fingerprint();

@@ -1,46 +1,33 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active. M3 was accepted on 2026-09-19.**
-V17 stages ordinary-door swings against server NPC hulls, then moves one NPC
-against staged door angles. Doors, NPC physics/path and an inventory intent commit
-together. Player movement is unchanged. Computer-use remains disabled.
+**M4 in [PLAN.md](PLAN.md) is active; M3 accepted 2026-09-19.**
+V18 reuses OpenMW door avoidance and turning: the selected obstructing NPC retreats,
+then replans to its retained destination. Rotation updates native navigation.
+Avoidance/RNG, physics/path, doors and inventory commit together; rejection and
+recovery preserve them. Player movement remains inherited.
 
-Next: extract stock NPC door avoidance and update navigation for rotating doors,
-then verify a real interior with two desktop clients. M4 step 2 remains active;
-traveler activity after both players leave follows later.
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-18**,
+fresh campaign, one dry interior, one living unscripted nonleveled NPC, fixed
+speed/destination, navigation settings, 1–128 ordinary doors. V16/V17 retain their
+domains. Background NPCs remain frozen; neighbor propagation, general AI, automatic
+door activation, combat, scripts, water and gameplay animation remain unavailable.
+Either player sustains simulation; both leaving freezes it. Headless packaging
+remains unproved; computer-use remains disabled.
 
-[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-17**
-requires a fresh campaign, one dry interior, one living unscripted nonleveled NPC,
-a fixed destination/speed, navigation settings and 1-128 ordinary doors.
-The area image owns angles; physics derives transforms, including on recovery.
-All retained NPC hulls obstruct doors; authenticated player reports supplement
-server sensing. Either player sustains simulation; both leaving freezes it.
+Verified 2026-09-20, `build/vnext-desktop-evidence`:
 
-Navigation still uses authored obstacles. Background inventories, teleports,
-pickup/drop, AI packages/avoidance, gameplay animation timing, combat, scripts,
-water, creatures, corpses and animated collision remain unavailable.
-Headless packaging remains unproved. V15/V16 campaigns retain their domains.
+- `tes3mp_native_actor_tests door-avoidance`: `build/logs/m4-door-avoidance.log`.
+- `tes3mp_native_loadout_tests npc-door-avoidance`: synthetic geometry on retained
+  TR loadout; retreat/resumption, rotating navigation, rejection, RNG/recovery,
+  inventory composition, reversal, disconnect/freeze. `build/logs/m4-npc-door-avoidance.log`.
+- V17/V16 regressions: `build/logs/m4-avoidance-v17.log`, `build/logs/m4-avoidance-v16.log`.
+- Two desktops, Hlavora in Vivec's Redoran Records: obstruction, retreat, opening,
+  resumption and convergence under latency/jitter/loss/reordering. Screenshots and
+  results: `build/m4-door-desktop-accepted`; reproduce with
+  `scripts/run_native_navigation_capture.py --doors`. Real-content probe:
+  `build/logs/m4-real-door-probe.log`, maximum 23.3 ms, no overruns (excludes durability).
 
-Verified 2026-09-20 in `build/vnext-desktop-evidence`:
-
-- `tes3mp_native_actor_tests door-contact`: direction, reversal, Bullet pair
-  ordering, actor isolation; `build/logs/m4-door-contact.log`.
-- `tes3mp_native_loadout_tests npc-doors`: synthetic rooms on the retained
-  Morrowind/Tribunal/Bloodmoon/Tamriel_Data/TR_Mainland loadout. Collision follows
-  door angle; inventory composition, rejection/retry, stale input, mid-swing
-  recovery, reversal, two player projections, disconnect, inactive freeze and
-  uncertain-write closure pass. `build/logs/m4-npc-doors.log`.
-  Desktop/published-mod interaction acceptance remains pending.
-- Regressions: `native-navigation` (V16), `build/logs/m4-npc-door-v16.log`;
-  `area-door-service` (V14), `build/logs/m4-npc-door-legacy.log`.
-
-Retained V16 desktop evidence (2026-09-20): Raflod's navigation passed two clients,
-100 ms latency, jitter/loss/reordering and either disconnect. User confirmed motion;
-capture processes stopped. Evidence: `build/logs/m4-navigation-Alice-final`,
-`build/logs/m4-navigation-Bob-final`, `build/logs/m4-navigation-durable.log`,
-`build/logs/m4-navigation-early.log`. Reproduce with
-`scripts/run_native_navigation_capture.py`.
-
-Retained M3 campaigns: `build/m3-tr-varyon-doors` (25617),
-`build/m3-tr-noran-dry` (25616); `build/logs/m3-v15-acceptance.json`.
-Inherited split/unload evidence remains synthetic.
+Next: investigate impaired V18 delayed-resume failure
+(`build/m4-door-desktop-Alice/Alice-user/openmw.log`); reconnect acceptance is pending.
+Then M4 step 3: traveler activity after both players leave.
+Retained M3 campaigns: `build/m3-tr-varyon-doors`, `build/m3-tr-noran-dry`.

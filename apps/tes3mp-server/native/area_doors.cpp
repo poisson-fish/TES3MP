@@ -105,7 +105,7 @@ namespace TES3MP::Native
         {
             std::vector<ActorSceneDoor> doors;
             for (size_t i = 0; i < states.size(); ++i)
-                doors.push_back({mBinding.mDoors[i].mId, states[i]->mPosition.rot[2]});
+                doors.push_back({mBinding.mDoors[i].mId, states[i]->mPosition.rot[2], states[i]->mDoorState != 0});
             step = mBinding.mNavigatingActor->prepareRestore(actor, doors);
         }
         EquipmentBytes accepted(core.begin(), core.end()), restored;
@@ -126,11 +126,12 @@ namespace TES3MP::Native
         std::vector<std::shared_ptr<const ESM::DoorState>> states;
         std::vector<uint64_t> motions;
         std::vector<bool> blocked;
+        std::vector<bool> avoid;
         bool consumed = false;
         explicit AreaDoorTransaction(InventoryService& owner) : service(owner), before(owner.mImage)
         {
             for (const auto& door : owner.mAreaDoors)
-            { states.push_back(door.state); motions.push_back(door.motion); blocked.push_back(door.blocked); }
+            { states.push_back(door.state); motions.push_back(door.motion); blocked.push_back(door.blocked); avoid.push_back(false); }
         }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -205,7 +206,11 @@ namespace TES3MP::Native
             auto next = activation ? door.binding.door().activate(state)
                 : door.binding.door().advance(state, seconds, [&](const auto& position, float delta) {
                     if (mBinding.mNavigatingActor)
-                        blocked |= mBinding.mNavigatingActor->doorBlocked(mBinding.mDoors[i].mId, position.rot[2], delta);
+                    {
+                        const auto contact = mBinding.mNavigatingActor->doorContact(mBinding.mDoors[i].mId, position.rot[2], delta);
+                        blocked |= contact.mBlocked;
+                        result->avoid[i] = contact.mSelectedActor;
+                    }
                     return blocked;
                 });
             result->blocked[i] = !activation && blocked && state.mDoorState != 0;
@@ -236,8 +241,11 @@ namespace TES3MP::Native
         if (prepared && !ownsAreaDoorCandidate(candidate)) throw std::invalid_argument("Stale actor door candidate");
         std::vector<ActorSceneDoor> result;
         for (size_t i = 0; i < mAreaDoors.size(); ++i)
-            result.push_back({mBinding.mDoors[i].mId,
-                (prepared ? prepared->states[i] : mAreaDoors[i].state)->mPosition.rot[2]});
+        {
+            const auto& state = *(prepared ? prepared->states[i] : mAreaDoors[i].state);
+            result.push_back({mBinding.mDoors[i].mId, state.mPosition.rot[2], state.mDoorState != 0,
+                prepared && prepared->avoid[i]});
+        }
         return result;
     }
 

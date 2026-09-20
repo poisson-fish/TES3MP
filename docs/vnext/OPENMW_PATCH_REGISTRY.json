@@ -3,10 +3,30 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-005",
+      "slice": "shared NPC door avoidance and rotating navigation",
+      "owner": "OpenMW mechanics and app-local native actor runtime",
+      "purpose": "Extract AiAvoidDoor timer, stuck detection, random direction and stock turning into caller-owned simulation helpers. Stock single-player retains neighbor propagation and actor flags. V18 commits one selected NPC avoidance state, random stream and retained destination with door angles and inventory. The derived DetourNavigator cache synchronizes to each queried angle image and replans after rotation or avoidance; V16/V17 retain their formats and behavior.",
+      "paths": [
+        "apps/openmw/mwmechanics/aiavoiddoor.cpp",
+        "apps/openmw/mwmechanics/aiavoiddoor.hpp",
+        "apps/openmw/mwmechanics/dooravoidance.hpp",
+        "apps/openmw/mwmechanics/steering.cpp",
+        "apps/openmw/mwmechanics/steering.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_actor_tests door-avoidance",
+        "tes3mp_native_loadout_tests npc-door-avoidance",
+        "scripts/run_native_navigation_capture.py --doors"
+      ],
+      "disposition": "shared engine behavior with isolated native state and derived rotating geometry",
+      "removal_condition": "OpenMW supplies equivalent explicit avoidance, steering and navigation context for authoritative simulation"
+    },
+    {
       "id": "M4-004",
       "slice": "server-owned NPC door contact and composed collision angles",
       "owner": "OpenMW physics and app-local native actor/door transaction",
-      "purpose": "Extract the player door contact callback for shared NPC queries. Normalize Bullet contacts to the door surface outward normal in either pair order; the previous player query used the actor normal and could block receding rotation. V17 stages ordinary-door proposals against retained NPC hulls and NPC movement against proposed door angles, with inventory in one durable tick. The existing door image owns angles; physics transforms are derived and restored atomically. AI avoidance and dynamic navigation mesh updates remain pending. PhysicsSystem is shared with NATIVE-DOOR-001.",
+      "purpose": "Extract the player door contact callback for shared NPC queries. Normalize Bullet contacts to the door surface outward normal in either pair order; the previous player query used the actor normal and could block receding rotation. V17 stages ordinary-door proposals against retained NPC hulls and NPC movement against proposed door angles, with inventory in one durable tick. The existing door image owns angles; physics transforms are derived and restored atomically. V18 adds shared avoidance and rotating navigation under M4-005; V17 retains this contact-only domain. PhysicsSystem is shared with NATIVE-DOOR-001.",
       "paths": [
         "apps/openmw/mwphysics/doorcontact.hpp"
       ],

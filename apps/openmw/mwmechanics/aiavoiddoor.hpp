@@ -2,6 +2,7 @@
 #define GAME_MWMECHANICS_AIAVOIDDOOR_H
 
 #include "typedaipackage.hpp"
+#include "dooravoidance.hpp"
 
 namespace MWMechanics
 {
@@ -30,16 +31,8 @@ namespace MWMechanics
         }
 
     private:
-        float mDuration;
+        DoorAvoidance mAvoidance;
         const MWWorld::ConstPtr mDoorPtr;
-        osg::Vec3f mLastPos;
-        int mDirection;
-
-        bool isStuck(const osg::Vec3f& actorPos) const;
-
-        void adjustDirection();
-
-        float getAdjustedAngle() const;
     };
 }
 #endif

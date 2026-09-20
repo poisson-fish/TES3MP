@@ -82,6 +82,11 @@ physics steps; those steps see staged door angles. Inventory, doors and actor st
 install only after the same commit. Door angles have one durable owner in the area
 image; collision transforms are derived, including on recovery. Player contact
 reports supplement server NPC sensing until player movement cutover.
+V18 retains a destination beneath the shared OpenMW door-avoidance state and
+persists its timer, stuck position, direction and private random stream. Rotating
+geometry is a derived navigator cache synchronized before each query, including
+after rejected staging or recovery; it is never another durable door writer.
+Only the selected NPC moves; stock neighbor propagation awaits multiple actors.
 
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding

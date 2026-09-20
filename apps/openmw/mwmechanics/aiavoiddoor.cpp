@@ -13,12 +13,8 @@
 #include "movement.hpp"
 #include "steering.hpp"
 
-static const int MAX_DIRECTIONS = 4;
-
 MWMechanics::AiAvoidDoor::AiAvoidDoor(const MWWorld::ConstPtr& doorPtr)
-    : mDuration(1)
-    , mDoorPtr(doorPtr)
-    , mDirection(0)
+    : mDoorPtr(doorPtr)
 {
 }
 
@@ -27,33 +23,16 @@ bool MWMechanics::AiAvoidDoor::execute(
 {
 
     ESM::Position pos = actor.getRefData().getPosition();
-    if (mDuration == 1) // If it just started, get the actor position as the stuck detection thing
-        mLastPos = pos.asVec3();
-
-    mDuration -= duration; // Update timer
-
-    if (mDuration < 0)
-    {
-        if (isStuck(pos.asVec3()))
-        {
-            adjustDirection();
-            mDuration = 1; // reset timer
-        }
-        else
-            return true; // We have tried backing up for more than one second, we've probably cleared it
-    }
-
-    if (mDoorPtr.getClass().getDoorState(mDoorPtr) == MWWorld::DoorState::Idle)
-        return true; // Door is no longer opening
-
-    ESM::Position tPos = mDoorPtr.getRefData().getPosition(); // Position of the door
-    float x = pos.pos[1] - tPos.pos[1];
-    float y = pos.pos[0] - tPos.pos[0];
+    const auto angle = mAvoidance.update(pos.asVec3(), mDoorPtr.getRefData().getPosition().asVec3(),
+        mDoorPtr.getClass().getDoorState(mDoorPtr) != MWWorld::DoorState::Idle, duration,
+        MWBase::Environment::get().getWorld()->getPrng());
+    if (!angle)
+        return true;
 
     actor.getClass().getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);
 
     // Turn away from the door and move when turn completed
-    if (zTurn(actor, std::atan2(y, x) + getAdjustedAngle(), osg::DegreesToRadians(5.f)))
+    if (zTurn(actor, *angle, osg::DegreesToRadians(5.f)))
         actor.getClass().getMovementSettings(actor).mPosition[1] = 1;
     else
         actor.getClass().getMovementSettings(actor).mPosition[1] = 0;
@@ -73,20 +52,4 @@ bool MWMechanics::AiAvoidDoor::execute(
     }
 
     return false;
-}
-
-bool MWMechanics::AiAvoidDoor::isStuck(const osg::Vec3f& actorPos) const
-{
-    return (actorPos - mLastPos).length2() < 10 * 10;
-}
-
-void MWMechanics::AiAvoidDoor::adjustDirection()
-{
-    auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-    mDirection = Misc::Rng::rollDice(MAX_DIRECTIONS, prng);
-}
-
-float MWMechanics::AiAvoidDoor::getAdjustedAngle() const
-{
-    return 2 * osg::PIf / MAX_DIRECTIONS * mDirection;
 }

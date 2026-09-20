@@ -1,3 +1,5 @@
+#include <apps/openmw/mwmechanics/dooravoidance.hpp>
+#include <apps/openmw/mwmechanics/steering.hpp>
 #include <apps/openmw/mwphysics/collisiontype.hpp>
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
@@ -255,6 +257,31 @@ namespace
             "Falling actor did not land on the floor");
     }
 
+    void doorAvoidance()
+    {
+        Misc::Rng::Generator random(7), expected(7);
+        MWMechanics::DoorAvoidance state;
+        const osg::Vec3f actor(60, -32, 1), door(0, 0, 0);
+        const auto angle = state.update(actor, door, true, .5f, random);
+        require(angle && std::abs(*angle - std::atan2(60.f, -32.f)) < .0001f,
+            "Avoidance did not turn away from the door pivot");
+        require(random == expected, "Unstuck avoidance consumed randomness");
+        require(!state.update(actor + osg::Vec3f(11, 0, 0), door, true, .51f, random),
+            "Moving NPC did not finish its one-second retreat");
+        state = {};
+        state.update(actor, door, true, .5f, random);
+        const int direction = Misc::Rng::rollDice(4, expected);
+        require(state.update(actor, door, true, .51f, random).has_value()
+            && state.mDuration == 1 && state.mDirection == direction && random == expected,
+            "Stuck avoidance did not use the caller's stock random stream");
+        require(!state.update(actor, door, false, 1.f / 60, random), "Idle door did not end avoidance");
+        const auto turn = MWMechanics::smoothTurnStep(0, osg::PIf, 120, 1.f / 60, false, .01f);
+        require(!turn.mComplete && std::abs(std::abs(turn.mRotation) - osg::DegreesToRadians(15.f)) < .0001f,
+            "Avoidance steering lost stock angular speed");
+        require(MWMechanics::smoothTurnStep(0, .01f, 120, 1.f / 60, false, .02f).mComplete,
+            "Stock turning tolerance did not complete");
+    }
+
     void doorContact()
     {
         btDefaultCollisionConfiguration configuration;
@@ -301,6 +328,8 @@ int main(int argc, char** argv)
             collisionEffects();
         else if (filter == "door-contact")
             doorContact();
+        else if (filter == "door-avoidance")
+            doorAvoidance();
         else
             throw std::invalid_argument("Unknown actor physics filter");
         std::cout << "PASS " << filter << " (synthetic geometry, stock OpenMW solver, no engine environment)\n";

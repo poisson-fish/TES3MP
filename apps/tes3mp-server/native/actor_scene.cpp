@@ -13,6 +13,8 @@
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
 #include <apps/openmw/mwmechanics/pathfinding.hpp>
+#include <apps/openmw/mwmechanics/dooravoidance.hpp>
+#include <apps/openmw/mwmechanics/steering.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/placedrefid.hpp>
@@ -119,6 +121,61 @@ namespace TES3MP::Native
         std::vector<DetourNavigator::ObjectTransform> mTransforms;
         std::map<uint64_t, size_t> mOrdinaryDoors;
         std::vector<ActorSceneDoor> mDoors;
+        bool mAvoidanceEnabled = false;
+        bool mSmoothMovement = false;
+        struct Travel
+        {
+            osg::Vec3f destination;
+            bool hasDestination = false;
+            uint64_t door = 0;
+            MWMechanics::DoorAvoidance avoidance;
+            Misc::Rng::Generator random;
+        } mTravel;
+        // Derived cache only. A rejected candidate may warm it; every query
+        // synchronizes it to its own complete angle image before using it.
+        std::vector<ActorSceneDoor> mNavigationDoors;
+        bool mNavigationValid = false;
+
+        void syncNavigation(std::span<const ActorSceneDoor> doors)
+        {
+            if (!mAvoidanceEnabled || !mNavigator) return;
+            bool changed = !mNavigationValid;
+            for (size_t i = 0; i < doors.size(); ++i)
+                changed |= !mNavigationValid || doors[i].mAngle != mNavigationDoors[i].mAngle;
+            if (!changed) return;
+            mNavigationValid = false;
+            {
+                auto guard = mNavigator->makeUpdateGuard();
+                for (const auto& door : doors)
+                {
+                    const auto index = mOrdinaryDoors.at(door.mId);
+                    auto transform = mTransforms[index];
+                    transform.mPosition.rot[2] = door.mAngle;
+                    const auto& body = *mBodies[index];
+                    mNavigator->updateObject(DetourNavigator::ObjectId(body.mObject.get()),
+                        DetourNavigator::ObjectShapes(body.mResource, transform),
+                        btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(transform.mPosition)),
+                            Misc::Convert::toBullet(transform.mPosition.asVec3())), guard.get());
+                }
+                mNavigator->update(mActor->mPosition, guard.get());
+            }
+            mNavigator->wait(DetourNavigator::WaitConditionType::allJobsDone, nullptr);
+            mNavigationDoors.assign(doors.begin(), doors.end());
+            mNavigationValid = true;
+        }
+
+        void rebuildPath(MWMechanics::PathFinder& path, const osg::Vec3f& position, const Travel& travel)
+        {
+            path.clearPath();
+            if (!travel.hasDestination) return;
+            std::vector<osg::Vec3f> points;
+            const auto status = DetourNavigator::findPath(*mNavigator, mAgentBounds, position,
+                travel.destination, DetourNavigator::Flag_walk, {}, 0, {}, std::back_inserter(points));
+            if (points.size() > 2048) throw std::length_error("Interior path exceeds bound");
+            // An obstructed destination remains pending, never a completed trip.
+            if (status == DetourNavigator::Status::Success)
+                for (const auto& point : points) path.addPointToPath(point);
+        }
 
         void validateDoors(std::span<const ActorSceneDoor> doors) const
         {
@@ -130,6 +187,8 @@ namespace TES3MP::Native
                 const auto opened = MWWorld::doorMotion(MWWorld::DoorState::Opening, closed, closed, 1).mTargetAngle;
                 if (!std::isfinite(doors[i].mAngle) || doors[i].mAngle < closed || doors[i].mAngle > opened)
                     throw std::invalid_argument("Actor door angle outside authored swing");
+                if (doors[i].mAvoid && !doors[i].mMoving)
+                    throw std::invalid_argument("Idle door requested NPC avoidance");
             }
         }
         void applyDoors(std::span<const ActorSceneDoor> doors) noexcept
@@ -302,7 +361,31 @@ namespace TES3MP::Native
             mWorld.updateSingleAabb(mActor->mCollisionObject);
         }
         std::vector<char> encode(const MWPhysics::ActorFrameData& frame,
-            const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts) const;
+            const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts, const Travel& travel) const;
+
+        void advance(MWPhysics::ActorFrameData& frame, MWMechanics::PathFinder& path,
+            std::vector<uint64_t>& contacts, Travel& travel, float speed, std::span<const ActorSceneDoor> doors)
+        {
+            if (travel.door)
+            {
+                const auto door = std::ranges::find(doors, travel.door, &ActorSceneDoor::mId);
+                const auto angle = travel.avoidance.update(frame.mPosition,
+                    mTransforms[mOrdinaryDoors.at(travel.door)].mPosition.asVec3(),
+                    door != doors.end() && door->mMoving, 1.f / 60, travel.random);
+                if (angle)
+                {
+                    const auto turn = MWMechanics::smoothTurnStep(frame.mRotation.y(), *angle, speed,
+                        1.f / 60, mSmoothMovement, osg::DegreesToRadians(5.f));
+                    frame.mRotation.y() += turn.mRotation;
+                    simulate(frame, contacts, {0, turn.mComplete ? speed : 0, 0});
+                    return;
+                }
+                travel.door = 0;
+                travel.avoidance = {};
+                rebuildPath(path, frame.mPosition, travel);
+            }
+            navigate(frame, path, contacts, speed);
+        }
 
         ActorSceneSnapshot snapshot() const
         {
@@ -342,11 +425,15 @@ namespace TES3MP::Native
             }
         } restore;
         Settings::SettingsFileParser().loadSettingsFile(settingsFile, Settings::Manager::mDefaultSettings);
+        mImpl->mSmoothMovement = Settings::Manager::getBool("smooth movement", "Game");
         Settings::Index index;
         Settings::NavigatorCategory category(index);
         auto settings = DetourNavigator::makeSettings(category, Debug::Error);
         // Execution budgets/cache policy, not alternative navigation rules.
         settings.mAsyncNavMeshUpdaterThreads = 1;
+        // Candidate queries must see this tick's geometry, without the stock
+        // background worker's wall-clock debounce (250 ms by default).
+        if (mImpl->mAvoidanceEnabled) settings.mMinUpdateInterval = std::chrono::milliseconds(0);
         settings.mMaxTilesNumber = std::min(settings.mMaxTilesNumber, 256);
         settings.mDetour.mMaxSmoothPathSize = std::min<size_t>(settings.mDetour.mMaxSmoothPathSize, 2048);
         settings.mEnableNavMeshDiskCache = settings.mWriteToNavMeshDb = false;
@@ -379,6 +466,7 @@ namespace TES3MP::Native
         for (float value : destination)
             if (!std::isfinite(value) || std::abs(value) > 1e7f)
                 throw std::invalid_argument("Interior destination outside bounds");
+        mImpl->syncNavigation(mImpl->mDoors);
         std::vector<osg::Vec3f> path;
         const auto status = DetourNavigator::findPath(*mImpl->mNavigator, mImpl->mAgentBounds,
             mImpl->mActor->mPosition, {destination[0], destination[1], destination[2]}, DetourNavigator::Flag_walk,
@@ -396,16 +484,18 @@ namespace TES3MP::Native
         MWMechanics::PathFinder next;
         for (const auto& point : path) next.addPointToPath({point[0], point[1], point[2]});
         mImpl->mPath = std::move(next);
+        mImpl->mTravel.destination = {destination[0], destination[1], destination[2]};
+        mImpl->mTravel.hasDestination = true;
     }
 
-    bool InteriorActorScene::arrived() const { return mImpl->mPath.checkPathCompleted(); }
+    bool InteriorActorScene::arrived() const { return !mImpl->mTravel.door && mImpl->mPath.checkPathCompleted(); }
 
-    void InteriorActorScene::bindDoors(std::span<const uint64_t> doors)
+    void InteriorActorScene::bindDoors(std::span<const uint64_t> doors, bool avoidance)
     {
         if (mImpl->mNavigator || !mImpl->mDoors.empty() || doors.empty() || doors.size() > 128)
             throw std::invalid_argument("Actor door binding outside startup bounds");
         std::vector<ActorSceneDoor> bound;
-        auto fingerprint = mImpl->mFingerprint + "npc-door-contact-1\n";
+        auto fingerprint = mImpl->mFingerprint + (avoidance ? "npc-door-avoidance-1\n" : "npc-door-contact-1\n");
         for (auto id : doors)
         {
             const auto found = mImpl->mOrdinaryDoors.find(id);
@@ -416,9 +506,10 @@ namespace TES3MP::Native
         }
         mImpl->mDoors.swap(bound);
         mImpl->mFingerprint.swap(fingerprint);
+        mImpl->mAvoidanceEnabled = avoidance;
     }
 
-    bool InteriorActorScene::doorBlocked(uint64_t door, float proposedAngle, float delta) const
+    ActorDoorContact InteriorActorScene::doorContact(uint64_t door, float proposedAngle, float delta) const
     {
         const auto bound = std::ranges::find(mImpl->mDoors, door, &ActorSceneDoor::mId);
         if (bound == mImpl->mDoors.end() || !std::isfinite(delta) || std::abs(delta) > osg::PIf / 2)
@@ -434,25 +525,32 @@ namespace TES3MP::Native
         query.setWorldTransform(btTransform(Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(position)),
             Misc::Convert::toBullet(position.asVec3())));
         // All retained NPC hulls obstruct doors, including frozen background NPCs.
+        ActorDoorContact result;
         for (const auto& body : mImpl->mBodies)
         {
             if (!body->mHull) continue;
             MWPhysics::DoorContactResult contact(&query, body->mObject.get(), position.asVec3(), delta);
             mImpl->mWorld.contactPairTest(&query, body->mObject.get(), contact);
-            if (contact.mBlocked) return true;
+            result.mBlocked |= contact.mBlocked;
+            result.mSelectedActor |= contact.mBlocked && body->mObject.get() == mImpl->mActor->mCollisionObject;
         }
-        return false;
+        return result;
     }
 
     ActorSceneSnapshot InteriorActorScene::navigate(float speed)
     {
+        if (!mImpl->mNavigator || !std::isfinite(speed) || speed <= 0 || speed > 4096)
+            throw std::invalid_argument("Interior navigation speed outside bounds");
         auto frame=std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         auto path=mImpl->mPath;
+        auto travel=mImpl->mTravel;
         std::vector<uint64_t> contacts;
-        mImpl->navigate(*frame,path,contacts,speed);
+        mImpl->syncNavigation(mImpl->mDoors);
+        mImpl->advance(*frame,path,contacts,travel,speed,mImpl->mDoors);
         ActorSceneSnapshot result{mImpl->mActorId,{frame->mPosition.x(),frame->mPosition.y(),frame->mPosition.z()},
             frame->mIsOnGround,contacts,frame->mRotation.y()};
         mImpl->mActor.swap(frame); std::swap(mImpl->mPath,path); mImpl->mContacts.swap(contacts);
+        std::swap(mImpl->mTravel,travel);
         mImpl->updateTransform();
         return result;
     }
@@ -475,6 +573,7 @@ namespace TES3MP::Native
         std::vector<uint64_t> contacts;
         std::vector<char> bytes;
         std::vector<ActorSceneDoor> doors;
+        Impl::Travel travel;
     };
     InteriorActorScene::Prepared::Prepared(std::unique_ptr<State> state) : mState(std::move(state)) {}
     InteriorActorScene::Prepared::~Prepared() = default;
@@ -487,16 +586,16 @@ namespace TES3MP::Native
     std::span<const char> InteriorActorScene::Prepared::image() const { return mState->bytes; }
 
     std::vector<char> InteriorActorScene::image() const
-    { return mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts); }
+    { return mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel); }
 
     std::vector<char> InteriorActorScene::Impl::encode(const MWPhysics::ActorFrameData& frame,
-        const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts) const
+        const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts, const Travel& travel) const
     {
         std::vector<char> bytes;
         const auto word = [&](uint64_t value) { putAreaWord(bytes, value); };
         const auto real = [&](float value) { word(std::bit_cast<uint32_t>(value)); };
         const auto vector = [&](const osg::Vec3f& value) { for (int i=0; i<3; ++i) real(value[i]); };
-        word(1); word(mActorId);
+        word(mAvoidanceEnabled ? 2 : 1); word(mActorId);
         vector(frame.mPosition); vector(frame.mInertia); vector(frame.mLastStuckPosition);
         real(frame.mRotation.x()); real(frame.mRotation.y()); real(frame.mOldHeight);
         word(frame.mStuckFrames); word(frame.mIsOnGround); word(frame.mIsOnSlope);
@@ -505,6 +604,13 @@ namespace TES3MP::Native
         for (const auto& point : path.getPath()) vector(point);
         word(contacts.size());
         for (auto contact : contacts) word(contact);
+        if (mAvoidanceEnabled)
+        {
+            word(travel.hasDestination); vector(travel.destination);
+            word(travel.door); real(travel.avoidance.mDuration); vector(travel.avoidance.mLastPos);
+            word(travel.avoidance.mDirection);
+            word(std::stoull(Misc::Rng::serialize(travel.random)));
+        }
         return bytes;
     }
 
@@ -530,7 +636,8 @@ namespace TES3MP::Native
         };
         const auto vector = [&]() { const auto x=real(), y=real(), z=real(); return osg::Vec3f(x,y,z); };
         const auto boolean = [&]() { const auto value=word(); if (value>1) throw std::invalid_argument("Invalid actor image boolean"); return bool(value); };
-        if (word() != 1 || word() != mImpl->mActorId) throw std::invalid_argument("Actor image identity mismatch");
+        if (word() != (mImpl->mAvoidanceEnabled ? 2 : 1) || word() != mImpl->mActorId)
+            throw std::invalid_argument("Actor image identity mismatch");
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         frame->mPosition = vector(); frame->mInertia = vector(); frame->mLastStuckPosition = vector();
         frame->mRotation.x() = real(); frame->mRotation.y() = real(); frame->mOldHeight = real();
@@ -566,19 +673,48 @@ namespace TES3MP::Native
                 || std::ranges::find(ids, id) != ids.end()) throw std::invalid_argument("Actor contact outside scene");
             ids.push_back(id);
         }
+        auto travel = mImpl->mTravel;
+        if (mImpl->mAvoidanceEnabled)
+        {
+            travel.hasDestination = boolean(); travel.destination = vector();
+            travel.door = word(); travel.avoidance.mDuration = real(); travel.avoidance.mLastPos = vector();
+            const auto direction = word(), random = word();
+            if (travel.hasDestination != mImpl->mTravel.hasDestination || travel.destination != mImpl->mTravel.destination
+                || (travel.door && std::ranges::find(doors, travel.door, &ActorSceneDoor::mId) == doors.end())
+                || travel.avoidance.mDuration < 0 || travel.avoidance.mDuration > 1 || direction > 3
+                || random < Misc::Rng::Generator::min() || random > Misc::Rng::Generator::max())
+                throw std::invalid_argument("Actor avoidance image outside bounds");
+            travel.avoidance.mDirection = int(direction);
+            Misc::Rng::deserialize(std::to_string(random), travel.random);
+        }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl.get(), std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
-            {doors.begin(), doors.end()}})));
+            {doors.begin(), doors.end()}, std::move(travel)})));
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
         float speed, std::span<const ActorSceneDoor> doors)
     {
         mImpl->validateDoors(doors);
+        if (!mImpl->mNavigator || !std::isfinite(speed) || speed <= 0 || speed > 4096)
+            throw std::invalid_argument("Interior navigation speed outside bounds");
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         auto path = mImpl->mPath;
+        auto travel = mImpl->mTravel;
         std::vector<uint64_t> contacts;
+        mImpl->syncNavigation(doors);
+        if (mImpl->mAvoidanceEnabled)
+        {
+            if (!travel.door)
+                for (const auto& door : doors)
+                    if (door.mAvoid) { travel.door = door.mId; travel.avoidance = {}; break; }
+            bool changed = false;
+            for (size_t i = 0; i < doors.size(); ++i)
+                changed |= doors[i].mAngle != mImpl->mDoors[i].mAngle;
+            if (!travel.door && (changed || (!path.isPathConstructed() && !path.checkPathCompleted())))
+                mImpl->rebuildPath(path, frame->mPosition, travel);
+        }
         // The staged angles participate in stock sweeps/stepping. Restore the
         // committed broadphase even when a solver/allocation exception escapes.
         struct RestoreDoors
@@ -587,11 +723,12 @@ namespace TES3MP::Native
             ~RestoreDoors() { scene.applyDoors(scene.mDoors); }
         } restore{*mImpl};
         mImpl->applyDoors(doors);
-        mImpl->navigate(*frame,path,contacts,speed); mImpl->navigate(*frame,path,contacts,speed);
-        auto bytes = mImpl->encode(*frame,path,contacts);
+        mImpl->advance(*frame,path,contacts,travel,speed,doors);
+        mImpl->advance(*frame,path,contacts,travel,speed,doors);
+        auto bytes = mImpl->encode(*frame,path,contacts,travel);
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl.get(), std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
-            {doors.begin(), doors.end()}})));
+            {doors.begin(), doors.end()}, std::move(travel)})));
     }
     void InteriorActorScene::install(Prepared& prepared) noexcept
     {
@@ -599,6 +736,7 @@ namespace TES3MP::Native
         assert(state.owner == mImpl.get());
         mImpl->mActor.swap(state.frame); std::swap(mImpl->mPath, state.path); mImpl->mContacts.swap(state.contacts);
         mImpl->mDoors.swap(state.doors);
+        std::swap(mImpl->mTravel, state.travel);
         mImpl->applyDoors(mImpl->mDoors);
         mImpl->updateTransform();
     }

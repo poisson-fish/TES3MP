@@ -15,6 +15,13 @@ namespace TES3MP::Native
     {
         uint64_t mId;
         float mAngle;
+        bool mMoving = false;
+        bool mAvoid = false; // Only the selected NPC's server-sensed contact.
+    };
+    struct ActorDoorContact
+    {
+        bool mBlocked = false;
+        bool mSelectedActor = false;
     };
     struct ActorSceneSnapshot
     {
@@ -29,7 +36,8 @@ namespace TES3MP::Native
     // obstacles; bound doors receive transaction-owned angles and only the
     // selected NPC is stepped. The native host composes
     // prepared frames with its existing inventory owner and durable transaction.
-    // No AI packages, scripts or presentation services are constructed here.
+    // Shared door avoidance can interrupt the retained destination. No complete
+    // AI packages, scripts or presentation services are constructed here.
     class InteriorActorScene
     {
         struct Impl;
@@ -48,8 +56,8 @@ namespace TES3MP::Native
         const std::string& fingerprint() const;
         // Bind a complete, bounded set of ordinary doors before navigation.
         // Angles are owned by the inventory/door transaction, never this image.
-        void bindDoors(std::span<const uint64_t> doors);
-        bool doorBlocked(uint64_t door, float proposedAngle, float delta) const;
+        void bindDoors(std::span<const uint64_t> doors, bool avoidance = false);
+        ActorDoorContact doorContact(uint64_t door, float proposedAngle, float delta) const;
         // Build the engine navmesh from the retained collision resources. The
         // trusted settings file supplies stock navigation settings and is bound
         // into the scene identity. No World/player services are constructed.

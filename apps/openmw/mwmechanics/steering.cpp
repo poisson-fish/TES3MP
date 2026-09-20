@@ -16,24 +16,12 @@ namespace MWMechanics
     bool smoothTurn(const MWWorld::Ptr& actor, float targetAngleRadians, int axis, float epsilonRadians)
     {
         MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
-        float diff
-            = static_cast<float>(Misc::normalizeAngle(targetAngleRadians - actor.getRefData().getPosition().rot[axis]));
-        float absDiff = std::abs(diff);
-
-        // The turning animation actually moves you slightly, so the angle will be wrong again.
-        // Use epsilon to prevent jerkiness.
-        if (absDiff < epsilonRadians)
+        const auto step = smoothTurnStep(actor.getRefData().getPosition().rot[axis], targetAngleRadians,
+            actor.getClass().getMaxSpeed(actor), MWBase::Environment::get().getFrameDuration(),
+            Settings::game().mSmoothMovement, epsilonRadians);
+        if (step.mComplete)
             return true;
-
-        float limit
-            = getAngularVelocity(actor.getClass().getMaxSpeed(actor)) * MWBase::Environment::get().getFrameDuration();
-        if (Settings::game().mSmoothMovement)
-            limit *= std::min(absDiff / osg::PIf + 0.1f, 0.5f);
-
-        if (absDiff > limit)
-            diff = osg::sign(diff) * limit;
-
-        movement.mRotation[axis] = diff;
+        movement.mRotation[axis] = step.mRotation;
         return false;
     }
 

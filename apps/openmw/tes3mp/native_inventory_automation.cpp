@@ -22,6 +22,7 @@
 #include <map>
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <osgDB/WriteFile>
 
 #include <stdexcept>
 
@@ -405,6 +406,14 @@ namespace TES3MP::OpenMWAdapter
             writeNativeTraversal(action);
             finish(true);
             return;
+        }
+        else if (action == "screenshot")
+        {
+            osg::ref_ptr<osg::Image> image = new osg::Image;
+            world->screenshot(image, 1000, 700);
+            const auto path = mTraversalControl.string() + "." + std::to_string(sequence) + ".png";
+            if (!osgDB::writeImageFile(*image, path))
+                throw std::runtime_error("Traversal screenshot could not be written");
         }
         else if (action == "observe")
         {

@@ -2,6 +2,7 @@
 #define OPENMW_MECHANICS_STEERING_H
 
 #include <osg/Math>
+#include <components/misc/mathutil.hpp>
 
 #include <algorithm>
 
@@ -21,6 +22,27 @@ namespace MWMechanics
         const float baseAngularVelocity = osg::DegreesToRadians(degreesPerFrame * framesPerSecond);
         const float baseSpeed = 200;
         return baseAngularVelocity * std::max(actorSpeed / baseSpeed, 1.0f);
+    }
+
+    struct TurnStep
+    {
+        float mRotation;
+        bool mComplete;
+    };
+
+    inline TurnStep smoothTurnStep(float current, float target, float speed, float duration,
+        bool smoothMovement, float epsilon)
+    {
+        float diff = static_cast<float>(Misc::normalizeAngle(target - current));
+        const float absDiff = std::abs(diff);
+        if (absDiff < epsilon)
+            return {0, true};
+        float limit = getAngularVelocity(speed) * duration;
+        if (smoothMovement)
+            limit *= std::min(absDiff / osg::PIf + 0.1f, 0.5f);
+        if (absDiff > limit)
+            diff = osg::sign(diff) * limit;
+        return {diff, false};
     }
 
     /// configure rotation settings for an actor to reach this target angle (eventually)

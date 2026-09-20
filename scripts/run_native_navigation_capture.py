@@ -45,6 +45,112 @@ def distance(a, b):
     return math.hypot(a["x"] - b["x"], a["y"] - b["y"])
 
 
+def trajectory_errors(motions):
+    # Latest-wins delivery may select disjoint ticks for the two peers.
+    errors = []
+    other = sorted(motions[1].values(), key=lambda sample: sample["tick"])
+    for tick, sample in motions[0].items():
+        for a, b in zip(other, other[1:]):
+            if a["tick"] <= tick <= b["tick"] and b["tick"] - a["tick"] <= 10:
+                ratio = (tick - a["tick"]) / (b["tick"] - a["tick"])
+                errors.append(distance(sample, {axis: a[axis] + ratio * (b[axis] - a[axis])
+                                                for axis in ("x", "y")}))
+                break
+    return errors
+
+
+def verify_doors(output, evidence, processes, relay, manifest):
+    """Real content and desktop activation; no synthetic placements or server commands."""
+    sequence = dict.fromkeys(evidence, 0)
+    finished = set()
+
+    def wait_for(predicate, description, timeout=35):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                return value
+            if any(p.poll() is not None for name, p in processes.items() if name not in finished):
+                raise RuntimeError(f"process exited while waiting for {description}")
+            time.sleep(.1)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
+        temporary.replace(control)
+        return wait_for(lambda: next((r for r in records(evidence[role])
+                                     if r.get("sequence") == sequence[role]
+                                     and r.get("event") == "traversal_" + action.split()[0]), None), action)
+
+    def door_records(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "native_door_presented"]
+
+    def settled(role):
+        data = poses(evidence[role])[-20:]
+        return len(data) == 20 and all(distance(p, data[-1]) < .01 for p in data)
+
+    wait_for(lambda: all(len(poses(path)) > 30 and door_records(role) and settled(role)
+                         for role, path in evidence.items()), "two settled desktop replicas")
+    initial = {role: poses(path)[-1] for role, path in evidence.items()}
+    command("Alice", "pose -70 -340 -125 0 2.25")
+    command("Bob", "pose -130 -230 -125 0 2.4")
+    time.sleep(.5)
+    screenshots = {role: command(role, "screenshot") for role in evidence}
+    focus = screenshots["Alice"]
+    if focus["focus"] != "in_velothismall_ndoor_01":
+        raise RuntimeError(f"Door not in Alice's focus: {focus['focus']}")
+    command("Alice", 'activate "in_velothismall_ndoor_01"')
+    wait_for(lambda: all(any(r["doors"][0]["blocked"] for r in door_records(role)) for role in evidence),
+             "both clients presenting the NPC obstruction")
+    for role in evidence:
+        command(role, "screenshot")
+    wait_for(lambda: all(door_records(role)[-1]["doors"][0]["direction"] == 0
+             and door_records(role)[-1]["doors"][0]["angle"] > 3.1 and settled(role) for role in evidence),
+             "both clients: door fully open and NPC destination resumed")
+    for role in evidence:
+        command(role, "screenshot")
+    data = {role: records(path) for role, path in evidence.items()}
+    metrics = {}
+    for role, events in data.items():
+        frames = [r for r in events if r.get("event") == "native_actor_pose"]
+        excursion = max(distance(initial[role], p) for p in frames)
+        final = frames[-1]
+        if excursion < 30 or distance(final, {"x": 32, "y": -320}) > 20:
+            raise RuntimeError(f"{role}: NPC did not retreat and resume its destination")
+        doors = [d for r in events if r.get("event") == "native_door_presented" for d in r["doors"]]
+        if any(d["angle"] != d["rendered_angle"] for d in doors):
+            raise RuntimeError(f"{role}: visual door angles diverged")
+        metrics[role] = dict(rendered_frames=len(frames), excursion=excursion, final=final,
+                             blocked_observations=sum(d["blocked"] for d in doors))
+    if distance(metrics["Alice"]["final"], metrics["Bob"]["final"]) > .1:
+        raise RuntimeError("Clients did not converge")
+    motion = [{r["tick"]: r for r in data[role] if r.get("event") == "native_actor_sample"} for role in evidence]
+    common_ticks = motion[0].keys() & motion[1].keys()
+    if any(distance(motion[0][t], motion[1][t]) != 0
+                               or motion[0][t]["z"] != motion[1][t]["z"] for t in common_ticks):
+        raise RuntimeError("Clients received contradictory actor samples")
+    errors = trajectory_errors(motion)
+    if len(errors) < 15 or max(errors) >= 8:
+        raise RuntimeError("Overlapping door-avoidance trajectories diverged")
+    for role in evidence:
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        finished.add(role)
+        completed = [r for r in records(evidence[role]) if r.get("event") == "phase8_desktop_complete"]
+        if processes[role].returncode or len(completed) != 1 or not completed[0]["success"]:
+            raise RuntimeError(f"{role} did not finish cleanly")
+    report = dict(success=True, scenario="V18 Hlavora, Vivec Redoran Records",
+                  clients=metrics, common_ticks=len(common_ticks), relay=asdict(relay.stop()), manifest=manifest,
+                  overlapping_samples=len(errors), maximum_trajectory_difference=max(errors),
+                  screenshots=[p.name for p in output.glob("*.png")],
+                  profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+
+
 def run(args):
     root = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
@@ -52,18 +158,21 @@ def run(args):
     binary = args.build.resolve()
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
-    cell = "Seyda Neen, Arrille's Tradehouse"
-    manifest = hashlib.sha256(b"native-navigation-capture-16" + config.joinpath("openmw.cfg").read_bytes()
+    cell = "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
+    version = 18 if args.doors else 16
+    npc = "hlavora sadas" if args.doors else "raflod the braggart"
+    destination = "32 -320 -127 120" if args.doors else "-550 70 385 40"
+    manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
     password.write_text(secrets.token_hex(24), encoding="ascii")
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
-        f'native-inventory-16\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
+        f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
         f'actors "player" "player"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
-        f'npc "raflod the braggart" "{settings.as_posix()}"\ndestination -550 70 385 40\n', encoding="utf-8")
+        f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n', encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
-                  spawn_cell="interior:1", spawn_positions="-768000:-409600:394240", default_appearance_id="2",
+                  spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
@@ -79,6 +188,8 @@ def run(args):
         tokens = template.copy()
         tokens[0:5] = [str(index + 1), str(index * 2 + 1), "2", manifest, hashlib.sha256(credential).hexdigest()]
         tokens[6:16] = ["0", "1", "0", "0", str((-750 + 80 * index) * 1024), "-409600", "394240", "0", "0", "0"]
+        if args.doors:
+            tokens[10:13] = [str((-80 - 80 * index) * 1024), "-204800", "-128000"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
         identities.append(" ".join(tokens))
@@ -129,6 +240,9 @@ def run(args):
                        f"--tes3mp-content-cell-space-map=1={cell}", "--tes3mp-content-appearance-id=2",
                        "--tes3mp-content-appearance-record=player"]
             start(role, command)
+        if args.doors:
+            verify_doors(output, evidence, processes, relay, manifest)
+            return
         deadline = time.monotonic() + 75
         ready_at, left_at, disconnect_pose = None, None, None
         while time.monotonic() < deadline:
@@ -173,15 +287,7 @@ def run(args):
         # Latest-wins delivery may select disjoint ticks for the two peers. Compare
         # the overlapping trajectories at the same server ticks as well as exact
         # equality wherever both received the same tick.
-        interpolated_errors = []
-        other = sorted(motions[1].values(), key=lambda sample: sample["tick"])
-        for tick, sample in motions[0].items():
-            for a, b in zip(other, other[1:]):
-                if a["tick"] <= tick <= b["tick"] and b["tick"] - a["tick"] <= 10:
-                    ratio = (tick - a["tick"]) / (b["tick"] - a["tick"])
-                    interpolated_errors.append(distance(sample, {axis: a[axis] + ratio * (b[axis] - a[axis])
-                                                                 for axis in ("x", "y")}))
-                    break
+        interpolated_errors = trajectory_errors(motions)
         if len(interpolated_errors) < 15 or max(interpolated_errors) >= 4:
             raise RuntimeError("overlapping authoritative trajectories diverged")
         final = metrics[survivor]["last"]
@@ -230,5 +336,9 @@ if __name__ == "__main__":
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--content-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--leave", choices=("Alice", "Bob"), required=True)
-    run(parser.parse_args())
+    parser.add_argument("--leave", choices=("Alice", "Bob"))
+    parser.add_argument("--doors", action="store_true", help="V18 real-interior door avoidance on two connected clients")
+    args = parser.parse_args()
+    if not args.doors and not args.leave:
+        parser.error("--leave is required for the V16 navigation capture")
+    run(args)
