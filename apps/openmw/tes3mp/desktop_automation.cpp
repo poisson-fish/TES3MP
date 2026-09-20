@@ -921,6 +921,7 @@ namespace TES3MP::OpenMWAdapter
     {
         mPresentation.clear();
         mTraversalGround.reset();
+        mPresentedNativeDoors.clear();
         mNativePlayerCount.reset();
         mNativeContainerCount.reset();
         mNativeContainerId.reset();

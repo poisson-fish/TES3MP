@@ -1,6 +1,7 @@
 #include "desktop_automation.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwworld/scene.hpp"
@@ -14,6 +15,7 @@
 #include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/manualref.hpp"
+#include "../mwmechanics/creaturestats.hpp"
 #include <cmath>
 #include <iomanip>
 #include <bit>
@@ -168,6 +170,53 @@ namespace TES3MP::OpenMWAdapter
         ++mEvidenceEvents;
     }
 
+    ProviderResult DesktopAutomation::applyNativeDoors(
+        const ReliableGroundItemBaseline& groundItems, MonotonicInstant receivedAt) noexcept
+    try
+    {
+        const auto result = mPresentation.applyNativeDoors(groundItems, receivedAt);
+        if (result != ProviderResult::Accepted || mRole != DesktopAutomationRole::NativeTraversal) return result;
+        auto doors = groundItems.doors;
+        if (groundItems.door) doors.push_back(*groundItems.door);
+        for (const auto& neighbor : groundItems.neighbors)
+            doors.insert(doors.end(), neighbor.doors.begin(), neighbor.doors.end());
+        if (doors == mPresentedNativeDoors) return result;
+        if (mEvidenceEvents >= MaximumEvidenceEvents) return ProviderResult::PresentationFailed;
+        auto world = MWBase::Environment::get().getWorld();
+        std::map<uint64_t, float> rendered;
+        for (auto* cell : MWBase::Environment::get().getWorldScene()->getActiveCells())
+            cell->forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
+                const auto id = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
+                if (id && std::ranges::find(doors, *id, &NativeDoorSnapshot::placement) != doors.end())
+                    rendered.emplace(*id, ptr.getRefData().getPosition().rot[2]);
+                return true;
+            });
+        for (const auto& door : doors)
+        {
+            const auto visual = rendered.find(door.placement);
+            if (visual == rendered.end() || visual->second != door.angle) return ProviderResult::PresentationFailed;
+        }
+        mOutput << "{\"event\":\"native_door_presented\",\"time_ns\":" << receivedAt.nanoseconds()
+                << ",\"revision\":" << groundItems.header.canonicalRevision.value() << ",\"doors\":[";
+        bool comma = false;
+        for (const auto& door : doors)
+        {
+            const auto visual = rendered.find(door.placement);
+            if (comma) mOutput << ',';
+            comma = true;
+            mOutput << "{\"id\":" << door.placement << ",\"motion\":" << door.motion
+                    << ",\"angle\":" << door.angle << ",\"rendered_angle\":" << visual->second
+                    << ",\"direction\":" << unsigned(door.direction)
+                    << ",\"blocked\":" << (door.blocked ? "true" : "false") << '}';
+        }
+        mOutput << "]}\n";
+        mOutput.flush();
+        ++mEvidenceEvents;
+        mPresentedNativeDoors = std::move(doors);
+        return result;
+    }
+    catch (...) { return ProviderResult::PresentationFailed; }
+
     void DesktopAutomation::writeNativeTraversal(std::string_view event)
     {
         if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || !mTraversalGround
@@ -188,7 +237,7 @@ namespace TES3MP::OpenMWAdapter
         size_t originals = 0;
         cell->forEach([&](const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().getBaseNode() || !ptr.getRefData().isEnabled()
-                || ptr.getCellRef().getCount() <= 0 || !MWWorld::ContainerStore::isStorableType(ptr.getType()))
+                || ptr.getCellRef().getCount() <= 0 || !ptr.getClass().isItem(ptr))
                 return true;
             add(visible, ptr);
             const auto placed = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
@@ -206,12 +255,17 @@ namespace TES3MP::OpenMWAdapter
             }
         }
         const auto& pos = player.getRefData().getPosition();
+        const auto& stats = player.getClass().getCreatureStats(player);
         mOutput << "{\"event\":\"traversal_" << event << "\",\"sequence\":" << mTraversalSequence
                 << ",\"cell\":" << std::quoted(cell->getCell()->getId().toString())
                 << ",\"authority_cell\":" << (mSelfCell && mSelfCell->asInterior()
                     ? mSelfCell->asInterior()->cellSpace().value() : 0)
                 << ",\"baseline_cell\":" << mTraversalGround->cell.asInterior()->cellSpace().value()
-                << ",\"resumes\":" << mResumes << ",\"position\":[" << pos.pos[0] << ',' << pos.pos[1] << ',' << pos.pos[2]
+                << ",\"resumes\":" << mResumes
+                << ",\"local_ai_active\":" << (MWBase::Environment::get().getMechanicsManager()->isAIActive() ? "true" : "false")
+                << ",\"player_health\":" << stats.getHealth().getCurrent()
+                << ",\"player_dead\":" << (stats.isDead() ? "true" : "false")
+                << ",\"position\":[" << pos.pos[0] << ',' << pos.pos[1] << ',' << pos.pos[2]
                 << "],\"focus\":" << std::quoted(focus.isEmpty() ? std::string{} : focus.getCellRef().getRefId().toString())
                 << ",\"ground_matches\":" << (visible == expected ? "true" : "false")
                 << ",\"visible_originals\":" << originals << ",\"ground\":[";
@@ -222,6 +276,22 @@ namespace TES3MP::OpenMWAdapter
             comma = true;
             mOutput << "{\"stack\":" << item.stack.stackId.value() << ",\"item\":"
                     << item.stack.prototypeId.value() << ",\"count\":" << item.stack.count << '}';
+        }
+        mOutput << "],\"visible_ground\":[";
+        comma = false;
+        for (const auto& [id, count] : visible)
+        {
+            if (comma) mOutput << ',';
+            comma = true;
+            mOutput << "{\"item\":" << id << ",\"count\":" << count << '}';
+        }
+        mOutput << "],\"expected_ground\":[";
+        comma = false;
+        for (const auto& [id, count] : expected)
+        {
+            if (comma) mOutput << ',';
+            comma = true;
+            mOutput << "{\"item\":" << id << ",\"count\":" << count << '}';
         }
         mOutput << "],\"teleports\":" << mTraversalGround->teleportDoors.size();
         if (mTraversalGround->door)
@@ -266,7 +336,7 @@ namespace TES3MP::OpenMWAdapter
         {
             if (!(file >> x >> y >> z >> pitch >> yaw) || !std::isfinite(x) || !std::isfinite(y)
                 || !std::isfinite(z) || !std::isfinite(pitch) || !std::isfinite(yaw)
-                || std::abs(x) > 4096 || std::abs(y) > 4096 || std::abs(z) > 4096
+                || std::abs(x) > 1048576 || std::abs(y) > 1048576 || std::abs(z) > 1048576
                 || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
                 throw std::runtime_error("Traversal setup pose invalid");
         }

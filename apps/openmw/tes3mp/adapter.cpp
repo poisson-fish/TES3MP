@@ -530,6 +530,27 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
+                // Ground baselines are already complete, committed, session-bound
+                // images. Door motion must not starve behind newer private inventory,
+                // equipment or movement revisions while a door is swinging.
+                if (mGameRunning && groundItems && groundItems->nativeWorld && snapshot && playerBaseline
+                    && (mPresentationBootstrapPending || advanced.groundItemsApplied
+                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
+                    && selfEntry(*snapshot) && groundItems->cell == selfEntry(*snapshot)->transform().cell()
+                    && groundItems->header.canonicalRevision >= playerBaseline->canonicalRevision()
+                    && (!mMinimumInventoryRevision
+                        || groundItems->header.canonicalRevision >= *mMinimumInventoryRevision)
+                    && (!mAwaitingResync || mResyncInventory)
+                    && mRuntime->session().stateMachine().interestBaselineComplete())
+                {
+                    const auto applied = mPresentation.applyNativeDoors(*groundItems, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
                 const auto& combat = mRuntime->confirmedCombatSnapshot();
                 if (mGameRunning
                     && (mPresentationBootstrapPending || advanced.combatSnapshotApplied

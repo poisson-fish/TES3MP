@@ -569,6 +569,12 @@ namespace
             lastEquipmentCount = equipment.members.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyNativeDoors(const TES3MP::ReliableGroundItemBaseline& ground,
+            TES3MP::MonotonicInstant) noexcept override
+        {
+            if (!ground.doors.empty()) doorAngles.push_back(ground.doors.front().angle);
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyCombat(const TES3MP::LatestWinsCombatSnapshot& snapshot,
             std::span<const TES3MP::ReliableCombatEventBatch> events, TES3MP::MonotonicInstant) noexcept override
         {
@@ -629,6 +635,7 @@ namespace
         unsigned actors = 0;
         unsigned interactiveObjects = 0;
         unsigned inventories = 0;
+        std::vector<float> doorAngles;
         std::optional<TES3MP::CellId> lastGroundCell;
         unsigned combats = 0;
         unsigned questJournals = 0;
@@ -716,7 +723,7 @@ namespace
 
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
-void teleportPresentation(bool pickupBarrier = false)
+void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -770,6 +777,42 @@ void teleportPresentation(bool pickupBarrier = false)
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (doorProgress)
+    {
+        const auto sendDoor = [&](uint64_t revision, CellId cell, float angle, uint8_t direction, bool blocked) {
+            auto ground = groundItemBaseline(generation, revision, revision);
+            ground.cell = cell;
+            ground.nativeWorld = true;
+            ground.doors = {{(uint64_t(1) << 63) | 50, 2, angle, 1.f / 30.f, direction, blocked}};
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
+                encodeReliableGroundItemBaseline(ground), TransportChannel::ReliableOrdered);
+        };
+        // Each committed angle arrives while the inventory/equipment and
+        // movement lanes are still on an older revision. Never wait until idle.
+        for (uint64_t revision = 2; revision <= 5; ++revision)
+        {
+            const float angle = float(revision - 1) * .1f;
+            sendDoor(revision, first, angle, 1, false);
+            coordinator->frame(.01f);
+            require(!presentation.doorAngles.empty() && presentation.doorAngles.back() == angle);
+            require(presentation.inventories == 1);
+        }
+        sendDoor(6, first, .4f, 1, true); coordinator->frame(.01f);
+        sendDoor(7, first, .3f, 2, false); coordinator->frame(.01f);
+        require(presentation.doorAngles.back() == .3f);
+        const auto beforeTransition = presentation.doorAngles.size();
+        sendDoor(8, second, .2f, 2, false); coordinator->frame(.01f);
+        require(presentation.doorAngles.size() == beforeTransition);
+        sendSpatial(8, second); coordinator->frame(.01f);
+        require(presentation.doorAngles.back() == .2f);
+        // An old cell cannot overwrite the destination's door presentation.
+        const auto inDestination = presentation.doorAngles.size();
+        sendDoor(9, first, .1f, 2, false); coordinator->frame(.01f);
+        require(presentation.doorAngles.size() == inDestination);
+        require(coordinator->multiplayerState() == MultiplayerState::Ready);
+        std::cout << "PASS native-door-presentation: moving/blocked/reversed angles without inventory lane agreement; cell transitions guarded\n";
+        return;
+    }
     if (pickupBarrier)
     {
         // Reliable inventory and ground updates can span frames. Picking up
@@ -833,9 +876,11 @@ int main(int argc, char** argv)
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
     if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
-        || std::string_view(argv[1]) == "inventory-pickup-barrier"))
+        || std::string_view(argv[1]) == "inventory-pickup-barrier"
+        || std::string_view(argv[1]) == "native-door-presentation"))
     {
-        teleportPresentation(std::string_view(argv[1]) == "inventory-pickup-barrier");
+        teleportPresentation(std::string_view(argv[1]) == "inventory-pickup-barrier",
+            std::string_view(argv[1]) == "native-door-presentation");
         return 0;
     }
 

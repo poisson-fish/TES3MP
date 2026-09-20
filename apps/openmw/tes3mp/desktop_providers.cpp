@@ -2388,6 +2388,12 @@ namespace TES3MP::OpenMWAdapter
                 presentedGroundBaseline = groundItems;
             }
             observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
+            return applyPublicEquipment(equipment);
+        }
+
+        ProviderResult applyNativeDoors(const ReliableGroundItemBaseline& groundItems)
+        {
+            auto world = MWBase::Environment::get().getWorld();
             auto nextDoors = groundItems.doors;
             for (const auto& neighbor : groundItems.neighbors) nextDoors.insert(nextDoors.end(), neighbor.doors.begin(), neighbor.doors.end());
             if (groundItems.door) nextDoors.push_back(*groundItems.door);
@@ -2428,7 +2434,7 @@ namespace TES3MP::OpenMWAdapter
                 installedDoors.emplace(next.placement, next);
             }
             nativeDoors.swap(installedDoors);
-            return applyPublicEquipment(equipment);
+            return ProviderResult::Accepted;
         }
 
         std::optional<InventoryTransactionCapture> inventoryTransfer(
@@ -2764,6 +2770,22 @@ namespace TES3MP::OpenMWAdapter
     std::optional<ObjectRevision> DesktopPresentation::observedObjectRevision(InteractiveObjectId id) const noexcept
     {
         return mImpl->observedObjectRevision(id);
+    }
+
+    ProviderResult DesktopPresentation::applyNativeDoors(
+        const ReliableGroundItemBaseline& groundItems, MonotonicInstant) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->applyNativeDoors(groundItems);
+            if (result != ProviderResult::Accepted) mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
     }
 
     ProviderResult DesktopPresentation::applyInventory(const ReliablePlayerInventoryBaseline& player,

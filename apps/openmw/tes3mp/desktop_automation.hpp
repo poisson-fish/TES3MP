@@ -54,7 +54,7 @@ namespace TES3MP::OpenMWAdapter
                                     public ConnectionControlProvider
     {
     public:
-        static constexpr std::size_t MaximumEvidenceEvents = 128;
+        static constexpr std::size_t MaximumEvidenceEvents = 2048;
 
         DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
             ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);
@@ -78,6 +78,8 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
+            MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyNativeDoors(const ReliableGroundItemBaseline& groundItems,
             MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
             std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
@@ -120,6 +122,7 @@ namespace TES3MP::OpenMWAdapter
         std::filesystem::path mTraversalControl;
         std::uint64_t mTraversalSequence = 0;
         std::optional<ReliableGroundItemBaseline> mTraversalGround;
+        std::vector<NativeDoorSnapshot> mPresentedNativeDoors;
         std::optional<std::uint32_t> mNativePlayerCount;
         std::optional<std::uint32_t> mNativeContainerCount;
         std::optional<ContainerId> mNativeContainerId;

@@ -17,6 +17,21 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
+#include "../tes3mp/engine_coordinator.hpp"
+
+namespace
+{
+    bool hasServerActorAuthority()
+    {
+        const auto& environment = MWBase::Environment::get();
+        const auto* multiplayer = environment.getMultiplayerCoordinator();
+        // The initial cell can load before the first baseline. Do not roll a
+        // temporary local creature while connecting, or after a disconnect.
+        return environment.getWorld()->hasLeveledActorAuthority()
+            || (multiplayer && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Idle);
+    }
+}
+
 namespace MWClass
 {
     class CreatureLevListCustomData : public MWWorld::TypedCustomData<CreatureLevListCustomData>
@@ -71,7 +86,7 @@ namespace MWClass
 
     void CreatureLevList::respawn(const MWWorld::Ptr& ptr) const
     {
-        if (MWBase::Environment::get().getWorld()->hasLeveledActorAuthority()) return;
+        if (hasServerActorAuthority()) return;
         ensureCustomData(ptr);
 
         CreatureLevListCustomData& customData = ptr.getRefData().getCustomData()->asCreatureLevListCustomData();
@@ -103,7 +118,7 @@ namespace MWClass
     void CreatureLevList::insertObjectRendering(
         const MWWorld::Ptr& ptr, const std::string& model, MWRender::RenderingInterface& renderingInterface) const
     {
-        if (MWBase::Environment::get().getWorld()->hasLeveledActorAuthority())
+        if (hasServerActorAuthority())
         {
             suppressLocalSpawn(ptr);
             return;

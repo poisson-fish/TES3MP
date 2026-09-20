@@ -170,6 +170,10 @@ namespace TES3MP::OpenMWAdapter
         {
             return ProviderResult::Accepted;
         }
+        virtual ProviderResult applyNativeDoors(const ReliableGroundItemBaseline&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual ProviderResult applyCombat(
             const LatestWinsCombatSnapshot&, std::span<const ReliableCombatEventBatch>, MonotonicInstant) noexcept
         {

@@ -6,17 +6,19 @@
       "id": "M3-008",
       "slice": "persistent native leveled actor selection and offline area discovery",
       "owner": "OpenMW native runtime and desktop adapter",
-      "purpose": "Reuse the bounded stock leveled-list resolver with explicit campaign level and RNG. V15 persists initial selected/none outcomes with inventory and doors and recovers without rolling. Connected clients suppress stock leveled spawns and render server selections with placement scale and public equipment. Offline WorldModel construction does not send live Lua exterior-created notifications; stock construction retains them. Initial living unscripted NPCs/creatures are supported; AI, respawn and leveled authored corpses remain outside this slice.",
+      "purpose": "Reuse the bounded stock leveled-list resolver with explicit campaign level and RNG. V15 persists initial selected/none outcomes with inventory and doors and recovers without rolling. Connected clients suppress stock leveled spawns and render server selections with placement scale and public equipment. Offline WorldModel construction does not send live Lua exterior-created notifications; stock construction retains them. Initial living unscripted NPCs/creatures are supported; AI, respawn and leveled authored corpses remain outside this slice. Suppress client AI and local leveled spawning from connection start through failure, before the first baseline and during reconnect; stock idle single-player remains unchanged.",
       "paths": [
         "apps/openmw/mwclass/creaturelevlist.cpp",
-        "apps/openmw/mwclass/creaturelevlist.hpp"
+        "apps/openmw/mwclass/creaturelevlist.hpp",
+        "apps/openmw/mwmechanics/mechanicsmanagerimp.cpp"
       ],
       "tests": [
         "tes3mp_native_loadout_tests leveled-actors",
         "tes3mp_native_loadout_tests leveled-actor-persistence",
         "tes3mp_native_loadout_tests player-area-discovery",
         "tes3mp_inventory_replication_tests neighborhoods",
-        "openmw-m3-v15.exe RelWithDebInfo link"
+        "openmw-m3-v15.exe RelWithDebInfo link",
+        "Varyon native-traversal live samples: local_ai_active=false, player_health=35, player_dead=false, ground_matches=true"
       ],
       "disposition": "shared engine resolver and explicit presentation/service boundary",
       "removal_condition": "OpenMW provides equivalent authoritative spawn selection persistence and external actor presentation services"

@@ -31,6 +31,8 @@
 
 #include "../mwsound/constants.hpp"
 
+#include "../tes3mp/engine_coordinator.hpp"
+
 #include "actor.hpp"
 #include "actors.hpp"
 #include "actorutil.hpp"
@@ -848,6 +850,11 @@ namespace MWMechanics
 
     bool MechanicsManager::isAIActive()
     {
+        // Server actor simulation is still deferred to M4. Neither joining nor
+        // losing a multiplayer session grants the client permission to run AI.
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Idle)
+            return false;
         return mAI;
     }
 

@@ -36,7 +36,9 @@ NPC simulation stays server-owned; no client ownership leases.
 
 **M3 doors:** server transactions own activation, reversal, angle, direction and
 persistence through shared OpenMW rules. Clients apply committed angles and report
-only their own player's contacts. Reports bind authenticated session/generation,
+only their own player's contacts. Complete committed door images present independently
+of inventory/equipment revision alignment, with session and active-cell guards.
+Reports bind authenticated session/generation,
 placement, motion, sequence and observed tick; any fresh block stalls progress.
 Expiry is ten ticks. Reports/motion IDs are transient; reversal/reconnect invalidates
 old reports. Collision is trusted like inherited movement. Latency can clip before
