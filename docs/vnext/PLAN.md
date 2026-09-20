@@ -6,104 +6,69 @@ adding phase plans or diaries.
 
 ## M1 - Prove the native loadout and runtime seam
 
-**Outcome:** a small app-local headless probe uses OpenMW's real content path,
-with executable evidence showing what can be reused and what must be separated.
+**Outcome:** an app-local headless probe reuses OpenMW configuration/content loading,
+winning records and inventory behavior, including plain and scripted/enchanted cases.
+Retain engine records; export bounded owned diagnostics with atomic rejection.
 
-1. Resolve actual OpenMW configuration layers, data paths, encoding, masters,
-   and ordered TES3 plugins using OpenMW code. Enumerate winning item/spell/
-   enchantment/GMST records after applicable setup/normalization. Handle ignored
-   and deleted records and report load errors; Python must not reinterpret ESM.
-2. Translate a bounded sample to owned diagnostic/network-facing values. Keep
-   the loaded engine records available to the runtime; this is not a new manual
-   catalog requirement for each item or quest. Test malformed/oversized export
-   rejection without partial publication.
-3. Probe an actual OpenMW inventory operation without initialized UI/rendering.
-   Expose the required service/player dependencies with a scripted or enchanted
-   case, as well as a plain item. Do not substitute CanonicalInventoryWorld and
-   call that engine reuse. If the operation is coupled, make the smallest useful
-   service separation and report the remaining blocker accurately.
-4. Compare an unshared calculation, such as live-actor spell school/chance or
-   enchantment cost, with normal OpenMW using the same loadout/settings. Include
-   a changed actor skill or GMST. Two calls to the same helper are not parity
-   evidence for adapter inputs or effect execution.
-5. Record startup/RSS, build/link dependencies, and exercised singleton/player
-   assumptions in a bounded artifact under ignored `build/`. Distinguish linked
-   libraries from services actually initialized. Broad offline/probe links may
-   be temporary; document their specific removal condition in code/CURRENT.
+**Exit:** named narrow checks reproduce real-loadout enumeration, inventory operations
+and independent stock calculation parity with changed skills/settings. Record startup,
+RSS, dependency/service initialization and player assumptions under ignored `build/`;
+identify temporary broad-link removal conditions and missing TR evidence. Loading
+alone does not prove gameplay; unresolved coupling requires engine refactoring.
 
-**Exit:** real-loadout enumeration plus the operation/calculation evidence are
-reproducible through a named narrow target/command. If coupling prevents the
-operation, keep M1 incomplete and identify the exact next refactor. Do not quietly
-return to independent gameplay formulas or declare a loader-only result a server.
-Use Morrowind content while TR is unavailable, but record TR validation missing.
-
-**Retire:** raw baker semantics only after the replacement covers their consumers;
-retain hash/pack selection utilities and useful malformed-input tests.
+**Retire:** replaced raw baker semantics after consumer coverage; retain hash/pack
+selection and malformed-input tests.
 
 ## M2 - Make engine mutations safe for two player contexts
 
-**Outcome:** two distinct server-controlled player actors share an engine-backed
-container and item lifecycle without borrowing one global player's identity.
+**Outcome:** two explicit player contexts share native take, split/drop, equip and
+enchanted/scripted item mechanics. Preserve instance identity, locals, soul, condition,
+charge, equipment and dynamic records; separate presentation effects.
 
-Implement take, split/drop, equip, and one enchanted/scripted item operation with
-explicit initiator, stable instance identity, and separated presentation effects.
-Route stock OpenMW through shared mechanics where code is extracted. Preserve
-script locals, soul/condition/charge, equipment, and relevant dynamic records.
-Exercise stale input, contention, and durability failure: no partial mutation,
-duplicate script consequence, or emitted success. Prove isolated staging/effect
-handling; copying Ptr/ContainerStore/RefData is not sufficient by itself.
+**Exit:** narrow headless checks prove intended-actor mutation, isolated staging,
+coherent engine/identity save/restore and acknowledgment durability. Stale input,
+contention or durability failure cannot leak mutation, script effects or success;
+object copies alone do not establish isolation.
 
-**Exit:** a narrow headless test changes the intended actor only and verifies a
-coherent inventory save/restore using engine state plus multiplayer identity.
-Choose the concrete persistence adapter here; retain the current acknowledgment
-guarantee. General persistence coverage follows in M6.
-
-**Retire:** migrated independent inventory mutations and gameplay-active client
-rebuilds once their production callers use the engine path. Preserve useful
-identity, validation, and failure tests against the replacement.
+**Retire:** replaced independent inventory writers/client rebuilds after production
+cutover; retain identity, validation and failure tests. General persistence follows M6.
 
 ## M3 - Connect two clients to a shared modded world
 
-**Outcome:** two desktop clients enter a real modded cell and observe one
-server-owned set of references, actors, doors, containers (barrels and chests),
-time, and weather.
+**Outcome:** two desktop clients share native references, actors, containers, doors,
+time/weather through authentication, transport and interest. Bound player-area activity;
+preserve identities/revisions, baselines, committed updates and unload semantics.
 
-Connect the runtime to existing authentication, command intake, transport, and
-interest. Derive content and placed references from OpenMW instead of fixture
-recipes. Activate the union of player areas with bounded scheduling; define
-unload/background behavior. Establish stable reference/dynamic-record mappings,
-ownership/revisions, initial baselines, and committed incremental updates.
-Separate authoritative state from client input, prediction, animation, and UI.
-Ordinary doors use server motion with client player-contact reports. Verify
-expiry/reversal/disconnect and latency; defer server physics/NPC obstruction.
+**Exit:** named TR loadout and observed client presentation prove shared container/door
+changes, weather, late join/reconnect. Doors cover contact expiry, reversal, disconnect
+and latency; server physics/NPC obstruction follows M4. Graphical acceptance precedes M4.
 
-**Exit:** an actual Tamriel Rebuilt location works with two clients; a shared
-container/door change and regional weather transition converge after late join
-and reconnect. The test names the loadout and observes client presentation.
-Complete M3 integration/evidence before M4; deferred graphical testing leaves M3 open.
-
-**Retire:** hand-enumerated cells/reference catalogs and corresponding fixture-only
-production bootstrap for migrated paths. Keep small fixtures as fast tests.
+**Retire:** replaced hand-enumerated cells/references and fixture-only production
+bootstrap; retain small test fixtures.
 
 ## M4 - Fight together using OpenMW mechanics
 
 **Outcome:** two players engage the same actor, see consistent AI, hits, effects,
 death, equipment wear, and loot, with the server deciding gameplay outcomes.
 
-After M3, first prove one server-controlled NPC navigating/colliding in one
-interior, replicated smoothly to two clients and continuing when either disconnects.
-Retain current player movement until physics prediction/reconciliation meets
-[DECISIONS.md](DECISIONS.md)'s cutover requirements. Reuse OpenMW movement,
-navigation, AI, collision and combat/effects; extend to NPC-door contact, then one melee/effect
-path including spells/projectiles and enchantments. Validate authoritative reach,
-misses, resources, friendly targeting and retries/reconnect.
+Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 
-Cover Travel AI beyond processing range, both players' cell boundaries, unload/restart,
-and preserved destinations/completion state. Define inactive travel policy and
-prevent duplicate simulation.
+1. Prove one native NPC navigating/colliding in an interior, smoothly replicated
+   to two clients under latency/jitter/loss and continuing when either disconnects.
+2. Add server-owned NPC-door contact/avoidance using shared OpenMW physics.
+3. Retain bounded simulation around active travelers after both players leave.
+   Cover processing range, cell boundaries, unload/restart and preserved
+   destinations/completion; never simulate an actor twice.
+4. Add one melee encounter with coherent resources, wear, death and loot;
+   extend through effects, spells/projectiles and enchantments. Validate reach,
+   misses, friendly targeting and retries/reconnect.
+5. Switch player movement last, after unified collision/physics and smoothness
+   verification, meeting DECISIONS.md's prediction/reconciliation budgets.
+   Retain inherited movement until this cutover.
 
 **Exit:** a recorded two-client encounter and narrow rejection tests establish
-single damage/death/loot consequences, shared actor targeting, and convergence.
+single damage/death/loot consequences, validated player contacts, shared targeting,
+and convergence.
 Prove persisted respawn deadlines, life generations and attributed death events
 for M5; authored corpses and transient summons must not become permanent spawns.
 

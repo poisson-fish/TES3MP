@@ -1,8 +1,8 @@
 # Durable decisions
 
 These rules define the target; CURRENT.md identifies implemented behavior.
-Independent progression, engine-level mod support and shared respawning NPCs define
-the direction; lifecycle and script-scoping details below remain proposals.
+M4 runtime decisions are approved; respawn tuning and script-scoping proposals remain
+labeled. Independent progression and engine-level mod support remain the direction.
 Replace superseded rules rather than appending session history.
 
 ## Product, authority and reuse
@@ -46,14 +46,50 @@ a stall; no response barrier or rewind is promised. Defer server physics and NPC
 obstruction ownership to shared actor simulation; replacing reports must preserve
 transactions, persistence and replication.
 
-**Presentation is separate.** Route UI, animation, audio and graphics to relevant
+**Presentation is separate.** Route UI, visual animation, audio and graphics to relevant
 clients. Pure visual replacements may vary; collision/bounds and script-affecting
 resources belong to gameplay identity. Reuse supported MWScript/Lua execution and
 semantic serialization with explicit context and resource limits. Never persist
 raw memory, process pointers, rendering objects or live sessions.
 
-**Movement smoothness (target).** Server NPC physics precedes player movement
-cutover. Interpolate timestamped remote snapshots with bounded extrapolation;
+## M4 actor simulation
+
+**Runtime ownership.** Incrementally extract shared OpenMW simulation into an
+app-local actor runtime with owned command/snapshot boundaries and explicit multiplayer
+activity/identity. AI, physics and combat share authoritative actor inventories;
+wear, charge, death and loot cannot have competing stores. Preserve stock callers
+and dependency checks; avoid whole-engine refactoring or a full World/UI wrapper.
+
+**Gameplay animation.** Extract shared gameplay timing, retaining necessary CPU
+animation evaluation without graphics. Preserve engine movement, hit keys and
+projectile/spell releases rather than substitute attack timers. Clients render
+committed actions. Timing/collision resources belong to gameplay identity; null
+presentation services must not suppress mechanics.
+
+**Travel scheduling.** Simulate the union of player areas plus bounded areas around
+active travelers, retaining engine navigation/collision even when both players leave.
+Simulation demand is independent of replication interest; simulate each actor once.
+Bound cells, actors and tick work; report saturation without losing destinations or
+completion. Preserve inactive state, stock Travel compatibility guards and travel
+state across unload/restart. Abstract travel/automatic fast-forward is not selected.
+
+**Composed ticks.** Evolve the single native mutation slot into one composed native
+transaction per tick: ordered intents, actor/door simulation, resources, effects,
+wear, death/loot, RNG and receipts. Prove isolated staging; durability precedes
+installation/publication. Measure serialization, commit costs and overruns early;
+preserve acknowledgment guarantees during optimization.
+
+**Combat latency.** Predict local swing/cast presentation only; the server owns
+gameplay consequences. Start with server-time contacts; measure latency before adding
+bounded historical actor/obstacle queries. Full-world rewind is not selected. Reuse
+timestamped replication, reliable action/life events and latest-wins motion.
+
+**Movement smoothness (target).** Player movement cutover is M4's final implementation
+step, after smooth replication and unified engine collision/physics are verified
+across actors, doors and projectiles. Retain inherited player movement until then;
+combat acceptance requires server-validated player positions and contacts.
+Start with stock physics stepping; tune snapshot frequency separately.
+Interpolate timestamped remote snapshots with bounded extrapolation;
 use latest-wins movement snapshots and reliable durable events. Local players
 predict immediately using shared movement/collision rules and compatible fixed
 steps. Restore authoritative physics state at acknowledged input, then replay
@@ -80,12 +116,17 @@ loss of another character's progression is not. Personal campaign state primaril
 owns journals, choices, relationships, faction progress, rewards and script history.
 Whole private campaigns are not the default response to an NPC death.
 
-**Generic respawn proposal:** configurable 15-minute real-time delay for initially
+**Lifecycle contract (M4).** Design stable placement/life generations, attributed
+death events, corpse inventories and respawn deadlines surviving unload/restart from
+the start.
+Old requests cannot affect new lives. OpenMW supplies origin/reconstruction data;
+authored corpses, summons, scripted spawns and deleted placements must not become
+permanent spawn points. M4 records causal events; M5 owns personal quest credit.
+
+**Respawn policy proposal:** configurable 15-minute real-time delay for initially
 living content-placed NPCs, including mod placements regardless of single-player
-respawn flags. OpenMW's resolved loadout supplies identity, origin and reconstruction
-data; no NPC list. Persist deadlines across unload/restart; game-time skips cannot
-accelerate them. Authored corpses, summons, scripted spawns and deleted placements
-require lifecycle rules, not new permanent spawn points.
+respawn flags. Delay tuning remains separate from lifecycle identity/persistence;
+game-time skips cannot accelerate deadlines. No NPC list.
 
 Separate three kinds of state:
 
@@ -241,8 +282,7 @@ loot, doors, player visibility and equipment. Ordinary doors share inventory
 durability. References, payloads and persistence remain bounded. A new capability
 excludes older clients. Fixture-free bootstrap requires established identities and
 uses engine environment with inherited client movement; physics remains M4.
-It does not authorize unsupported scripts. M3 still requires TR acceptance and
-latency measurements.
+It does not authorize unsupported scripts. CURRENT.md records milestone acceptance.
 
 **Initial leveled actors (v15).** A separate campaign-seeded OpenMW RNG stream and
 explicit loot level select initial NPC/creature records in stable cell/reference
