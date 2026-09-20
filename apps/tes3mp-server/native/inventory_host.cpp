@@ -3,6 +3,7 @@
 #include "inventory_service.hpp"
 #include "loadout.hpp"
 #include "environment.hpp"
+#include "actor_campaign.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <algorithm>
 #include <fstream>
@@ -27,6 +28,12 @@ namespace TES3MP::Native
             if (!input.read(text.data(), size)) throw std::invalid_argument("Native inventory descriptor read failed");
             return text;
         }
+        struct Navigation
+        {
+            std::string record, settings;
+            std::array<float, 3> destination;
+            float speed = 120;
+        };
         struct Startup
         {
             std::string text;
@@ -44,6 +51,7 @@ namespace TES3MP::Native
             ESM::RefId secondCell;
             std::optional<CellId> secondWireCell;
             std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
+            std::optional<Navigation> navigation;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -64,9 +72,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool streaming = version == "native-inventory-14" || version == "native-inventory-15";
+            const bool movingActor = version == "native-inventory-16";
+            const bool streaming = movingActor || version == "native-inventory-14" || version == "native-inventory-15";
             const bool exteriorCells = streaming || version == "native-inventory-13";
             const bool twoCells = exteriorCells || version == "native-inventory-10" || version == "native-inventory-11" || version == "native-inventory-12";
             const bool door = version == "native-inventory-9" || twoCells;
@@ -166,6 +175,7 @@ namespace TES3MP::Native
             std::string secondCellText;
             std::optional<CellId> secondWireCell;
             std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
+            std::optional<Navigation> navigation;
             size_t areaCount = 2;
             if (streaming)
             {
@@ -195,6 +205,21 @@ namespace TES3MP::Native
                     secondCellText += "\n" + areaText;
                 }
             }
+            if (movingActor)
+            {
+                key("npc"); Navigation nav;
+                in >> std::quoted(nav.record) >> std::quoted(nav.settings);
+                key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
+                if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
+                    || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096 || cell.is<ESM::ESM3ExteriorCellRefId>() || areaCount != 1)
+                    throw std::invalid_argument("Native navigating NPC descriptor invalid");
+                for (float value : nav.destination) if (!std::isfinite(value) || std::abs(value)>1e7f)
+                    throw std::invalid_argument("Native navigation destination invalid");
+                auto settings = std::filesystem::u8path(nav.settings);
+                if (settings.is_relative()) settings = path.parent_path()/settings;
+                nav.settings = settings.string();
+                navigation = std::move(nav);
+            }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
                 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
@@ -204,7 +229,7 @@ namespace TES3MP::Native
             InventoryServiceBinding binding{{*first, *second}, itemId,
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
             binding.mStreamExteriors = streaming;
-            if (version == "native-inventory-15") binding.mActorSelections.emplace();
+            if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
             if (version == "native-inventory-11" || version == "native-inventory-12" || exteriorCells) binding.mTeleportDoors.emplace();
@@ -216,10 +241,12 @@ namespace TES3MP::Native
                 << shirt << ':' << (itemId ? itemId->value() : 0) << '\n' << cellText << '\n' << lootLevel << ':' << lootSeed << '\n';
             if (streaming) semantic << cell.serializeText() << ":" << areaCount << '\n';
             if (twoCells) semantic << secondCellText << '\n';
+            if (navigation) semantic << std::setprecision(9) << navigation->record << ':' << navigation->speed << ':'
+                << navigation->destination[0] << ':' << navigation->destination[1] << ':' << navigation->destination[2] << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells)};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation)};
         }
     }
     struct InventoryHost::Impl
@@ -236,7 +263,8 @@ namespace TES3MP::Native
             {
                 if (restored.size() > MaximumNativeInventoryImageBytes)
                     throw std::invalid_argument("Native spawn image exceeds bound");
-                const auto bytes = std::span(reinterpret_cast<const char*>(restored.data()), restored.size());
+                auto bytes = std::span(reinterpret_cast<const char*>(restored.data()), restored.size());
+                if (start.navigation) bytes = readActorCampaign(bytes).inventory;
                 size_t offset = 0;
                 if (getAreaWord(bytes, offset) != SpawnAreaMagic)
                     throw std::invalid_argument("Leveled actor recovery requires a V15 campaign image");
@@ -268,7 +296,18 @@ namespace TES3MP::Native
                 auto references = start.plugin.empty()
                     ? (start.worldActors ? loadout.placedContainers(cell) : loadout.resolveContainers(cell, MaxEquipmentContainers))
                     : std::vector{loadout.resolveContainer(cell, start.plugin, start.index)};
-                if (start.worldActors)
+                if (start.navigation)
+                {
+                    // This descriptor deliberately binds one living NPC in a
+                    // frozen interior. Other inventory/door/script services are
+                    // outside its domain, just as in the collision probe.
+                    references = loadout.placedActors(cell);
+                    std::erase_if(references, [&](const auto& ref) { return ref.mRef.mRefID != ESM::RefId::stringRefId(start.navigation->record); });
+                    if (references.size()!=1 || references.front().mScripted || references.front().mLeveled)
+                        throw std::invalid_argument("Native navigating actor must be one unscripted placement");
+                    actorCounts[cellIndex]=1;
+                }
+                else if (start.worldActors)
                 {
                     const auto actors = start.binding.mActorSelections
                         ? loadout.resolveActors(cell, 128, start.binding.mLootLevel, spawnRng,
@@ -317,13 +356,13 @@ namespace TES3MP::Native
                                 world->mActorSpawns.push_back({marker.mIdentity, selected->mRecord});
                                 if (!selected->mRecord) ++actorCounts[cellIndex];
                             }
-                    for (const auto& item : loadout.placedItems(cell, start.binding.mStreamExteriors ? MaximumGroundItemBaselineChunkItems : 64))
+                    if (!start.navigation) for (const auto& item : loadout.placedItems(cell, start.binding.mStreamExteriors ? MaximumGroundItemBaselineChunkItems : 64))
                     {
                         world->mPlacements.emplace_back(item.mIdentity, item.mRef);
                         placement << "\nworld-item:" << item.mIdentity << ':' << item.mRef.mRefID;
                     }
                 }
-                if (start.stockPlacement)
+                if (start.stockPlacement && !start.navigation)
                 {
                     for (const auto& [id, ref] : world->mPlacements) domains[cellIndex].push_back(ref);
                     scenes[cellIndex] = std::make_unique<PlacementScene>(loadout, cell, domains[cellIndex]);
@@ -336,7 +375,7 @@ namespace TES3MP::Native
                         return scenes[cellIndex]->resolve(actor, item, view, world);
                     };
                 }
-                if (start.binding.mStreamExteriors)
+                if (start.binding.mStreamExteriors && !start.navigation)
                     for (const auto& door : loadout.ordinaryDoors(cell, 128))
                     {
                         if (start.binding.mDoors.size() == 4096)
@@ -355,7 +394,7 @@ namespace TES3MP::Native
                 // Bind even an empty second cell's engine identity.
                 if (start.secondWireCell)
                     placement << "\narea:" << cellIndex << ':' << std::quoted(cell.serializeText());
-                if (start.binding.mTeleportDoors)
+                if (start.binding.mTeleportDoors && !start.navigation)
                 {
                     const auto angle = [](float radians) {
                         double turns = -double(radians) / (2 * std::numbers::pi);
@@ -378,7 +417,7 @@ namespace TES3MP::Native
                     }
                 }
             }
-            if (start.secondWireCell || start.binding.mStreamExteriors)
+            if ((start.secondWireCell || start.binding.mStreamExteriors) && !start.navigation)
             {
                 if (start.binding.mStreamExteriors)
                     for (const auto& cell : wireCells)
@@ -422,6 +461,21 @@ namespace TES3MP::Native
                 for (const auto& spawn : selections)
                     placement << "\nspawn:" << spawn.mPlacement << ':' << spawn.mRecord;
             }
+            if (start.navigation)
+            {
+                const auto base = ESM::RefId::stringRefId(start.navigation->record);
+                const auto matching = [&](const auto& owner) { return owner.mCell == start.wireCell && owner.mBase == base; };
+                if (std::ranges::count_if(start.binding.mContainers, matching) != 1)
+                    throw std::invalid_argument("Navigating NPC must resolve to one authoritative inventory owner");
+                const auto& owner = *std::ranges::find_if(start.binding.mContainers, matching);
+                auto scene = std::make_shared<InteriorActorScene>(loadout, std::string(start.cell.getRefIdString()), owner.mId.value(),
+                    "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                scene->enableNavigation(start.navigation->settings);
+                scene->travelTo(start.navigation->destination);
+                placement << scene->fingerprint();
+                start.binding.mNavigationSpeed = start.navigation->speed;
+                start.binding.mNavigatingActor = std::move(scene);
+            }
             // Re-resolve before recovery. The image envelope binds resolved
             // placement plus actual ordered file bytes, encoding and player roles.
             auto material = start.text + placement.str() + '\n' + loadout.contentFingerprint();
@@ -436,7 +490,7 @@ namespace TES3MP::Native
             : loadout(std::move(start.options)),
               inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes, restored), !restored.empty())
         {
-            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13") || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15"))
+            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13") || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15") || start.text.starts_with("native-inventory-16"))
                 environment = std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed);
             if (!restored.empty())
             {

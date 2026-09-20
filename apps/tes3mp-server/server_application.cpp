@@ -275,6 +275,9 @@ namespace TES3MP::ServerApp
         }
         if (!mWiring->lifecycle.commit(lifecycle->id))
             return false;
+        if (mWiring->nativeInventory && mWiring->nativeInventory->hasActorMotion())
+            std::fprintf(stderr, "native actor disconnect committed: tick=%llu active_sessions=%zu\n",
+                static_cast<unsigned long long>(tick.value()), mWiring->reducer.state().activeSessions().size());
         for (const auto connection : knownConnections)
             if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted)
                 return false;
@@ -1063,7 +1066,7 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>> weatherUpdates;
             std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>> worldTimeUpdates;
             std::vector<CellId> changedObjectCells;
-            bool refreshInventoryBaselines = prepared.candidateNativeInventory() != nullptr;
+            bool refreshInventoryBaselines = prepared.candidateNativeInventory() && prepared.candidateNativeInventory()->changesInventory();
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
             auto waitRestConsentsCandidate = mWaitRestConsents;
@@ -1279,7 +1282,7 @@ namespace TES3MP::ServerApp
                         const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
                         const bool changedCell
                             = oldPlayer && newPlayer && oldPlayer->transform().cell() != newPlayer->transform().cell();
-                        if (!connection || !newPlayer || (!changedCell && !refreshInventoryBaselines)
+                        if (!connection || !newPlayer || (!changedCell && !refreshInventoryBaselines && !(mWiring->nativeInventory && mWiring->nativeInventory->hasActorMotion()))
                             || !supportsInventory(*connection))
                             continue;
                         auto baseline = mWiring->nativeInventory
@@ -1293,6 +1296,8 @@ namespace TES3MP::ServerApp
                             mFailure = "inventory baseline projection failed";
                             return false;
                         }
+                        if (!changedCell && !refreshInventoryBaselines && mWiring->nativeInventory && mWiring->nativeInventory->hasActorMotion())
+                        { baseline->playerInventory.clear(); baseline->containers.clear(); baseline->groundItems.clear(); }
                         inventoryBaselines.emplace_back(*connection, std::move(*baseline));
                     }
             }

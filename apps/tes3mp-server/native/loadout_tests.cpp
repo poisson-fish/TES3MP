@@ -6551,6 +6551,11 @@ int main(int argc, char** argv)
             std::cout << "PASS exterior-host\n";
             return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "native-navigation")
+        {
+            TES3MP::Native::Testing::checkNavigatingActor(std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),std::filesystem::absolute(argv[4]));
+            std::cout << "PASS native-navigation\n"; return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "environment-host")
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),

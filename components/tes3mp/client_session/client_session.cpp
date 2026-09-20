@@ -720,9 +720,13 @@ namespace TES3MP
             return InventoryReplicationReceiveResult::GenerationMismatch;
         if (mConfirmedEquipmentSnapshot)
         {
-            if (snapshot.serverTick < mConfirmedEquipmentSnapshot->serverTick)
+            if (snapshot.serverTick < mConfirmedEquipmentSnapshot->serverTick
+                || snapshot.canonicalRevision < mConfirmedEquipmentSnapshot->canonicalRevision)
                 return InventoryReplicationReceiveResult::StaleTick;
-            if (snapshot.serverTick == mConfirmedEquipmentSnapshot->serverTick)
+            // A join baseline and the following native simulation commit can
+            // share a tick. Canonical revision orders those distinct commits.
+            if (snapshot.serverTick == mConfirmedEquipmentSnapshot->serverTick
+                && snapshot.canonicalRevision == mConfirmedEquipmentSnapshot->canonicalRevision)
                 return snapshot == *mConfirmedEquipmentSnapshot
                     ? InventoryReplicationReceiveResult::IdenticalDuplicate
                     : InventoryReplicationReceiveResult::ContradictorySameTick;

@@ -36,6 +36,7 @@ namespace TES3MP
     inline constexpr std::uint32_t NativeEnvironmentCapabilityValue = 16;
     inline constexpr std::uint32_t NativeStreamingCapabilityValue = 17;
     inline constexpr std::uint32_t NativeLeveledActorsCapabilityValue = 18;
+    inline constexpr std::uint32_t NativeActorMotionCapabilityValue = 19;
 
     class CapabilityId
     {
@@ -88,6 +89,9 @@ namespace TES3MP
     {
         return *CapabilityId::fromValue(NativeTeleportCapabilityValue);
     }
+
+    inline constexpr CapabilityId nativeActorMotionCapability() noexcept
+    { return *CapabilityId::fromValue(NativeActorMotionCapabilityValue); }
 
     inline constexpr CapabilityId nativeLeveledActorsCapability() noexcept
     { return *CapabilityId::fromValue(NativeLeveledActorsCapabilityValue); }

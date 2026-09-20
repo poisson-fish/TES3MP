@@ -1,55 +1,46 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active. M3 was accepted on 2026-09-19.**
-M4 binds one content-derived NPC to a detached interior collision scene. Stock
-movement/sweeps/stair stepping accept an explicit collision-effect owner; stock
-callers retain effects, while the native scene journals bounded contacts. NPC model
-selection and hull construction are shared. Player movement authority is unchanged;
-computer-use remains disabled.
+Raflod the Braggart now navigates **Seyda Neen, Arrille's Tradehouse** using
+OpenMW DetourNavigator/PathFinder and stock collision/stepping. Two 60 Hz physics
+steps compose with the existing native actor/inventory owner in each durable
+30 Hz tick. Position, remaining path, contacts and inventory install only after
+commit. Either active player sustains simulation. Clients interpolate committed
+motion; player movement authority is unchanged. Computer-use remains disabled.
 
-Next: reuse engine navigation, then compose actor physics with the native host's
-authoritative actor/inventory state and durable tick installation. Prove smooth
-two-client replication under latency/jitter/loss, continuing when either disconnects.
-Live navigation and replication remain pending; follow DECISIONS.md's cutover rules.
+Next: server-owned NPC-door contact/avoidance using shared OpenMW physics, following
+[DECISIONS.md](DECISIONS.md). Traveler activity after both players leave follows later.
 
-Verified 2026-09-20 in `build/vnext-desktop-evidence`:
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-16**
+requires a fresh campaign, one dry interior, one living unscripted nonleveled NPC,
+a fixed destination/speed and navigation settings. Background collision is frozen;
+background inventories, doors, teleports and pickup/drop are unavailable in V16.
+Both players leaving freezes the path. AI packages, gameplay animation timing,
+combat, scripts, water, creatures, corpses and animated collision remain outside
+this slice. Production headless packaging remains unproved. V15 campaigns retain
+M3 behavior.
 
-- `tes3mp_native_actor_tests` filters `collision-effects` and `movement-collision`
-  passed separately: isolated effects, invalid/inactive projectile targets, hull
-  selection, wall/actor obstruction, sliding and steps. Logs under `build/logs`:
-  `m4-collision-build.log`, `m4-collision-effects.log`, `m4-collision-movement.log`.
-  Earlier environment evidence: `m4-movement-environment.log`.
-- `tes3mp_native_actor_probe`: Raflod the Braggart in **Seyda Neen, Arrille's
-  Tradehouse**, using the retained Morrowind/Tribunal/Bloodmoon/Tamriel_Data/TR_Mainland
-  loadout. 206 collision bodies, 900 movement steps, 888 grounded, seven contacted
-  objects; invalid velocity left the snapshot unchanged. Logs:
-  `build/logs/m4-interior-build.log`, `build/logs/m4-interior-npc.log`;
-  the latter records placement and content/model fingerprints.
+Verified 2026-09-20 in `build/vnext-desktop-evidence`, retained
+Morrowind/Tribunal/Bloodmoon/Tamriel_Data/TR_Mainland loadout:
 
-`tes3mp_native_actor_runtime` remains a frozen dry-interior physics diagnostic:
-no AI, gameplay animation, live authority or durability. It constructs no
-Environment/World/player/rendering services. Only the selected living unscripted
-NPC moves. Water, corpses, non-NPC/unresolved leveled actors, projectiles and animated
-object collision are unsupported. Inventories/scripts do not execute; production
-headless packaging remains unproved.
+- `tes3mp_native_loadout_tests native-navigation`: atomic rejected ticks,
+  inventory composition, exact mid-path/arrival recovery, malformed input,
+  uncertain-write closure and both disconnects through production codecs/smoothing.
+  Latest isolated maximum tick: 9.9 ms; an earlier run had one 35.1 ms outlier.
+  `build/logs/m4-navigation-durable.log`.
+- `tes3mp_headless_client_tests early-native-snapshot`: bounded pre-authentication
+  buffering without early installation. Same-tick revision ordering is covered
+  by `native-navigation`. `build/logs/m4-navigation-early.log`.
+- Two real desktop clients at 30 FPS, 40 units/second: 100 ms one-way latency,
+  ±25 ms jitter, 10% loss, periodic reordering; either player disconnects durably.
+  Survivors move another 324 units and converge. Captured rendered frame steps
+  stay below 5 units. Each scenario's `result.json` and bounded samples are under
+  `build/logs/m4-navigation-Alice-final` and `build/logs/m4-navigation-Bob-final`.
+  Reproduce with `scripts/run_native_navigation_capture.py`; capture processes stopped.
+- User visually confirmed Raflod moving with two desktop clients on 2026-09-20.
+  The observation run used 10 units/second to extend viewing time; the temporary
+  slowdown was removed and the launch setup restored to 40 units/second.
 
-[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-15**,
-campaign-seeded initial living actors; selections/none persist without rerolling.
-AI/combat/respawn, leveled corpses, scripts/Lua and locked/trapped inventories
-remain unsupported. Client AI/local leveled spawning remain suppressed.
-Streaming retains occupied interiors/player 3×3 exteriors; unloaded doors freeze,
-weather continues, inventories persist.
-
-Inherited M3 acceptance: Varyon doors/restoration and Noran travel/weather/reconnect;
-final door latency accepted without a new timing capture. Split/unload/reentry
-evidence is synthetic: `build/logs/m3-area-crossings-02.log`.
-Retained setups provide `launch.ps1 -Role server|Alice|Bob [-Evidence]`:
-
-- `build/m3-tr-varyon-doors`, port 25617, stopped at handoff; campaign retained.
-- `build/m3-tr-noran-dry`, port 25616, server/two clients running at prior handoff;
-  land spawn `(310272,-240512,200)`, exterior `(37,-30)`. Original
-  `build/m3-tr-noran` retained/stopped.
-
-Loadout/recovery: `build/logs/m3-v15-acceptance.json`. Reconnect evidence:
-`build/logs/m3-tr-noran-dry/weather-reconnect.json`,
-`build/logs/m3-tr-varyon-doors/reconnect-20260919.json`.
+Retained M3 campaigns: `build/m3-tr-varyon-doors` (25617),
+`build/m3-tr-noran-dry` (25616). Prior acceptance:
+`build/logs/m3-v15-acceptance.json`; inherited split/unload evidence remains synthetic.

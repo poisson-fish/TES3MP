@@ -121,6 +121,9 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "components/tes3mp/include/tes3mp/interactive_object_replication.hpp",
             "components/tes3mp/protocol/native_door.cpp",
             "components/tes3mp/include/tes3mp/native_door.hpp",
+            "components/tes3mp/include/tes3mp/native_inventory.hpp",
+            "components/tes3mp/include/tes3mp/inventory_replication.hpp",
+            "components/tes3mp/protocol/inventory_replication.cpp",
             "apps/tes3mp-server/interactive_object_interest_projection.cpp",
             "apps/tes3mp-server/interactive_object_interest_projection.hpp",
         )

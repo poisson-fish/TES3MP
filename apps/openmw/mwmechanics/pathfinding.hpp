@@ -22,6 +22,7 @@ namespace MWWorld
 namespace DetourNavigator
 {
     struct AgentBounds;
+    struct Navigator;
 }
 
 namespace MWMechanics
@@ -121,6 +122,12 @@ namespace MWMechanics
         /// Remove front point if exist and within tolerance
         void update(const osg::Vec3f& position, float pointTolerance, float destinationTolerance,
             UpdateFlags updateFlags, const DetourNavigator::AgentBounds& agentBounds, DetourNavigator::Flags pathFlags);
+
+        // Explicit simulation context for detached server actors; stock callers
+        // resolve the same navigator through World in the overload above.
+        void update(const osg::Vec3f& position, float pointTolerance, float destinationTolerance,
+            UpdateFlags updateFlags, const DetourNavigator::AgentBounds& agentBounds,
+            DetourNavigator::Flags pathFlags, const DetourNavigator::Navigator& navigator);
 
         bool checkPathCompleted() const { return mConstructed && mPath.empty(); }
 

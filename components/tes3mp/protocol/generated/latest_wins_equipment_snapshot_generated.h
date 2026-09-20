@@ -25,6 +25,8 @@ struct ActorEquipmentMember;
 struct EquipmentSnapshotHeader;
 struct EquipmentSnapshotHeaderBuilder;
 
+struct NativeActorMotion;
+
 struct LatestWinsEquipmentSnapshot;
 struct LatestWinsEquipmentSnapshotBuilder;
 
@@ -290,6 +292,76 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorEquipmentMember FLATBUFFERS_FINAL_CL
 };
 FLATBUFFERS_STRUCT_END(ActorEquipmentMember, 160);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeActorMotion FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t placement_;
+  uint64_t tick_;
+  float x_;
+  float y_;
+  float z_;
+  float vx_;
+  float vy_;
+  float vz_;
+  float yaw_;
+  int32_t padding0__;
+
+ public:
+  NativeActorMotion()
+      : placement_(0),
+        tick_(0),
+        x_(0),
+        y_(0),
+        z_(0),
+        vx_(0),
+        vy_(0),
+        vz_(0),
+        yaw_(0),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  NativeActorMotion(uint64_t _placement, uint64_t _tick, float _x, float _y, float _z, float _vx, float _vy, float _vz, float _yaw)
+      : placement_(::flatbuffers::EndianScalar(_placement)),
+        tick_(::flatbuffers::EndianScalar(_tick)),
+        x_(::flatbuffers::EndianScalar(_x)),
+        y_(::flatbuffers::EndianScalar(_y)),
+        z_(::flatbuffers::EndianScalar(_z)),
+        vx_(::flatbuffers::EndianScalar(_vx)),
+        vy_(::flatbuffers::EndianScalar(_vy)),
+        vz_(::flatbuffers::EndianScalar(_vz)),
+        yaw_(::flatbuffers::EndianScalar(_yaw)),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  uint64_t placement() const {
+    return ::flatbuffers::EndianScalar(placement_);
+  }
+  uint64_t tick() const {
+    return ::flatbuffers::EndianScalar(tick_);
+  }
+  float x() const {
+    return ::flatbuffers::EndianScalar(x_);
+  }
+  float y() const {
+    return ::flatbuffers::EndianScalar(y_);
+  }
+  float z() const {
+    return ::flatbuffers::EndianScalar(z_);
+  }
+  float vx() const {
+    return ::flatbuffers::EndianScalar(vx_);
+  }
+  float vy() const {
+    return ::flatbuffers::EndianScalar(vy_);
+  }
+  float vz() const {
+    return ::flatbuffers::EndianScalar(vz_);
+  }
+  float yaw() const {
+    return ::flatbuffers::EndianScalar(yaw_);
+  }
+};
+FLATBUFFERS_STRUCT_END(NativeActorMotion, 48);
+
 struct EquipmentSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EquipmentSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -367,7 +439,8 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
     VT_MEMBERS = 6,
-    VT_ACTORS = 8
+    VT_ACTORS = 8,
+    VT_MOTIONS = 10
   };
   const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *>(VT_HEADER);
@@ -378,6 +451,9 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *> *actors() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *> *>(VT_ACTORS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *> *motions() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *> *>(VT_MOTIONS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -387,6 +463,8 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            verifier.VerifyVector(members()) &&
            VerifyOffset(verifier, VT_ACTORS) &&
            verifier.VerifyVector(actors()) &&
+           VerifyOffset(verifier, VT_MOTIONS) &&
+           verifier.VerifyVector(motions()) &&
            verifier.EndTable();
   }
 };
@@ -404,6 +482,9 @@ struct LatestWinsEquipmentSnapshotBuilder {
   void add_actors(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors) {
     fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_ACTORS, actors);
   }
+  void add_motions(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *>> motions) {
+    fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_MOTIONS, motions);
+  }
   explicit LatestWinsEquipmentSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -419,8 +500,10 @@ inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipm
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *>> members = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *>> motions = 0) {
   LatestWinsEquipmentSnapshotBuilder builder_(_fbb);
+  builder_.add_motions(motions);
   builder_.add_actors(actors);
   builder_.add_members(members);
   builder_.add_header(header);
@@ -431,14 +514,17 @@ inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipm
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember> *members = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember> *actors = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember> *actors = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion> *motions = nullptr) {
   auto members__ = members ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember>(*members) : 0;
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember>(*actors) : 0;
+  auto motions__ = motions ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion>(*motions) : 0;
   return TES3MP::Protocol::Schema::EquipmentSnapshot::CreateLatestWinsEquipmentSnapshot(
       _fbb,
       header,
       members__,
-      actors__);
+      actors__,
+      motions__);
 }
 
 inline const TES3MP::Protocol::Schema::EquipmentSnapshot::LatestWinsEquipmentSnapshot *GetLatestWinsEquipmentSnapshot(const void *buf) {

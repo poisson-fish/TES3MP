@@ -3,6 +3,7 @@
 
 #include "equipment_runtime.hpp"
 #include "actor_spawns.hpp"
+#include "actor_scene.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -70,6 +71,8 @@ namespace TES3MP::Native
         bool mStreamExteriors = false;
         std::function<void(const std::vector<bool>&)> mAreaActivity;
         std::optional<std::vector<ActorSpawnSelection>> mActorSelections;
+        std::shared_ptr<InteriorActorScene> mNavigatingActor;
+        float mNavigationSpeed = 120;
         std::vector<const WorldItems*> worldDomains() const
         {
             std::vector<const WorldItems*> result;
@@ -91,12 +94,19 @@ namespace TES3MP::Native
         MWWorld::LocalScripts mScripts;
         EquipmentRuntime mRuntime;
         EquipmentBytes mImage;
+        EquipmentBytes mActorImage;
         class Transaction;
         class EquipmentTransaction;
         class WorldTransaction;
         class DoorTransaction;
         class TeleportTransaction;
         class AreaDoorTransaction;
+        class ActorTransaction;
+        uint64_t mActorTick = 0;
+        std::array<float, 3> mActorVelocity{};
+        EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
+            uint64_t tick, const std::array<float, 3>& velocity) const;
+        void installActorPosition() noexcept;
         struct AreaDoor
         {
             DoorBinding binding;
@@ -171,6 +181,9 @@ namespace TES3MP::Native
         bool requiresDoorTraversal() const noexcept override { return mBinding.mTeleportDoors.has_value(); }
         bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
+        bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
+        std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
         bool allowsCellTransition(CellId current, CellId requested, Position3 position) const override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(

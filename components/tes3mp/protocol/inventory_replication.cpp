@@ -407,7 +407,8 @@ namespace TES3MP
 
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
         SessionId target, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
-        std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors)
+        std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors,
+        std::span<const NativeActorMotion> motions)
     {
         if (members.size() > MaximumEquipmentSnapshotPlayers)
             return error(Code::TooManyEntries, members.size(), MaximumEquipmentSnapshotPlayers);
@@ -421,8 +422,22 @@ namespace TES3MP
             if (actors[index - 1].actor >= actors[index].actor)
                 return error(Code::EntriesNotStrictlySorted, actors[index].actor.value(),
                     actors[index - 1].actor.value(), index);
+        if (motions.size() > MaximumEquipmentSnapshotActors) return error(Code::TooManyEntries);
+        for (size_t i=0; i<motions.size(); ++i)
+        {
+            const auto& motion=motions[i];
+            if (!(motion.placement >> 63) || !motion.tick || motion.tick > tick.value()
+                || (i && motions[i-1].placement >= motion.placement)
+                || std::ranges::none_of(actors, [&](const auto& owner) { return owner.actor.value()==motion.placement; })
+                || !std::isfinite(motion.yaw) || std::abs(motion.yaw)>1e4f)
+                return error(Code::InvalidStrongValue);
+            for (size_t axis=0; axis<3; ++axis)
+                if (!std::isfinite(motion.position[axis]) || std::abs(motion.position[axis])>1e7f
+                    || !std::isfinite(motion.velocity[axis]) || std::abs(motion.velocity[axis])>4096)
+                    return error(Code::InvalidStrongValue);
+        }
         return LatestWinsEquipmentSnapshot{ target, generation, tick, revision,
-            { members.begin(), members.end() }, { actors.begin(), actors.end() } };
+            { members.begin(), members.end() }, { actors.begin(), actors.end() }, {motions.begin(), motions.end()} };
     }
 
     std::vector<std::byte> encodeReliablePlayerInventoryBaseline(const ReliablePlayerInventoryBaseline& input)
@@ -533,8 +548,12 @@ namespace TES3MP
                 slots[6], slots[7], slots[8], slots[9], slots[10], slots[11], slots[12], slots[13], slots[14],
                 slots[15], slots[16], slots[17], slots[18]);
         }
+        std::vector<EquipmentSchema::NativeActorMotion> motions;
+        for (const auto& m : input.motions)
+            motions.emplace_back(m.placement, m.tick, m.position[0], m.position[1], m.position[2],
+                m.velocity[0], m.velocity[1], m.velocity[2], m.yaw);
         const auto root = EquipmentSchema::CreateLatestWinsEquipmentSnapshotDirect(
-            builder, header, &members, actors.empty() ? nullptr : &actors);
+            builder, header, &members, actors.empty() ? nullptr : &actors, motions.empty() ? nullptr : &motions);
         EquipmentSchema::FinishSizePrefixedLatestWinsEquipmentSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -885,8 +904,18 @@ namespace TES3MP
                 actors.push_back(std::move(member));
             }
         }
+        std::vector<NativeActorMotion> motions;
+        if (const auto* encoded = root->motions())
+        {
+            if (encoded->size()>MaximumEquipmentSnapshotActors) return error(Code::TooManyEntries);
+            for (size_t i=0; i<encoded->size(); ++i)
+            {
+                const auto m = copyStruct(encoded, i);
+                motions.push_back({m.placement(), m.tick(), {m.x(),m.y(),m.z()}, {m.vx(),m.vy(),m.vz()}, m.yaw()});
+            }
+        }
         return LatestWinsEquipmentSnapshot::create(
-            *value(session), *value(generation), *value(tick), *value(revision), members, actors);
+            *value(session), *value(generation), *value(tick), *value(revision), members, actors, motions);
     }
 
     InventoryTransactionCommandDecodeResult decodeClientInventoryTransactionCommand(std::span<const std::byte> payload)

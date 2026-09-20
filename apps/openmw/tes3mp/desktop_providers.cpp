@@ -921,6 +921,14 @@ namespace TES3MP::OpenMWAdapter
             std::optional<MonotonicInstant> lastAdvance;
         };
         std::map<uint64_t, LeveledPresentation> leveledActors;
+        struct NativeRemote : ActorRemote
+        {
+            using ActorRemote::ActorRemote;
+            MWWorld::Ptr source;
+            std::vector<ESM::RefId> equipment;
+            uint64_t tick = 0;
+        };
+        std::map<uint64_t, NativeRemote> nativeRemotes;
         MWWorld::InventoryRecordMap nativeActorRecords;
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
         std::map<uint64_t, NativeDoorSnapshot> nativeDoors;
@@ -950,6 +958,9 @@ namespace TES3MP::OpenMWAdapter
                 remote.motion.clear();
             }
             actorRemotes.clear();
+            for (auto& [id, remote] : nativeRemotes)
+                try { if (!remote.source.isEmpty()) MWBase::Environment::get().getWorld()->enable(remote.source); } catch (...) {}
+            nativeRemotes.clear();
             leveledActors.clear();
             nativeActorRecords.clear();
             observedDoors.clear();
@@ -1031,7 +1042,7 @@ namespace TES3MP::OpenMWAdapter
             return true;
         }
 
-        ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot)
+        ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot, MonotonicInstant receivedAt)
         {
             auto world = MWBase::Environment::get().getWorld();
             std::set<uint64_t> desiredSpawns;
@@ -1089,6 +1100,15 @@ namespace TES3MP::OpenMWAdapter
                     leveledActors.emplace(spawn.placement, LeveledPresentation{cell, spawn.record, std::move(records), std::move(actor)});
                 }
             }
+            for (auto it=nativeRemotes.begin(); it!=nativeRemotes.end();)
+            {
+                if (std::ranges::none_of(snapshot.motions, [&](const auto& motion) { return motion.placement == it->first; }))
+                {
+                    world->enable(it->second.source);
+                    it=nativeRemotes.erase(it);
+                }
+                else ++it;
+            }
             for (const auto& member : snapshot.actors)
             {
                 if (desiredSpawns.contains(member.actor.value())) continue;
@@ -1108,6 +1128,37 @@ namespace TES3MP::OpenMWAdapter
                         if (record == nativeItemRecords.end()) return ProviderResult::ContentMappingFailed;
                         records.emplace_back(static_cast<int>(slot), record->second);
                     }
+                const auto motion = std::ranges::find(snapshot.motions, member.actor.value(), &NativeActorMotion::placement);
+                if (motion != snapshot.motions.end())
+                {
+                    const auto cell = toCanonical(*ptr.getCell()->getCell(), *mapping);
+                    if (!cell) return ProviderResult::ContentMappingFailed;
+                    std::vector<ESM::RefId> appearance;
+                    for (const auto& [slot, record] : records)
+                        if (slot != int(EquipmentSlot::Ammunition)) appearance.push_back(record);
+                    auto remote=nativeRemotes.find(motion->placement);
+                    if (remote != nativeRemotes.end() && (remote->second.cell != ptr.getCell()
+                        || remote->second.equipment != appearance || !remote->second.actor->ptr().getRefData().getBaseNode()))
+                    { world->enable(remote->second.source); nativeRemotes.erase(remote); remote=nativeRemotes.end(); }
+                    if (remote == nativeRemotes.end())
+                    {
+                        ESM::Position position=ptr.getRefData().getPosition();
+                        std::copy(motion->position.begin(),motion->position.end(),position.pos); position.rot[2]=motion->yaw;
+                        auto [created, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
+                            *MWBase::Environment::get().getESMStore(), ptr.getCellRef().getRefId(), *ptr.getCell(),
+                            position, std::span<const ESM::RefId>(appearance), ptr.getCellRef().getScale());
+                        if (!MWRender::replicatedActorResultAccepted(created) || !actor) return mapReplicatedActorResult(created);
+                        remote=nativeRemotes.try_emplace(motion->placement,ptr.getCell(),std::move(actor),metrics).first;
+                        remote->second.source=ptr; remote->second.equipment=std::move(appearance);
+                        world->disable(ptr);
+                    }
+                    if (motion->tick > remote->second.tick)
+                    {
+                        if (!remote->second.motion.observe(*motion,*cell,receivedAt)) return ProviderResult::PresentationFailed;
+                        remote->second.tick=motion->tick;
+                    }
+                    continue;
+                }
                 if (ptr.getClass().hasInventoryStore(ptr))
                     ptr.getClass().getInventoryStore(ptr).applyAuthoritativeAppearance(records,
                         *MWBase::Environment::get().getESMStore(), world->getLocalScripts(),
@@ -1945,6 +1996,17 @@ namespace TES3MP::OpenMWAdapter
                     return result;
                 }
             }
+            for (auto& [id, remote] : nativeRemotes)
+            {
+                if (!remote.actor->ptr().getRefData().getBaseNode()) continue;
+                auto pose=remote.motion.advance(now);
+                if (!pose) return ProviderResult::PresentationFailed;
+                const float seconds=remote.lastAdvance && now>=*remote.lastAdvance
+                    ? float(now.nanoseconds()-remote.lastAdvance->nanoseconds())/1e9f : 0.f;
+                remote.lastAdvance=now;
+                const auto result=remote.actor->update(toOpenMW(*pose),toOpenMW(remoteLocomotionAnimation(*pose)),seconds);
+                if (!MWRender::replicatedActorResultAccepted(result)) return mapReplicatedActorResult(result);
+            }
             for (auto& [entity, remote] : actorRemotes)
             {
                 auto pose = remote.motion.advance(now);
@@ -2147,7 +2209,7 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
             std::span<const ReliableContainerInventoryBaseline> containers,
-            const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment)
+            const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt)
         {
             if (!mapping)
                 return ProviderResult::ContentMappingFailed;
@@ -2388,7 +2450,7 @@ namespace TES3MP::OpenMWAdapter
                 presentedGroundBaseline = groundItems;
             }
             observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
-            return applyPublicEquipment(equipment);
+            return applyPublicEquipment(equipment, receivedAt);
         }
 
         ProviderResult applyNativeDoors(const ReliableGroundItemBaseline& groundItems)
@@ -2677,6 +2739,18 @@ namespace TES3MP::OpenMWAdapter
     {
     }
 
+    std::vector<NativeActorMotion> DesktopPresentation::nativeActorPresentation() const
+    {
+        std::vector<NativeActorMotion> result;
+        for (const auto& [id, remote] : mImpl->nativeRemotes)
+        {
+            if (!remote.actor->ptr().getRefData().getBaseNode()) continue;
+            const auto& position=remote.actor->ptr().getRefData().getPosition();
+            result.push_back({id,remote.tick,{position.pos[0],position.pos[1],position.pos[2]}, {},position.rot[2]});
+        }
+        return result;
+    }
+
     DesktopPresentation::~DesktopPresentation() = default;
 
     std::optional<bool> DesktopPresentation::nativeDoorObstruction(const NativeDoorSnapshot& door) const noexcept
@@ -2792,10 +2866,9 @@ namespace TES3MP::OpenMWAdapter
         std::span<const ReliableContainerInventoryBaseline> containers, const ReliableGroundItemBaseline& groundItems,
         const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
     {
-        (void)receivedAt;
         try
         {
-            const auto result = mImpl->applyInventory(player, containers, groundItems, equipment);
+            const auto result = mImpl->applyInventory(player, containers, groundItems, equipment, receivedAt);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;

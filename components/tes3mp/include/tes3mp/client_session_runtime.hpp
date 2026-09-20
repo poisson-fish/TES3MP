@@ -180,6 +180,9 @@ namespace TES3MP
         std::optional<ReliableCharacterProfile> mCharacterProfile;
         std::optional<ReliableCharacterProfile> mPendingCharacterProfile;
         std::vector<ReliableObservationBatch> mPendingObservations;
+        // At most one decoded snapshot of each of five latest-wins kinds.
+        // No session/presentation state is installed before authentication.
+        std::vector<ClientRuntimeMessage> mPendingAuthenticationSnapshots;
         bool mResyncPending = false;
         bool mResyncPlayerBaselineObserved = false;
         bool mResyncActorBaselineObserved = false;

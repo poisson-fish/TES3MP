@@ -5,18 +5,30 @@
 
 #include <array>
 #include <cstdlib>
+#include <string_view>
+#include <cstdio>
+#include <source_location>
 
 namespace
 {
-    void require(bool value)
+    void require(bool value, std::source_location where = std::source_location::current())
     {
         if (!value)
+        {
+            std::fprintf(stderr, "headless client check failed at line %u\n", where.line());
             std::abort();
+        }
     }
     template <class Value>
     Value value(std::uint64_t raw)
     {
         return *Value::fromValue(raw);
+    }
+    template <class T, class... Alternatives>
+    T checked(std::variant<Alternatives...> input, std::source_location where = std::source_location::current())
+    {
+        require(std::holds_alternative<T>(input), where);
+        return std::get<T>(std::move(input));
     }
     TES3MP::ResumeToken resumeToken(std::byte byte)
     {
@@ -81,10 +93,60 @@ namespace
         std::vector<std::byte> sent;
         std::optional<TES3MP::TransportChannel> sentChannel;
     };
+
+    void earlyNativeSnapshot()
+    {
+        using namespace TES3MP;
+        FakeRuntime transport;
+        TestSupport::ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        const auto queues = *OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+        auto client = checked<std::unique_ptr<ClientSessionRuntime>>(
+            ClientSessionRuntime::create(transport, clock, timeouts, SessionGeneration::initial(), queues));
+        const auto versions = checked<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+        const std::array capabilities{ inventoryReplicationCapability(), nativeActorMotionCapability() };
+        auto offer = checked<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+        auto hello = ClientHello::fromOffer(offer);
+        auto serverHello = checked<ServerHello>(negotiateClientHello(hello, offer));
+        require(client->start(*ConnectionEndpoint::create("127.0.0.1", 25565), std::move(hello),
+            AuthenticationRequest::join(*AuthenticationMaterial::create({}))) == HeadlessClientResult::Accepted);
+        require(client->advance().action == ClientSessionAction::SendClientHello);
+        const auto receive = [&](MessageClass cls, MessageKind kind, std::vector<std::byte> payload, TransportChannel channel) {
+            transport.inbound.push_back({channel, checked<std::vector<std::byte>>(encodeProtocolFrame(cls, kind, payload))});
+        };
+        receive(MessageClass::SessionControl, MessageKind::ServerHello, encodeServerHello(serverHello), TransportChannel::ReliableOrdered);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        require(client->session().stateMachine().state() == ClientSessionState::AwaitingAuthenticationResult);
+        const PublicActorEquipmentMember actor{ value<ContainerId>(0x8000000000000001ull), {} };
+        const NativeActorMotion motion{ actor.actor.value(), 1, {1, 2, 3}, {}, 0 };
+        const auto equipment = checked<LatestWinsEquipmentSnapshot>(LatestWinsEquipmentSnapshot::create(
+            value<SessionId>(1), SessionGeneration::initial(), value<ServerTick>(1), CanonicalRevision::initial(),
+            {}, std::span(&actor, 1), std::span(&motion, 1)));
+        receive(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+            encodeLatestWinsEquipmentSnapshot(equipment), TransportChannel::LatestWins);
+        const auto early = client->advance();
+        require(early.result == ClientRuntimeResult::Accepted && !early.equipmentSnapshotApplied
+            && client->session().stateMachine().state() == ClientSessionState::AwaitingAuthenticationResult
+            && !client->session().stateMachine().sessionId());
+        const auto accepted = AuthenticationAcceptedMessage::create(resumeToken(std::byte{8}), 5000).value();
+        receive(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+            encodeAuthenticationAccepted(accepted), TransportChannel::ReliableOrdered);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        const auto established = client->advance();
+        require(established.result == ClientRuntimeResult::Accepted && established.equipmentSnapshotApplied
+            && client->session().stateMachine().confirmedEquipmentSnapshot() == equipment);
+        std::puts("PASS early-native-snapshot: no pre-authentication mutation, accepted after authentication");
+    }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "early-native-snapshot")
+    {
+        try { earlyNativeSnapshot(); return 0; }
+        catch (const std::exception& error) { std::fprintf(stderr, "early native snapshot: %s\n", error.what()); return 1; }
+    }
+    require(argc == 1);
     using namespace TES3MP;
     FakeRuntime runtime;
     TestSupport::ManualClock clock(MonotonicInstant::fromNanoseconds(0));

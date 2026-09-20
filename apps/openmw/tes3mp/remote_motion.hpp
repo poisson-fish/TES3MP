@@ -3,6 +3,7 @@
 
 #include <tes3mp/command_primitives.hpp>
 #include <tes3mp/actor_replication.hpp>
+#include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/monotonic_clock.hpp>
 #include <tes3mp/observability.hpp>
 
@@ -153,6 +154,7 @@ namespace TES3MP::OpenMWAdapter
 
         bool observe(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
         bool observe(const ActorSpatialSnapshot& sample, MonotonicInstant receivedAt) noexcept;
+        bool observe(const NativeActorMotion& sample, CellId cell, MonotonicInstant receivedAt) noexcept;
         std::optional<RemoteMotionPose> advance(MonotonicInstant now) noexcept;
         void clear() noexcept;
         std::size_t sampleCount() const noexcept { return mSampleCount; }

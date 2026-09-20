@@ -166,6 +166,16 @@ namespace TES3MP
         friend constexpr bool operator==(const PublicActorEquipmentMember&, const PublicActorEquipmentMember&) noexcept = default;
     };
 
+    struct NativeActorMotion
+    {
+        // Committed native reference identity/tick, position in game units,
+        // velocity in game units per second and engine-space yaw in radians.
+        uint64_t placement = 0, tick = 0;
+        std::array<float, 3> position{}, velocity{};
+        float yaw = 0;
+        friend bool operator==(const NativeActorMotion&, const NativeActorMotion&) = default;
+    };
+
     struct LatestWinsEquipmentSnapshot
     {
         SessionId targetSessionId;
@@ -174,10 +184,12 @@ namespace TES3MP
         CanonicalRevision canonicalRevision;
         std::vector<PublicEquipmentMember> members;
         std::vector<PublicActorEquipmentMember> actors;
+        std::vector<NativeActorMotion> motions;
 
         static std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> create(SessionId target,
             SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
-            std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors = {});
+            std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors = {},
+            std::span<const NativeActorMotion> motions = {});
         friend bool operator==(const LatestWinsEquipmentSnapshot&, const LatestWinsEquipmentSnapshot&) noexcept
             = default;
     };

@@ -17,6 +17,19 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V16 uses native-inventory-16 with V15 fields, one dry interior and a fresh
+    // campaign. After `areas 1`, append `npc "NPC_BASE" "NAV_SETTINGS_FILE"`
+    // and `destination X Y Z SPEED`. Exactly one living unscripted, nonleveled
+    // NPC of that base is bound. Stock NPC hulls use base_anim/base_animkna;
+    // resource bytes and navigation settings join the campaign fingerprint.
+    // Frozen background geometry/actors remain collision obstacles; background
+    // inventories, pickups/drops, doors and teleports are unavailable in V16.
+    // Its owner inventory, physics frame, remaining engine path, contacts and
+    // motion tick commit together, including one ordered inventory intent.
+    // Two 60 Hz physics steps run per 30 Hz tick while either player occupies
+    // the cell. Both leaving freezes the path. Recovery preserves it exactly.
+    // Requires native-actor-motion capability; clients render committed motion
+    // through the existing interpolation buffer. Player movement is unchanged.
     // V15 uses native-inventory-15 with V14 fields and a fresh campaign. The
     // initial campaign level and a separate seed stream drive OpenMW leveled
     // actor selection. Persist chosen records and chance-none in the area image;

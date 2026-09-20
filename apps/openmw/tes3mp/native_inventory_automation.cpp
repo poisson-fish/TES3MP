@@ -393,10 +393,18 @@ namespace TES3MP::OpenMWAdapter
             if (wm->containsMode(MWGui::GM_Container)) wm->removeGuiMode(MWGui::GM_Container);
             if (wm->containsMode(MWGui::GM_Inventory)) wm->removeGuiMode(MWGui::GM_Inventory);
         }
-        else if (action == "reconnect")
+        else if (action == "reconnect" || action == "disconnect")
         {
+            mTraversalDisconnectOnly = action == "disconnect";
             mReadyToDisconnect = true;
             mNextDisconnect = now;
+        }
+        else if (action == "quit")
+        {
+            mTraversalSequence = sequence;
+            writeNativeTraversal(action);
+            finish(true);
+            return;
         }
         else if (action == "observe")
         {

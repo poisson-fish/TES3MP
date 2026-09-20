@@ -20,6 +20,7 @@ namespace TES3MP
         // A door may stage relocation of the authenticated requester. The
         // reducer persists it with the unchanged native image before publication.
         virtual std::optional<Transform> playerDestination() const { return {}; }
+        virtual bool changesInventory() const noexcept { return true; }
         virtual CanonicalDurabilityResult commit(const NativeInventoryCommit& durability) noexcept = 0;
     };
 
@@ -37,6 +38,7 @@ namespace TES3MP
         virtual bool requiresDoorTraversal() const noexcept { return false; }
         virtual bool streamsPlayerAreas() const noexcept { return false; }
         virtual bool hasLeveledActors() const noexcept { return false; }
+        virtual bool hasActorMotion() const noexcept { return false; }
         // Resolve inherited player motion against the native area domain. This
         // never grants interior travel; the engine adapter may permit contiguous
         // exterior crossings while explicit relocations remain transactional.
@@ -46,6 +48,9 @@ namespace TES3MP
             const CanonicalServerState&, const ServerCommandProposal&) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareDoorStep(
             const CanonicalServerState&, ServerTick, float) { return {}; }
+        virtual std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
+        { return command ? std::move(command) : prepareDoorStep(players, tick, seconds); }
         virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };
 }

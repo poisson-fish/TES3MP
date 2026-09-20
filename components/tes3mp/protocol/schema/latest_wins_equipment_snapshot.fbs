@@ -53,10 +53,23 @@ table EquipmentSnapshotHeader {
   canonical_revision:ulong (id: 3);
 }
 
+struct NativeActorMotion {
+  placement:ulong;
+  tick:ulong;
+  x:float;
+  y:float;
+  z:float;
+  vx:float;
+  vy:float;
+  vz:float;
+  yaw:float;
+}
+
 table LatestWinsEquipmentSnapshot {
   header:EquipmentSnapshotHeader (id: 0);
   members:[EquipmentMember] (id: 1);
   actors:[ActorEquipmentMember] (id: 2);
+  motions:[NativeActorMotion] (id: 3);
 }
 
 root_type LatestWinsEquipmentSnapshot;

@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <span>
 
 namespace TES3MP::Native
 {
@@ -16,11 +17,13 @@ namespace TES3MP::Native
         std::array<float, 3> mPosition{};
         bool mGrounded = false;
         std::vector<uint64_t> mContacts;
+        float mYaw = 0;
     };
 
-    // A detached, content-derived interior physics binding. No inventory, AI,
-    // script, live host or persistence writer is installed by this diagnostic slice.
-    // Frozen references are obstacles; only the selected NPC is stepped.
+    // Detached, content-derived interior navigation/physics. Frozen references
+    // are obstacles; only the selected NPC is stepped. The native host composes
+    // prepared frames with its existing inventory owner and durable transaction.
+    // No AI packages, scripts or presentation services are constructed here.
     class InteriorActorScene
     {
         struct Impl;
@@ -30,11 +33,38 @@ namespace TES3MP::Native
             const std::string& baseAnimation, const std::string& beastAnimation);
         ~InteriorActorScene();
         ActorSceneSnapshot snapshot() const;
+        std::array<float, 4> transform() const noexcept;
         // One stock 60 Hz step. Velocity is local-space diagnostic input, not AI
         // or authenticated player input. Invalid input leaves the scene unchanged.
         ActorSceneSnapshot step(const std::array<float, 3>& velocity);
         size_t bodyCount() const;
+        uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
+        // Build the engine navmesh from the retained collision resources. The
+        // trusted settings file supplies stock navigation settings and is bound
+        // into the scene identity. No World/player services are constructed.
+        void enableNavigation(const std::string& settingsFile);
+        std::vector<std::array<float, 3>> pathTo(const std::array<float, 3>& destination) const;
+        void travelTo(const std::array<float, 3>& destination);
+        ActorSceneSnapshot navigate(float speed);
+        bool arrived() const;
+        class Prepared
+        {
+            friend class InteriorActorScene;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit Prepared(std::unique_ptr<State> state);
+        public:
+            ~Prepared();
+            ActorSceneSnapshot snapshot() const;
+            std::span<const char> image() const;
+        };
+        // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
+        std::unique_ptr<Prepared> prepareNavigation(float speed);
+        void install(Prepared& prepared) noexcept;
+        std::vector<char> image() const;
+        void restore(std::span<const char> bytes);
+        std::unique_ptr<Prepared> prepareRestore(std::span<const char> bytes);
     };
 }
 

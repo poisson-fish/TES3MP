@@ -15,7 +15,8 @@ int main(int argc, const char* const argv[])
         if (argc < 6)
             throw std::invalid_argument("Usage: actor_probe <interior> <npc-record|--list> <baseanim> <beastanim> <loadout options>");
         std::vector<const char*> arguments{argv[0]};
-        arguments.insert(arguments.end(), argv + 5, argv + argc);
+        const bool navigation = argc >= 10 && std::string_view(argv[5]) == "--navigate";
+        arguments.insert(arguments.end(), argv + (navigation ? 10 : 5), argv + argc);
         TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(
             static_cast<int>(arguments.size()), arguments.data()));
         const auto actors = loadout.placedActors(std::string_view(argv[1]));
@@ -32,6 +33,25 @@ int main(int argc, const char* const argv[])
         const auto actor = std::find_if(actors.begin(), actors.end(), [&](const auto& value) { return value.mRef.mRefID == record; });
         TES3MP::Native::InteriorActorScene scene(loadout, argv[1], actor->mIdentity, argv[3], argv[4]);
         const auto original = scene.snapshot();
+        if (navigation)
+        {
+            scene.enableNavigation(argv[6]);
+            for (int i = 0; i < 120; ++i) scene.step({0,0,0});
+            const std::array destination{std::stof(argv[7]), std::stof(argv[8]), std::stof(argv[9])};
+            const auto path = scene.pathTo(destination);
+            scene.travelTo(destination);
+            size_t steps = 0;
+            while (!scene.arrived() && steps < 3600) { scene.navigate(120); ++steps; }
+            const auto end = scene.snapshot();
+            const auto dx = end.mPosition[0] - destination[0], dy = end.mPosition[1] - destination[1];
+            std::cout << "navigation points=" << path.size() << " steps=" << steps
+                << " end=" << end.mPosition[0] << ',' << end.mPosition[1] << ',' << end.mPosition[2]
+                << " arrived=" << scene.arrived() << '\n';
+            if (!scene.arrived() || dx*dx + dy*dy > 32*32 || steps < 60)
+                throw std::runtime_error("Interior navigation failed to reach a distinct destination");
+            std::cout << "PASS native-interior-navigation\n" << scene.fingerprint();
+            return 0;
+        }
         std::set<uint64_t> contacts;
         size_t grounded = 0;
         float distance = 0.f;

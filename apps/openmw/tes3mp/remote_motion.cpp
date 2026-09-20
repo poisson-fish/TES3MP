@@ -342,6 +342,27 @@ namespace TES3MP::OpenMWAdapter
             sample.transform(), sample.linearVelocity(), LocomotionMode::Walk }, receivedAt);
     }
 
+    bool RemoteMotionBuffer::observe(const NativeActorMotion& sample, CellId cell, MonotonicInstant receivedAt) noexcept
+    {
+        const auto tick = ServerTick::fromValue(sample.tick);
+        const auto revision = EntityRevision::fromValue(sample.tick);
+        const auto entity = EntityId::fromValue(sample.placement);
+        if (!tick || !revision || !entity || !std::isfinite(sample.yaw)) return false;
+        for (size_t i=0; i<3; ++i)
+            if (!std::isfinite(sample.position[i]) || std::abs(sample.position[i])>1e7f
+                || !std::isfinite(sample.velocity[i]) || std::abs(sample.velocity[i])>4096) return false;
+        double turns = -double(sample.yaw)/(2*std::numbers::pi);
+        turns -= std::floor(turns);
+        const auto yaw = Turn32::fromValue(uint32_t(uint64_t(std::llround(turns*4294967296.0))));
+        return observe({*tick, *entity, *revision, AuthorityEpoch::initial(),
+            Transform(cell, Position3(std::llround(double(sample.position[0])*1024),
+                std::llround(double(sample.position[1])*1024), std::llround(double(sample.position[2])*1024)),
+                Orientation3(Turn32::fromValue(0),Turn32::fromValue(0),yaw)),
+            LinearVelocity3(std::llround(double(sample.velocity[0])*1024/30),
+                std::llround(double(sample.velocity[1])*1024/30), std::llround(double(sample.velocity[2])*1024/30)),
+            LocomotionMode::Walk}, receivedAt);
+    }
+
     bool RemoteMotionBuffer::observe(RemoteMotionSample sample, MonotonicInstant receivedAt) noexcept
     {
         if (mSampleCount == 0)

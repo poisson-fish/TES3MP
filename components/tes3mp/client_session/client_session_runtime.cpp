@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <ranges>
+#include <iterator>
 
 namespace TES3MP
 {
@@ -51,6 +52,7 @@ namespace TES3MP
         mLastCharacterCommandSequence.reset();
         mAuthenticationRejection.reset();
         mProtocolRejection.reset();
+        mPendingAuthenticationSnapshots.clear();
         mMayAcceptPlayerCredential = authentication.kind() == AuthenticationCredentialKind::JoinPassword
             && !authentication.hasPlayerCredential();
         mClientHello.emplace(std::move(hello));
@@ -78,6 +80,14 @@ namespace TES3MP
         if (drained.result != ClientRuntimeResult::Accepted)
             return result;
 
+        if (mSession->stateMachine().state() == ClientSessionState::Established)
+        {
+            drained.messages.insert(drained.messages.begin(),
+                std::make_move_iterator(mPendingAuthenticationSnapshots.begin()),
+                std::make_move_iterator(mPendingAuthenticationSnapshots.end()));
+            mPendingAuthenticationSnapshots.clear();
+        }
+
         if (drained.action == ClientSessionAction::SendClientHello)
         {
             if (!mClientHello
@@ -91,6 +101,24 @@ namespace TES3MP
 
         for (auto& message : drained.messages)
         {
+            // Unreliable motion can overtake the reliable authentication reply.
+            // Retain one bounded value per kind until the reply is processed;
+            // do not bind a session or apply gameplay/presentation early.
+            if (mSession->stateMachine().state() == ClientSessionState::AwaitingAuthenticationResult
+                && (std::holds_alternative<LatestWinsSnapshot>(message)
+                    || std::holds_alternative<LatestWinsActorSnapshot>(message)
+                    || std::holds_alternative<LatestWinsEquipmentSnapshot>(message)
+                    || std::holds_alternative<LatestWinsCombatSnapshot>(message)
+                    || std::holds_alternative<ServerVrPoseSnapshot>(message)))
+            {
+                const auto pending = std::ranges::find_if(mPendingAuthenticationSnapshots,
+                    [&](const auto& value) { return value.index() == message.index(); });
+                if (pending == mPendingAuthenticationSnapshots.end())
+                    mPendingAuthenticationSnapshots.push_back(std::move(message));
+                else
+                    *pending = std::move(message);
+                continue;
+            }
             if (auto* hello = std::get_if<ServerHello>(&message))
             {
                 const auto transition = mSession->handle(ClientServerHelloReceived{ std::move(*hello) });
@@ -892,6 +920,7 @@ namespace TES3MP
 
     ClientRuntimeDrainResult ClientSessionRuntime::fail(ClientRuntimeResult result) noexcept
     {
+        mPendingAuthenticationSnapshots.clear();
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         mLocomotionHistory.clear();
@@ -1174,6 +1203,7 @@ namespace TES3MP
 
     HeadlessClientResult ClientSessionRuntime::close(TransportCloseMode mode) noexcept
     {
+        mPendingAuthenticationSnapshots.clear();
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         mLocomotionHistory.clear();

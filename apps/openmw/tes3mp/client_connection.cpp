@@ -766,7 +766,7 @@ namespace TES3MP::OpenMWAdapter
             interactiveObjectReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability(),
             characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability(),
             worldTimeReplicationCapability(), authoritativeWaitRestCapability(), authoritativeSecurityCapability(),
-            authoritativeInstantMagicCapability(), authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability() };
+            authoritativeInstantMagicCapability(), authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(), nativeActorMotionCapability() };
         auto offer
             = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),

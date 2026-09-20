@@ -6,6 +6,8 @@
 #include "inventory_service.hpp"
 #include "inventory_host.hpp"
 #include "loadout.hpp"
+#include <apps/openmw/tes3mp/remote_motion.hpp>
+#include <chrono>
 #include "test_allocations.hpp"
 #include "../canonical_persistence_file.hpp"
 #include <tes3mp/server_command_reducer.hpp>
@@ -3699,4 +3701,219 @@ namespace TES3MP::Native::Testing
         std::cout << "synthetic service: trusted session/player binding, native drop/take/recovery/continuation; "
             << delivery.sent + reconnected.sent << " frames through existing queue/encoder/client receive; no sockets or desktop clients\n";
     }
+    void checkNavigatingActor(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        require(std::filesystem::create_directory(scratch), "Navigation scratch already exists");
+        auto crypto=makeProductionCredentialCrypto(); require(bool(crypto), "Navigation crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile=CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Navigation participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1,2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            records.push_back({{id<PlayerId>(i),id<EntityId>(i==1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
+                digest, *players(SessionGeneration::initial(),1,2).findPlayer(id<PlayerId>(i)), profile});
+        }
+        auto registry=std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto,storage,records));
+        const auto descriptor=scratch/"native.txt";
+        {
+            std::ofstream out(descriptor);
+            out << "native-inventory-16\nmanifest " << ([] { std::ostringstream out; const auto manifestId=testContentManifestId(); for (auto byte : manifestId.bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte); return out.str(); })() << "\nconfig " << std::quoted(config.string())
+                << "\nplayers 1 2\nactors \"raflod the braggart\" \"player\"\nloot 1 0\ninterior \"Seyda Neen, Arrille's Tradehouse\""
+                << "\ndoors auto\ncell interior:7\nareas 1\nnpc \"raflod the braggart\" " << std::quoted(settings.string())
+                << "\ndestination -550 70 385 120\n";
+        }
+        using namespace TES3MP::OpenMWAdapter;
+        for (uint64_t leaving : {1,2})
+        {
+            InventoryHost host(descriptor,testContentManifest(),*registry,*crypto,{});
+            auto& service=host.service(); auto initial=players(SessionGeneration::initial(),1,2);
+            service.synchronizeCells(initial);
+            NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics,events);
+            CanonicalCommandReducer reducer(initial,observability,testContentManifest());
+            const auto catalog=ServerScriptStateCatalog::create({}).value();
+            auto scripts=CanonicalScriptState::initial(catalog).value();
+            std::array<std::byte,32> configuration{}; configuration[0]=std::byte{16};
+            const auto identity=CanonicalPersistenceIdentity::create(testContentManifestId(),ServerConfigurationId::fromBytes(configuration).value(),{},catalog,{}).value();
+            auto file=std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(scratch/("campaign-"+std::to_string(leaving)),identity));
+            struct Port final : CanonicalDurabilityPort
+            {
+                ServerApp::CanonicalPersistenceFile& file; ServerApp::NativeInventoryService& service;
+                bool reject=false; size_t commits=0;
+                Port(ServerApp::CanonicalPersistenceFile& f,ServerApp::NativeInventoryService& s):file(f),service(s){}
+                CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                    CanonicalRevision revision,std::span<const DurableCommandOrder> commands,const CanonicalInventoryWorld* inventory,
+                    const CanonicalCombatWorld* combat,const CanonicalInteractiveObjectWorld* objects,const CanonicalActorWorld* actors,
+                    const CanonicalWorldState* world,const CanonicalScriptState* scripts,std::span<const std::byte> image) noexcept override
+                {
+                    if (reject) return CanonicalDurabilityResult::Rejected;
+                    ++commits; return file.commit(candidate,revision,commands,inventory,combat,objects,actors,world,scripts,image);
+                }
+            } port(*file,service);
+            require(reducer.configureDurability(port,nullptr,nullptr,nullptr,nullptr,nullptr,&scripts,&service),"Navigation durability composition failed");
+            Clock clock;
+            std::array clients{client(clock,1,SessionGeneration::initial()),client(clock,2,SessionGeneration::initial())};
+            std::array<BoundedMovementMetricSink,2> movementMetrics;
+            std::array buffers{RemoteMotionBuffer(movementMetrics[0]),RemoteMotionBuffer(movementMetrics[1])};
+            std::array<std::optional<RemoteMotionPose>,2> previous;
+            std::array<uint64_t,2> lastTick{};
+            std::array<double,2> maxFrameStep{};
+            struct Packet { uint64_t arrival; size_t client; std::vector<std::byte> bytes; };
+            std::vector<Packet> packets;
+            const auto cell=CellId::interior(id<CellSpaceId>(7));
+            auto view=[&](uint64_t session,uint64_t tick,const PreparedNativeInventory* candidate=nullptr) {
+                return service.projectInventory(reducer.state(),id<SessionId>(session),id<ServerTick>(tick),reducer.canonicalRevision(),candidate).value();
+            };
+            const auto start=view(1,1).equipment->motions.at(0);
+            {
+                auto joining = client(clock, 1, SessionGeneration::initial());
+                auto baseline = *view(1, 2).equipment;
+                auto moving = baseline;
+                moving.canonicalRevision = *baseline.canonicalRevision.next();
+                moving.motions[0].tick = 2;
+                moving.motions[0].position[0] += 1;
+                require(joining->receiveLatestWinsEquipmentSnapshot(baseline) == InventoryReplicationReceiveResult::Applied
+                    && joining->receiveLatestWinsEquipmentSnapshot(moving) == InventoryReplicationReceiveResult::Applied
+                    && joining->receiveLatestWinsEquipmentSnapshot(baseline) == InventoryReplicationReceiveResult::StaleTick
+                    && joining->receiveLatestWinsEquipmentSnapshot(moving) == InventoryReplicationReceiveResult::IdenticalDuplicate,
+                    "Same-tick join baseline/movement commits were not ordered by canonical revision");
+                moving.motions[0].position[0] += 1;
+                require(joining->receiveLatestWinsEquipmentSnapshot(moving) == InventoryReplicationReceiveResult::ContradictorySameTick,
+                    "Conflicting actor state for the same durable commit was accepted");
+            }
+            double maxTickMs=0; size_t overruns=0, dropped=0, delivered=0; std::array<float,3> atDisconnect{};
+            for (uint64_t frame=2; frame<=660; ++frame)
+            {
+                const auto tick=frame/2;
+                clock.value=frame*16'666'667;
+                if (frame%2==0 && tick<=300)
+                {
+                    const auto began=std::chrono::steady_clock::now();
+                    std::optional<ServerCommandProposal> command;
+                    if (tick==2)
+                    {
+                        const auto inventory=view(1,tick).playerInventory.front();
+                        require(!inventory.equipment.empty(),"Real inventory composition fixture has no equipped item");
+                        const auto slot=inventory.equipment.front();
+                        const auto item=std::ranges::find(inventory.stacks,slot.stackId,&CanonicalItemStack::stackId);
+                        ClientInventoryTransactionCommand input{id<SessionId>(1),SessionGeneration::initial(),CommandSequence::initial(),id<CommandId>(1),
+                            reducer.canonicalRevision(),InventoryTransactionKind::UnequipItem,{},item->prototypeId,item->stackId,1,slot.slot,
+                            inventory.revision,{},{},Position3(0,0,0)};
+                        command=bind(reducer.state(),input).proposal();
+                    }
+                    auto prepare=[&]() {
+                        Clock ingressClock;
+                        ServerCommandIntakeCoordinator intake(ingressClock,observability,ingressClock.now(),id<ServerTick>(tick),IngressOrdinal::initial());
+                        if (command) require(intake.submit(*command)==CommandSubmissionResult::Accepted,"Navigation command intake failed");
+                        ingressClock.value=tick*33'333'334;
+                        auto batches=intake.pump(); require(batches && batches.batches().size()==1,"Navigation tick intake failed");
+                        auto pending=reducer.prepareTick(batches.batches().front());
+                        require(pending.result() && reducer.stageNativeDoorStep(pending,id<ServerTick>(tick),1.f/30),"Navigation tick staging failed");
+                        if (command) require(pending.result().dispositions()[0].disposition()==CommandDisposition::Applied,"Composed inventory command rejected");
+                        return pending;
+                    };
+                    auto pending=prepare();
+                    const std::vector before(service.inventoryImage().begin(),service.inventoryImage().end());
+                    if (tick==2 || tick==10)
+                    {
+                        port.reject=true;
+                        require(!reducer.commit(std::move(pending)),"Rejected navigation durability acknowledged");
+                        require(std::ranges::equal(before,service.inventoryImage()),"Rejected navigation tick leaked movement/inventory");
+                        port.reject=false; pending=prepare();
+                    }
+                    require(reducer.commit(std::move(pending)),"Navigation durable tick failed");
+                    if (tick==45)
+                    {
+                        atDisconnect=view(3-leaving,tick).equipment->motions.at(0).position;
+                        auto disconnect=reducer.prepareDisconnect(id<SessionId>(leaving),id<ServerTick>(tick));
+                        require(disconnect && reducer.commit(std::move(*disconnect)),"Navigation player disconnect failed");
+                        service.synchronizeCells(reducer.state());
+                    }
+                    for (size_t peer=0; peer<2; ++peer)
+                    {
+                        if (tick>=45 && peer+1==leaving) continue;
+                        const auto motion=view(peer+1,tick).equipment.value();
+                        if ((tick+peer*3)%10==0) { ++dropped; continue; }
+                        // 100 ms one-way, +/- 33 ms jitter, deterministic 10% loss,
+                        // plus occasional reordering; both receivers use production codecs/buffers.
+                        packets.push_back({frame+4+(tick*7+peer*3)%5+(tick%23==0 ? 8 : 0),peer,encodeLatestWinsEquipmentSnapshot(motion)});
+                    }
+                    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
+                    maxTickMs=std::max(maxTickMs,ms); overruns+=ms>33.333334;
+                    if (tick == 30)
+                    {
+                        // Restart with a nonempty path, not only at the destination.
+                        InventoryHost midway(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+                        midway.service().synchronizeCells(reducer.state());
+                        auto original = service.prepareNativeTick(reducer.state(), id<ServerTick>(31), 1.f/30, {});
+                        auto restarted = midway.service().prepareNativeTick(reducer.state(), id<ServerTick>(31), 1.f/30, {});
+                        std::vector<std::byte> expected, actual;
+                        require(original->commit([&](auto bytes) { expected.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected
+                            && restarted->commit([&](auto bytes) { actual.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected
+                            && !expected.empty() && expected == actual,
+                            "Mid-path restart changed the next staged actor/inventory tick");
+                    }
+                }
+                for (auto it=packets.begin(); it!=packets.end();)
+                {
+                    if (it->arrival>frame) { ++it; continue; }
+                    const auto decoded=decodeLatestWinsEquipmentSnapshot(it->bytes);
+                    require(std::holds_alternative<LatestWinsEquipmentSnapshot>(decoded),"Native motion codec rejected projection");
+                    auto& receiver=*clients[it->client];
+                    receiver.receiveLatestWinsEquipmentSnapshot(std::get<LatestWinsEquipmentSnapshot>(decoded));
+                    const auto& confirmed=receiver.confirmedEquipmentSnapshot();
+                    if (confirmed && !confirmed->motions.empty() && confirmed->motions[0].tick>lastTick[it->client])
+                    {
+                        require(buffers[it->client].observe(confirmed->motions[0],cell,clock.now()),"Native motion interpolation rejected sample");
+                        lastTick[it->client]=confirmed->motions[0].tick; ++delivered;
+                    }
+                    it=packets.erase(it);
+                }
+                for (size_t peer=0; peer<2; ++peer)
+                {
+                    if (!buffers[peer].sampleCount() || (frame/2>=45 && peer+1==leaving)) continue;
+                    auto pose=buffers[peer].advance(clock.now()); require(bool(pose),"Native interpolation has no pose");
+                    if (previous[peer]) maxFrameStep[peer]=std::max(maxFrameStep[peer],std::hypot(pose->x-previous[peer]->x,pose->y-previous[peer]->y)/1024);
+                    previous[peer]=pose;
+                }
+            }
+            const auto end=view(3-leaving,300).equipment->motions.at(0);
+            require(std::hypot(end.position[0]+550,end.position[1]-70)<16,"Native NPC did not arrive after disconnect");
+            require(std::hypot(end.position[0]-atDisconnect[0],end.position[1]-atDisconnect[1])>50,"Disconnect did not exercise continued motion");
+            for (size_t peer=0; peer<2; ++peer)
+                require(maxFrameStep[peer]<16,"Impaired native interpolation exceeded frame displacement budget");
+            const auto& pose=previous[2-leaving];
+            require(pose && std::hypot(pose->x/1024-end.position[0],pose->y/1024-end.position[1])<.1,"Surviving client did not converge");
+            const auto saved=file->prefix().latest()->nativeInventory();
+            InventoryHost recovered(descriptor,testContentManifest(),*registry,*crypto,saved);
+            require(std::ranges::equal(saved,recovered.service().inventoryImage()),"Native recovery changed actor/inventory bytes");
+            recovered.service().synchronizeCells(reducer.state());
+            auto resumed=recovered.service().prepareNativeTick(reducer.state(),id<ServerTick>(301),1.f/30,{});
+            require(resumed && resumed->commit([](auto) { return CanonicalDurabilityResult::Rejected; })==CanonicalDurabilityResult::Rejected,
+                "Recovered rejected tick failed");
+            auto bad=std::vector<std::byte>(saved.begin(),saved.end()); bad.pop_back();
+            bool rejected=false;
+            try { InventoryHost invalid(descriptor,testContentManifest(),*registry,*crypto,bad); } catch (...) { rejected=true; }
+            require(rejected,"Truncated native motion campaign accepted");
+            auto malformed=*view(3-leaving,300).equipment; malformed.motions[0].position[0]=std::numeric_limits<float>::quiet_NaN();
+            require(std::holds_alternative<InventoryReplicationDecodeError>(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(malformed))),
+                "Nonfinite native motion accepted");
+            require(resumed->commit([](auto) { return CanonicalDurabilityResult::Failed; })==CanonicalDurabilityResult::Failed
+                && recovered.service().inventoryImage().empty(),"Uncertain actor durability did not close service");
+            std::cout << "native-navigation leaving=" << leaving << " committed=" << port.commits << " delivered=" << delivered << " lost=" << dropped
+                << " max-frame-step=" << maxFrameStep[0] << ',' << maxFrameStep[1] << " max-tick-ms=" << maxTickMs << " overruns=" << overruns
+                << " hard-snaps=" << movementMetrics[0].summary(MovementMetricKey::HardSnaps).total << ','
+                << movementMetrics[1].summary(MovementMetricKey::HardSnaps).total << " end=" << end.position[0] << ',' << end.position[1]
+                << " rejection=atomic recovery=exact mid-path-recovery=exact inventory=composed\n";
+        }
+    }
+
 }

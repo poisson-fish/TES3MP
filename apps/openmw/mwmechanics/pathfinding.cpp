@@ -308,14 +308,22 @@ namespace MWMechanics
     void PathFinder::update(const osg::Vec3f& position, float pointTolerance, float destinationTolerance,
         UpdateFlags updateFlags, const DetourNavigator::AgentBounds& agentBounds, DetourNavigator::Flags pathFlags)
     {
+        if (mPath.empty()) return;
+        update(position, pointTolerance, destinationTolerance, updateFlags, agentBounds, pathFlags,
+            *MWBase::Environment::get().getWorld()->getNavigator());
+    }
+
+    void PathFinder::update(const osg::Vec3f& position, float pointTolerance, float destinationTolerance,
+        UpdateFlags updateFlags, const DetourNavigator::AgentBounds& agentBounds, DetourNavigator::Flags pathFlags,
+        const DetourNavigator::Navigator& navigator)
+    {
         if (mPath.empty())
             return;
 
         while (mPath.size() > 1 && sqrDistanceIgnoreZ(mPath.front(), position) < pointTolerance * pointTolerance)
             mPath.pop_front();
 
-        const IsValidShortcut isValidShortcut{ MWBase::Environment::get().getWorld()->getNavigator(), agentBounds,
-            pathFlags };
+        const IsValidShortcut isValidShortcut{ &navigator, agentBounds, pathFlags };
 
         if ((updateFlags & UpdateFlag_ShortenIfAlmostStraight) != 0)
         {

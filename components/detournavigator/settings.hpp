@@ -6,6 +6,8 @@
 #include <chrono>
 #include <string>
 
+namespace Settings { struct NavigatorCategory; }
+
 namespace DetourNavigator
 {
     struct RecastSettings
@@ -59,6 +61,7 @@ namespace DetourNavigator
     inline constexpr std::int64_t navMeshFormatVersion = 2;
 
     Settings makeSettingsFromSettingsManager(Debug::Level maxLogLevel);
+    Settings makeSettings(const ::Settings::NavigatorCategory& category, Debug::Level maxLogLevel);
 }
 
 #endif

@@ -403,6 +403,22 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.advance(now);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            try
+            {
+                if (auto* desktop=dynamic_cast<DesktopPresentation*>(&mPresentation))
+                    for (const auto& actor : desktop->nativeActorPresentation())
+                    {
+                        mOutput << "{\"event\":\"native_actor_pose\",\"time_ns\":" << now.nanoseconds()
+                            << ",\"placement\":" << actor.placement << ",\"tick\":" << actor.tick
+                            << ",\"x\":" << actor.position[0] << ",\"y\":" << actor.position[1] << ",\"z\":" << actor.position[2] << "}\n";
+                        ++mEvidenceEvents;
+                    }
+                mOutput.flush();
+            }
+            catch (...) { return ProviderResult::PresentationFailed; }
+        }
         if (mFinished)
             return ProviderResult::Accepted;
         const auto elapsed = now.nanoseconds() - mStartedAt->nanoseconds();
@@ -593,6 +609,14 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            for (const auto& actor : equipment.motions)
+            {
+                mOutput << "{\"event\":\"native_actor_sample\",\"time_ns\":" << receivedAt.nanoseconds()
+                    << ",\"placement\":" << actor.placement << ",\"tick\":" << actor.tick
+                    << ",\"x\":" << actor.position[0] << ",\"y\":" << actor.position[1] << ",\"z\":" << actor.position[2] << "}\n";
+                ++mEvidenceEvents;
+            }
         if (nativeInventoryRole())
         {
             if (mRole == DesktopAutomationRole::NativeTraversal)
@@ -979,6 +1003,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::uint64_t DesktopAutomation::reconnectDelayNanoseconds() noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mTraversalDisconnectOnly)
+            return 60'000'000'000ull;
         if (mRole == DesktopAutomationRole::WaitReconnect)
             return 8'000'000'000ull;
         return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull : 0;

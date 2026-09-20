@@ -2050,11 +2050,18 @@ namespace TES3MP
     try
     {
         if (!prepared.result() || prepared.mBaseVersion != mStateVersion) return false;
-        // Preserve the bounded one-native-mutation-per-tick rule. Inventory or
-        // activation commits consume this step; elapsed time is never caught up.
-        if (!mNativeInventory || prepared.mNativeInventory) return true;
-        auto door = mNativeInventory->prepareDoorStep(*prepared.mState, tick, seconds);
+        // The native authority composes continuous simulation with the ordered
+        // command candidate before one durability callback and publication.
+        if (!mNativeInventory) return true;
+        const bool hadCommand = static_cast<bool>(prepared.mNativeInventory);
+        auto door = mNativeInventory->prepareNativeTick(*prepared.mState, tick, seconds,
+            std::move(prepared.mNativeInventory));
         if (!door) return true;
+        if (hadCommand)
+        {
+            prepared.mNativeInventory = std::move(door);
+            return true;
+        }
         const auto version = prepared.mStateVersion.next();
         const auto revision = prepared.mCanonicalRevision.next();
         if (!version || !revision) return false;

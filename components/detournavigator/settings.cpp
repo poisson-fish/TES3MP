@@ -44,38 +44,38 @@ namespace DetourNavigator
             };
         }
 
-        RecastSettings makeRecastSettingsFromSettingsManager(Debug::Level maxLogLevel)
+        RecastSettings makeRecastSettings(const ::Settings::NavigatorCategory& category, Debug::Level maxLogLevel)
         {
             RecastSettings result;
 
-            result.mBorderSize = ::Settings::navigator().mBorderSize;
-            result.mCellHeight = ::Settings::navigator().mCellHeight;
-            result.mCellSize = ::Settings::navigator().mCellSize;
-            result.mDetailSampleDist = ::Settings::navigator().mDetailSampleDist;
-            result.mDetailSampleMaxError = ::Settings::navigator().mDetailSampleMaxError;
+            result.mBorderSize = category.mBorderSize;
+            result.mCellHeight = category.mCellHeight;
+            result.mCellSize = category.mCellSize;
+            result.mDetailSampleDist = category.mDetailSampleDist;
+            result.mDetailSampleMaxError = category.mDetailSampleMaxError;
             result.mMaxClimb = Constants::sStepSizeUp;
-            result.mMaxSimplificationError = ::Settings::navigator().mMaxSimplificationError;
+            result.mMaxSimplificationError = category.mMaxSimplificationError;
             result.mMaxSlope = Constants::sMaxSlope;
-            result.mRecastScaleFactor = ::Settings::navigator().mRecastScaleFactor;
+            result.mRecastScaleFactor = category.mRecastScaleFactor;
             result.mSwimHeightScale = 0;
-            result.mMaxEdgeLen = ::Settings::navigator().mMaxEdgeLen;
-            result.mMaxVertsPerPoly = ::Settings::navigator().mMaxVertsPerPoly;
-            result.mRegionMergeArea = ::Settings::navigator().mRegionMergeArea;
-            result.mRegionMinArea = ::Settings::navigator().mRegionMinArea;
-            result.mTileSize = ::Settings::navigator().mTileSize;
+            result.mMaxEdgeLen = category.mMaxEdgeLen;
+            result.mMaxVertsPerPoly = category.mMaxVertsPerPoly;
+            result.mRegionMergeArea = category.mRegionMergeArea;
+            result.mRegionMinArea = category.mRegionMinArea;
+            result.mTileSize = category.mTileSize;
             result.mMaxLogLevel = maxLogLevel;
 
             return result;
         }
 
-        DetourSettings makeDetourSettingsFromSettingsManager()
+        DetourSettings makeDetourSettings(const ::Settings::NavigatorCategory& category)
         {
             DetourSettings result;
 
-            result.mMaxNavMeshQueryNodes = ::Settings::navigator().mMaxNavMeshQueryNodes;
-            result.mMaxPolys = ::Settings::navigator().mMaxPolygonsPerTile;
-            result.mMaxPolygonPathSize = ::Settings::navigator().mMaxPolygonPathSize;
-            result.mMaxSmoothPathSize = ::Settings::navigator().mMaxSmoothPathSize;
+            result.mMaxNavMeshQueryNodes = category.mMaxNavMeshQueryNodes;
+            result.mMaxPolys = category.mMaxPolygonsPerTile;
+            result.mMaxPolygonPathSize = category.mMaxPolygonPathSize;
+            result.mMaxSmoothPathSize = category.mMaxSmoothPathSize;
 
             return result;
         }
@@ -83,31 +83,36 @@ namespace DetourNavigator
 
     Settings makeSettingsFromSettingsManager(Debug::Level maxLogLevel)
     {
+        return makeSettings(::Settings::navigator(), maxLogLevel);
+    }
+
+    Settings makeSettings(const ::Settings::NavigatorCategory& category, Debug::Level maxLogLevel)
+    {
         Settings result;
 
-        result.mRecast = makeRecastSettingsFromSettingsManager(maxLogLevel);
-        result.mDetour = makeDetourSettingsFromSettingsManager();
+        result.mRecast = makeRecastSettings(category, maxLogLevel);
+        result.mDetour = makeDetourSettings(category);
 
         const NavMeshLimits limits = getNavMeshTileLimits(result.mDetour);
 
         result.mDetour.mMaxPolys = limits.mMaxPolys;
 
-        result.mMaxTilesNumber = std::min(limits.mMaxTiles, ::Settings::navigator().mMaxTilesNumber.get());
-        result.mWaitUntilMinDistanceToPlayer = ::Settings::navigator().mWaitUntilMinDistanceToPlayer;
-        result.mAsyncNavMeshUpdaterThreads = ::Settings::navigator().mAsyncNavMeshUpdaterThreads;
-        result.mMaxNavMeshTilesCacheSize = ::Settings::navigator().mMaxNavMeshTilesCacheSize;
-        result.mEnableWriteRecastMeshToFile = ::Settings::navigator().mEnableWriteRecastMeshToFile;
-        result.mEnableWriteNavMeshToFile = ::Settings::navigator().mEnableWriteNavMeshToFile;
-        result.mRecastMeshPathPrefix = ::Settings::navigator().mRecastMeshPathPrefix;
-        result.mNavMeshPathPrefix = ::Settings::navigator().mNavMeshPathPrefix;
-        result.mEnableRecastMeshFileNameRevision = ::Settings::navigator().mEnableRecastMeshFileNameRevision;
-        result.mEnableNavMeshFileNameRevision = ::Settings::navigator().mEnableNavMeshFileNameRevision;
-        result.mMinUpdateInterval = std::chrono::milliseconds(::Settings::navigator().mMinUpdateIntervalMs);
-        result.mEnableNavMeshDiskCache = ::Settings::navigator().mEnableNavMeshDiskCache;
-        result.mWriteToNavMeshDb = ::Settings::navigator().mWriteToNavmeshdb;
-        result.mMaxDbFileSize = ::Settings::navigator().mMaxNavmeshdbFileSize;
+        result.mMaxTilesNumber = std::min(limits.mMaxTiles, category.mMaxTilesNumber.get());
+        result.mWaitUntilMinDistanceToPlayer = category.mWaitUntilMinDistanceToPlayer;
+        result.mAsyncNavMeshUpdaterThreads = category.mAsyncNavMeshUpdaterThreads;
+        result.mMaxNavMeshTilesCacheSize = category.mMaxNavMeshTilesCacheSize;
+        result.mEnableWriteRecastMeshToFile = category.mEnableWriteRecastMeshToFile;
+        result.mEnableWriteNavMeshToFile = category.mEnableWriteNavMeshToFile;
+        result.mRecastMeshPathPrefix = category.mRecastMeshPathPrefix;
+        result.mNavMeshPathPrefix = category.mNavMeshPathPrefix;
+        result.mEnableRecastMeshFileNameRevision = category.mEnableRecastMeshFileNameRevision;
+        result.mEnableNavMeshFileNameRevision = category.mEnableNavMeshFileNameRevision;
+        result.mMinUpdateInterval = std::chrono::milliseconds(category.mMinUpdateIntervalMs);
+        result.mEnableNavMeshDiskCache = category.mEnableNavMeshDiskCache;
+        result.mWriteToNavMeshDb = category.mWriteToNavmeshdb;
+        result.mMaxDbFileSize = category.mMaxNavmeshdbFileSize;
 
-        if (result.mMaxTilesNumber < ::Settings::navigator().mMaxTilesNumber.get())
+        if (result.mMaxTilesNumber < category.mMaxTilesNumber.get())
             Log(Debug::Warning)
                 << "Navigator max tiles number is adjusted due to limitation on number of bits for tile identifier: "
                 << result.mMaxTilesNumber;

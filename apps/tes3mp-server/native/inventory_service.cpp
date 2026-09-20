@@ -1,6 +1,7 @@
 #include <numbers>
 #include "inventory_service.hpp"
 #include "actor_inventory.hpp"
+#include "actor_campaign.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -224,6 +225,15 @@ namespace TES3MP::Native
             mCoreImage = mImage;
             mImage = sealInventory(mCoreImage);
         }
+        if (!recovering && mBinding.mNavigatingActor)
+        {
+            const auto id = mBinding.mNavigatingActor->snapshot().mActor;
+            if (!mBinding.mStreamExteriors || std::ranges::none_of(mBinding.mContainers,
+                    [id](const auto& owner) { return owner.mId.value() == id && owner.mPlacement.has_value(); }))
+                throw std::invalid_argument("Navigating NPC has no authoritative inventory owner");
+            mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity);
+            installActorPosition();
+        }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
             throw std::invalid_argument("Native inventory image exceeds canonical record budget");
     }
@@ -341,8 +351,11 @@ namespace TES3MP::Native
         // Preserve the bounded 384-unit interaction radius in that wire domain.
         constexpr std::uint32_t ReachQuanta = 384 * 1024;
         if (!bound.current(players)) throw std::invalid_argument("Inventory session binding is no longer current");
-        (void)actor(bound.player());
         const auto& command = bound.transaction();
+        if (mBinding.mNavigatingActor && (command.kind == InventoryTransactionKind::PickupItem
+                || command.kind == InventoryTransactionKind::DropItem))
+            throw std::invalid_argument("Frozen NPC interior does not support changing collision placements");
+        (void)actor(bound.player());
         if (command.placement && (command.kind != InventoryTransactionKind::DropItem
             || !validDropPlacementView(*command.placement)))
             throw std::invalid_argument("Invalid placement command shape");
@@ -880,13 +893,24 @@ namespace TES3MP::Native
     std::span<const std::byte> InventoryService::inventoryImage() const noexcept
     {
         return mRuntime.mFailedClosed || mRuntime.mRestartActor ? std::span<const std::byte>{}
-            : std::as_bytes(std::span(mImage));
+            : std::as_bytes(std::span(mBinding.mNavigatingActor ? mActorImage : mImage));
     }
 
     void InventoryService::recover(std::span<const std::byte> image, std::span<const ESM::RefId> references)
     {
         if (image.empty() || image.size() > MaximumNativeInventoryImageBytes)
             throw std::invalid_argument("Native inventory recovery image bound invalid");
+        if (mBinding.mNavigatingActor)
+        {
+            const auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            auto step = mBinding.mNavigatingActor->prepareRestore(decoded.actor);
+            EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
+            recoverAreas(std::as_bytes(decoded.inventory), references);
+            mBinding.mNavigatingActor->install(*step);
+            mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
+            installActorPosition();
+            return;
+        }
         if (mBinding.mStreamExteriors) { recoverAreas(image, references); return; }
         EquipmentBytes accepted(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
         std::unique_ptr<const EquipmentSessionValues> values;
@@ -896,10 +920,107 @@ namespace TES3MP::Native
         mImage.swap(output);
     }
 
+    EquipmentBytes InventoryService::sealActor(std::span<const char> core, std::span<const char> actor,
+        uint64_t tick, const std::array<float, 3>& velocity) const
+    {
+        if (core.empty() || actor.empty() || actor.size() > 65536 || core.size() > MaximumNativeInventoryImageBytes-56-actor.size())
+            throw std::invalid_argument("Native actor campaign exceeds bound");
+        EquipmentBytes result;
+        putAreaWord(result, ActorCampaignMagic); putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
+        for (float value : velocity) putAreaWord(result, std::bit_cast<uint32_t>(value));
+        result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
+        (void)readActorCampaign(result);
+        return result;
+    }
+
+    void InventoryService::installActorPosition() noexcept
+    {
+        // The physics identity is the existing engine inventory owner. No second
+        // NPC inventory or loot stream is created by the collision scene.
+        const auto state = mBinding.mNavigatingActor->transform();
+        const auto id = mBinding.mNavigatingActor->actorId();
+        for (size_t i=0; i<mBinding.mContainers.size(); ++i)
+            if (mBinding.mContainers[i].mId.value() == id)
+            {
+                auto position = mRuntime.ownerPtr(i+2).getRefData().getPosition();
+                std::copy_n(state.begin(), 3, position.pos);
+                position.rot[2] = state[3];
+                mRuntime.ownerPtr(i+2).getRefData().setPosition(position);
+                return;
+            }
+        std::terminate();
+    }
+
+    class InventoryService::ActorTransaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        std::unique_ptr<PreparedNativeInventory> command;
+        std::unique_ptr<InteriorActorScene::Prepared> actor;
+        EquipmentBytes before;
+        uint64_t tick;
+        std::array<float, 3> velocity;
+        bool consumed = false;
+        ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
+            std::unique_ptr<InteriorActorScene::Prepared> step, uint64_t time, std::array<float,3> motion)
+            : service(owner), command(std::move(input)), actor(std::move(step)), before(owner.mActorImage), tick(time), velocity(motion) {}
+        bool changesInventory() const noexcept override { return bool(command); }
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        {
+            if (consumed || service.inventoryImage().empty() || before != service.mActorImage) return CanonicalDurabilityResult::Rejected;
+            try
+            {
+                EquipmentBytes sealed;
+                const auto compose = [&](std::span<const std::byte> inventory) {
+                    sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
+                        actor->image(), tick, velocity);
+                    return persist(std::as_bytes(std::span(sealed)));
+                };
+                const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
+                if (result == CanonicalDurabilityResult::Rejected) return result;
+                consumed = true;
+                if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
+                else
+                {
+                    service.mBinding.mNavigatingActor->install(*actor);
+                    service.mActorTick = tick; service.mActorVelocity = velocity;
+                    service.mActorImage.swap(sealed);
+                    service.installActorPosition();
+                }
+                return result;
+            }
+            catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
+        }
+    };
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
+        ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
+    {
+        if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
+        if (std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
+            throw std::invalid_argument("Native actor requires increasing 30 Hz durable ticks");
+        if (!command) command = prepareDoorStep(players, tick, seconds);
+        const auto before = mBinding.mNavigatingActor->snapshot();
+        const auto owner = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) { return value.mId.value()==before.mActor; });
+        bool active = false;
+        for (const auto& session : players.activeSessions())
+            if (const auto* player = players.findPlayer(session.playerId()); player && player->transform().cell()==owner->mCell) active = true;
+        // Both players leaving freezes this bounded slice; traveler activity is a later M4 slice.
+        auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed)
+            : mBinding.mNavigatingActor->prepareRestore(mBinding.mNavigatingActor->image());
+        const auto after = step->snapshot();
+        std::array<float,3> velocity;
+        for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
+        return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step), tick.value(), velocity);
+    }
+
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::projectInventory(
         const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
         const PreparedNativeInventory* candidate) const
     {
+        const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
+        if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage)) return {};
+        if (moving) candidate = moving->command.get();
         const auto* transaction = dynamic_cast<const Transaction*>(candidate);
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(candidate);
         const auto* world = dynamic_cast<const WorldTransaction*>(candidate);
@@ -917,6 +1038,13 @@ namespace TES3MP::Native
                 ground.doors = areaDoorSnapshots(ground.cell, candidate);
                 for (auto& neighbor : ground.neighbors) neighbor.doors = areaDoorSnapshots(neighbor.cell, candidate);
             }
+        if (result && result->equipment && mBinding.mNavigatingActor)
+        {
+            const auto state = moving ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+            if (std::ranges::any_of(result->equipment->actors, [&](const auto& owner) { return owner.actor.value() == state.mActor; }))
+                result->equipment->motions.push_back({state.mActor, moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
+                    state.mPosition, moving ? moving->velocity : mActorVelocity, state.mYaw});
+        }
         return result;
     }
 

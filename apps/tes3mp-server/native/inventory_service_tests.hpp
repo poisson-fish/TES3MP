@@ -3,6 +3,7 @@
 #include <filesystem>
 namespace TES3MP::Native::Testing
 {
+    void checkNavigatingActor(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkDoorService(const std::filesystem::path& scratch, bool streaming = false);
     void checkAreaCrossings(const std::filesystem::path& scratch);
     void checkCellLifecycle(const std::filesystem::path& scratch);

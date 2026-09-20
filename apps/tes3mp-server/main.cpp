@@ -677,6 +677,7 @@ int main(int argc, char** argv)
     if (nativeInventory && nativeInventory->hasNativeDoor())
     {
         requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
+        if (nativeInventory->hasActorMotion()) requiredCapabilities.push_back(TES3MP::nativeActorMotionCapability());
         if (nativeInventory->hasLeveledActors()) requiredCapabilities.push_back(TES3MP::nativeLeveledActorsCapability());
         if (nativeInventory->streamsPlayerAreas()) requiredCapabilities.push_back(TES3MP::nativeStreamingCapability());
         if (nativeInventory->requiresDoorTraversal()) requiredCapabilities.push_back(TES3MP::nativeTeleportCapability());

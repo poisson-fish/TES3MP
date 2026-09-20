@@ -183,6 +183,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryTransactionCapture> inventoryPickup(const MWWorld::Ptr& item) const noexcept;
         bool observesInventoryItem(const MWWorld::Ptr& item) const noexcept;
         void clear() noexcept override;
+        // Read-only presentation evidence: positions of the actual rendered
+        // native actors, in OpenMW units, with their last committed sample tick.
+        std::vector<NativeActorMotion> nativeActorPresentation() const;
 
     private:
         class Impl;

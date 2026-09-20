@@ -3,10 +3,27 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-003",
+      "slice": "native interior navigation and durable actor motion",
+      "owner": "OpenMW navigation, app-local native authority and desktop adapter",
+      "purpose": "Allow stock PathFinder updates to receive an explicit Navigator; stock callers still resolve the same World navigator. The detached native scene reuses DetourNavigator and shared settings conversion, stages two stock physics steps per tick, and installs its path/frame with the existing inventory owner only after durability. V16 binds one NPC and freezes background interaction; inherited player movement is unchanged.",
+      "paths": [
+        "apps/openmw/mwmechanics/pathfinding.cpp",
+        "apps/openmw/mwmechanics/pathfinding.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests native-navigation",
+        "tes3mp_headless_client_tests early-native-snapshot",
+        "scripts/run_native_navigation_capture.py"
+      ],
+      "disposition": "shared engine navigation context; composed native tick and interpolated desktop presentation",
+      "removal_condition": "OpenMW supplies an equivalent explicit navigation context for detached authoritative actor simulation"
+    },
+    {
       "id": "M4-002",
       "slice": "isolated collision effects and native interior NPC binding",
       "owner": "OpenMW physics and app-local actor runtime",
-      "purpose": "Route stock object flags and projectile effects through an explicit owner supplied to movement, sweeps and stair stepping. Stock callers retain immediate effects; the detached native scene journals bounded object contacts without interpreting engine user pointers. Extract stock actor hull selection and race-based NPC model selection for both callers. The native probe resolves one real interior NPC and frozen content collision resources; navigation, gameplay animation, live host transactions and replication remain pending. Movement frame/solver paths are shared with M4-001; npc.cpp with M2-001; PhysicsSystem with NATIVE-DOOR-001.",
+      "purpose": "Route stock object flags and projectile effects through an explicit owner supplied to movement, sweeps and stair stepping. Stock callers retain immediate effects; the detached native scene journals bounded object contacts without interpreting engine user pointers. Extract stock actor hull selection and race-based NPC model selection for both callers. The native probe resolves one real interior NPC and frozen content collision resources; M4-003 adds navigation, live host transactions and replication; gameplay animation timing remains pending. Movement frame/solver paths are shared with M4-001; npc.cpp with M2-001; PhysicsSystem with NATIVE-DOOR-001.",
       "paths": [
         "apps/openmw/mwphysics/collisioneffects.cpp",
         "apps/openmw/mwphysics/collisioneffects.hpp",
