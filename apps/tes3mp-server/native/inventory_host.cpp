@@ -35,6 +35,7 @@ namespace TES3MP::Native
             float speed = 120;
             bool doors = false;
             bool avoidance = false;
+            size_t cells = 9, steps = 2;
         };
         struct Startup
         {
@@ -74,9 +75,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool traveler = version == "native-inventory-19";
+            const bool neighborhood = version == "native-inventory-20";
+            const bool traveler = neighborhood || version == "native-inventory-19";
             const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
             const bool streaming = movingActor || version == "native-inventory-14" || version == "native-inventory-15";
             const bool exteriorCells = streaming || version == "native-inventory-13";
@@ -215,8 +217,11 @@ namespace TES3MP::Native
                 nav.avoidance = traveler || version == "native-inventory-18";
                 in >> std::quoted(nav.record) >> std::quoted(nav.settings);
                 key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
+                if (neighborhood) { key("processing"); in >> nav.cells >> nav.steps; }
                 if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
-                    || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096 || cell.is<ESM::ESM3ExteriorCellRefId>() || areaCount != 1)
+                    || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096
+                    || (neighborhood ? (areaCount > 9 || nav.cells > 9 || nav.steps > 2)
+                        : (cell.is<ESM::ESM3ExteriorCellRefId>() || areaCount != 1)))
                     throw std::invalid_argument("Native navigating NPC descriptor invalid");
                 for (float value : nav.destination) if (!std::isfinite(value) || std::abs(value)>1e7f)
                     throw std::invalid_argument("Native navigation destination invalid");
@@ -235,6 +240,8 @@ namespace TES3MP::Native
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
+            binding.mTravelerNeighborhood = neighborhood;
+            if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
@@ -309,9 +316,10 @@ namespace TES3MP::Native
                     // outside its domain, just as in the collision probe.
                     references = loadout.placedActors(cell);
                     std::erase_if(references, [&](const auto& ref) { return ref.mRef.mRefID != ESM::RefId::stringRefId(start.navigation->record); });
-                    if (references.size()!=1 || references.front().mScripted || references.front().mLeveled)
+                    if (cellIndex != 0) references.clear();
+                    if (cellIndex == 0 && (references.size()!=1 || references.front().mScripted || references.front().mLeveled))
                         throw std::invalid_argument("Native navigating actor must be one unscripted placement");
-                    actorCounts[cellIndex]=1;
+                    actorCounts[cellIndex]=references.size();
                 }
                 else if (start.worldActors)
                 {
@@ -353,7 +361,7 @@ namespace TES3MP::Native
                         world = &slot.emplace(InventoryServiceBinding::WorldItems{wireCell, {}});
                     }
                     else world = &start.binding.mAdditionalWorldItems.emplace_back(InventoryServiceBinding::WorldItems{wireCell, {}});
-                    if (start.binding.mActorSelections)
+                    if (start.binding.mActorSelections && !start.navigation)
                         for (const auto& marker : loadout.placedActors(cell))
                             if (marker.mLeveled)
                             {
@@ -474,15 +482,19 @@ namespace TES3MP::Native
                 if (std::ranges::count_if(start.binding.mContainers, matching) != 1)
                     throw std::invalid_argument("Navigating NPC must resolve to one authoritative inventory owner");
                 const auto& owner = *std::ranges::find_if(start.binding.mContainers, matching);
+                std::ranges::sort(start.binding.mDoors, {}, &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
                 std::vector<uint64_t> doors;
                 for (const auto& door : start.binding.mDoors) doors.push_back(door.mId);
-                const auto createScene = [&loadout, cell = std::string(start.cell.getRefIdString()),
+                std::ranges::sort(doors);
+                if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
+                    throw std::invalid_argument("V17-V19 require at least one ordinary door");
+                const auto createScene = [&loadout, names, neighborhood = start.binding.mTravelerNeighborhood,
                     id = owner.mId.value(), navigation = *start.navigation, doors] {
-                    auto scene = std::make_shared<InteriorActorScene>(loadout, cell, id,
+                    auto scene = std::make_shared<InteriorActorScene>(loadout, names, id,
                         "meshes/base_anim.nif", "meshes/base_animkna.nif");
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     scene->enableNavigation(navigation.settings);
-                    scene->travelTo(navigation.destination);
+                    scene->travelTo(navigation.destination, neighborhood);
                     return scene;
                 };
                 auto scene = createScene();

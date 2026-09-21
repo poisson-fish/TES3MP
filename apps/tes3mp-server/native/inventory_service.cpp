@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <cstdio>
 #include <stdexcept>
 
 namespace TES3MP::Native
@@ -316,14 +317,19 @@ namespace TES3MP::Native
         }
         if (mBinding.mRetainTraveler && mBinding.mNavigatingActor)
         {
-            const auto actor = mBinding.mNavigatingActor->actorId();
-            const auto owner = std::ranges::find_if(mBinding.mContainers,
-                [actor](const auto& value) { return value.mId.value() == actor; });
-            const auto index = worldIndex(owner->mCell);
+            const auto index = worldIndex(actorCell(mBinding.mNavigatingActor->snapshot()));
             // Demand is a union, not another simulation loop. An unavailable
             // path remains travel demand; only stock path completion releases it.
             active[index] = active[index] || !mBinding.mNavigatingActor->arrived();
-            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(active[index]);
+            bool navigationActive = active[index];
+            if (mBinding.mTravelerNeighborhood)
+            {
+                navigationActive = navigationActive || std::ranges::any_of(active, [](bool value) { return value; });
+                // The declared neighborhood is one collision/navigation unit.
+                // Union admission happens once below, never once per cell.
+                if (navigationActive) std::fill(active.begin(), active.end(), true);
+            }
+            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(navigationActive);
         }
         if (mBinding.mAreaActivity) mBinding.mAreaActivity(active);
         const std::array legacy{bool(active[0]), active.size() > 1 && active[1]};
@@ -960,6 +966,35 @@ namespace TES3MP::Native
         std::terminate();
     }
 
+    CellId InventoryService::actorCell(const ActorSceneSnapshot& state) const
+    {
+        const auto owner = std::ranges::find_if(mBinding.mContainers,
+            [&](const auto& value) { return value.mId.value() == state.mActor; });
+        if (const auto* exterior = owner->mCell.asExterior(); mBinding.mTravelerNeighborhood && exterior)
+        {
+            const auto x = std::floor(double(state.mPosition[0]) / 8192);
+            const auto y = std::floor(double(state.mPosition[1]) / 8192);
+            if (x < -32768 || x > 32767 || y < -32768 || y > 32767)
+                throw std::invalid_argument("Traveler position outside cell coordinate bounds");
+            const auto cell = CellId::exterior(exterior->worldspace(), int32_t(x), int32_t(y));
+            if (!worldDomain(cell)) throw std::invalid_argument("Traveler outside processing neighborhood");
+            return cell;
+        }
+        return owner->mCell;
+    }
+
+    std::optional<ServerApp::NativeTravelDiagnostics> InventoryService::travelDiagnostics() const
+    {
+        if (!mBinding.mRetainTraveler) return {};
+        auto result = mTravelDiagnostics;
+        result.tick = mActorTick;
+        result.position = mBinding.mNavigatingActor->snapshot().mPosition;
+        result.completed = mBinding.mNavigatingActor->arrived();
+        result.cellLimit = mBinding.mTravelerCellBudget;
+        result.stepLimit = mBinding.mTravelerStepBudget;
+        return result;
+    }
+
     class InventoryService::ActorTransaction final : public PreparedNativeInventory
     {
     public:
@@ -970,9 +1005,11 @@ namespace TES3MP::Native
         uint64_t tick;
         std::array<float, 3> velocity;
         bool consumed = false;
+        ServerApp::NativeTravelDiagnostics diagnostics;
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
-            std::unique_ptr<InteriorActorScene::Prepared> step, uint64_t time, std::array<float,3> motion)
-            : service(owner), command(std::move(input)), actor(std::move(step)), before(owner.mActorImage), tick(time), velocity(motion) {}
+            std::unique_ptr<InteriorActorScene::Prepared> step, uint64_t time, std::array<float,3> motion,
+            ServerApp::NativeTravelDiagnostics report)
+            : service(owner), command(std::move(input)), actor(std::move(step)), before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
         bool changesInventory() const noexcept override { return bool(command); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -997,6 +1034,19 @@ namespace TES3MP::Native
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
+                    if (service.mBinding.mRetainTraveler)
+                    {
+                        const bool changed = diagnostics.status != service.mTravelDiagnostics.status;
+                        service.mTravelDiagnostics = diagnostics;
+                        if (changed || tick % 30 == 0)
+                        {
+                            const auto report = *service.travelDiagnostics();
+                            const char* statuses[]{"idle", "running", "cell-capacity", "step-capacity", "boundary", "no-path"};
+                            std::fprintf(stderr, "native travel committed: tick=%llu status=%s cells=%zu/%zu steps=%zu/2 completed=%d position=%.6f,%.6f,%.6f\n",
+                                static_cast<unsigned long long>(tick), statuses[size_t(report.status)], report.demandedCells,
+                                report.cellLimit, report.stepLimit, int(report.completed), report.position[0], report.position[1], report.position[2]);
+                        }
+                    }
                 }
                 return result;
             }
@@ -1006,6 +1056,7 @@ namespace TES3MP::Native
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
+    try
     {
         if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
         if (!std::isfinite(seconds) || std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
@@ -1013,17 +1064,38 @@ namespace TES3MP::Native
         if (!mBinding.mDoors.empty()) command = prepareAreaDoor(0, false, players, tick, seconds, std::move(command));
         else if (!command) command = prepareDoorStep(players, tick, seconds);
         const auto before = mBinding.mNavigatingActor->snapshot();
-        const auto owner = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) { return value.mId.value()==before.mActor; });
         bool active = mBinding.mRetainTraveler && !mBinding.mNavigatingActor->arrived();
         for (const auto& session : players.activeSessions())
-            if (const auto* player = players.findPlayer(session.playerId()); player && player->transform().cell()==owner->mCell) active = true;
+            if (const auto* player = players.findPlayer(session.playerId()); player
+                && (mBinding.mTravelerNeighborhood ? sharesCellNeighborhood(player->transform().cell(), actorCell(before))
+                                                  : player->transform().cell() == actorCell(before))) active = true;
+        using Diagnostics = ServerApp::NativeTravelDiagnostics;
+        Diagnostics report;
+        report.status = active ? Diagnostics::Status::Running : Diagnostics::Status::Idle;
+        report.demandedCells = active ? (mBinding.mTravelerNeighborhood ? mBinding.worldDomains().size() : 1) : 0;
+        if (mBinding.mTravelerNeighborhood && active)
+        {
+            if (report.demandedCells > mBinding.mTravelerCellBudget) report.status = Diagnostics::Status::CellCapacity;
+            else if (mBinding.mTravelerStepBudget < 2) report.status = Diagnostics::Status::StepCapacity;
+            active = report.status == Diagnostics::Status::Running;
+        }
         const auto doors = actorDoorFrames(command.get());
         auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)
             : nullptr;
+        if (step && mBinding.mTravelerNeighborhood && !mBinding.mNavigatingActor->contains(step->snapshot().mPosition))
+        { step.reset(); report.status = Diagnostics::Status::Boundary; }
+        if (active && !step) report.status = Diagnostics::Status::Boundary;
+        else if (step && step->pathUnavailable()) report.status = Diagnostics::Status::NoPath;
         const auto after = step ? step->snapshot() : before;
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
-        return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step), tick.value(), velocity);
+        return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step), tick.value(), velocity, report);
+    }
+    catch (const std::exception& error)
+    {
+        std::fprintf(stderr, "native travel preparation failed: tick=%llu previous=%llu reason=%s\n",
+            static_cast<unsigned long long>(tick.value()), static_cast<unsigned long long>(mActorTick), error.what());
+        throw;
     }
 
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::projectInventory(
@@ -1045,8 +1117,11 @@ namespace TES3MP::Native
                 || (teleport && &teleport->service != this) || (door && &door->service != this)
                 || (world && &world->service != this) || (transaction && &transaction->service != this)
                 || (equipment && &equipment->service != this))) return std::nullopt;
+        const auto actorState = mBinding.mNavigatingActor ? std::optional(moving && moving->actor
+            ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot()) : std::nullopt;
         auto result = project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
-            equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr);
+            equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr,
+            {}, actorState ? &*actorState : nullptr);
         if (result)
             for (auto& ground : result->groundItems)
             {
@@ -1066,7 +1141,7 @@ namespace TES3MP::Native
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::project(const CanonicalServerState& players,
         SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedCommand* candidate,
         const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world,
-        const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area) const
+        const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area, const ActorSceneSnapshot* moving) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -1111,7 +1186,11 @@ namespace TES3MP::Native
         for (size_t i = 0; i < mBinding.mContainers.size(); ++i)
         {
             const auto& shared = mBinding.mContainers[i];
-            if (visibleCell != shared.mCell) continue;
+            // Keep the authored placement controlled while its origin is visible,
+            // too: otherwise a late observer could render its local frozen copy.
+            // V20's fixed neighborhood always retains that origin cell.
+            if (visibleCell != shared.mCell
+                && !(moving && shared.mId.value() == moving->mActor && visibleCell == actorCell(*moving))) continue;
             const auto owner = mRuntime.ownerPtr(i + 2);
             const auto sharedValues = values(i + 2);
             if (actorInventory(owner) && !initialCorpse(owner))
@@ -1180,7 +1259,7 @@ namespace TES3MP::Native
                 if (!exterior || domain->mCell == visibleCell || exterior->worldspace() != visibleCell.asExterior()->worldspace()
                     || std::abs(int64_t(exterior->gridX()) - visibleCell.asExterior()->gridX()) > 1
                     || std::abs(int64_t(exterior->gridY()) - visibleCell.asExterior()->gridY()) > 1) continue;
-                auto neighbor = project(players, target, tick, revision, candidate, equipped, world, door, domain->mCell);
+                auto neighbor = project(players, target, tick, revision, candidate, equipped, world, door, domain->mCell, moving);
                 if (!neighbor || neighbor->groundItems.size() != 1 || !neighbor->equipment) return std::nullopt;
                 result.groundItems.front().neighbors.push_back(std::move(neighbor->groundItems.front()));
                 actors.insert(actors.end(), neighbor->equipment->actors.begin(), neighbor->equipment->actors.end());
@@ -1190,6 +1269,9 @@ namespace TES3MP::Native
         }
         std::ranges::sort(visible, {}, &PublicEquipmentMember::player);
         std::ranges::sort(actors, {}, &PublicActorEquipmentMember::actor);
+        actors.erase(std::unique(actors.begin(), actors.end(), [](const auto& a, const auto& b) {
+            return a.actor == b.actor;
+        }), actors.end());
         auto publicEquipment = LatestWinsEquipmentSnapshot::create(target, session->sessionGeneration(), tick, revision, visible, actors);
         if (!std::holds_alternative<LatestWinsEquipmentSnapshot>(publicEquipment)) return std::nullopt;
         result.equipment = std::get<LatestWinsEquipmentSnapshot>(std::move(publicEquipment));

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <span>
+#include <components/esm/refid.hpp>
 
 namespace TES3MP::Native
 {
@@ -32,7 +33,7 @@ namespace TES3MP::Native
         float mYaw = 0;
     };
 
-    // Detached, content-derived interior navigation/physics. References are
+    // Detached, content-derived interior/exterior navigation and physics. References are
     // obstacles; bound doors receive transaction-owned angles and only the
     // selected NPC is stepped. The native host composes
     // prepared frames with its existing inventory owner and durable transaction.
@@ -47,6 +48,12 @@ namespace TES3MP::Native
     public:
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
+        // V20: one interior or a fixed, contiguous exterior processing neighborhood
+        // (at most 3x3). One collision world and one actor frame across cell edges.
+        InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+            const std::string& baseAnimation, const std::string& beastAnimation);
+        bool contains(const std::array<float, 3>& position) const;
+        bool pathUnavailable() const;
         ~InteriorActorScene();
         ActorSceneSnapshot snapshot() const;
         std::array<float, 4> transform() const noexcept;
@@ -71,7 +78,7 @@ namespace TES3MP::Native
         // into the scene identity. No World/player services are constructed.
         void enableNavigation(const std::string& settingsFile);
         std::vector<std::array<float, 3>> pathTo(const std::array<float, 3>& destination) const;
-        void travelTo(const std::array<float, 3>& destination);
+        void travelTo(const std::array<float, 3>& destination, bool retainUnavailable = false);
         ActorSceneSnapshot navigate(float speed);
         bool arrived() const;
         class Prepared
@@ -84,6 +91,7 @@ namespace TES3MP::Native
             ~Prepared();
             ActorSceneSnapshot snapshot() const;
             std::span<const char> image() const;
+            bool pathUnavailable() const;
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});

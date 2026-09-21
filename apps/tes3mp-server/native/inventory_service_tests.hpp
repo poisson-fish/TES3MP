@@ -3,6 +3,7 @@
 #include <filesystem>
 namespace TES3MP::Native::Testing
 {
+    void checkTravelerNeighborhood(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcDoors(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
         bool avoidance = false, bool traveler = false);
     void checkNavigatingActor(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);

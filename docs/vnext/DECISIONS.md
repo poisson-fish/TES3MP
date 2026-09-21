@@ -1,49 +1,39 @@
 # Durable decisions
 
-These rules define the target; CURRENT.md identifies implemented behavior.
-M4 runtime decisions are approved; respawn tuning and script-scoping proposals remain
-labeled. Independent progression and engine-level mod support remain the direction.
-Replace superseded rules rather than appending session history.
+CURRENT.md records implementation. M4 runtime decisions are approved; respawn tuning
+and script-scoping proposals remain labeled. Replace superseded rules; append no history.
 
 ## Product, authority and reuse
 
-**OpenMW gameplay is the foundation.** Reuse/refactor content, mechanics, world
-and scripting on a dedicated authoritative server, including for Tamriel Rebuilt.
-Do not grow independent gameplay formulas, manual content catalogs or a custom
-quest language. Keep the 0.51.0 baseline until an explicit upgrade. TES3MP 0.8
-wire/API/save compatibility is not required; existing code may be reused when
-inspection/tests justify it. MWSE/native-engine-only behavior is not automatic
-compatibility. Mod support requires evidence.
+**OpenMW gameplay is the foundation.** Reuse/refactor content, mechanics, world and
+scripting for the authoritative server, including TR. No independent formulas,
+manual catalogs or custom quest language. Keep baseline 0.51.0 until explicitly
+upgraded. TES3MP 0.8 wire/API/save compatibility is unnecessary; reuse requires
+inspection/tests. Mod support, including MWSE/native-engine behavior, requires evidence.
 
-**Independent networking; native runtime.** Keep components/tes3mp portable with
-owned integration values. A distinct app-local server-runtime leaf may use OpenMW
-types internally and extract shared gameplay for stock callers. Preserve dependency
-checks; no engine-wide cleanup is prerequisite to a vertical slice.
+**Independent networking; native runtime.** Keep components/tes3mp portable with owned
+values. An app-local runtime leaf may use OpenMW internally and extract gameplay
+shared with stock callers. Preserve dependency checks; avoid prerequisite engine-wide cleanup.
 
 **One gameplay loadout.** OpenMW resolves configuration, encoding, load order,
 overrides/deletions and references. Bind plugins, scripts, settings and relevant
-resources to server/client/save identity. Python may package/hash/cache, not
-reinterpret ESM. No manually curated item catalog is required. Unsupported behavior
-fails visibly, never through silent client authority.
+resources to server/client/save identity. Python may package/hash/cache, not reinterpret
+ESM. Unsupported behavior fails visibly; never silently grant client authority.
 
 **One server authority.** The server owns actors, objects, player resources,
-time/weather and gameplay outcomes, including every personal story scope.
-Clients submit authenticated intent and present committed results. Prediction
-cannot author damage, rewards or world mutations. Replace inherited movement
-authority with validation for combat. Schedule the union of player areas;
-one player's menu/scene cannot control the whole simulation.
-NPC simulation stays server-owned; no client ownership leases.
+time/weather and outcomes in every story scope. Clients submit authenticated intent
+and present commits. Prediction cannot author damage, rewards or world mutations.
+Validate inherited movement for combat. Schedule the player-area union independently
+of individual menus/scenes. NPC authority has no client ownership leases.
 
-**M3 doors:** server transactions own activation, reversal, angle, direction and
-persistence through shared OpenMW rules. Clients apply committed angles and report
-only their own player's contacts. Complete committed door images present independently
-of inventory/equipment revision alignment, with session and active-cell guards.
-Reports bind authenticated session/generation,
-placement, motion, sequence and observed tick; any fresh block stalls progress.
-Expiry is ten ticks. Reports/motion IDs are transient; reversal/reconnect invalidates
-old reports. Collision is trusted like inherited movement. Latency can clip before
-a stall; no response barrier or rewind is promised. Server NPC obstruction belongs to shared actor simulation; replacing player
-reports must preserve transactions, persistence and replication.
+**M3 doors:** transactions own activation, reversal, angle, direction and persistence
+through shared OpenMW rules. Clients present complete committed angles independently
+of inventory/equipment revisions, guarded by session/active cell, and report only
+their own contacts. Reports bind session/generation, placement, motion, sequence and
+observed tick; fresh blocks stall. Transient reports expire after ten ticks and
+invalidate on reversal/reconnect. Contacts remain trusted; latency may clip without
+barrier/rewind. Replacing reports with shared NPC physics must preserve transactions,
+persistence and replication.
 
 **Presentation is separate.** Route UI, visual animation, audio and graphics to relevant
 clients. Pure visual replacements may vary; collision/bounds and script-affecting
@@ -71,6 +61,10 @@ Simulation demand is independent of replication interest; simulate each actor on
 Bound cells, actors and tick work; report saturation without losing destinations or
 completion. Preserve inactive state, stock Travel compatibility guards and travel
 state across unload/restart. Abstract travel/automatic fast-forward is not selected.
+V20 admits a fixed neighborhood atomically; saturation pauses both substeps.
+Cell/step limits may change on restart without resetting destinations. Origin and
+destination visibility coalesce by placement ID, suppressing authored local NPCs.
+Offline native-session players freeze; client velocity cannot enter legacy simulation.
 
 **Composed ticks.** Evolve the single native mutation slot into one composed native
 transaction per tick: ordered intents, actor/door simulation, resources, effects,
@@ -258,20 +252,17 @@ precedes installation, which precedes publication. Restore the complete content/
 version-bound world/player relationship off to the side. No checkpoint-only
 acknowledgment, silent resets or parallel canonical files.
 
-**Borrowed lifetime.** Ptr carries a weak reference-lifetime witness; copies preserve
-it, destruction invalidates it, reference copy/move construction creates a new
-lifetime and assignment preserves the destination lifetime. Check witnesses before
-pointer access, then registry/script ownership. Address equality is insufficient.
-Checks assume serialized engine access and neither pin nor authorize installation.
+**Borrowed lifetime.** Ptr copies preserve a weak witness, invalidated on destruction.
+Reference copy/move construction creates a new lifetime; assignment preserves the
+destination lifetime. Check witnesses before dereferencing, then registry/script ownership.
+Address equality is insufficient. Serialized checks neither pin nor authorize installation.
 
-**Native inventory cutover.** Session image and command dispositions share one file
-transaction; never mirror into CanonicalInventoryWorld. The initial host accepts
-one native mutation per tick, durably rejecting later native intents in ingress
-order. Descriptor/content fingerprints bind roles, winning placements and the
-complete domain. Reference IDs use record-plugin order, not script reader slots.
-One registry/counter and stock initial-loot stream cover players then placements
-in stable order. Recovery never reloads, rerolls or auto-equips initial loot.
-Record-derived identities preserve raw condition/light-time/charge bits.
+**Native inventory cutover.** Session image and dispositions share one file transaction,
+never CanonicalInventoryWorld. Initially, one native mutation per tick durably rejects
+later intents in ingress order. Fingerprints bind roles, winning placements and domain.
+Reference IDs use record-plugin order, not reader slots. One registry/counter and
+stock loot stream initialize players then placements in stable order. Recovery never
+reloads/rerolls/auto-equips. Identities preserve raw condition/light-time/charge bits.
 
 **Versioned domains.** V3–V13 retain their documented
 [meanings](../../apps/tes3mp-server/native/inventory_host.hpp). Descriptor changes

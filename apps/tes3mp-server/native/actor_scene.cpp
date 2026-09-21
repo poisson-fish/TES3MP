@@ -27,6 +27,8 @@
 #include <components/settings/parser.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadland.hpp>
+#include <components/bullethelpers/heightfield.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/bulletshapemanager.hpp>
@@ -38,6 +40,7 @@
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
+#include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -111,6 +114,20 @@ namespace TES3MP::Native
         btDbvtBroadphase mBroadphase;
         btCollisionWorld mWorld{ &mDispatcher, &mBroadphase, &mConfiguration };
         std::vector<std::unique_ptr<Body>> mBodies;
+        struct Terrain
+        {
+            btCollisionWorld& world;
+            osg::Vec2i cell;
+            std::array<float, ESM::Land::LAND_NUM_VERTS> heights;
+            std::vector<btScalar> collisionHeights;
+            float minimum, maximum, water;
+            std::unique_ptr<btHeightfieldTerrainShape> shape;
+            std::unique_ptr<btCollisionObject> object;
+            explicit Terrain(btCollisionWorld& value) : world(value) {}
+            ~Terrain() { if (object && object->getBroadphaseHandle()) world.removeCollisionObject(object.get()); }
+        };
+        std::vector<std::unique_ptr<Terrain>> mTerrain;
+        std::vector<ESM::RefId> mCells;
         std::map<const btCollisionObject*, uint64_t> mIdentities;
         std::unique_ptr<MWPhysics::ActorFrameData> mActor;
         osg::Vec3f mActorOffset;
@@ -207,29 +224,43 @@ namespace TES3MP::Native
             }
         }
 
-        Impl(Loadout& loadout, const std::string& cellName, uint64_t actor,
+        Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation)
             : mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
               mReferences(loadout.store(), loadout.readers(), 1), mActorId(actor)
         {
-            if (cellName.empty() || cellName.size() > 256 || !actor
+            if (cells.empty() || cells.size() > 9 || !actor
                 || baseAnimation.empty() || baseAnimation.size() > 1024
                 || beastAnimation.empty() || beastAnimation.size() > 1024)
                 throw std::invalid_argument("Interior NPC binding outside bounds");
+            mCells.assign(cells.begin(), cells.end());
+            std::set<ESM::RefId> unique;
+            const auto* anchor = cells.front().getIf<ESM::ESM3ExteriorCellRefId>();
+            for (auto cell : cells)
+            {
+                const auto* exterior = cell.getIf<ESM::ESM3ExteriorCellRefId>();
+                if (!unique.insert(cell).second || (anchor ? (!exterior
+                    || std::abs(int64_t(exterior->getX()) - anchor->getX()) > 1
+                    || std::abs(int64_t(exterior->getY()) - anchor->getY()) > 1) : cells.size() != 1))
+                    throw std::invalid_argument("Actor processing cells must fit one unique 3x3 neighborhood");
+            }
             MWClass::registerClasses();
             // Non-NIF collision meshes use the stock scene importer; shader
             // generation is presentation and must not initialize here.
             mResources.getSceneManager()->setShaderGenerationEnabled(false);
             VFS::registerArchives(&mVfs, Files::Collections(loadout.options().mDataPaths),
                 loadout.options().mArchives, true, &loadout.encoder());
-            auto& cell = mReferences.getCell(interiorCell(cellName));
-            if (cell.isExterior() || cell.getCell()->hasWater())
-                throw std::invalid_argument("Interior NPC slice requires a dry interior");
             const VFS::Path::Normalized base(baseAnimation), beast(beastAnimation);
             std::set<std::string> meshes;
+            std::set<uint64_t> identities;
             size_t references = 0;
+            for (auto cellId : cells)
+            {
+            auto& cell = mReferences.getCell(cellId);
+            if (!cell.isExterior() && cell.getCell()->hasWater())
+                throw std::invalid_argument("Interior NPC slice requires a dry interior");
             cell.forEach([&](const MWWorld::Ptr& ptr) {
                 if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
@@ -238,6 +269,7 @@ namespace TES3MP::Native
                 const auto resolvedId = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), loadout.options().mContent);
                 if (!resolvedId) throw std::invalid_argument("Collision reference identity invalid");
                 const auto id = *resolvedId;
+                if (!identities.insert(id).second) throw std::invalid_argument("Duplicate collision placement across cells");
                 const bool npc = ptr.getType() == ESM::NPC::sRecordId;
                 if (cls.isActor() && !npc)
                     throw std::invalid_argument("Non-NPC actor in interior collision domain");
@@ -311,13 +343,46 @@ namespace TES3MP::Native
                 mBodies.push_back(std::move(body));
                 mIdentities.emplace(object, id);
                 mWorld.addCollisionObject(object, npc ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
-                    npc ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
+                    npc ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
                 return true;
             });
+            if (const auto* exterior = cellId.getIf<ESM::ESM3ExteriorCellRefId>())
+            {
+                auto terrain = std::make_unique<Terrain>(mWorld);
+                terrain->cell = {exterior->getX(), exterior->getY()};
+                terrain->water = cell.getWaterLevel();
+                if (!std::isfinite(terrain->water)) throw std::invalid_argument("Actor water level outside bounds");
+                const auto* land = loadout.store().get<ESM::Land>().search(exterior->getX(), exterior->getY());
+                const auto* data = land ? land->getLandData(ESM::Land::DATA_VHGT) : nullptr;
+                if (data) terrain->heights = data->mHeights;
+                else terrain->heights.fill(ESM::Land::DEFAULT_HEIGHT);
+                for (float value : terrain->heights)
+                    if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                        throw std::invalid_argument("Actor terrain height outside bounds");
+                const auto [lo, hi] = std::minmax_element(terrain->heights.begin(), terrain->heights.end());
+                terrain->minimum = *lo; terrain->maximum = *hi;
+                // Stock HeightField parameters and diamond subdivision. The owned
+                // buffer also supports Bullet builds using double precision.
+                terrain->collisionHeights.assign(terrain->heights.begin(), terrain->heights.end());
+                terrain->shape = std::make_unique<btHeightfieldTerrainShape>(ESM::Land::LAND_SIZE,
+                    ESM::Land::LAND_SIZE, terrain->collisionHeights.data(), 1, *lo, *hi, 2,
+                    sizeof(btScalar) == sizeof(float) ? PHY_FLOAT : PHY_DOUBLE, false);
+                terrain->shape->setUseDiamondSubdivision(true);
+                const float scale = float(ESM::Land::REAL_SIZE) / (ESM::Land::LAND_SIZE - 1);
+                terrain->shape->setLocalScaling({scale, scale, 1});
+                terrain->object = BulletHelpers::makeCollisionObject(terrain->shape.get(),
+                    BulletHelpers::getHeightfieldShift(exterior->getX(), exterior->getY(), ESM::Land::REAL_SIZE, *lo, *hi),
+                    btQuaternion::getIdentity());
+                mIdentities.emplace(terrain->object.get(), mTerrain.size() + 1);
+                mWorld.addCollisionObject(terrain->object.get(), MWPhysics::CollisionType_HeightMap, MWPhysics::CollisionType_Actor);
+                mTerrain.push_back(std::move(terrain));
+            }
+            }
             if (!mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
             std::ostringstream fingerprint;
             fingerprint << "native-interior-collision-1\n" << loadout.contentFingerprint() << '\n'
-                << cellName << '\n' << actor << '\n';
+                << (anchor ? "exterior-neighborhood-1" : std::string(cells.front().getRefIdString())) << '\n' << actor << '\n';
+            if (anchor) for (auto cell : cells) fingerprint << cell.serializeText() << '\n';
             for (const auto& mesh : meshes)
             {
                 auto stream = mVfs.get(VFS::Path::toNormalized(mesh));
@@ -408,7 +473,14 @@ namespace TES3MP::Native
 
     InteriorActorScene::InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation)
-        : mImpl(std::make_unique<Impl>(loadout, cell, actor, baseAnimation, beastAnimation)) {}
+        : InteriorActorScene(loadout, std::array{interiorCell(cell)}, actor, baseAnimation, beastAnimation) {}
+    InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+        const std::string& baseAnimation, const std::string& beastAnimation)
+        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation))
+    {
+        if (!contains(snapshot().mPosition))
+            throw std::invalid_argument("Actor start outside dry processing neighborhood");
+    }
     InteriorActorScene::~InteriorActorScene() = default;
     ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl ? mImpl->snapshot() : mDormant->snapshot; }
     std::array<float, 4> InteriorActorScene::transform() const noexcept
@@ -478,6 +550,10 @@ namespace TES3MP::Native
         if (!navigator->addAgent(mImpl->mAgentBounds))
             throw std::invalid_argument("Interior NPC navigation bounds unsupported");
         navigator->updateBounds(ESM::RefId::stringRefId("native-interior"), {}, mImpl->mActor->mPosition, nullptr);
+        for (const auto& terrain : mImpl->mTerrain)
+            navigator->addHeightfield(terrain->cell, ESM::Land::REAL_SIZE,
+                DetourNavigator::HeightfieldSurface{terrain->heights.data(), ESM::Land::LAND_SIZE,
+                    terrain->minimum, terrain->maximum}, nullptr);
         for (size_t i = 0; i < mImpl->mBodies.size(); ++i)
         {
             const auto& body = *mImpl->mBodies[i];
@@ -503,6 +579,7 @@ namespace TES3MP::Native
         for (float value : destination)
             if (!std::isfinite(value) || std::abs(value) > 1e7f)
                 throw std::invalid_argument("Interior destination outside bounds");
+        if (!contains(destination)) throw std::invalid_argument("Travel destination outside processing neighborhood");
         mImpl->syncNavigation(mImpl->mDoors);
         std::vector<osg::Vec3f> path;
         const auto status = DetourNavigator::findPath(*mImpl->mNavigator, mImpl->mAgentBounds,
@@ -515,8 +592,25 @@ namespace TES3MP::Native
         return result;
     }
 
-    void InteriorActorScene::travelTo(const std::array<float, 3>& destination)
+    void InteriorActorScene::travelTo(const std::array<float, 3>& destination, bool retainUnavailable)
     {
+        if (retainUnavailable)
+        {
+            if (!mImpl || !mImpl->mNavigator) throw std::logic_error("Travel navigation unavailable");
+            for (float value : destination)
+                if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                    throw std::invalid_argument("Travel destination outside bounds");
+            if (!contains(destination)) throw std::invalid_argument("Travel destination outside dry processing neighborhood");
+            auto travel = mImpl->mTravel;
+            travel.hasDestination = true;
+            travel.destination = {destination[0], destination[1], destination[2]};
+            MWMechanics::PathFinder path;
+            mImpl->syncNavigation(mImpl->mDoors);
+            mImpl->rebuildPath(path, mImpl->mActor->mPosition, travel);
+            mImpl->mPath = std::move(path);
+            mImpl->mTravel = std::move(travel);
+            return;
+        }
         const auto path = pathTo(destination);
         MWMechanics::PathFinder next;
         for (const auto& point : path) next.addPointToPath({point[0], point[1], point[2]});
@@ -528,10 +622,23 @@ namespace TES3MP::Native
     bool InteriorActorScene::arrived() const
     { return mImpl ? !mImpl->mTravel.door && mImpl->mPath.checkPathCompleted() : mDormant->arrived; }
 
+    bool InteriorActorScene::contains(const std::array<float, 3>& position) const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        if (mImpl->mTerrain.empty()) return true;
+        const auto x = std::floor(double(position[0]) / ESM::Land::REAL_SIZE);
+        const auto y = std::floor(double(position[1]) / ESM::Land::REAL_SIZE);
+        return std::ranges::any_of(mImpl->mTerrain, [&](const auto& terrain) {
+            return x == terrain->cell.x() && y == terrain->cell.y() && position[2] >= terrain->water;
+        });
+    }
+    bool InteriorActorScene::pathUnavailable() const
+    { return mImpl && !mImpl->mPath.isPathConstructed() && !mImpl->mPath.checkPathCompleted(); }
+
     void InteriorActorScene::bindDoors(std::span<const uint64_t> doors, bool avoidance)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
-        if (mImpl->mNavigator || !mImpl->mDoors.empty() || doors.empty() || doors.size() > 128)
+        if (mImpl->mNavigator || !mImpl->mDoors.empty() || (doors.empty() && !avoidance) || doors.size() > 128)
             throw std::invalid_argument("Actor door binding outside startup bounds");
         std::vector<ActorSceneDoor> bound;
         auto fingerprint = mImpl->mFingerprint + (avoidance ? "npc-door-avoidance-1\n" : "npc-door-contact-1\n");
@@ -627,6 +734,8 @@ namespace TES3MP::Native
             frame.mIsOnGround, mState->contacts, frame.mRotation.y()};
     }
     std::span<const char> InteriorActorScene::Prepared::image() const { return mState->bytes; }
+    bool InteriorActorScene::Prepared::pathUnavailable() const
+    { return !mState->path.isPathConstructed() && !mState->path.checkPathCompleted(); }
 
     std::vector<char> InteriorActorScene::image() const
     { return mImpl ? mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel) : mDormant->image; }
@@ -685,6 +794,8 @@ namespace TES3MP::Native
             throw std::invalid_argument("Actor image identity mismatch");
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         frame->mPosition = vector(); frame->mInertia = vector(); frame->mLastStuckPosition = vector();
+        if (!contains({frame->mPosition.x(), frame->mPosition.y(), frame->mPosition.z()}))
+            throw std::invalid_argument("Recovered traveler outside processing neighborhood");
         frame->mRotation.x() = real(); frame->mRotation.y() = real(); frame->mOldHeight = real();
         const auto stuck = word();
         if (stuck > UINT32_MAX) throw std::invalid_argument("Actor stuck counter outside bounds");

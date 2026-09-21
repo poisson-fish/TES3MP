@@ -17,6 +17,22 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V20 uses native-inventory-20 with V19 fields and a fresh campaign. It
+    // accepts one dry interior or 1..9 exterior cells within the first cell's
+    // 3x3 neighborhood; the first cell owns the single selected NPC. Collision
+    // references are deduplicated across cells, with stock LAND heightfields.
+    // The declared neighborhood is retained as one scene until completion.
+    // Physics positions determine exterior crossings, including signed edges.
+    // Append `processing CELLS STEPS` after destination: 0..9 cells, 0..2
+    // physics steps admitted per tick. Inadequate capacity pauses the complete
+    // actor step, retaining destination/path/completion. These policy limits
+    // may change on restart without changing the content-bound campaign.
+    // Diagnostics report running, idle, cell/step saturation, dry-domain edge
+    // and unavailable path; 256 nav tiles/2048 path points remain hard bounds.
+    // An unavailable route stays pending. Source and destination appearances
+    // coalesce to one actor; origin interest suppresses the authored local copy.
+    // Beyond-domain travel, water, teleports and sliding neighborhoods await
+    // later slices. V16..V19 retain their prior domains.
     // V19 uses native-inventory-19 with V18 fields and a fresh campaign. One
     // selected traveler sustains the bound interior independently of player
     // interest. The player/traveler union runs the existing composed tick once:

@@ -59,7 +59,7 @@ namespace TES3MP::Native
         std::optional<std::vector<TeleportDoor>> mTeleportDoors;
         // V14 expands the content-bound domain. The first two fields remain
         // compatibility inputs for older descriptors; every cell uses the same
-        // registry and durable image. Only occupied player areas retain scenes.
+        // registry and durable image. Player and active traveler demand retain scenes.
         std::vector<WorldItems> mAdditionalWorldItems;
         struct OrdinaryDoorPlacement
         {
@@ -75,6 +75,10 @@ namespace TES3MP::Native
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
         bool mRetainTraveler = false;
+        // V20 processing admission; never partially step an actor on saturation.
+        bool mTravelerNeighborhood = false;
+        size_t mTravelerCellBudget = 9;
+        size_t mTravelerStepBudget = 2;
         std::function<void(bool)> mNavigationActivity;
         std::vector<const WorldItems*> worldDomains() const
         {
@@ -110,6 +114,8 @@ namespace TES3MP::Native
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity) const;
         void installActorPosition() noexcept;
+        CellId actorCell(const ActorSceneSnapshot& state) const;
+        ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor
         {
             DoorBinding binding;
@@ -189,6 +195,7 @@ namespace TES3MP::Native
         bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
+        std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
@@ -211,7 +218,8 @@ namespace TES3MP::Native
             const PreparedCommand* candidate = nullptr,
             const EquipmentRuntime::PreparedEquipment* equipment = nullptr,
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
-            const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {}) const;
+            const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {},
+            const ActorSceneSnapshot* moving = nullptr) const;
     };
 }
 #endif

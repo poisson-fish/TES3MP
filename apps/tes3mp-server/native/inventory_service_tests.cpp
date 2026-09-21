@@ -3917,6 +3917,208 @@ namespace TES3MP::Native::Testing
         }
     }
 
+    void checkTravelerNeighborhood(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        require(std::filesystem::create_directory(scratch), "Traveler scratch already exists");
+        std::filesystem::create_directory(scratch / "openmw");
+        std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw/openmw.cfg");
+        const auto npcId = ESM::RefId::stringRefId("neighborhood_traveler");
+        constexpr float y = 100 * 8192.f + 1000;
+        {
+            const auto directory = config.string();
+            const char* arguments[]{"traveler-neighborhood", "--config", directory.c_str()};
+            Loadout base(readLoadoutOptions(3, arguments));
+            auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
+            npc.mId = npcId; npc.mScript = {}; npc.mInventory.mList.clear();
+            std::ofstream stream(scratch / "Traveler.esp", std::ios::binary);
+            ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
+            out.addMaster("Morrowind.esm", 0); out.save(stream);
+            out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            for (int x : {0, -1, 1})
+            {
+                ESM::Cell cell; cell.blank(); cell.mData.mX = x; cell.mData.mY = 100; cell.updateId();
+                out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                if (x == 0)
+                {
+                    ESM::CellRef ref; ref.blank(); ref.mRefNum = {1, 0}; ref.mRefID = npcId;
+                    ref.mPos = {{150, y, 257}, {0, 0, 0}}; ref.save(out);
+                }
+                out.endRecord(ESM::Cell::sRecordId);
+                ESM::Land land; land.blank(); land.mX = x; land.mY = 100;
+                land.mFlags = ESM::Land::Flag_HeightsNormals;
+                land.add(ESM::Land::DATA_VHGT);
+                land.mLandData->mHeights.fill(256);
+                land.mLandData->mMinHeight = land.mLandData->mMaxHeight = 256;
+                out.startRecord(ESM::Land::sRecordId, 0); land.save(out); out.endRecord(ESM::Land::sRecordId);
+            }
+            out.close();
+            std::ofstream cfg(scratch / "openmw/openmw.cfg", std::ios::app);
+            cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=Traveler.esp\n";
+        }
+        const auto exterior = [](int x) { return CellId::exterior(id<CellSpaceId>(8), x, 100); };
+        const std::array cells{exterior(0), exterior(-1), exterior(1)};
+        const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Exterior}};
+        const auto manifest = ContentManifest::create(testContentManifestId(), spaces, cells, id<AppearanceId>(1), testMovementProfile()).value();
+        auto observed = players(SessionGeneration::initial(), 1, 2);
+        std::vector entities(observed.players().begin(), observed.players().end());
+        for (size_t i = 0; i < entities.size(); ++i)
+            entities[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entities[i], id<ServerTick>(1),
+                Transform(exterior(i ? -1 : 1), Position3((i ? -100 : 8200) * 1024, int64_t(y) * 1024, 257 * 1024),
+                    entities[i].transform().orientation()), LinearVelocity3(0,0,0)));
+        observed = std::get<CanonicalServerState>(createCanonicalServerState(entities, observed.activeSessions()));
+        auto empty = std::get<CanonicalServerState>(createCanonicalServerState(entities, {}));
+        auto crypto = makeProductionCredentialCrypto();
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Traveler observer", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        std::vector<PersistedPlayerIdentity> records;
+        for (const auto& entity : entities)
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(entity.playerId().value()));
+            records.push_back({{entity.playerId(),entity.entityId(),id<AppearanceId>(1),testContentManifestId()},digest,entity,profile});
+        }
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+        const auto descriptor = [&](size_t cellBudget, size_t steps) {
+            auto path = scratch / ("native-" + std::to_string(cellBudget) + "-" + std::to_string(steps) + ".txt");
+            std::ofstream out(path);
+            out << "native-inventory-20\nmanifest ";
+            const auto manifestId = testContentManifestId();
+            for (auto byte : manifestId.bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
+            out << std::dec << "\nconfig \"openmw\"\nplayers 1 2\nactors \"player\" \"player\"\nloot 1 0\n"
+                << "exterior 0 100\ndoors auto\ncell exterior:8:0:100\nareas 3\n"
+                << "exterior -1 100\ncell exterior:8:-1:100\nexterior 1 100\ncell exterior:8:1:100\n"
+                << "npc \"neighborhood_traveler\" " << std::quoted(settings.string())
+                << "\ndestination -150 " << int(y) << " 257 120\nprocessing " << cellBudget << ' ' << steps << '\n';
+            return path;
+        };
+        const auto normal = descriptor(3, 2), cellsFull = descriptor(2, 2), workFull = descriptor(3, 1);
+        const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+        const auto rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+        const auto bytes = [](auto& service) { return std::vector(service.inventoryImage().begin(), service.inventoryImage().end()); };
+        const auto actorImage = [](const auto& image) {
+            auto actor = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()}).actor;
+            return std::vector(actor.begin(), actor.end());
+        };
+        InventoryHost host(normal, manifest, *registry, *crypto, {});
+        auto& service = host.service(); service.synchronizeCells(empty);
+        require(dynamic_cast<InventoryService&>(service).activeAreas() == std::vector<bool>({true,true,true}),
+            "Unattended traveler did not retain its processing neighborhood");
+        const auto initial = bytes(service);
+        {
+            std::ifstream input(normal);
+            std::string text((std::istreambuf_iterator<char>(input)), {});
+            text.replace(text.find("destination -150 "), std::string("destination -150 ").size(), "destination 15000 ");
+            const auto pendingPath = scratch / "pending.txt";
+            { std::ofstream output(pendingPath); output << text; }
+            InventoryHost pending(pendingPath, manifest, *registry, *crypto, {});
+            pending.service().synchronizeCells(empty);
+            auto tick = pending.service().prepareNativeTick(empty, id<ServerTick>(1), 1.f/30, {});
+            require(tick->commit(accepted) == CanonicalDurabilityResult::Committed
+                && pending.service().travelDiagnostics()->status == ServerApp::NativeTravelDiagnostics::Status::NoPath
+                && !pending.service().travelDiagnostics()->completed, "Unavailable bounded path lost its destination or completed");
+            InventoryHost recovered(pendingPath, manifest, *registry, *crypto, pending.service().inventoryImage());
+            require(bytes(recovered.service()) == bytes(pending.service())
+                && !recovered.service().travelDiagnostics()->completed, "Unavailable path changed across restart");
+        }
+        {
+            auto falling = entities;
+            for (auto& player : falling)
+                player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player, id<ServerTick>(1),
+                    player.transform(), LinearVelocity3(0, 0, -1000000)));
+            const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(falling, {}));
+            NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+            CanonicalCommandReducer reducer(offline, observability, manifest);
+            struct Port final : CanonicalDurabilityPort
+            {
+                CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
+                    CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+                    const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+                    const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte>) noexcept override
+                { return CanonicalDurabilityResult::Committed; }
+            } port;
+            require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &service),
+                "Offline travel reducer composition failed");
+            Clock clock;
+            ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(2), IngressOrdinal::initial());
+            clock.value = 100'000'000;
+            const auto pump = intake.pump();
+            require(pump && !pump.batches().empty(), "Offline tick missing");
+            auto pending = reducer.prepareTick(pump.batches().front());
+            require(pending.result() && std::ranges::equal(pending.candidateState().players(), offline.players()),
+                "Offline inherited velocity reentered legacy player simulation");
+        }
+        for (const auto& path : {cellsFull, workFull})
+        {
+            InventoryHost limited(path, manifest, *registry, *crypto, initial);
+            auto& paused = limited.service(); paused.synchronizeCells(empty);
+            auto step = paused.prepareNativeTick(empty, id<ServerTick>(1), 1.f/30, {});
+            require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "Saturated tick failed");
+            using Status = ServerApp::NativeTravelDiagnostics::Status;
+            const auto report = *paused.travelDiagnostics();
+            require(report.status == (path == cellsFull ? Status::CellCapacity : Status::StepCapacity)
+                && !report.completed && report.demandedCells == 3 && actorImage(bytes(paused)) == actorImage(initial),
+                "Capacity diagnostic lost destination, completion or partially stepped the NPC");
+            InventoryHost resumed(normal, manifest, *registry, *crypto, paused.inventoryImage());
+            require(actorImage(bytes(resumed.service())) == actorImage(initial), "Increasing capacity lost the retained trip");
+        }
+        InventoryHost occupied(normal, manifest, *registry, *crypto, initial);
+        occupied.service().synchronizeCells(observed);
+        std::unique_ptr<InventoryHost> restarted;
+        bool crossed = false, completed = false;
+        for (uint64_t tick = 1; tick <= 160; ++tick)
+        {
+            auto step = service.prepareNativeTick(empty, id<ServerTick>(tick), 1.f/30, {});
+            const auto before = bytes(service);
+            if (tick == 38)
+                require(step->commit(rejected) == CanonicalDurabilityResult::Rejected && bytes(service) == before,
+                    "Rejected boundary tick changed the committed trip");
+            require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "Unattended neighborhood tick failed");
+            auto overlap = occupied.service().prepareNativeTick(observed, id<ServerTick>(tick), 1.f/30, {});
+            require(overlap->commit(accepted) == CanonicalDurabilityResult::Committed
+                && bytes(occupied.service()) == bytes(service), "Overlapping player and traveler neighborhoods stepped twice");
+            if (restarted)
+            {
+                auto resume = restarted->service().prepareNativeTick(empty, id<ServerTick>(tick), 1.f/30, {});
+                require(resume->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(restarted->service()) == bytes(service), "Mid-trip restart changed physics, path or destination");
+            }
+            if (tick == 25)
+            {
+                restarted = std::make_unique<InventoryHost>(normal, manifest, *registry, *crypto, service.inventoryImage());
+                restarted->service().synchronizeCells(empty);
+            }
+            const auto report = *service.travelDiagnostics();
+            crossed |= report.position[0] < 0;
+            require(report.position[2] > 255 && report.position[2] < 260, "Crossing lost stock terrain collision");
+            auto a = service.projectInventory(observed, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+            auto b = service.projectInventory(observed, id<SessionId>(2), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+            require(a && b && a->equipment->actors.size() == 1 && b->equipment->actors.size() == 1
+                && a->equipment->motions.size() == 1 && a->equipment->motions == b->equipment->motions,
+                "Crossing or overlapping interest duplicated/lost the returning clients' traveler");
+            require(!service.projectInventory(empty, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick)),
+                "Traveler simulation manufactured an observer");
+            if (report.completed)
+            {
+                completed = true;
+                require(crossed && std::abs(report.position[0] + 150) < 16, "Travel completed in the wrong cell");
+                service.synchronizeCells(empty);
+                require(!dynamic_cast<InventoryService&>(service).activeActorCollisionBodies(), "Completion did not release the neighborhood");
+                InventoryHost done(normal, manifest, *registry, *crypto, service.inventoryImage());
+                require(done.service().travelDiagnostics()->completed, "Completed restart restarted travel");
+                service.synchronizeCells(observed);
+                require(bytes(service) == bytes(done.service()), "Reload changed completed travel");
+                std::cout << "neighborhood crossing=x:0->-1 completion_tick=" << tick
+                    << " cell-capacity=retained step-capacity=retained union=once restart=exact clients=converged\n";
+                break;
+            }
+        }
+        require(completed, "Neighborhood traveler did not complete");
+    }
+
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler)
     {

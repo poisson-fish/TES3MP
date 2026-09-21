@@ -185,6 +185,115 @@ def verify_doors(output, evidence, processes, relay, manifest):
     print(json.dumps(report, indent=2), flush=True)
 
 
+def verify_traveler(output, evidence, processes, relay, manifest, restart_server, restart_clients):
+    """Two real desktops leave; durable empty-world travel survives a process restart."""
+    finished = set()
+    sequence = dict.fromkeys(evidence, 0)
+
+    def wait_for(predicate, description, timeout=45):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = predicate()
+            if result:
+                return result
+            if any(p.poll() is not None for name, p in processes.items() if name not in finished):
+                raise RuntimeError(f"process exited: {description}")
+            time.sleep(.1)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
+        temporary.replace(control)
+
+    pattern = re.compile(r"native travel committed: tick=(\d+) status=(\S+) cells=(\d+)/(\d+) "
+                         r"steps=(\d+)/2 completed=(\d) position=([-\d.]+),([-\d.]+),([-\d.]+)")
+
+    def progress(name):
+        path = output / (name + ".stderr.log")
+        text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        return [dict(tick=int(m[0]), status=m[1], completed=bool(int(m[5])),
+                     x=float(m[6]), y=float(m[7]), z=float(m[8])) for m in pattern.findall(text)]
+
+    wait_for(lambda: all(len(poses(path)) >= 30 for path in evidence.values()), "both traveler replicas")
+    for role, path in evidence.items():
+        command(role, "screenshot")
+        wait_for(lambda: any(r.get("event") == "traversal_inventory" for r in records(path)),
+                 role + " initial inventory observation")
+    before = {role: poses(path)[-1] for role, path in evidence.items()}
+    identities = {role: next(r["player"] for r in reversed(records(path))
+                            if r.get("event") == "traversal_inventory") for role, path in evidence.items()}
+    for role in evidence:
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        if processes[role].returncode:
+            raise RuntimeError(f"{role} failed to leave cleanly")
+        finished.add(role)
+    disconnect = wait_for(lambda: re.findall(r"native actor disconnect committed: tick=(\d+) active_sessions=0",
+                              output.joinpath("server.stderr.log").read_text(encoding="utf-8", errors="replace")),
+                          "durable disconnect of both clients")
+    left_tick = int(disconnect[-1])
+    empty_trip = wait_for(lambda: [p for p in progress("server") if p["tick"] > left_tick + 90],
+                         "unattended movement before restart")[-1]
+    if empty_trip["completed"] or distance(empty_trip, before["Bob"]) < 4:
+        raise RuntimeError("No distinct unfinished unattended travel before restart")
+    processes["server"].terminate()
+    processes["server"].wait(timeout=15)
+    finished.add("server")
+    print(f"Both clients left; restarting mid-trip after tick {empty_trip['tick']}", flush=True)
+    restart_server()
+    continued = wait_for(lambda: [p for p in progress("server-restarted") if p["tick"] > empty_trip["tick"] + 90],
+                         "unattended movement after restart")[-1]
+    if continued["completed"] or distance(continued, empty_trip) < 4:
+        raise RuntimeError("Restart did not continue the unfinished empty-world trip")
+    # Keep pre-restart evidence separately; the new clients must independently
+    # establish identity and consume fresh committed snapshots.
+    for role, path in evidence.items():
+        path.rename(output / (role + "-before.ndjson"))
+        control = path.with_suffix(".ndjson.control")
+        control.unlink(missing_ok=True)
+        sequence[role] = 0
+    restart_clients()
+    finished.difference_update(evidence)
+    final_server = wait_for(lambda: next((p for p in reversed(progress("server-restarted")) if p["completed"]), None),
+                            "server travel completion", timeout=240)
+    if distance(final_server, {"x": -550, "y": 70}) > 16:
+        raise RuntimeError("Server completed away from the retained destination")
+    wait_for(lambda: all(len(poses(path)) >= 30
+                         and all(distance(p, final_server) < .1 and abs(p["z"] - final_server["z"]) < .1
+                                 for p in poses(path)[-20:]) for path in evidence.values()),
+             "returning desktop convergence")
+    clients = {}
+    for role, path in evidence.items():
+        # A walkable point on the observed route, looking back at the destination.
+        command(role, "pose -400 30 385 0 -1.32")
+        pose_sequence = sequence[role]
+        wait_for(lambda: any(r.get("event") == "traversal_pose" and r.get("sequence") == pose_sequence
+                             for r in records(path)), role + " returned camera")
+        command(role, "screenshot")
+        shot = wait_for(lambda: next((r for r in reversed(records(path)) if r.get("event") == "traversal_screenshot"), None),
+                        role + " returned screenshot")
+        inventory = next(r for r in reversed(records(path)) if r.get("event") == "traversal_inventory")
+        if inventory["player"] != identities[role] or shot["local_ai_active"]:
+            raise RuntimeError(f"{role} lost identity or enabled local AI")
+        clients[role] = dict(final=poses(path)[-1], identity_preserved=True, local_ai_active=False)
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        finished.add(role)
+        finished.add(role + "-returned")
+        if processes[role].returncode:
+            raise RuntimeError(f"{role} failed to finish")
+    report = dict(success=True, scenario="V20 real-content unattended interior travel and process restart",
+                  cell="Seyda Neen, Arrille's Tradehouse", npc="raflod the braggart", synthetic_placements=False,
+                  manifest=manifest, departed_tick=left_tick, before_restart=empty_trip,
+                  after_restart=continued, completed=final_server, clients=clients,
+                  relay=asdict(relay.stop()), screenshots=[p.name for p in output.glob("*.png")])
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+
+
 def run(args):
     root = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
@@ -193,9 +302,9 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     cell = "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 18 if args.doors else 16
+    version = 20 if args.traveler else 18 if args.doors else 16
     npc = "hlavora sadas" if args.doors else "raflod the braggart"
-    destination = "32 -320 -127 120" if args.doors else "-550 70 385 40"
+    destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
@@ -204,10 +313,13 @@ def run(args):
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
         f'actors "player" "player"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
-        f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n', encoding="utf-8")
+        f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
+        + ('processing 1 2\n' if args.traveler else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
+    if args.traveler:
+        common["spawn_positions"] = "-563200:71680:394240"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
                                  join_password_file="join-password.txt", player_identity_file="players.txt")
@@ -224,6 +336,8 @@ def run(args):
         tokens[6:16] = ["0", "1", "0", "0", str((-750 + 80 * index) * 1024), "-409600", "394240", "0", "0", "0"]
         if args.doors:
             tokens[10:13] = [str((-80 - 80 * index) * 1024), "-204800", "-128000"]
+        if args.traveler:
+            tokens[10:13] = ["-563200", str((70 + 40 * index) * 1024), "394240"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
         identities.append(" ".join(tokens))
@@ -255,6 +369,7 @@ def run(args):
         return process
     evidence = {role: output / (role + ".ndjson") for role in ("Alice", "Bob")}
     survivor = "Bob" if args.leave == "Alice" else "Alice"
+    client_commands = {}
     try:
         server = start("server", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")])
         time.sleep(2)
@@ -274,6 +389,15 @@ def run(args):
                        f"--tes3mp-content-cell-space-map=1={cell}", "--tes3mp-content-appearance-id=2",
                        "--tes3mp-content-appearance-record=player"]
             start(role, command)
+            client_commands[role] = command
+        if args.traveler:
+            def restart_clients():
+                for role, command in client_commands.items():
+                    processes[role] = start(role + "-returned", command)
+            verify_traveler(output, evidence, processes, relay, manifest,
+                            lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
+                            restart_clients)
+            return
         if args.doors:
             verify_doors(output, evidence, processes, relay, manifest)
             return
@@ -372,7 +496,10 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--leave", choices=("Alice", "Bob"))
     parser.add_argument("--doors", action="store_true", help="V18 real-interior door avoidance on two connected clients")
+    parser.add_argument("--traveler", action="store_true", help="V20 both clients leave, server restarts mid-trip, clients return")
     args = parser.parse_args()
-    if not args.doors and not args.leave:
+    if args.doors and args.traveler:
+        parser.error("choose --doors or --traveler")
+    if not args.doors and not args.traveler and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

@@ -1452,6 +1452,15 @@ namespace TES3MP
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0))
                     continue;
+                // Inherited desktop movement is not a server movement intent.
+                // Disconnect removes the live client-authority marker; do not
+                // feed its last (possibly falling) velocity into the legacy
+                // movement kernel while native simulation continues unattended.
+                if (mNativeInventory && mNativeInventory->hasActorMotion()
+                    && std::ranges::none_of(prepared.mState->activeSessions(), [&](const auto& session) {
+                        return session.playerId() == current.playerId();
+                    }))
+                    continue;
                 if (std::find(prepared.mClientAuthoritativePlayers.begin(), prepared.mClientAuthoritativePlayers.end(),
                         current.playerId())
                     != prepared.mClientAuthoritativePlayers.end())

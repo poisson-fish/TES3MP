@@ -6544,6 +6544,12 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 5 && std::string_view(argv[1]) == "traveler-neighborhood")
+        {
+            TES3MP::Native::Testing::checkTravelerNeighborhood(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]));
+            std::cout << "PASS traveler-neighborhood\n"; return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "exterior-host")
         {
             TES3MP::Native::Testing::checkInventoryHost(std::filesystem::absolute(std::filesystem::u8path(argv[2])),

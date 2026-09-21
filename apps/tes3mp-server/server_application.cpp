@@ -1055,7 +1055,8 @@ namespace TES3MP::ServerApp
             if (!prepared.result() || !mWiring->reducer.stageNativeDoorStep(prepared,
                     batch.scheduledTick().value(), 1.f / ServerTicksPerSecond))
             {
-                mFailure = "command reduction failed";
+                mFailure = "command reduction failed: tick=" + std::to_string(batch.scheduledTick().value().value())
+                    + " preparation=" + std::to_string(static_cast<unsigned>(prepared.result().error()));
                 return false;
             }
             std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
