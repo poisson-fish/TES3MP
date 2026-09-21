@@ -30,6 +30,7 @@
 #include "actorutil.hpp"
 #include "difficultyscaling.hpp"
 #include "movement.hpp"
+#include "meleestate.hpp"
 #include "npcstats.hpp"
 #include "pathfinding.hpp"
 #include "spellcasting.hpp"
@@ -312,34 +313,11 @@ namespace MWMechanics
     float getHitChance(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, int skillValue)
     {
         MWMechanics::CreatureStats& stats = attacker.getClass().getCreatureStats(attacker);
-        const MWMechanics::MagicEffects& mageffects = stats.getMagicEffects();
-
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        const MWWorld::Store<ESM::GameSetting>& gmst = world->getStore().get<ESM::GameSetting>();
-
-        MWMechanics::CreatureStats& victimStats = victim.getClass().getCreatureStats(victim);
-        const bool unaware = (!victimStats.getAiSequence().isInCombat()) && (attacker == getPlayer())
-            && (!MWBase::Environment::get().getMechanicsManager()->awarenessCheck(attacker, victim));
-        TES3MP::OpenMwMeleeSettings settings;
-        settings.combatInvisibilityMultiplier = gmst.find("fCombatInvisoMult")->mValue.getFloat();
-        TES3MP::OpenMwMeleeAttacker attackerState;
-        attackerState.weaponSkill = static_cast<float>(skillValue);
-        attackerState.agility = stats.getAttribute(ESM::Attribute::Agility).getModified();
-        attackerState.luck = stats.getAttribute(ESM::Attribute::Luck).getModified();
-        attackerState.fatigueTerm = stats.getFatigueTerm();
-        attackerState.fortifyAttack = mageffects.getOrDefault(ESM::MagicEffect::FortifyAttack).getMagnitude();
-        attackerState.blind = mageffects.getOrDefault(ESM::MagicEffect::Blind).getMagnitude();
-        TES3MP::OpenMwMeleeVictim victimState;
-        victimState.evasion = victimStats.getEvasion();
-        victimState.chameleon
-            = victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude();
-        victimState.invisibility
-            = victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude();
-        victimState.fatigueNonNegative = victimStats.getFatigue().getCurrent() >= 0;
-        victimState.knockedDown = victimStats.getKnockedDown();
-        victimState.paralyzed = victimStats.isParalyzed();
-        victimState.unaware = unaware;
-        return TES3MP::openMwMeleeHitChance(settings, attackerState, victimState);
+        const auto& victimStats = victim.getClass().getCreatureStats(victim);
+        const bool unaware = !victimStats.getAiSequence().isInCombat() && attacker == getPlayer()
+            && !MWBase::Environment::get().getMechanicsManager()->awarenessCheck(attacker, victim);
+        return getHitChance(*MWBase::Environment::get().getESMStore(), stats, victimStats,
+            skillValue, unaware, victimStats.isParalyzed());
     }
 
     void applyElementalShields(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
@@ -430,9 +408,7 @@ namespace MWMechanics
                                                     ->get<ESM::GameSetting>()
                                                     .find("fWeaponDamageMult")
                                                     ->mValue.getFloat();
-                float x = std::max(1.f, fWeaponDamageMult * damage);
-
-                weaphealth -= std::min(int(x), weaphealth);
+                weaphealth = weaponConditionAfterHit(weaphealth, damage, hit, fWeaponDamageMult);
                 weapon.getCellRef().setCharge(weaphealth);
             }
 
@@ -515,38 +491,12 @@ namespace MWMechanics
 
     void applyFatigueLoss(const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, float attackStrength)
     {
-        // somewhat of a guess, but using the weapon weight makes sense
-        const MWWorld::Store<ESM::GameSetting>& store
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-        static const float fFatigueAttackBase = store.find("fFatigueAttackBase")->mValue.getFloat();
-        static const float fFatigueAttackMult = store.find("fFatigueAttackMult")->mValue.getFloat();
-        static const float fWeaponFatigueMult = store.find("fWeaponFatigueMult")->mValue.getFloat();
-        CreatureStats& stats = attacker.getClass().getCreatureStats(attacker);
-        MWMechanics::DynamicStat<float> fatigue = stats.getFatigue();
-        const float normalizedEncumbrance = attacker.getClass().getNormalizedEncumbrance(attacker);
-
-        bool godmode = attacker == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState();
-
+        const bool godmode = attacker == getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState();
         if (!godmode)
-        {
-            TES3MP::OpenMwMeleeSettings settings;
-            settings.fatigueAttackBase = fFatigueAttackBase;
-            settings.fatigueAttackMultiplier = fFatigueAttackMult;
-            settings.weaponFatigueMultiplier = fWeaponFatigueMult;
-            TES3MP::OpenMwMeleeAttacker attackerState;
-            attackerState.normalizedEncumbrance = normalizedEncumbrance;
-            TES3MP::OpenMwMeleeAttempt attempt;
-            attempt.attackStrength = attackStrength;
-            if (!weapon.isEmpty())
-            {
-                TES3MP::OpenMwMeleeWeapon weaponState;
-                weaponState.weight = weapon.getClass().getWeight(weapon);
-                attempt.weapon = weaponState;
-            }
-            const float fatigueLoss = TES3MP::openMwMeleeFatigueCost(settings, attackerState, attempt);
-            fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss);
-            stats.setFatigue(fatigue);
-        }
+            applyFatigueLoss(attacker.getClass().getCreatureStats(attacker),
+                *MWBase::Environment::get().getESMStore(),
+                weapon.isEmpty() ? 0.f : weapon.getClass().getWeight(weapon), attackStrength,
+                attacker.getClass().getNormalizedEncumbrance(attacker));
     }
 
     float getFightDistanceBias(const MWWorld::Ptr& actor1, const MWWorld::Ptr& actor2)
@@ -591,20 +541,15 @@ namespace MWMechanics
 
     float getMeleeWeaponReach(const MWWorld::Ptr& actor, const MWWorld::Ptr& weapon)
     {
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        const MWWorld::Store<ESM::GameSetting>& store = world->getStore().get<ESM::GameSetting>();
-        const float fCombatDistance = store.find("fCombatDistance")->mValue.getFloat();
-        if (!weapon.isEmpty())
-            return fCombatDistance * weapon.get<ESM::Weapon>()->mBase->mData.mReach;
-        if (actor.getClass().isNpc())
-            return fCombatDistance * store.find("fHandToHandReach")->mValue.getFloat();
-        return fCombatDistance;
+        return getMeleeWeaponReach(*MWBase::Environment::get().getESMStore(),
+            weapon.isEmpty() ? nullptr : weapon.get<ESM::Weapon>()->mBase, actor.getClass().isNpc());
     }
 
     bool isInMeleeReach(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, const float reach)
     {
-        const float heightDiff = actor.getRefData().getPosition().pos[2] - target.getRefData().getPosition().pos[2];
-        return std::abs(heightDiff) < reach && getDistanceToBounds(actor, target) < reach;
+        const auto world = MWBase::Environment::get().getWorld();
+        return isInMeleeReach(actor.getRefData().getPosition().asVec3(), target.getRefData().getPosition().asVec3(),
+            world->getHalfExtents(actor).y(), world->getHalfExtents(target).y(), reach);
     }
 
     std::pair<MWWorld::Ptr, osg::Vec3f> getHitContact(const MWWorld::Ptr& actor, float reach)

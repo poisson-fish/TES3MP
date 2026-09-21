@@ -37,6 +37,7 @@
 #include <components/vfs/pathutil.hpp>
 #include <components/vfs/recursivedirectoryiterator.hpp>
 
+#include <components/sceneutil/animationkeys.hpp>
 #include <components/sceneutil/keyframe.hpp>
 #include <components/sceneutil/lightcommon.hpp>
 #include <components/sceneutil/lightmanager.hpp>
@@ -983,40 +984,12 @@ namespace MWRender
     bool Animation::reset(AnimState& state, const SceneUtil::TextKeyMap& keys, std::string_view groupname,
         std::string_view start, std::string_view stop, float startpoint, bool loopfallback)
     {
-        // Look for text keys in reverse. This normally wouldn't matter, but for some reason undeadwolf_2.nif has two
-        // separate walkforward keys, and the last one is supposed to be used.
-        auto groupend = keys.rbegin();
-        for (; groupend != keys.rend(); ++groupend)
-        {
-            if (groupend->second.starts_with(groupname) && groupend->second.compare(groupname.size(), 2, ": ") == 0)
-                break;
-        }
-
-        auto startkey = groupend;
-        while (startkey != keys.rend() && !equalsParts(startkey->second, groupname, ": ", start))
-            ++startkey;
-        if (startkey == keys.rend() && start == "loop start")
-        {
-            startkey = groupend;
-            while (startkey != keys.rend() && !equalsParts(startkey->second, groupname, ": start"))
-                ++startkey;
-        }
-        if (startkey == keys.rend())
+        SceneUtil::AnimationKeys range;
+        if (!SceneUtil::findAnimationKeys(keys, groupname, start, stop, range))
             return false;
-
-        auto stopkey = groupend;
-        std::size_t checkLength = groupname.size() + 2 + stop.size();
-        while (stopkey != keys.rend()
-            // We have to ignore extra garbage at the end.
-            // The Scrib's idle3 animation has "Idle3: Stop." instead of "Idle3: Stop".
-            // Why, just why? :(
-            && !equalsParts(std::string_view{ stopkey->second }.substr(0, checkLength), groupname, ": ", stop))
-            ++stopkey;
-        if (stopkey == keys.rend())
-            return false;
-
-        if (startkey->first > stopkey->first)
-            return false;
+        const auto groupend = range.mGroupEnd;
+        const auto startkey = range.mStart;
+        const auto stopkey = range.mStop;
 
         state.mStartTime = startkey->first;
         if (loopfallback)

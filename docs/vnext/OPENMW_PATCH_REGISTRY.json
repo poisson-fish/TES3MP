@@ -3,6 +3,23 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-006",
+      "slice": "explicit melee resources and detached directional animation scheduling",
+      "owner": "OpenMW mechanics and native headless checks",
+      "purpose": "Share stock hit chance, fatigue, reach, weapon wear and hit-resource mutation through explicit actor/content inputs; CreatureStats accepts a simulation timestamp for first death. Share wind-up, release skipping, follow-through and melee hit-key interpretation with CharacterController. A bounded app-local directional scheduler uses these helpers and the shared SceneUtil animation-section lookup; detached value copies emit hit proposals without damage or presentation callbacks. Host resource binding, encounter staging, validated player contacts, loot, receipts and client convergence remain pending. Stock combat/character paths are shared with P16-001; CreatureStats and Npc paths with M2-001; rendered section lookup with P8-004; CMake remains covered by its existing entry.",
+      "paths": [
+        "apps/openmw/mwmechanics/meleestate.cpp",
+        "apps/openmw/mwmechanics/meleestate.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_melee_tests melee-context",
+        "tes3mp_native_melee_tests melee-timing",
+        "tes3mp_native_melee_tests melee-scheduling"
+      ],
+      "disposition": "shared engine extraction; no native combat authority enabled",
+      "removal_condition": "OpenMW supplies equivalent explicit actor/content/clock and gameplay text-key interfaces"
+    },
+    {
       "id": "M4-005",
       "slice": "shared NPC door avoidance and rotating navigation",
       "owner": "OpenMW mechanics and app-local native actor runtime",
@@ -17,7 +34,7 @@
       "tests": [
         "tes3mp_native_actor_tests door-avoidance",
         "tes3mp_native_loadout_tests npc-door-avoidance",
-        "scripts/run_native_navigation_capture.py --doors"
+        "scripts/run_native_navigation_capture.py"
       ],
       "disposition": "shared engine behavior with isolated native state and derived rotating geometry",
       "removal_condition": "OpenMW supplies equivalent explicit avoidance, steering and navigation context for authoritative simulation"
@@ -291,7 +308,7 @@
       "id": "M2-001",
       "slice": "explicit actor constant-effect shirt mechanics",
       "owner": "OpenMW server runtime",
-      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface. M4-002 also shares NPC race/model selection with the detached collision caller.",
+      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface. M4-002 also shares NPC race/model selection with the detached collision caller. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers.",
       "paths": [
         "apps/openmw/mwclass/npc.cpp",
         "apps/openmw/mwmechanics/autocalcspell.cpp",
@@ -308,7 +325,9 @@
         "tes3mp_native_loadout_tests inventory-equipment-enchanted-guards",
         "tes3mp_native_loadout_tests inventory-equipment-enchanted-durability",
         "tes3mp_native_loadout_tests inventory-equipment-enchanted-allocations",
-        "tes3mp_native_loadout_tests inventory-equipment-scripted"
+        "tes3mp_native_loadout_tests inventory-equipment-scripted",
+        "tes3mp_native_melee_tests melee-context",
+        "tes3mp_native_melee_tests melee-timing"
       ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent actor-context equipment-effect preparation interfaces"
@@ -490,7 +509,7 @@
       "id": "P8-004",
       "slice": "8.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body. Rendering queries share their masks, intersection traversal and camera ray calculation with the headless placement scene. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008.",
+      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body. Rendering queries share their masks, intersection traversal and camera ray calculation with the headless placement scene. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. M4 Animation::reset delegates section selection to components/sceneutil/animationkeys.hpp, shared with detached native directional melee scheduling; reverse group selection, loop-start fallback and stop suffix tolerance are preserved.",
       "paths": [
         "apps/openmw/mwrender/actorutil.cpp",
         "apps/openmw/mwrender/actorutil.hpp",
@@ -521,7 +540,8 @@
         "tes3mp_native_loadout_tests leveled-actor-persistence",
         "tes3mp_native_loadout_tests player-area-discovery",
         "tes3mp_inventory_replication_tests neighborhoods",
-        "openmw-m3-v15.exe RelWithDebInfo link"
+        "openmw-m3-v15.exe RelWithDebInfo link",
+        "tes3mp_native_melee_tests melee-scheduling"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"
@@ -572,7 +592,7 @@
       "id": "P16-001",
       "slice": "16.1",
       "owner": "OpenMW adapter",
-      "purpose": "Route player melee animation hit keys through the multiplayer semantic-command seam before stock single-player mutation, while allowing replicated content actors to participate in OpenMW's native melee contact search.",
+      "purpose": "Route player melee animation hit keys through the multiplayer semantic-command seam before stock single-player mutation, while allowing replicated content actors to participate in OpenMW's native melee contact search. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers.",
       "paths": [
         "apps/openmw/mwmechanics/character.cpp",
         "apps/openmw/mwmechanics/combat.cpp"
@@ -581,7 +601,9 @@
         "scripts/tests/test_openmw_patch_registry.py",
         "openmw_tes3mp_adapter_tests",
         "tes3mp_melee_combat_tests",
-        "tes3mp_combat_command_reducer_tests"
+        "tes3mp_combat_command_reducer_tests",
+        "tes3mp_native_melee_tests melee-context",
+        "tes3mp_native_melee_tests melee-timing"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed pre-mutation melee hit hook and replicated-actor targeting role"

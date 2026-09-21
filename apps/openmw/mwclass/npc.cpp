@@ -37,6 +37,7 @@
 #include "../mwmechanics/aisetting.hpp"
 #include "../mwmechanics/autocalcspell.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/creaturecustomdataresetter.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/difficultyscaling.hpp"
@@ -571,36 +572,10 @@ namespace MWClass
         if (ptr == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())
             return;
 
-        bool hasDamage = false;
-        bool hasHealthDamage = false;
-        float healthDamage = 0.f;
-        for (auto& [stat, damage] : damages)
-        {
-            if (damage < 0.001f)
-                continue;
-            hasDamage = true;
-
-            if (stat == "health")
-            {
-                hasHealthDamage = true;
-                healthDamage = damage;
-                MWMechanics::DynamicStat<float> health(getCreatureStats(ptr).getHealth());
-                health.setCurrent(health.getCurrent() - damage);
-                stats.setHealth(health);
-            }
-            else if (stat == "fatigue")
-            {
-                MWMechanics::DynamicStat<float> fatigue(getCreatureStats(ptr).getFatigue());
-                fatigue.setCurrent(fatigue.getCurrent() - damage, true);
-                stats.setFatigue(fatigue);
-            }
-            else if (stat == "magicka")
-            {
-                MWMechanics::DynamicStat<float> magicka(getCreatureStats(ptr).getMagicka());
-                magicka.setCurrent(magicka.getCurrent() - damage);
-                stats.setMagicka(magicka);
-            }
-        }
+        const auto damageResult = MWMechanics::applyHitDamage(stats, damages);
+        const bool hasDamage = damageResult.mHasDamage;
+        const bool hasHealthDamage = damageResult.mHasHealthDamage;
+        const float healthDamage = damageResult.mHealthDamage;
 
         if (hasDamage && !attacker.isEmpty())
         {

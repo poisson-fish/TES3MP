@@ -43,16 +43,20 @@ namespace MWMechanics
 
     float CreatureStats::getFatigueTerm() const
     {
+        return getFatigueTerm(*MWBase::Environment::get().getESMStore());
+    }
+
+    float CreatureStats::getFatigueTerm(const MWWorld::ESMStore& store) const
+    {
         float max = getFatigue().getModified();
         float current = getFatigue().getCurrent();
 
         float normalised = std::floor(max) == 0 ? 1 : std::max(0.0f, current / max);
 
-        const MWWorld::Store<ESM::GameSetting>& gmst
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
+        const MWWorld::Store<ESM::GameSetting>& gmst = store.get<ESM::GameSetting>();
 
-        static const float fFatigueBase = gmst.find("fFatigueBase")->mValue.getFloat();
-        static const float fFatigueMult = gmst.find("fFatigueMult")->mValue.getFloat();
+        const float fFatigueBase = gmst.find("fFatigueBase")->mValue.getFloat();
+        const float fFatigueMult = gmst.find("fFatigueMult")->mValue.getFloat();
 
         return fFatigueBase - fFatigueMult * (1 - normalised);
     }
@@ -175,6 +179,11 @@ namespace MWMechanics
         setDynamic(0, value);
     }
 
+    void CreatureStats::setHealth(const DynamicStat<float>& value, const MWWorld::TimeStamp& time)
+    {
+        setDynamic(0, value, time);
+    }
+
     void CreatureStats::setMagicka(const DynamicStat<float>& value)
     {
         setDynamic(1, value);
@@ -187,6 +196,15 @@ namespace MWMechanics
 
     void CreatureStats::setDynamic(int index, const DynamicStat<float>& value)
     {
+        // Do not require a World for nonlethal updates (including initialization),
+        // or query its clock again for an already dead actor.
+        const auto time = index == 0 && value.getCurrent() < 1 && !mDead
+            ? MWBase::Environment::get().getWorld()->getTimeStamp() : mTimeOfDeath;
+        setDynamic(index, value, time);
+    }
+
+    void CreatureStats::setDynamic(int index, const DynamicStat<float>& value, const MWWorld::TimeStamp& time)
+    {
         if (index < 0 || index > 2)
             throw std::runtime_error("dynamic stat index is out of range");
 
@@ -195,7 +213,7 @@ namespace MWMechanics
         if (index == 0 && mDynamic[index].getCurrent() < 1)
         {
             if (!mDead)
-                mTimeOfDeath = MWBase::Environment::get().getWorld()->getTimeStamp();
+                mTimeOfDeath = time;
 
             mDead = true;
 
@@ -342,9 +360,14 @@ namespace MWMechanics
 
     float CreatureStats::getEvasion() const
     {
+        return getEvasion(*MWBase::Environment::get().getESMStore());
+    }
+
+    float CreatureStats::getEvasion(const MWWorld::ESMStore& store) const
+    {
         float evasion = (getAttribute(ESM::Attribute::Agility).getModified() / 5.0f)
             + (getAttribute(ESM::Attribute::Luck).getModified() / 10.0f);
-        evasion *= getFatigueTerm();
+        evasion *= getFatigueTerm(store);
         evasion += std::min(100.f, mMagicEffects.getOrDefault(ESM::MagicEffect::Sanctuary).getMagnitude());
 
         return evasion;

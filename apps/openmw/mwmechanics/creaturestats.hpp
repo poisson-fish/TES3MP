@@ -148,12 +148,16 @@ namespace MWMechanics
         void setAttribute(ESM::RefId id, float base);
 
         void setHealth(const DynamicStat<float>& value);
+        // Explicit simulation clock for detached authoritative candidates. The
+        // first lethal transition records this time; repeated damage retains it.
+        void setHealth(const DynamicStat<float>& value, const MWWorld::TimeStamp& time);
 
         void setMagicka(const DynamicStat<float>& value);
 
         void setFatigue(const DynamicStat<float>& value);
 
         void setDynamic(int index, const DynamicStat<float>& value);
+        void setDynamic(int index, const DynamicStat<float>& value, const MWWorld::TimeStamp& time);
 
         void setAttackingOrSpell(bool attackingOrSpell) { mAttackingOrSpell = attackingOrSpell; }
 
@@ -170,6 +174,7 @@ namespace MWMechanics
         AiSequence& getAiSequence();
 
         float getFatigueTerm() const;
+        float getFatigueTerm(const MWWorld::ESMStore& store) const;
         ///< Return effective fatigue
 
         bool isParalyzed() const;
@@ -217,6 +222,7 @@ namespace MWMechanics
         void setAttacked(bool attacked);
 
         float getEvasion() const;
+        float getEvasion(const MWWorld::ESMStore& store) const;
 
         void setKnockedDown(bool value);
         /// Returns true for the entire duration of the actor being knocked down or knocked out,

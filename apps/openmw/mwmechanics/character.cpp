@@ -53,6 +53,7 @@
 #include "aicombataction.hpp"
 #include "creaturestats.hpp"
 #include "movement.hpp"
+#include "meleestate.hpp"
 #include "npcstats.hpp"
 #include "security.hpp"
 #include "spellcasting.hpp"
@@ -1088,22 +1089,7 @@ namespace MWMechanics
         }
         else if (action == "chop hit" || action == "slash hit" || action == "thrust hit" || action == "hit")
         {
-            int attackType = -1;
-            if (action == "hit")
-            {
-                if (groupname == "attack1" || groupname == "swimattack1")
-                    attackType = ESM::Weapon::AT_Chop;
-                else if (groupname == "attack2" || groupname == "swimattack2")
-                    attackType = ESM::Weapon::AT_Slash;
-                else if (groupname == "attack3" || groupname == "swimattack3")
-                    attackType = ESM::Weapon::AT_Thrust;
-            }
-            else if (action == "chop hit")
-                attackType = ESM::Weapon::AT_Chop;
-            else if (action == "slash hit")
-                attackType = ESM::Weapon::AT_Slash;
-            else if (action == "thrust hit")
-                attackType = ESM::Weapon::AT_Thrust;
+            const int attackType = meleeHitType(groupname, action);
             // We want to avoid hit keys that come out of nowhere (e.g. in the follow animation)
             // and processing multiple hit keys for a single attack
             if (mReadyToHit)
@@ -1118,46 +1104,23 @@ namespace MWMechanics
         }
         else if (isRandomAttackAnimation(groupname) && action == "start")
         {
-            std::multimap<float, std::string>::const_iterator hitKey = key;
-
-            // Not all animations have a hit key defined. If there is none, the hit happens with the start key.
-            bool hasHitKey = false;
-            while (hitKey != map.end())
-            {
-                if (hitKey->second.starts_with(groupname))
-                {
-                    std::string_view suffix = std::string_view(hitKey->second).substr(groupname.size());
-                    if (suffix == ": hit")
-                    {
-                        hasHitKey = true;
-                        break;
-                    }
-                    if (suffix == ": stop")
-                        break;
-                }
-                ++hitKey;
-            }
+            // Missing hit keys retain the stock hit-at-start fallback.
+            const bool hasHitKey = hasMeleeHitKey(groupname, key, map);
             if (!hasHitKey)
             {
                 // State update doesn't expect the start key to be the hit key,
                 // so we have to do this early.
                 prepareHit();
 
-                std::optional<int> attackType;
-                if (groupname == "attack1" || groupname == "swimattack1")
-                    attackType = ESM::Weapon::AT_Chop;
-                else if (groupname == "attack2" || groupname == "swimattack2")
-                    attackType = ESM::Weapon::AT_Slash;
-                else if (groupname == "attack3" || groupname == "swimattack3")
-                    attackType = ESM::Weapon::AT_Thrust;
-                if (attackType)
+                const int attackType = meleeHitType(groupname, "hit");
+                if (attackType != -1)
                 {
                     const bool intercepted = mPtr == MWMechanics::getPlayer()
                         && MWBase::Environment::get().getWorld()->getPlayer().interceptMeleeHit(
-                            mAttackStrength, *attackType, mAttackVictim);
+                            mAttackStrength, attackType, mAttackVictim);
                     if (!intercepted)
                         charClass.hit(
-                            mPtr, mAttackStrength, *attackType, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                            mPtr, mAttackStrength, attackType, mAttackVictim, mAttackHitPos, mAttackSuccess);
                 }
             }
         }
@@ -1251,11 +1214,7 @@ namespace MWMechanics
 
         float minAttackTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + " min attack");
         float maxAttackTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + " max attack");
-        if (minAttackTime == -1.f || minAttackTime >= maxAttackTime)
-            return -1.f;
-
-        return std::clamp(
-            (mAnimation->getCurrentTime(mCurrentWeapon) - minAttackTime) / (maxAttackTime - minAttackTime), 0.f, 1.f);
+        return attackWindUp(mAnimation->getCurrentTime(mCurrentWeapon), minAttackTime, maxAttackTime);
     }
 
     void CharacterController::prepareHit()
@@ -1781,17 +1740,10 @@ namespace MWMechanics
             {
                 std::string hit = mAttackType != "shoot" ? "hit" : "release";
 
-                float startPoint = 0.f;
-
-                // Skip a bit of the pre-hit section based on the attack strength
-                if (minAttackTime != -1.f && minAttackTime < maxAttackTime)
-                {
-                    startPoint = 1.f - mAttackStrength;
-                    float minHitTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + " min hit");
-                    float hitTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + ' ' + hit);
-                    if (maxAttackTime <= minHitTime && minHitTime < hitTime)
-                        startPoint *= (minHitTime - maxAttackTime) / (hitTime - maxAttackTime);
-                }
+                const float minHitTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + " min hit");
+                const float hitTime = mAnimation->getTextKeyTime(mCurrentWeapon + ": " + mAttackType + ' ' + hit);
+                const float startPoint = attackReleaseStartPoint(
+                    mAttackStrength, minAttackTime, maxAttackTime, minHitTime, hitTime);
 
                 mAnimation->disable(mCurrentWeapon);
                 playBlendedAnimation(mCurrentWeapon, priorityWeapon, MWRender::BlendMask_All, false, weapSpeed,
@@ -1808,9 +1760,7 @@ namespace MWMechanics
 
                 if (mAttackType != "shoot")
                 {
-                    std::string strength = mAttackStrength < 0.33f ? "small"
-                        : mAttackStrength < 0.66f                  ? "medium"
-                                                                   : "large";
+                    const std::string strength(attackFollowStrength(mAttackStrength));
                     start = strength + ' ' + start;
                     stop = strength + ' ' + stop;
                 }
