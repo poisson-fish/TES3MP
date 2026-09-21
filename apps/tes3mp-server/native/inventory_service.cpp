@@ -314,6 +314,17 @@ namespace TES3MP::Native
                             active[i] = true;
             }
         }
+        if (mBinding.mRetainTraveler && mBinding.mNavigatingActor)
+        {
+            const auto actor = mBinding.mNavigatingActor->actorId();
+            const auto owner = std::ranges::find_if(mBinding.mContainers,
+                [actor](const auto& value) { return value.mId.value() == actor; });
+            const auto index = worldIndex(owner->mCell);
+            // Demand is a union, not another simulation loop. An unavailable
+            // path remains travel demand; only stock path completion releases it.
+            active[index] = active[index] || !mBinding.mNavigatingActor->arrived();
+            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(active[index]);
+        }
         if (mBinding.mAreaActivity) mBinding.mAreaActivity(active);
         const std::array legacy{bool(active[0]), active.size() > 1 && active[1]};
         if (mBinding.mCellActivity) mBinding.mCellActivity(legacy);
@@ -965,13 +976,15 @@ namespace TES3MP::Native
         bool changesInventory() const noexcept override { return bool(command); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
-            if (consumed || service.inventoryImage().empty() || before != service.mActorImage) return CanonicalDurabilityResult::Rejected;
+            if (consumed || service.inventoryImage().empty() || before != service.mActorImage
+                || (actor && !service.mBinding.mNavigatingActor->canInstall(*actor))) return CanonicalDurabilityResult::Rejected;
             try
             {
                 EquipmentBytes sealed;
                 const auto compose = [&](std::span<const std::byte> inventory) {
+                    const auto retained = readActorCampaign(before).actor;
                     sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
-                        actor->image(), tick, velocity);
+                        actor ? actor->image() : retained, tick, velocity);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -980,7 +993,7 @@ namespace TES3MP::Native
                 if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
                 else
                 {
-                    service.mBinding.mNavigatingActor->install(*actor);
+                    if (actor) service.mBinding.mNavigatingActor->install(*actor);
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
@@ -1001,14 +1014,13 @@ namespace TES3MP::Native
         else if (!command) command = prepareDoorStep(players, tick, seconds);
         const auto before = mBinding.mNavigatingActor->snapshot();
         const auto owner = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) { return value.mId.value()==before.mActor; });
-        bool active = false;
+        bool active = mBinding.mRetainTraveler && !mBinding.mNavigatingActor->arrived();
         for (const auto& session : players.activeSessions())
             if (const auto* player = players.findPlayer(session.playerId()); player && player->transform().cell()==owner->mCell) active = true;
-        // Both players leaving freezes this bounded slice; traveler activity is a later M4 slice.
         const auto doors = actorDoorFrames(command.get());
         auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)
-            : mBinding.mNavigatingActor->prepareRestore(mBinding.mNavigatingActor->image(), doors);
-        const auto after = step->snapshot();
+            : nullptr;
+        const auto after = step ? step->snapshot() : before;
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step), tick.value(), velocity);
@@ -1019,7 +1031,8 @@ namespace TES3MP::Native
         const PreparedNativeInventory* candidate) const
     {
         const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
-        if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage)) return {};
+        if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage
+            || (moving->actor && !mBinding.mNavigatingActor->canInstall(*moving->actor)))) return {};
         if (moving) candidate = moving->command.get();
         const auto* areaDoors = candidate;
         if (ownsAreaDoorCandidate(candidate)) candidate = areaDoorCommand(candidate);
@@ -1042,7 +1055,7 @@ namespace TES3MP::Native
             }
         if (result && result->equipment && mBinding.mNavigatingActor)
         {
-            const auto state = moving ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+            const auto state = moving && moving->actor ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
             if (std::ranges::any_of(result->equipment->actors, [&](const auto& owner) { return owner.actor.value() == state.mActor; }))
                 result->equipment->motions.push_back({state.mActor, moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
                     state.mPosition, moving ? moving->velocity : mActorVelocity, state.mYaw});

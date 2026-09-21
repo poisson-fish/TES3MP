@@ -42,6 +42,8 @@ namespace TES3MP::Native
     {
         struct Impl;
         std::unique_ptr<Impl> mImpl;
+        struct Dormant;
+        std::unique_ptr<Dormant> mDormant;
     public:
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
@@ -54,6 +56,12 @@ namespace TES3MP::Native
         size_t bodyCount() const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
+        bool loaded() const noexcept { return bool(mImpl); }
+        // Release collision/navigation resources, retaining the exact committed
+        // image. Reload validates a freshly bound scene before swapping it in.
+        // The host calls these between transactions, never during preparation.
+        void unload();
+        void reload(InteriorActorScene& fresh);
         // Bind a complete, bounded set of ordinary doors before navigation.
         // Angles are owned by the inventory/door transaction, never this image.
         void bindDoors(std::span<const uint64_t> doors, bool avoidance = false);
@@ -79,6 +87,7 @@ namespace TES3MP::Native
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});
+        bool canInstall(const Prepared& prepared) const noexcept;
         void install(Prepared& prepared) noexcept;
         std::vector<char> image() const;
         void restore(std::span<const char> bytes);

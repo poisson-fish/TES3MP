@@ -17,6 +17,15 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V19 uses native-inventory-19 with V18 fields and a fresh campaign. One
+    // selected traveler sustains the bound interior independently of player
+    // interest. The player/traveler union runs the existing composed tick once:
+    // two 60 Hz steps, at most 8192 collision references, 256 navigation tiles
+    // and 2048 path points. Unavailable paths retain demand and destination.
+    // Completion releases an unoccupied scene; reload validates fresh resources
+    // and restores the exact committed path, avoidance/RNG and collision frame.
+    // Restart retains active/completed travel, with no wall-clock catch-up.
+    // Cross-cell travel, general AI and multiple travelers remain unsupported.
     // V18 uses native-inventory-18 with V17 fields and a fresh campaign. The
     // selected NPC uses shared AiAvoidDoor timer/stuck/direction and steering
     // logic, then resumes its retained destination. Avoidance and its random

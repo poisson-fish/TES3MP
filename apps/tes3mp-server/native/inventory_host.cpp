@@ -74,9 +74,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool movingActor = version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
+            const bool traveler = version == "native-inventory-19";
+            const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
             const bool streaming = movingActor || version == "native-inventory-14" || version == "native-inventory-15";
             const bool exteriorCells = streaming || version == "native-inventory-13";
             const bool twoCells = exteriorCells || version == "native-inventory-10" || version == "native-inventory-11" || version == "native-inventory-12";
@@ -210,8 +211,8 @@ namespace TES3MP::Native
             if (movingActor)
             {
                 key("npc"); Navigation nav;
-                nav.doors = version == "native-inventory-17" || version == "native-inventory-18";
-                nav.avoidance = version == "native-inventory-18";
+                nav.doors = traveler || version == "native-inventory-17" || version == "native-inventory-18";
+                nav.avoidance = traveler || version == "native-inventory-18";
                 in >> std::quoted(nav.record) >> std::quoted(nav.settings);
                 key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
                 if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
@@ -233,6 +234,7 @@ namespace TES3MP::Native
             InventoryServiceBinding binding{{*first, *second}, itemId,
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
             binding.mStreamExteriors = streaming;
+            binding.mRetainTraveler = traveler;
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
@@ -472,16 +474,29 @@ namespace TES3MP::Native
                 if (std::ranges::count_if(start.binding.mContainers, matching) != 1)
                     throw std::invalid_argument("Navigating NPC must resolve to one authoritative inventory owner");
                 const auto& owner = *std::ranges::find_if(start.binding.mContainers, matching);
-                auto scene = std::make_shared<InteriorActorScene>(loadout, std::string(start.cell.getRefIdString()), owner.mId.value(),
-                    "meshes/base_anim.nif", "meshes/base_animkna.nif");
-                if (start.navigation->doors)
+                std::vector<uint64_t> doors;
+                for (const auto& door : start.binding.mDoors) doors.push_back(door.mId);
+                const auto createScene = [&loadout, cell = std::string(start.cell.getRefIdString()),
+                    id = owner.mId.value(), navigation = *start.navigation, doors] {
+                    auto scene = std::make_shared<InteriorActorScene>(loadout, cell, id,
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                    if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
+                    scene->enableNavigation(navigation.settings);
+                    scene->travelTo(navigation.destination);
+                    return scene;
+                };
+                auto scene = createScene();
+                if (start.binding.mRetainTraveler)
                 {
-                    std::vector<uint64_t> doors;
-                    for (const auto& door : start.binding.mDoors) doors.push_back(door.mId);
-                    scene->bindDoors(doors, start.navigation->avoidance);
+                    start.binding.mNavigationActivity = [scene, createScene](bool active) {
+                        if (active && !scene->loaded())
+                        {
+                            auto fresh = createScene();
+                            scene->reload(*fresh);
+                        }
+                        else if (!active) scene->unload();
+                    };
                 }
-                scene->enableNavigation(start.navigation->settings);
-                scene->travelTo(start.navigation->destination);
                 placement << scene->fingerprint();
                 start.binding.mNavigationSpeed = start.navigation->speed;
                 start.binding.mNavigatingActor = std::move(scene);
@@ -500,7 +515,8 @@ namespace TES3MP::Native
             : loadout(std::move(start.options)),
               inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes, restored), !restored.empty())
         {
-            if (start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13") || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15") || start.text.starts_with("native-inventory-16") || start.text.starts_with("native-inventory-17") || start.text.starts_with("native-inventory-18"))
+            if (start.navigation || start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13")
+                || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15"))
                 environment = std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed);
             if (!restored.empty())
             {

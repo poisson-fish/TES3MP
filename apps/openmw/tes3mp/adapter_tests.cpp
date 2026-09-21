@@ -727,6 +727,7 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+
     Input input; Presentation presentation; Status status;
     auto transport = std::make_unique<IdleTransport>();
     auto* wire = transport.get(); wire->acceptConnections = true;
@@ -875,6 +876,16 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "native-capabilities")
+    {
+        const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),
+            nativeLeveledActorsCapability(), nativeActorMotionCapability() };
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
+        const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
+            versions, {}, required, testContentManifestId()));
+        require(std::holds_alternative<ServerHello>(negotiateClientHello(makeClientHello(testContentManifestId()), server)));
+        return 0;
+    }
     if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
         || std::string_view(argv[1]) == "inventory-pickup-barrier"
         || std::string_view(argv[1]) == "native-door-presentation"))

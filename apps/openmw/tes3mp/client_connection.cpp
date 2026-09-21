@@ -761,15 +761,7 @@ namespace TES3MP::OpenMWAdapter
         auto* runtime = std::get_if<std::unique_ptr<ClientSessionRuntime>>(&created);
         if (!runtime || !*runtime)
             return ClientCompositionFailure::RuntimeUnavailable;
-        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
-        const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
-            interactiveObjectReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability(),
-            characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability(),
-            worldTimeReplicationCapability(), authoritativeWaitRestCapability(), authoritativeSecurityCapability(),
-            authoritativeInstantMagicCapability(), authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(), nativeActorMotionCapability() };
-        auto offer
-            = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
-        if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),
+        if ((*runtime)->start(*endpoint, makeClientHello(contentManifest),
                 AuthenticationRequest::join(
                     std::move(*password), std::move(playerCredential), std::string(profileUsername)))
             != HeadlessClientResult::Accepted)

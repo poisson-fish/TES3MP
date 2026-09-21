@@ -3918,7 +3918,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool avoidance)
+        const std::filesystem::path& settings, bool avoidance, bool traveler)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4021,6 +4021,34 @@ namespace TES3MP::Native::Testing
                 auto replay = scene.prepareRestore(stuck, moving); scene.install(*replay);
                 auto repeated = scene.prepareNavigation(.01f, moving);
                 require(std::ranges::equal(future->image(), repeated->image()), "Avoidance random/timer recovery diverged");
+                if (traveler)
+                {
+                    const std::vector expected(future->image().begin(), future->image().end());
+                    future.reset(); repeated.reset(); replay.reset();
+                    const auto position = scene.snapshot().mPosition;
+                    bool outside = false;
+                    try { scene.travelTo({10000000, 10000000, 1}); }
+                    catch (const std::invalid_argument&) { outside = true; }
+                    require(outside && scene.image() == stuck, "Out-of-range travel discarded the retained destination");
+                    scene.unload();
+                    require(!scene.loaded() && scene.bodyCount() == 0 && scene.image() == stuck
+                        && scene.snapshot().mPosition == position && !scene.arrived(),
+                        "Unloading lost the active travel image or retained collision bodies");
+                    InteriorActorScene fresh(loadout, "NPC Door Path Test", actor,
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                    fresh.bindDoors(ids, true); fresh.enableNavigation(settings.string());
+                    fresh.travelTo({20, -40, 1});
+                    bool mismatch = false;
+                    try { scene.reload(fresh); } catch (const std::invalid_argument&) { mismatch = true; }
+                    require(mismatch && !scene.loaded() && scene.image() == stuck,
+                        "Mismatched reload changed the dormant destination");
+                    fresh.travelTo({0, -40, 1}); scene.reload(fresh);
+                    require(scene.loaded() && scene.bodyCount() > 0 && scene.image() == stuck,
+                        "Reload did not restore exact travel state");
+                    auto next = scene.prepareNavigation(.01f, moving);
+                    require(std::ranges::equal(next->image(), expected),
+                        "Unload/reload changed the next avoidance, RNG or physics step");
+                }
                 for (size_t tail : {size_t(8), size_t(16), size_t(48), size_t(56)})
                 {
                     auto bad = stuck;
@@ -4055,7 +4083,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
+            std::ofstream out(descriptor); out << (traveler ? "native-inventory-19\nmanifest "
+                : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
@@ -4064,6 +4093,7 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        const auto observers = authority;
         const auto view = [&](ServerApp::NativeInventoryService& owner, uint64_t tick, uint64_t session = 1,
             const PreparedNativeInventory* pending = nullptr) {
             auto value = owner.projectInventory(authority, id<SessionId>(session), id<ServerTick>(tick), id<CanonicalRevision>(tick), pending);
@@ -4185,13 +4215,101 @@ namespace TES3MP::Native::Testing
             && view(service, 14, 2).equipment->motions[0].position != before, "Disconnect stopped the surviving player's simulation");
         dropSession(2);
         const auto frozen = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
-        auto inactive = service.prepareNativeTick(authority, id<ServerTick>(15), 1.f/30, {});
-        require(inactive->commit(accepted) == CanonicalDurabilityResult::Committed, "Inactive NPC/door tick failed");
-        const auto oldImage = readActorCampaign({reinterpret_cast<const char*>(frozen.data()), frozen.size()});
-        const auto newImage = service.inventoryImage();
-        const auto newParts = readActorCampaign({reinterpret_cast<const char*>(newImage.data()), newImage.size()});
-        require(std::ranges::equal(oldImage.actor, newParts.actor) && std::ranges::equal(oldImage.inventory, newParts.inventory),
-            "Unoccupied NPC/door scene did not freeze coherently");
+        if (traveler)
+        {
+            const auto bodies = [](ServerApp::NativeInventoryService& owner) {
+                return dynamic_cast<InventoryService&>(owner).activeActorCollisionBodies();
+            };
+            require(bodies(service) > 0, "Both players leaving unloaded an active traveler");
+            require(!service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(15), id<CanonicalRevision>(15)),
+                "Traveler demand manufactured client replication interest");
+            auto rejectedStep = service.prepareNativeTick(authority, id<ServerTick>(15), 1.f/30, {});
+            require(rejectedStep->commit(rejected) == CanonicalDurabilityResult::Rejected
+                && std::ranges::equal(frozen, service.inventoryImage()), "Rejected unattended tick leaked");
+            rejectedStep.reset();
+            InventoryHost occupied(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+            occupied.service().synchronizeCells(observers);
+            std::unique_ptr<InventoryHost> restart;
+            bool completed = false;
+            for (uint64_t tick = 15; tick <= 240; ++tick)
+            {
+                if (tick == 25)
+                {
+                    restart = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto,
+                        service.inventoryImage());
+                    restart->service().synchronizeCells(authority);
+                    require(bodies(restart->service()) > 0, "Restart forgot unattended travel demand");
+                }
+                const bool traveling = bodies(service) > 0;
+                auto step = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "Unattended travel tick failed");
+                service.synchronizeCells(authority);
+                auto connectedStep = occupied.service().prepareNativeTick(observers, id<ServerTick>(tick), 1.f/30, {});
+                require(connectedStep->commit(accepted) == CanonicalDurabilityResult::Committed, "Occupied comparison tick failed");
+                occupied.service().synchronizeCells(observers);
+                if (traveling)
+                    require(std::ranges::equal(service.inventoryImage(), occupied.service().inventoryImage()),
+                        "Player/traveler area union stepped the NPC twice or changed unattended simulation");
+                if (restart)
+                {
+                    auto continued = restart->service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                    require(continued->commit(accepted) == CanonicalDurabilityResult::Committed, "Unattended restart tick failed");
+                    restart->service().synchronizeCells(authority);
+                    require(std::ranges::equal(service.inventoryImage(), restart->service().inventoryImage()),
+                        "Restart changed unattended destination, completion, doors or RNG");
+                }
+                if (restart && !bodies(service))
+                {
+                    completed = true;
+                    const auto projection = service.projectInventory(observers, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    require(projection && projection->equipment && projection->equipment->motions.size() == 1,
+                        "Dormant traveler lost its canonical snapshot");
+                    const auto end = projection->equipment->motions[0].position;
+                    require(std::abs(end[0]-60) < 8 && std::abs(end[1]+240) < 8,
+                        "Unattended traveler released demand before reaching the retained destination");
+                    const std::vector done(service.inventoryImage().begin(), service.inventoryImage().end());
+                    InventoryHost completionRestart(descriptor, testContentManifest(), *registry, *crypto, done);
+                    completionRestart.service().synchronizeCells(authority);
+                    require(!bodies(completionRestart.service())
+                        && std::ranges::equal(done, completionRestart.service().inventoryImage()),
+                        "Restart restarted completed travel or retained idle collision resources");
+                    service.synchronizeCells(observers);
+                    require(bodies(service) > 0 && std::ranges::equal(done, service.inventoryImage()),
+                        "Returning players failed to reload the completed scene exactly");
+                    auto stale = service.prepareNativeTick(observers, id<ServerTick>(tick+1), 1.f/30, {});
+                    service.synchronizeCells(authority);
+                    service.synchronizeCells(observers);
+                    require(!service.projectInventory(observers, id<SessionId>(1), id<ServerTick>(tick+1),
+                            id<CanonicalRevision>(tick+1), stale.get())
+                        && stale->commit(accepted) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(done, service.inventoryImage()),
+                        "Scene reload accepted a candidate holding retired collision references");
+                    service.synchronizeCells(authority);
+                    require(!bodies(service), "Completed traveler remained active after observers left");
+                    auto idle = service.prepareNativeTick(authority, id<ServerTick>(tick+1), 1.f/30, {});
+                    require(idle->commit(accepted) == CanonicalDurabilityResult::Committed, "Dormant tick failed");
+                    const auto previous = readActorCampaign({reinterpret_cast<const char*>(done.data()), done.size()});
+                    const auto current = service.inventoryImage();
+                    const auto parts = readActorCampaign({reinterpret_cast<const char*>(current.data()), current.size()});
+                    require(std::ranges::equal(previous.actor, parts.actor) && std::ranges::equal(previous.inventory, parts.inventory),
+                        "Completed travel or door state changed while unloaded");
+                    std::cout << "traveler completion_tick=" << tick << " empty=continued union=once mid-travel-restart=exact "
+                        << "unload-reload=exact completed-restart=idle range-rejection=atomic\n";
+                    break;
+                }
+            }
+            require(completed, "Unattended traveler did not complete within its bounded work allowance");
+        }
+        else
+        {
+            auto inactive = service.prepareNativeTick(authority, id<ServerTick>(15), 1.f/30, {});
+            require(inactive->commit(accepted) == CanonicalDurabilityResult::Committed, "Inactive NPC/door tick failed");
+            const auto oldImage = readActorCampaign({reinterpret_cast<const char*>(frozen.data()), frozen.size()});
+            const auto newImage = service.inventoryImage();
+            const auto newParts = readActorCampaign({reinterpret_cast<const char*>(newImage.data()), newImage.size()});
+            require(std::ranges::equal(oldImage.actor, newParts.actor) && std::ranges::equal(oldImage.inventory, newParts.inventory),
+                "Unoccupied NPC/door scene did not freeze coherently");
+        }
         require(replay->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
             && restored.inventoryImage().empty(), "Uncertain NPC/door commit did not close the service");
         auto truncated = saved; truncated.pop_back(); bool invalid = false;
@@ -4199,7 +4317,8 @@ namespace TES3MP::Native::Testing
         catch (const std::invalid_argument&) { invalid = true; }
         require(invalid, "Truncated NPC/door campaign accepted");
         std::cout << "npc-door contact=server-owned rejection=atomic inventory=composed reversal=shared recovery=exact "
-            << "disconnect=continued empty=freeze uncertain=closed (synthetic room on retained loadout)\n";
+            << "disconnect=continued empty=" << (traveler ? "travel" : "freeze")
+            << " uncertain=closed (synthetic room on retained loadout)\n";
     }
 
 }

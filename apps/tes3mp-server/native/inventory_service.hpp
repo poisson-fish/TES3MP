@@ -73,6 +73,9 @@ namespace TES3MP::Native
         std::optional<std::vector<ActorSpawnSelection>> mActorSelections;
         std::shared_ptr<InteriorActorScene> mNavigatingActor;
         float mNavigationSpeed = 120;
+        // V19: one traveler pins its bounded interior independently of clients.
+        bool mRetainTraveler = false;
+        std::function<void(bool)> mNavigationActivity;
         std::vector<const WorldItems*> worldDomains() const
         {
             std::vector<const WorldItems*> result;
@@ -186,6 +189,8 @@ namespace TES3MP::Native
         bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
+        size_t activeActorCollisionBodies() const
+        { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;

@@ -27,24 +27,26 @@ namespace TES3MP::OpenMWAdapter
         return ProviderResult::PresentationFailed;
     }
 
+    ClientHello makeClientHello(ContentManifestId contentManifest)
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
+        const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
+            interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
+            combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
+            weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
+            authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
+            authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(),
+            nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
+            nativeActorMotionCapability() };
+        auto offer = std::get<CapabilityOffer>(
+            CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
+        return ClientHello::fromOffer(std::move(offer));
+    }
+
     namespace
     {
         constexpr std::uint64_t RetryIntervalNanoseconds = 1'000'000'000;
         constexpr std::uint64_t PoseSampleIntervalNanoseconds = 50'000'000;
-
-        ClientHello makeClientHello(ContentManifestId contentManifest)
-        {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
-            const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
-                interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
-                combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
-                weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
-                authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-                authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability() };
-            auto offer = std::get<CapabilityOffer>(
-                CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
-            return ClientHello::fromOffer(std::move(offer));
-        }
 
         bool nativeDoorNegotiated(const ClientSessionRuntime& runtime) noexcept
         {

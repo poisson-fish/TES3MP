@@ -11,6 +11,9 @@
 
 namespace TES3MP::OpenMWAdapter
 {
+    // Initial joins and resumes must advertise the same desktop capabilities.
+    ClientHello makeClientHello(ContentManifestId contentManifest);
+
     class PlayerCredentialPersistence
     {
     public:

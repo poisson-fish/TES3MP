@@ -135,15 +135,49 @@ def verify_doors(output, evidence, processes, relay, manifest):
     errors = trajectory_errors(motion)
     if len(errors) < 15 or max(errors) >= 8:
         raise RuntimeError("Overlapping door-avoidance trajectories diverged")
+    # Exercise each peer's real resume handshake through the same impaired relay.
+    # Only fresh post-resume observations may satisfy convergence.
+    resumes = {}
+    for role in evidence:
+        before_inventory = next(r for r in reversed(records(evidence[role]))
+                                if r.get("event") == "traversal_inventory")
+        marker = len(records(evidence[role]))
+        command(role, "reconnect")
+        wait_for(lambda: any(r.get("event") == "phase8_desktop_status" and r.get("status") == "resumed"
+                             for r in records(evidence[role])[marker:]), f"{role} session resume")
+        wait_for(lambda: sum(r.get("event") == "native_actor_pose"
+                             for r in records(evidence[role])[marker:]) >= 30
+                 and any(r.get("event") == "native_door_presented"
+                         for r in records(evidence[role])[marker:]) and settled(role),
+                 f"{role} fresh resumed actor and door presentation")
+        # V18 binds the selected actor/inventory and doors; loose room items are
+        # outside its domain, so the V14 whole-ground `observe` assertion is inapplicable.
+        observation = command(role, "screenshot")
+        inventory = next(r for r in reversed(records(evidence[role]))
+                         if r.get("event") == "traversal_inventory")
+        fresh = poses(evidence[role])[-1]
+        other = poses(evidence["Bob" if role == "Alice" else "Alice"])[-1]
+        authoritative = next(r for r in reversed(records(evidence[role]))
+                             if r.get("event") == "native_actor_sample")
+        if (observation["resumes"] != 1 or observation["local_ai_active"]
+                or inventory["player"] != before_inventory["player"]
+                or distance(fresh, other) > .1 or abs(fresh["z"] - other["z"]) > .1
+                or distance(fresh, authoritative) > .1
+                or any(d["direction"] != 0 or d["angle"] < 3.1 or d["angle"] != d["rendered_angle"]
+                       for d in door_records(role)[-1]["doors"])):
+            raise RuntimeError(f"{role}: resumed inventory/actor/door state did not converge")
+        resumes[role] = dict(resumes=observation["resumes"], final=fresh,
+                             peer_difference=distance(fresh, other), inventory_preserved=True)
     for role in evidence:
         command(role, "quit")
         processes[role].wait(timeout=15)
         finished.add(role)
         completed = [r for r in records(evidence[role]) if r.get("event") == "phase8_desktop_complete"]
-        if processes[role].returncode or len(completed) != 1 or not completed[0]["success"]:
+        if (processes[role].returncode or len(completed) != 1 or not completed[0]["success"]
+                or not completed[0]["player_identity_stable"] or completed[0]["resumes"] != 1):
             raise RuntimeError(f"{role} did not finish cleanly")
     report = dict(success=True, scenario="V18 Hlavora, Vivec Redoran Records",
-                  clients=metrics, common_ticks=len(common_ticks), relay=asdict(relay.stop()), manifest=manifest,
+                  clients=metrics, resumes=resumes, common_ticks=len(common_ticks), relay=asdict(relay.stop()), manifest=manifest,
                   overlapping_samples=len(errors), maximum_trajectory_difference=max(errors),
                   screenshots=[p.name for p in output.glob("*.png")],
                   profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")

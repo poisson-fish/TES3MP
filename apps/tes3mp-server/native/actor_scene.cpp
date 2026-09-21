@@ -91,6 +91,8 @@ namespace TES3MP::Native
 
     struct InteriorActorScene::Impl
     {
+        // Prepared frames cannot outlive and later match a reallocated scene.
+        std::shared_ptr<const char> mLifetime = std::make_shared<const char>(0);
         struct Body
         {
             btCollisionWorld& mWorld;
@@ -394,19 +396,53 @@ namespace TES3MP::Native
         }
     };
 
+    struct InteriorActorScene::Dormant
+    {
+        ActorSceneSnapshot snapshot;
+        std::array<float, 4> transform;
+        std::string fingerprint;
+        std::vector<char> image;
+        std::vector<ActorSceneDoor> doors;
+        bool arrived;
+    };
+
     InteriorActorScene::InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation)
         : mImpl(std::make_unique<Impl>(loadout, cell, actor, baseAnimation, beastAnimation)) {}
     InteriorActorScene::~InteriorActorScene() = default;
-    ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl->snapshot(); }
+    ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl ? mImpl->snapshot() : mDormant->snapshot; }
     std::array<float, 4> InteriorActorScene::transform() const noexcept
-    { const auto& frame=*mImpl->mActor; return {frame.mPosition.x(),frame.mPosition.y(),frame.mPosition.z(),frame.mRotation.y()}; }
-    uint64_t InteriorActorScene::actorId() const noexcept { return mImpl->mActorId; }
-    size_t InteriorActorScene::bodyCount() const { return mImpl->mBodies.size(); }
-    const std::string& InteriorActorScene::fingerprint() const { return mImpl->mFingerprint; }
+    {
+        if (!mImpl) return mDormant->transform;
+        const auto& frame=*mImpl->mActor;
+        return {frame.mPosition.x(),frame.mPosition.y(),frame.mPosition.z(),frame.mRotation.y()};
+    }
+    uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
+    size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
+    const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
+
+    void InteriorActorScene::unload()
+    {
+        if (!mImpl) return;
+        auto dormant = std::make_unique<Dormant>(Dormant{
+            snapshot(), transform(), fingerprint(), image(), mImpl->mDoors, arrived()});
+        mDormant.swap(dormant);
+        mImpl.reset();
+    }
+
+    void InteriorActorScene::reload(InteriorActorScene& fresh)
+    {
+        if (mImpl || !fresh.mImpl || fresh.fingerprint() != fingerprint())
+            throw std::invalid_argument("Actor reload scene differs from bound resources");
+        auto restored = fresh.prepareRestore(mDormant->image, mDormant->doors);
+        fresh.install(*restored);
+        mImpl.swap(fresh.mImpl);
+        mDormant.swap(fresh.mDormant);
+    }
 
     void InteriorActorScene::enableNavigation(const std::string& settingsFile)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         if (mImpl->mNavigator) throw std::logic_error("Interior navigation already initialized");
         if (std::filesystem::file_size(settingsFile) > 1024 * 1024)
             throw std::invalid_argument("Navigation settings exceed startup bound");
@@ -462,6 +498,7 @@ namespace TES3MP::Native
 
     std::vector<std::array<float, 3>> InteriorActorScene::pathTo(const std::array<float, 3>& destination) const
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         if (!mImpl->mNavigator) throw std::logic_error("Interior navigation unavailable");
         for (float value : destination)
             if (!std::isfinite(value) || std::abs(value) > 1e7f)
@@ -488,10 +525,12 @@ namespace TES3MP::Native
         mImpl->mTravel.hasDestination = true;
     }
 
-    bool InteriorActorScene::arrived() const { return !mImpl->mTravel.door && mImpl->mPath.checkPathCompleted(); }
+    bool InteriorActorScene::arrived() const
+    { return mImpl ? !mImpl->mTravel.door && mImpl->mPath.checkPathCompleted() : mDormant->arrived; }
 
     void InteriorActorScene::bindDoors(std::span<const uint64_t> doors, bool avoidance)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         if (mImpl->mNavigator || !mImpl->mDoors.empty() || doors.empty() || doors.size() > 128)
             throw std::invalid_argument("Actor door binding outside startup bounds");
         std::vector<ActorSceneDoor> bound;
@@ -511,6 +550,7 @@ namespace TES3MP::Native
 
     ActorDoorContact InteriorActorScene::doorContact(uint64_t door, float proposedAngle, float delta) const
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         const auto bound = std::ranges::find(mImpl->mDoors, door, &ActorSceneDoor::mId);
         if (bound == mImpl->mDoors.end() || !std::isfinite(delta) || std::abs(delta) > osg::PIf / 2)
             throw std::invalid_argument("Actor door query outside domain");
@@ -539,6 +579,7 @@ namespace TES3MP::Native
 
     ActorSceneSnapshot InteriorActorScene::navigate(float speed)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         if (!mImpl->mNavigator || !std::isfinite(speed) || speed <= 0 || speed > 4096)
             throw std::invalid_argument("Interior navigation speed outside bounds");
         auto frame=std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
@@ -556,6 +597,7 @@ namespace TES3MP::Native
     }
     ActorSceneSnapshot InteriorActorScene::step(const std::array<float,3>& velocity)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         auto frame=std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         std::vector<uint64_t> contacts;
         mImpl->simulate(*frame,contacts,velocity);
@@ -567,7 +609,8 @@ namespace TES3MP::Native
 
     struct InteriorActorScene::Prepared::State
     {
-        InteriorActorScene::Impl* owner;
+        std::shared_ptr<const char> lifetime;
+        uint64_t actor;
         std::unique_ptr<MWPhysics::ActorFrameData> frame;
         MWMechanics::PathFinder path;
         std::vector<uint64_t> contacts;
@@ -580,13 +623,13 @@ namespace TES3MP::Native
     ActorSceneSnapshot InteriorActorScene::Prepared::snapshot() const
     {
         const auto& frame = *mState->frame;
-        return {mState->owner->mActorId, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
+        return {mState->actor, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
             frame.mIsOnGround, mState->contacts, frame.mRotation.y()};
     }
     std::span<const char> InteriorActorScene::Prepared::image() const { return mState->bytes; }
 
     std::vector<char> InteriorActorScene::image() const
-    { return mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel); }
+    { return mImpl ? mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel) : mDormant->image; }
 
     std::vector<char> InteriorActorScene::Impl::encode(const MWPhysics::ActorFrameData& frame,
         const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts, const Travel& travel) const
@@ -616,6 +659,7 @@ namespace TES3MP::Native
 
     void InteriorActorScene::restore(std::span<const char> bytes)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         auto prepared = prepareRestore(bytes, mImpl->mDoors);
         install(*prepared);
     }
@@ -623,6 +667,7 @@ namespace TES3MP::Native
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareRestore(
         std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         mImpl->validateDoors(doors);
         if (bytes.size() > 64 * 1024) throw std::invalid_argument("Actor image exceeds bound");
         size_t offset = 0;
@@ -689,13 +734,14 @@ namespace TES3MP::Native
         }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
-            mImpl.get(), std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
+            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
             {doors.begin(), doors.end()}, std::move(travel)})));
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
         float speed, std::span<const ActorSceneDoor> doors)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         mImpl->validateDoors(doors);
         if (!mImpl->mNavigator || !std::isfinite(speed) || speed <= 0 || speed > 4096)
             throw std::invalid_argument("Interior navigation speed outside bounds");
@@ -727,13 +773,16 @@ namespace TES3MP::Native
         mImpl->advance(*frame,path,contacts,travel,speed,doors);
         auto bytes = mImpl->encode(*frame,path,contacts,travel);
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
-            mImpl.get(), std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
+            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
             {doors.begin(), doors.end()}, std::move(travel)})));
     }
+    bool InteriorActorScene::canInstall(const Prepared& prepared) const noexcept
+    { return mImpl && prepared.mState->lifetime == mImpl->mLifetime; }
+
     void InteriorActorScene::install(Prepared& prepared) noexcept
     {
         auto& state = *prepared.mState;
-        assert(state.owner == mImpl.get());
+        assert(canInstall(prepared));
         mImpl->mActor.swap(state.frame); std::swap(mImpl->mPath, state.path); mImpl->mContacts.swap(state.contacts);
         mImpl->mDoors.swap(state.doors);
         std::swap(mImpl->mTravel, state.travel);

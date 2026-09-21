@@ -1,33 +1,40 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active; M3 accepted 2026-09-19.**
-V18 reuses OpenMW door avoidance and turning: the selected obstructing NPC retreats,
-then replans to its retained destination. Rotation updates native navigation.
-Avoidance/RNG, physics/path, doors and inventory commit together; rejection and
-recovery preserve them. Player movement remains inherited.
+V19 sustains one traveler after both players leave. Player/traveler demand
+runs one composed actor/door/inventory tick, independently of replication interest.
+Completion releases an unoccupied collision/navigation scene. Unload/reload and
+restart preserve destination, completion, physics and avoidance/RNG; mismatches
+and retired-scene candidates reject atomically.
 
-[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-18**,
-fresh campaign, one dry interior, one living unscripted nonleveled NPC, fixed
-speed/destination, navigation settings, 1–128 ordinary doors. V16/V17 retain their
-domains. Background NPCs remain frozen; neighbor propagation, general AI, automatic
-door activation, combat, scripts, water and gameplay animation remain unavailable.
-Either player sustains simulation; both leaving freezes it. Headless packaging
-remains unproved; computer-use remains disabled.
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-19**,
+fresh campaign, V18 fields: one dry interior, one living unscripted nonleveled NPC,
+fixed speed/destination, navigation settings, 1–128 ordinary doors. Bounded interior
+processing. V16–V18 retain their domains and freeze when both players leave.
+
+Background NPCs remain frozen. Multiple travelers, cell crossings, general AI,
+neighbor propagation, automatic door activation, combat, scripts, water and gameplay
+animation remain unavailable. Player movement is inherited; headless packaging
+unproved; computer-use disabled.
 
 Verified 2026-09-20, `build/vnext-desktop-evidence`:
 
-- `tes3mp_native_actor_tests door-avoidance`: `build/logs/m4-door-avoidance.log`.
-- `tes3mp_native_loadout_tests npc-door-avoidance`: synthetic geometry on retained
-  TR loadout; retreat/resumption, rotating navigation, rejection, RNG/recovery,
-  inventory composition, reversal, disconnect/freeze. `build/logs/m4-npc-door-avoidance.log`.
-- V17/V16 regressions: `build/logs/m4-avoidance-v17.log`, `build/logs/m4-avoidance-v16.log`.
-- Two desktops, Hlavora in Vivec's Redoran Records: obstruction, retreat, opening,
-  resumption and convergence under latency/jitter/loss/reordering. Screenshots and
-  results: `build/m4-door-desktop-accepted`; reproduce with
-  `scripts/run_native_navigation_capture.py --doors`. Real-content probe:
-  `build/logs/m4-real-door-probe.log`, maximum 23.3 ms, no overruns (excludes durability).
+- `openmw_tes3mp_adapter_tests native-capabilities`: `build/logs/m4-native-capabilities.log`.
+  Reconnect omitted actor-motion/leveled-actor capabilities; join/resume now share
+  one offer. Two V18 desktops resumed under latency/jitter/loss/reordering:
+  identical final NPC positions, converged doors, preserved inventories/identities.
+  Results/screenshots: `build/m4-v18-resume-verified`; log: `build/logs/m4-v18-resume.log`.
+  Reproduce: `scripts/run_native_navigation_capture.py --doors`.
+- `tes3mp_native_loadout_tests npc-traveler`: `build/logs/m4-npc-traveler.log`.
+  Synthetic room on retained TR loadout: empty/occupied simulation equality,
+  completion at tick 62, mid-travel restart, unload/reload, completed restart,
+  range/destination/stale-scene rejection and composed durability failures.
+  Fixture: `build/m4-traveler-fixture-verified`.
+- V18 `npc-door-avoidance` / V16 `native-navigation`:
+  `build/logs/m4-traveler-v18.log`, `build/logs/m4-traveler-v16.log`.
+  Server built: `build/logs/m4-traveler-server-build.log`.
 
-Next: investigate impaired V18 delayed-resume failure
-(`build/m4-door-desktop-Alice/Alice-user/openmw.log`); reconnect acceptance is pending.
-Then M4 step 3: traveler activity after both players leave.
+Next: M4 step 3 processing neighborhoods, cell-boundary transitions and saturation
+diagnostics; then real-content unattended travel/restart acceptance. Preserve
+one simulation and durable destinations/completion independently of client interest.
 Retained M3 campaigns: `build/m3-tr-varyon-doors`, `build/m3-tr-noran-dry`.
