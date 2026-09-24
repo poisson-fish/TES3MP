@@ -17,6 +17,12 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V23 uses V22's fields under native-inventory-23 and requires a fresh
+    // campaign. Its actor wrapper saves OpenMW-initialized combat attributes,
+    // resources and skills for both players and the selected NPC, plus a
+    // dedicated combat RNG. Equipped weapon condition remains in the nested
+    // inventory image and is sampled from that owner during tick preparation.
+    // Damage, costs, wear and death are not applied yet.
     // V22 uses V21's descriptor and adds server-owned release/target and
     // contact at the authored hit key. It requires a fresh campaign.
     // V21 uses native-inventory-21 with V20 fields, then adds

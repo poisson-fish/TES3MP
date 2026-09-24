@@ -4120,7 +4120,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee)
+        const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4136,6 +4136,7 @@ namespace TES3MP::Native::Testing
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
+            if (combat) npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
@@ -4285,7 +4286,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (melee ? "native-inventory-22\nmanifest "
+            std::ofstream out(descriptor); out << (combat ? "native-inventory-23\nmanifest "
+                : melee ? "native-inventory-22\nmanifest "
                 : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
@@ -4300,9 +4302,17 @@ namespace TES3MP::Native::Testing
         auto& service = host.service(); service.synchronizeCells(authority);
         if (melee)
         {
+            if (combat)
+                require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition().value_or(0) > 0,
+                    "V23 did not bind the selected NPC's equipped weapon condition");
             const auto image = [&] { return std::vector(service.inventoryImage().begin(), service.inventoryImage().end()); };
             const auto initial = image();
             const auto before = readActorCampaign({reinterpret_cast<const char*>(initial.data()), initial.size()});
+            if (combat)
+                require(before.combat && before.combat->rng >= 1
+                    && std::ranges::all_of(before.combat->actors,
+                        [](const auto& stats) { return stats[0][0] > 0; }),
+                    "V23 did not stage both players' and the NPC's OpenMW stats and combat RNG");
             require(before.melee && before.melee->identity.find("meshes/xbase_anim.kf") != std::string::npos
                 && before.melee->state.mPhase == MeleeAnimation::Phase::WindUp,
                 "Bound melee source or initial swing was not saved with the native actor");
@@ -4311,6 +4321,9 @@ namespace TES3MP::Native::Testing
             auto first = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {});
             require(first->commit(rejected) == CanonicalDurabilityResult::Rejected && image() == initial,
                 "Rejected actor tick advanced the bound swing");
+            if (combat)
+                require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition().value_or(0) > 0,
+                    "Rejected tick changed equipped weapon condition");
             require(first->commit(accepted) == CanonicalDurabilityResult::Committed,
                 "Retried bound swing tick did not commit");
             const auto committed = image();
@@ -4319,10 +4332,16 @@ namespace TES3MP::Native::Testing
                 && after.melee->identity == before.melee->identity
                 && !after.melee->state.mReleased && after.melee->target == 0 && !after.melee->contact,
                 "Committed actor tick did not advance the durable bound swing");
+            if (combat) require(after.combat == before.combat,
+                "Ordinary motion changed combat stats or RNG before a hit");
             InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, committed);
             auto& resumed = restart.service(); resumed.synchronizeCells(authority);
             require(std::ranges::equal(committed, resumed.inventoryImage()),
                 "Bound swing recovery changed the committed image");
+            if (combat)
+                require(dynamic_cast<InventoryService&>(resumed).selectedNpcWeaponCondition()
+                    == dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition(),
+                    "Restart changed the equipped weapon condition");
             auto wrongResource = committed;
             wrongResource.at(64) ^= std::byte{1}; // First identity byte after the bounded V22 header.
             bool invalid = false;
@@ -4330,6 +4349,28 @@ namespace TES3MP::Native::Testing
             catch (const std::invalid_argument&) { invalid = true; }
             require(invalid && std::ranges::equal(committed, resumed.inventoryImage()),
                 "Changed saved KF identity passed recovery or changed the live campaign");
+            if (combat)
+            {
+                auto corrupt = committed;
+                const auto parts = readActorCampaign({reinterpret_cast<const char*>(corrupt.data()), corrupt.size()});
+                const auto offset = size_t(parts.inventory.data() - reinterpret_cast<const char*>(corrupt.data()))
+                    - (1 + 3 * ActorCampaignCombat::StatCount * 5) * 8;
+                std::fill_n(corrupt.begin() + offset, 8, std::byte{});
+                bool invalidRng = false;
+                try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, corrupt); }
+                catch (const std::invalid_argument&) { invalidRng = true; }
+                require(invalidRng && std::ranges::equal(committed, resumed.inventoryImage()),
+                    "Invalid combat RNG installed during restart");
+                corrupt = committed;
+                const std::array<std::byte, 8> nan{std::byte{0}, std::byte{0}, std::byte{0xc0},
+                    std::byte{0x7f}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}};
+                std::copy(nan.begin(), nan.end(), corrupt.begin() + offset + 8);
+                bool invalidStat = false;
+                try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, corrupt); }
+                catch (const std::invalid_argument&) { invalidStat = true; }
+                require(invalidStat && std::ranges::equal(committed, resumed.inventoryImage()),
+                    "Nonfinite combat stat installed during restart");
+            }
             auto originalTick = service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
             auto resumedTick = resumed.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
             std::vector<std::byte> originalCandidate, resumedCandidate;

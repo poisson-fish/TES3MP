@@ -1,6 +1,7 @@
 #include "equipment_runtime.hpp"
 #include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
+#include <components/esm3/loadweap.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwclass/armor.hpp>
 #include <apps/openmw/mwclass/clothing.hpp>
@@ -15,6 +16,20 @@
 
 namespace TES3MP::Native
 {
+    std::optional<EquipmentRuntime::EquippedWeaponCondition> EquipmentRuntime::equippedWeaponCondition(size_t owner) const
+    {
+        const auto* equipped = inventoryStorage(owner);
+        if (!equipped) return {};
+        const auto selected = equipped->mSlots[InventoryStore::Slot_CarriedRight];
+        if (selected == equipped->end()) return {};
+        const Ptr item = *selected;
+        if (item.getType() != ESM::Weapon::sRecordId) return {};
+        const auto maximum = mStore.get<ESM::Weapon>().find(item.getCellRef().getRefId())->mData.mHealth;
+        const int condition = item.getClass().hasItemHealth(item) ? item.getClass().getItemHealth(item) : 0;
+        if (condition < 0 || condition > maximum)
+            throw std::invalid_argument("Native equipped weapon condition invalid");
+        return EquippedWeaponCondition{item.getCellRef().getRefNum(), condition};
+    }
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,

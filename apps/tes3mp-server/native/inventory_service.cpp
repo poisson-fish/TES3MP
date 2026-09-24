@@ -9,6 +9,8 @@
 #include <apps/openmw/mwworld/containeradd.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/esm3/statstate.hpp>
+#include <components/misc/rng.hpp>
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
@@ -30,6 +32,40 @@ namespace TES3MP::Native
             SealedCommitter(EquipmentSessionCommitter& sink, const EquipmentBytes& image) : mSink(sink), mImage(image) {}
             PersistenceResult commit(std::span<const char>) noexcept override { return mSink.commit(mImage); }
         };
+        ActorCampaignCombat initialCombat(const std::array<ESM::RefId, 3>& actors,
+            const MWWorld::ESMStore& content, uint32_t seed)
+        {
+            static_assert(ActorCampaignCombat::StatCount == ESM::Attribute::Length + 3 + ESM::Skill::Length);
+            ActorCampaignCombat result;
+            Misc::Rng::Generator rng{seed};
+            result.rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+            const float magickaMultiplier = content.get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat();
+            if (!std::isfinite(magickaMultiplier) || magickaMultiplier < 0 || magickaMultiplier > 1000)
+                throw std::invalid_argument("Native combat magicka multiplier invalid");
+            for (size_t actor = 0; actor < actors.size(); ++actor)
+            {
+                const auto& base = *content.get<ESM::NPC>().find(actors[actor]);
+                MWMechanics::NpcStats stats(content);
+                if (base.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+                    stats.initializeAutoStats(base, content, magickaMultiplier);
+                else stats.initializeExplicitStats(base, magickaMultiplier);
+                size_t index = 0;
+                const auto capture = [&](const auto& stat) {
+                    ESM::StatState<float> value;
+                    stat.writeState(value);
+                    result.actors[actor][index++] = {value.mBase, value.mMod, value.mCurrent,
+                        value.mDamage, value.mProgress};
+                };
+                for (int i = 0; i < ESM::Attribute::Length; ++i)
+                    capture(stats.getAttribute(ESM::Attribute::indexToRefId(i)));
+                for (int i = 0; i < 3; ++i) capture(stats.getDynamic(i));
+                for (int i = 0; i < ESM::Skill::Length; ++i)
+                    capture(stats.getSkill(ESM::Skill::indexToRefId(i)));
+                if (index != result.actors[actor].size())
+                    throw std::invalid_argument("Native combat stat shape invalid");
+            }
+            return result;
+        }
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
         {
             if (binding.mSecondWorldItems && (!binding.mWorldItems || (!binding.mStreamExteriors && !binding.mDoor)
@@ -217,6 +253,20 @@ namespace TES3MP::Native
     {
         if (mBinding.mMeleeContact && !mBinding.mBoundMelee)
             throw std::invalid_argument("Native melee contact requires a bound animation");
+        if (mBinding.mCombatState)
+        {
+            if (!mBinding.mMeleeContact || !mBinding.mNavigatingActor)
+                throw std::invalid_argument("Native combat stats require both players and a selected melee NPC");
+            const auto id = mBinding.mNavigatingActor->actorId();
+            const auto owner = std::ranges::find_if(mBinding.mContainers,
+                [id](const auto& value) { return value.mId.value() == id; });
+            if (owner == mBinding.mContainers.end() || mRuntime.ownerPtr(size_t(owner - mBinding.mContainers.begin()) + 2).getType() != ESM::NPC::sRecordId)
+                throw std::invalid_argument("Native combat stat owner must be the selected NPC");
+            mCombatNpcOwner = size_t(owner - mBinding.mContainers.begin()) + 2;
+            mCombat = initialCombat({mBinding.mActors[0].mBase, mBinding.mActors[1].mBase, owner->mBase},
+                content, mBinding.mLootSeed);
+            (void)mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+        }
         if (mBinding.mBoundMelee)
         {
             if (!mBinding.mNavigatingActor || mBinding.mBoundMelee->mResourceIdentity.empty()
@@ -244,7 +294,7 @@ namespace TES3MP::Native
                     [id](const auto& owner) { return owner.mId.value() == id && owner.mPlacement.has_value(); }))
                 throw std::invalid_argument("Navigating NPC has no authoritative inventory owner");
             mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity,
-                mMelee, mMeleeTarget, mMeleeContacted);
+                mMelee, mMeleeTarget, mMeleeContacted, mCombat);
             installActorPosition();
         }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
@@ -935,9 +985,11 @@ namespace TES3MP::Native
             if (bool(decoded.melee) != bool(mMelee)
                 || (decoded.melee && decoded.melee->identity != mBinding.mBoundMelee->mResourceIdentity))
                 throw std::invalid_argument("Native melee resource binding differs from campaign");
+            if (bool(decoded.combat) != mBinding.mCombatState)
+                throw std::invalid_argument("Native combat campaign version differs from binding");
             size_t headerOffset = 0;
-            if (mBinding.mMeleeContact != (getAreaWord(
-                    {reinterpret_cast<const char*>(image.data()), image.size()}, headerOffset) == ContactActorCampaignMagic))
+            const auto magic = getAreaWord({reinterpret_cast<const char*>(image.data()), image.size()}, headerOffset);
+            if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic))
                 throw std::invalid_argument("Native melee contact campaign version differs from binding");
             auto restoredMelee = mMelee;
             if (decoded.melee) restoredMelee->restore(decoded.melee->state);
@@ -950,6 +1002,7 @@ namespace TES3MP::Native
             mMelee = std::move(restoredMelee);
             mMeleeTarget = decoded.melee ? decoded.melee->target : 0;
             mMeleeContacted = decoded.melee && decoded.melee->contact;
+            mCombat = decoded.combat;
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             installActorPosition();
             return;
@@ -965,15 +1018,18 @@ namespace TES3MP::Native
 
     EquipmentBytes InventoryService::sealActor(std::span<const char> core, std::span<const char> actor,
         uint64_t tick, const std::array<float, 3>& velocity, const std::optional<MeleeAnimation>& melee,
-        uint64_t target, bool contact) const
+        uint64_t target, bool contact, const std::optional<ActorCampaignCombat>& combat) const
     {
         const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size()
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
+        const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8 : 0;
         if (core.empty() || actor.empty() || actor.size() > 65536
-            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - actor.size())
+            || 56 + meleeSize + combatSize + actor.size() > MaximumNativeInventoryImageBytes
+            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, melee ? (mBinding.mMeleeContact ? ContactActorCampaignMagic : MeleeActorCampaignMagic)
+        putAreaWord(result, combat ? CombatActorCampaignMagic
+            : melee ? (mBinding.mMeleeContact ? ContactActorCampaignMagic : MeleeActorCampaignMagic)
             : ActorCampaignMagic);
         putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
         for (float value : velocity) putAreaWord(result, std::bit_cast<uint32_t>(value));
@@ -987,6 +1043,13 @@ namespace TES3MP::Native
             putAreaWord(result, std::bit_cast<uint32_t>(state.mStrength));
             putAreaWord(result, state.mReleased); putAreaWord(result, state.mHit);
             if (mBinding.mMeleeContact) { putAreaWord(result, target); putAreaWord(result, contact); }
+        }
+        if (combat)
+        {
+            putAreaWord(result, combat->rng);
+            for (const auto& actorStats : combat->actors)
+                for (const auto& stat : actorStats)
+                    for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
         }
         result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
         (void)readActorCampaign(result);
@@ -1094,6 +1157,8 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> command;
         std::unique_ptr<InteriorActorScene::Prepared> actor;
         std::optional<MeleeAnimation> melee;
+        std::optional<ActorCampaignCombat> combat;
+        std::optional<EquipmentRuntime::EquippedWeaponCondition> weapon;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -1103,10 +1168,13 @@ namespace TES3MP::Native
         ServerApp::NativeTravelDiagnostics diagnostics;
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
             std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
-            uint64_t selected, bool contacted, uint64_t time, std::array<float,3> motion,
+            uint64_t selected, bool contacted, std::optional<ActorCampaignCombat> stagedCombat,
+            std::optional<EquipmentRuntime::EquippedWeaponCondition> stagedWeapon,
+            uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
-              target(selected), contact(contacted), before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
+              combat(std::move(stagedCombat)), weapon(std::move(stagedWeapon)), target(selected), contact(contacted), before(owner.mActorImage),
+              tick(time), velocity(motion), diagnostics(report) {}
         bool changesInventory() const noexcept override { return bool(command); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -1114,11 +1182,13 @@ namespace TES3MP::Native
                 || (actor && !service.mBinding.mNavigatingActor->canInstall(*actor))) return CanonicalDurabilityResult::Rejected;
             try
             {
+                if (combat && weapon != service.mRuntime.equippedWeaponCondition(service.mCombatNpcOwner))
+                    return CanonicalDurabilityResult::Rejected;
                 EquipmentBytes sealed;
                 const auto compose = [&](std::span<const std::byte> inventory) {
                     const auto retained = readActorCampaign(before).actor;
                     sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
-                        actor ? actor->image() : retained, tick, velocity, melee, target, contact);
+                        actor ? actor->image() : retained, tick, velocity, melee, target, contact, combat);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -1130,6 +1200,7 @@ namespace TES3MP::Native
                     if (actor) service.mBinding.mNavigatingActor->install(*actor);
                     service.mMelee = std::move(melee);
                     service.mMeleeTarget = target; service.mMeleeContacted = contact;
+                    service.mCombat = std::move(combat);
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
@@ -1203,7 +1274,9 @@ namespace TES3MP::Native
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
-            std::move(melee), target, contact, tick.value(), velocity, report);
+            std::move(melee), target, contact, mCombat,
+            mCombat ? mRuntime.equippedWeaponCondition(mCombatNpcOwner) : std::nullopt,
+            tick.value(), velocity, report);
     }
     catch (const std::exception& error)
     {

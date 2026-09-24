@@ -212,6 +212,15 @@ namespace TES3MP::Native
         EquipmentEnvelope expectedEnvelope(ESM::RefNum actor) const;
 
     public:
+        struct EquippedWeaponCondition
+        {
+            ESM::RefNum mItem;
+            int mCondition;
+            bool operator==(const EquippedWeaponCondition&) const = default;
+        };
+        // Read the selected stock inventory slot and effective item health.
+        // The inventory image remains the only durable writer of condition.
+        std::optional<EquippedWeaponCondition> equippedWeaponCondition(size_t owner) const;
         class PreparedDoor
         {
             friend class EquipmentRuntime;

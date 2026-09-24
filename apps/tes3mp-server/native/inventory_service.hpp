@@ -4,6 +4,7 @@
 #include "equipment_runtime.hpp"
 #include "actor_spawns.hpp"
 #include "actor_scene.hpp"
+#include "actor_campaign.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -74,6 +75,7 @@ namespace TES3MP::Native
         std::shared_ptr<InteriorActorScene> mNavigatingActor;
         std::optional<BoundMeleeAnimation> mBoundMelee;
         bool mMeleeContact = false;
+        bool mCombatState = false;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
         bool mRetainTraveler = false;
@@ -116,9 +118,12 @@ namespace TES3MP::Native
         std::optional<MeleeAnimation> mMelee;
         uint64_t mMeleeTarget = 0;
         bool mMeleeContacted = false;
+        std::optional<ActorCampaignCombat> mCombat;
+        size_t mCombatNpcOwner = 0;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity,
-            const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact) const;
+            const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact,
+            const std::optional<ActorCampaignCombat>& combat) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         float meleeReach() const;
@@ -207,6 +212,12 @@ namespace TES3MP::Native
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }
+        std::optional<int> selectedNpcWeaponCondition() const
+        {
+            if (!mCombat) return {};
+            const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+            return weapon ? std::optional{weapon->mCondition} : std::nullopt;
+        }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
