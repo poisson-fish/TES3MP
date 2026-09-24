@@ -656,6 +656,8 @@ int main(int argc, char** argv)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
     if (inventoryWorld || nativeInventory)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
+    if (nativeInventory && nativeInventory->hasNativeCombat())
+        optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
     if (combatContent && meleeContactHistory)
     {
         optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
@@ -678,6 +680,7 @@ int main(int argc, char** argv)
     {
         requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
         if (nativeInventory->hasActorMotion()) requiredCapabilities.push_back(TES3MP::nativeActorMotionCapability());
+        if (nativeInventory->hasNativeCombat()) requiredCapabilities.push_back(TES3MP::combatReplicationCapability());
         if (nativeInventory->hasLeveledActors()) requiredCapabilities.push_back(TES3MP::nativeLeveledActorsCapability());
         if (nativeInventory->streamsPlayerAreas()) requiredCapabilities.push_back(TES3MP::nativeStreamingCapability());
         if (nativeInventory->requiresDoorTraversal()) requiredCapabilities.push_back(TES3MP::nativeTeleportCapability());

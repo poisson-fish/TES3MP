@@ -83,6 +83,11 @@ namespace TES3MP::Native
         (void)worldValues(&prepared);
         return owner == prepared.mState->mActor ? prepared.mState->mInventory->mSaved : installedValues(owner);
     }
+    std::optional<EquipmentSessionValues::WorldCells> EquipmentRuntime::preparedWorldCells(const PreparedWorldTransfer& prepared) const
+    {
+        (void)worldValues(&prepared);
+        return prepared.mState->mCells;
+    }
     uint8_t EquipmentRuntime::worldCell(ESM::RefNum ref, const PreparedWorldTransfer* prepared) const
     {
         (void)worldValues(prepared);

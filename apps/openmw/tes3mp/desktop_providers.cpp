@@ -1412,6 +1412,11 @@ namespace TES3MP::OpenMWAdapter
                 if (remote.actor)
                     targets.push_back(remote.actor->ptr());
             }
+            for (const auto& [placement, remote] : nativeRemotes)
+            {
+                (void)placement;
+                if (remote.actor) targets.push_back(remote.actor->ptr());
+            }
         }
 
         std::optional<MeleeAttackCapture> captureMeleeAttack(
@@ -1435,9 +1440,16 @@ namespace TES3MP::OpenMWAdapter
             {
                 const auto remote = std::ranges::find_if(actorRemotes,
                     [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == victim; });
-                if (remote == actorRemotes.end() || !remote->second.lastObserved)
-                    return std::nullopt;
-                target = remote->second.lastObserved->actorId();
+                if (remote != actorRemotes.end() && remote->second.lastObserved)
+                    target = remote->second.lastObserved->actorId();
+                else
+                {
+                    const auto native = std::ranges::find_if(nativeRemotes,
+                        [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == victim; });
+                    if (native == nativeRemotes.end()) return std::nullopt;
+                    target = ActorId::fromValue(native->first);
+                    if (!target) return std::nullopt;
+                }
                 const auto combat
                     = std::ranges::lower_bound(combatSnapshot->actors(), *target, {}, &ActorCombatSnapshot::actorId);
                 if (combat == combatSnapshot->actors().end() || combat->actorId != *target || combat->dead)
@@ -1774,6 +1786,32 @@ namespace TES3MP::OpenMWAdapter
                                       << replicatedActorResultName(deathResult);
                     return ProviderResult::PresentationFailed;
                 }
+            }
+            for (auto& [placement, remote] : nativeRemotes)
+            {
+                if (!remote.actor) continue;
+                const auto actorId = ActorId::fromValue(placement);
+                if (!actorId) return ProviderResult::PresentationFailed;
+                const auto combat = std::ranges::lower_bound(
+                    snapshot.actors(), *actorId, {}, &ActorCombatSnapshot::actorId);
+                if (combat == snapshot.actors().end() || combat->actorId != *actorId) continue;
+                auto ptr = remote.actor->ptr();
+                auto& stats = ptr.getClass().getCreatureStats(ptr);
+                if (!combat->dead && stats.isDead()) stats.resurrect();
+                auto health = stats.getHealth();
+                health.setBase(combat->maximumHealth);
+                health.setCurrent(combat->health);
+                stats.setHealth(health);
+                auto fatigue = stats.getFatigue();
+                fatigue.setBase(combat->maximumFatigue);
+                fatigue.setCurrent(combat->fatigue, true, true);
+                stats.setFatigue(fatigue);
+                auto magicka = stats.getMagicka();
+                magicka.setBase(combat->maximumMagicka);
+                magicka.setCurrent(combat->magicka, true, true);
+                stats.setMagicka(magicka);
+                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                    return ProviderResult::PresentationFailed;
             }
             for (auto& [entity, remote] : remotes)
             {

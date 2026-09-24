@@ -4384,6 +4384,7 @@ namespace TES3MP::Native::Testing
             require(!originalCandidate.empty() && originalCandidate == resumedCandidate,
                 "Restart changed the next bound swing tick");
             bool hit = false;
+            bool composedHit = false;
             uint64_t releaseTick = 0;
             std::vector<std::byte> releaseImage;
             for (uint64_t time = 2; time <= 64 && !hit; ++time)
@@ -4401,18 +4402,46 @@ namespace TES3MP::Native::Testing
                     "Rejected melee contact tick wrote more than once or mutated the campaign");
                 if (combat) require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition() == conditionBefore,
                     "Rejected hit-key tick changed the equipped weapon condition");
-                const auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
+                auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
                 hit = candidate.melee && candidate.melee->state.mHit;
                 if (combat && hit && candidate.melee->contact)
                 {
+                    const auto observed = service.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(observed && !observed->playerInventory.front().equipment.empty(),
+                        "Hit-key inventory fixture has no equipped player item");
+                    const auto& inventory = observed->playerInventory.front();
+                    const auto slot = inventory.equipment.front();
+                    const auto item = std::ranges::find(inventory.stacks, slot.stackId, &CanonicalItemStack::stackId);
+                    require(item != inventory.stacks.end(), "Hit-key equipped item missing from player inventory");
+                    ClientInventoryTransactionCommand input{id<SessionId>(1),SessionGeneration::initial(),
+                        CommandSequence::initial(),id<CommandId>(time),id<CanonicalRevision>(time),
+                        InventoryTransactionKind::UnequipItem,{},item->prototypeId,item->stackId,1,slot.slot,
+                        inventory.revision,{},{},Position3(0,0,0)};
+                    auto intent = service.prepareInventory(authority, bind(authority, input).proposal());
+                    require(bool(intent), "Simultaneous player inventory intent rejected before hit composition");
+                    pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(intent));
+                    proposal.clear();
+                    require(pending->commit([&](auto bytes) { proposal.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && image() == beforeHit, "Rejected composed hit/inventory tick leaked state");
+                    candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
+                    require(candidate.melee && candidate.melee->state.mHit && candidate.melee->contact
+                        && candidate.combat && candidate.combat->rng != prior.combat->rng,
+                        "Player inventory command displaced the KF hit resolution");
                     const auto installedView = service.projectInventory(authority, id<SessionId>(1),
                         id<ServerTick>(time), id<CanonicalRevision>(time));
                     const auto stagedView = service.projectInventory(authority, id<SessionId>(1),
                         id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
-                    require(pending->changesInventory() && installedView && stagedView
-                        && stagedView->playerInventory.front().revision.value()
-                            == installedView->playerInventory.front().revision.value() + 1,
-                        "Hit-key candidate did not refresh the staged inventory revision");
+                    require(pending->changesInventory() && installedView && stagedView,
+                        "Composed hit-key candidate lost staged inventory projection");
+                    require(stagedView->playerInventory.front().revision.value()
+                            == installedView->playerInventory.front().revision.value() + 2,
+                        "Composed hit-key candidate lost second inventory revision");
+                    require(std::ranges::none_of(stagedView->playerInventory.front().equipment,
+                        [&](const auto& equipped) { return equipped.slot == slot.slot; }),
+                        "Composed hit-key candidate lost player unequip intent");
+                    composedHit = true;
                 }
                 std::vector<std::byte> durable;
                 size_t acceptedWrites = 0;
@@ -4442,7 +4471,7 @@ namespace TES3MP::Native::Testing
             }
             const auto contactImage = image();
             const auto contacted = readActorCampaign({reinterpret_cast<const char*>(contactImage.data()), contactImage.size()});
-            require(hit && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
+            require(hit && (!combat || composedHit) && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
                 "Server contact was not recorded at the bound KF hit key");
             require(releaseTick && !releaseImage.empty(), "Server attack did not retain a release-before-hit state");
             if (combat)
@@ -4510,6 +4539,174 @@ namespace TES3MP::Native::Testing
                 }
             }
             require(missed, "Out-of-reach path never reached the KF hit key");
+            if (combat)
+            {
+                const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+                const auto denied = [](auto) { return CanonicalDurabilityResult::Rejected; };
+                const auto* attackingPlayer = authority.findPlayer(id<PlayerId>(2));
+                require(attackingPlayer != nullptr, "Second combat participant missing");
+                const auto atContact = image();
+                const auto current = readActorCampaign({reinterpret_cast<const char*>(atContact.data()), atContact.size()});
+                bool dead = false;
+                uint64_t deathTick = 0;
+                for (uint64_t time = current.tick + 1; time <= current.tick + 128 && !dead; ++time)
+                {
+                    const auto beforeAttack = image();
+                    const auto beforeParts = readActorCampaign({reinterpret_cast<const char*>(beforeAttack.data()), beforeAttack.size()});
+                    const auto view = service.projectInventory(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(view && view->equipment && view->equipment->motions.size() == 1,
+                        "Second client lost the native NPC identity before attacking");
+                    ClientMeleeAttackCommand attack{id<SessionId>(2),SessionGeneration::initial(),
+                        CommandSequence::initial(),id<CommandId>(time),id<CanonicalRevision>(time),
+                        id<ActorId>(view->equipment->motions[0].placement),id<ServerTick>(time),
+                        CombatRevision::initial(),CombatRevision::initial(),MeleeAttackType::Chop,1.f};
+                    const ServerCommandProposal proposal(id<SessionId>(2),SessionGeneration::initial(),
+                        CommandSequence::initial(),id<CommandId>(time),id<CanonicalRevision>(time),
+                        EntityPrecondition(attackingPlayer->entityId(),attackingPlayer->entityRevision(),attackingPlayer->authorityEpoch()),
+                        MeleeAttackCommandProposal(attack));
+                    auto request = service.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                    require(bool(request), "Authenticated second-player attack did not enter native tick");
+                    auto pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(request));
+                    std::vector<std::byte> candidate;
+                    require(pending->commit([&](auto bytes) { candidate.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && image() == beforeAttack, "Rejected player attack changed the native campaign");
+                    const auto proposed = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
+                    require(proposed.combat && beforeParts.combat
+                        && proposed.combat->rng != beforeParts.combat->rng
+                        && proposed.combat->actors[1][10][2] < beforeParts.combat->actors[1][10][2],
+                        "Player attack omitted durable RNG or fatigue cost");
+                    const auto staged = service.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    require(staged && staged->playerInventory.front().revision.value() > 0,
+                        "Player attack candidate could not project to the other client");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && image() == candidate && pending->commit(accepted) == CanonicalDurabilityResult::Rejected,
+                        "Player attack retry or duplicate changed the durable result");
+                    dead = proposed.combat->actors[2][8][2] <= 0;
+                    if (dead) deathTick = time;
+                }
+                require(dead, "Authenticated player attacks never killed the shared NPC");
+                const auto corpseImage = image();
+                InventoryHost corpseRestart(descriptor, testContentManifest(), *registry, *crypto, corpseImage);
+                auto& corpse = corpseRestart.service(); corpse.synchronizeCells(authority);
+                require(std::ranges::equal(corpseImage, corpse.inventoryImage()),
+                    "NPC death changed across restart");
+                const auto first = corpse.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(deathTick), id<CanonicalRevision>(deathTick));
+                const auto second = corpse.projectInventory(authority, id<SessionId>(2),
+                    id<ServerTick>(deathTick), id<CanonicalRevision>(deathTick));
+                require(first && second && first->containers.size() == 1 && second->containers.size() == 1
+                    && first->containers[0].stacks == second->containers[0].stacks
+                    && !first->containers[0].stacks.empty() && first->equipment && second->equipment
+                    && first->equipment->motions.size() == 1 && second->equipment->motions.size() == 1,
+                    "Two clients did not see one durable NPC corpse inventory");
+                const auto firstCombat = corpse.projectCombat(authority, id<SessionId>(1),
+                    id<ServerTick>(deathTick), id<CanonicalRevision>(deathTick));
+                const auto secondCombat = corpse.projectCombat(authority, id<SessionId>(2),
+                    id<ServerTick>(deathTick), id<CanonicalRevision>(deathTick));
+                require(firstCombat && secondCombat && firstCombat->actors().size() == 1
+                    && secondCombat->actors().size() == 1 && firstCombat->actors()[0].dead
+                    && secondCombat->actors()[0].dead
+                    && firstCombat->actors()[0] == secondCombat->actors()[0],
+                    "Two clients did not receive the same native NPC death snapshot");
+                const auto& corpseView = second->containers.front();
+                const auto loot = corpseView.stacks.front();
+                ClientInventoryTransactionCommand take{id<SessionId>(2),SessionGeneration::initial(),
+                    CommandSequence::initial(),id<CommandId>(deathTick + 1),id<CanonicalRevision>(deathTick + 1),
+                    InventoryTransactionKind::TakeFromContainer,corpseView.container,loot.prototypeId,
+                    loot.stackId,1,{},second->playerInventory.front().revision,corpseView.revision,{},
+                    corpseView.position};
+                auto transfer = corpse.prepareInventory(authority, bind(authority, take).proposal());
+                require(bool(transfer), "Fresh NPC corpse rejected authenticated loot");
+                const auto beforeLoot = std::vector(corpse.inventoryImage().begin(), corpse.inventoryImage().end());
+                auto looted = corpse.prepareNativeTick(authority, id<ServerTick>(deathTick + 1), 1.f/30,
+                    std::move(transfer));
+                std::vector<std::byte> lootCandidate;
+                require(looted->commit([&](auto bytes) { lootCandidate.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && std::ranges::equal(beforeLoot, corpse.inventoryImage()),
+                    "Rejected corpse loot changed death or inventory");
+                require(looted->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && std::ranges::equal(lootCandidate, corpse.inventoryImage())
+                    && !corpse.prepareInventory(authority, bind(authority, take).proposal()),
+                    "Corpse loot did not commit once or a retry duplicated the stack");
+                const auto afterLoot = std::vector(corpse.inventoryImage().begin(), corpse.inventoryImage().end());
+                InventoryHost lootRestart(descriptor, testContentManifest(), *registry, *crypto, afterLoot);
+                const auto reconnected = players(id<SessionGeneration>(2), 1, 2);
+                lootRestart.service().synchronizeCells(reconnected);
+                const auto alice = lootRestart.service().projectInventory(reconnected, id<SessionId>(1),
+                    id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
+                const auto bob = lootRestart.service().projectInventory(reconnected, id<SessionId>(2),
+                    id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
+                require(alice && bob && std::ranges::equal(afterLoot, lootRestart.service().inventoryImage())
+                    && alice->containers.size() == 1 && bob->containers.size() == 1
+                    && alice->containers[0].stacks == bob->containers[0].stacks
+                    && alice->containers[0].stacks != corpseView.stacks,
+                    "Two-client reconnect refilled or diverged on the looted corpse");
+                const auto resumedCombat = lootRestart.service().projectCombat(reconnected, id<SessionId>(2),
+                    id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
+                require(resumedCombat && resumedCombat->actors().size() == 1 && resumedCombat->actors()[0].dead,
+                    "Reconnect lost the NPC death presentation state");
+                InventoryHost routedHost(descriptor, testContentManifest(), *registry, *crypto, atContact);
+                auto& routedService = routedHost.service(); routedService.synchronizeCells(authority);
+                NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+                CanonicalCommandReducer reducer(authority, observability, testContentManifest());
+                const auto catalog = ServerScriptStateCatalog::create({}).value();
+                auto scripts = CanonicalScriptState::initial(catalog).value();
+                std::array<std::byte,32> configuration{}; configuration[0] = std::byte{24};
+                const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+                    ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+                auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                    ServerApp::CanonicalPersistenceFile::open(scratch / "routed-attack.bin", identity));
+                require(reducer.configureDurability(*file, nullptr, nullptr, nullptr, nullptr, nullptr,
+                    &scripts, &routedService), "Native combat reducer durability wiring failed");
+                const auto routedView = routedService.projectInventory(authority, id<SessionId>(2),
+                    id<ServerTick>(current.tick), id<CanonicalRevision>(current.tick));
+                require(routedView && routedView->equipment && routedView->equipment->motions.size() == 1,
+                    "Routed combat target not visible to the second player");
+                const uint64_t routedTick = current.tick + 1;
+                ClientMeleeAttackCommand routedAttack{id<SessionId>(2),SessionGeneration::initial(),
+                    CommandSequence::initial(),id<CommandId>(9000),reducer.canonicalRevision(),
+                    id<ActorId>(routedView->equipment->motions[0].placement),id<ServerTick>(routedTick),
+                    CombatRevision::initial(),CombatRevision::initial(),MeleeAttackType::Chop,1.f};
+                const ServerCommandProposal routed(id<SessionId>(2),SessionGeneration::initial(),
+                    CommandSequence::initial(),id<CommandId>(9000),reducer.canonicalRevision(),
+                    EntityPrecondition(attackingPlayer->entityId(),attackingPlayer->entityRevision(),attackingPlayer->authorityEpoch()),
+                    MeleeAttackCommandProposal(routedAttack));
+                Clock ingressClock;
+                const auto route = [&](uint64_t tick) {
+                    ServerCommandIntakeCoordinator intake(ingressClock, observability,
+                        MonotonicInstant::fromNanoseconds(0),
+                        id<ServerTick>(tick), IngressOrdinal::initial());
+                    require(intake.submit(routed) == CommandSubmissionResult::Accepted,
+                        "Authenticated attack command intake failed");
+                    ingressClock.value = tick * 33'333'334;
+                    auto batch = intake.pump();
+                    require(batch && batch.batches().size() == 1, "Attack intake produced no scheduled tick");
+                    auto pending = reducer.prepareTick(batch.batches().front());
+                    require(pending.result() && reducer.stageNativeDoorStep(pending, id<ServerTick>(tick), 1.f/30),
+                        "Native attack reducer staging failed");
+                    return pending;
+                };
+                auto routedPending = route(routedTick);
+                require(routedPending.result().dispositions()[0].disposition() == CommandDisposition::Applied
+                    && reducer.commit(std::move(routedPending)),
+                    "Authenticated player attack was not durably applied by the reducer");
+                const auto onceImage = std::vector(routedService.inventoryImage().begin(), routedService.inventoryImage().end());
+                const auto once = readActorCampaign({reinterpret_cast<const char*>(onceImage.data()), onceImage.size()});
+                auto duplicate = route(routedTick + 1);
+                const auto disposition = duplicate.result().dispositions()[0].disposition();
+                require((disposition == CommandDisposition::DuplicateCommandId
+                        || disposition == CommandDisposition::AlreadyFinalized)
+                    && reducer.commit(std::move(duplicate)), "Duplicate authenticated attack was not finalized");
+                const auto replayImage = std::vector(routedService.inventoryImage().begin(), routedService.inventoryImage().end());
+                const auto replay = readActorCampaign({reinterpret_cast<const char*>(replayImage.data()), replayImage.size()});
+                require(once.combat && replay.combat && replay.combat->actors[2][8][2] == once.combat->actors[2][8][2],
+                    "Duplicate authenticated request damaged the NPC twice");
+                std::cout << "player attacks=authenticated native tick death=durable corpse=shared loot=once reconnect=two\n";
+            }
             std::cout << "melee campaign resource=bound release=server contact=hit-key retry=once restart=exact"
                 << (combat ? " damage=fatigue+health+wear rng=durable" : "")
                 << " (synthetic actor, real KF)\n";

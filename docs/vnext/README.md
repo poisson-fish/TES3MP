@@ -3,8 +3,8 @@
 Build cooperative multiplayer OpenMW for compatible modpacks, including Tamriel
 Rebuilt. Players explore and fight together and complete campaigns independently;
 another's actions or absence must not permanently block their opportunities.
-Shared NPC respawn and personal progression define the target, not implemented
-support. Clients retain OpenMW graphics and compatible visual mods.
+NPC respawn and personal progression remain targets. Clients retain OpenMW
+graphics and visual mods.
 
 ## Chosen route
 
@@ -24,9 +24,10 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking remains engine-independent. [CURRENT.md](CURRENT.md) names native runtime
-coverage, evidence, limitations and next action. Migrate one subsystem through
-small playable slices, preserving one canonical writer.
+Networking remains engine-independent. M4 now has bounded native travel, weapon
+hits, death and corpse loot. [CURRENT.md](CURRENT.md) distinguishes synthetic
+checks from live evidence and names the next action. Migrate in slices
+with one canonical writer.
 
 ## Product boundaries
 
@@ -35,19 +36,19 @@ small playable slices, preserving one canonical writer.
   NPC lives and personal story state. Temporary unavailability is acceptable;
   private campaigns are not the default; quest adaptations cannot be required. M5 owns
   contextual scripts, deferred dependencies and scoped permanent changes.
-  Generic item replenishment and access remain unresolved; retries cannot duplicate rewards.
-- Match gameplay plugins, ordering, scripts and relevant resources. Purely visual
-  texture/shader/settings differences may remain client-local.
+  Item replenishment remains unresolved; retries cannot duplicate rewards.
+- Match gameplay plugins, ordering, scripts and resources. Visual-only
+  differences may remain client-local.
 - Target supported OpenMW APIs. MWSE/native-engine-only support and multiplayer
   script compatibility require evidence.
-- Prove two desktop clients first. Preserve portability and VR interfaces; VR hardware,
-  standalone headsets, public-server scale and administration are later concerns.
+- Prove two desktop clients first. Preserve portability and VR interfaces;
+  headset support, public scale and administration follow later.
 
 ## Start and resume
 
 Read [CURRENT.md](CURRENT.md), [DEVELOPMENT.md](DEVELOPMENT.md), this overview and
-the active milestone in [PLAN.md](PLAN.md). Consult [DECISIONS.md](DECISIONS.md)
-for architecture and authority.
+the active [PLAN.md](PLAN.md) milestone. Consult [DECISIONS.md](DECISIONS.md)
+for authority and architecture.
 
 Keep OpenMW 0.51.0 baseline `f4bec41444214a7903bebd178389ca22ca13f646`.
 [BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json),

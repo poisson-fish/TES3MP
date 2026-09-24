@@ -21,8 +21,10 @@ namespace TES3MP::Native
     // campaign. At the selected NPC's KF hit key, detached OpenMW stats and
     // dedicated RNG resolve accuracy, fatigue and physical weapon damage.
     // The same durable tick includes condition in the nested inventory image;
-    // a rejected write installs none of them. A simultaneous player inventory
-    // command is rejected at that hit key pending ordered intent composition.
+    // a rejected write installs none of them. A player inventory intent at the
+    // hit key composes with NPC weapon wear into one durable candidate.
+    // Authenticated player weapon attacks resolve on that tick too. NPC death
+    // is durable health state and opens the selected actor's corpse inventory.
     // V23 uses V22's fields under native-inventory-23 and requires a fresh
     // campaign. Its actor wrapper saves OpenMW-initialized combat attributes,
     // resources and skills for both players and the selected NPC, plus a

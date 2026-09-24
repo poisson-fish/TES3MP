@@ -249,8 +249,9 @@ destination lifetime. Check witnesses before dereferencing, then registry/script
 Address equality is insufficient. Serialized checks neither pin nor authorize installation.
 
 **Native inventory cutover.** Session image and dispositions share one file transaction,
-never CanonicalInventoryWorld. Initially, one native mutation per tick durably rejects
-later intents in ingress order. Fingerprints bind roles, winning placements and domain.
+never CanonicalInventoryWorld. One player inventory intent composes with the native
+actor tick and hit wear; later intents reject in ingress order. Fingerprints bind
+roles, winning placements and domain.
 Reference IDs use record-plugin order, not reader slots. One registry/counter and
 stock loot stream initialize players then placements in stable order. Recovery never
 reloads/rerolls/auto-equips. Identities preserve raw condition/light-time/charge bits.

@@ -1253,7 +1253,19 @@ namespace TES3MP
                                         requiresSpatialAdvance = false;
                                         const auto& melee
                                             = std::get<MeleeAttackCommandProposal>(proposal.payload()).command();
-                                        if (!prepared.mCombat || !prepared.mInventory || !itemCatalog || !actors
+                                        if (mNativeInventory && mNativeInventory->hasActorMotion())
+                                        {
+                                            if (prepared.mNativeInventory)
+                                                disposition = CommandDisposition::CombatRejected;
+                                            else
+                                            {
+                                                prepared.mNativeInventory = mNativeInventory->prepareMeleeAttack(
+                                                    *prepared.mState, proposal, tick);
+                                                disposition = prepared.mNativeInventory ? CommandDisposition::Applied
+                                                    : CommandDisposition::CombatRejected;
+                                            }
+                                        }
+                                        else if (!prepared.mCombat || !prepared.mInventory || !itemCatalog || !actors
                                             || !meleeWeapons || !meleeSettings || !meleePolicy || !meleeContact)
                                             disposition = CommandDisposition::CombatRejected;
                                         else

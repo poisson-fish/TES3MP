@@ -230,7 +230,8 @@ namespace TES3MP::Native
         return installedValues(owner);
     }
 
-    EquipmentRuntime::PreparedTransfer EquipmentRuntime::prepare(InventoryTransferCaller caller, InventoryTransferCommand command)
+    EquipmentRuntime::PreparedTransfer EquipmentRuntime::prepare(InventoryTransferCaller caller,
+        InventoryTransferCommand command, std::optional<size_t> newlyDeadOwner)
     {
         using namespace Allocations;
         InPhase phase(Phase::Validation);
@@ -251,8 +252,11 @@ namespace TES3MP::Native
         if (initiator >= 2 || (source >= 2 && destination != initiator)
             || (destination >= 2 && source != initiator))
             throw std::invalid_argument("Container intent requires its participating actor as trusted caller");
+        const auto corpse = [&](size_t owner) {
+            return initialCorpse(ownerPtr(owner)) || newlyDeadOwner == owner;
+        };
         for (const auto owner : {source, destination})
-            if (owner >= 2 && actorInventory(ownerPtr(owner)) && !initialCorpse(ownerPtr(owner)))
+            if (owner >= 2 && actorInventory(ownerPtr(owner)) && !corpse(owner))
                 throw std::invalid_argument("Living actor inventory access requires gameplay services");
         validateInventoryTransferIntent(caller, command, { command.mSourceOwner, command.mDestinationOwner },
             mWorld.getPtrRegistryRevision(), ownedId(mWorld.getLastGeneratedRefNum()));
@@ -268,7 +272,7 @@ namespace TES3MP::Native
             { ContainerStoreResolution(storage(source), ownerPtr(source)),
                 ContainerStoreResolution(storage(destination), ownerPtr(destination)) },
             item, id(command.mItem), command.mExpectedRevision, command.mQuantity, contexts,
-            source >= 2 && initialCorpse(ownerPtr(source)), command.mTakeAll);
+            source >= 2 && corpse(source), command.mTakeAll);
         std::array<std::unique_ptr<Installation>, 2> staged;
         auto registry = mWorld.mPtrRegistry.mIndex;
         EquipmentSessionValues values{ { installedValues(0), installedValues(1) } };

@@ -6,9 +6,10 @@ weather, and persistent world consequences while retaining OpenMW graphics.
 
 The project is moving from a separate bounded gameplay implementation to an
 OpenMW-backed authoritative server. Existing networking, sessions, replication,
-and client integration are the migration base. The native server runtime and
-broad mod/quest compatibility are not implemented yet. This is not a release
-claim; current status and the next implementation slice are below.
+and client integration are the migration base. A bounded native server runtime
+now owns inventory, doors, one NPC's travel and physical weapon combat, including
+durable death and corpse loot. Live graphical two-client combat and broad mod/quest
+compatibility remain unfinished. See the current status and next slice below.
 
 ## Start here
 

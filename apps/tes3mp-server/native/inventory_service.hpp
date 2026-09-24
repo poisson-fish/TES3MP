@@ -114,6 +114,13 @@ namespace TES3MP::Native
         class TeleportTransaction;
         class AreaDoorTransaction;
         class ActorTransaction;
+        class AttackTransaction;
+        struct WeaponWear
+        {
+            size_t owner;
+            EquipmentRuntime::EquippedWeaponCondition before;
+            int condition;
+        };
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};
         std::optional<MeleeAnimation> mMelee;
@@ -130,7 +137,7 @@ namespace TES3MP::Native
         float meleeReach() const;
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
             uint64_t requested, float reach) const;
-        EquipmentBytes stagedWeaponCore(int condition) const;
+        EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor
@@ -194,6 +201,8 @@ namespace TES3MP::Native
         void recover(std::span<const std::byte> image, std::span<const ESM::RefId> references);
         std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
+        std::unique_ptr<PreparedNativeInventory> prepareMeleeAttack(
+            const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
         std::span<const std::byte> inventoryImage() const noexcept override;
         void synchronizeCells(const CanonicalServerState& players) override;
         std::array<bool, 2> activeCells() const noexcept { return mActiveCells; }
@@ -212,6 +221,7 @@ namespace TES3MP::Native
         bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
+        bool hasNativeCombat() const noexcept override { return mBinding.mCombatResolution; }
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }
@@ -234,6 +244,9 @@ namespace TES3MP::Native
         std::optional<ServerApp::InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedNativeInventory* candidate = nullptr) const override;
+        std::optional<LatestWinsCombatSnapshot> projectCombat(const CanonicalServerState& players,
+            SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedNativeInventory* candidate = nullptr) const override;
         // Direct projection to the existing owned wire values. No retained or
         // writable mirror. Candidate baselines stay staged until durable commit.
         std::optional<ServerApp::InventoryInterestDelivery> project(const CanonicalServerState& players,
@@ -242,7 +255,8 @@ namespace TES3MP::Native
             const EquipmentRuntime::PreparedEquipment* equipment = nullptr,
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
             const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {},
-            const ActorSceneSnapshot* moving = nullptr, std::optional<int> wornCondition = {}) const;
+            const ActorSceneSnapshot* moving = nullptr, std::span<const WeaponWear> wear = {},
+            const ActorCampaignCombat* stagedCombat = nullptr) const;
     };
 }
 #endif

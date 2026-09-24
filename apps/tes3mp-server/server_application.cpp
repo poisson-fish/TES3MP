@@ -418,9 +418,13 @@ namespace TES3MP::ServerApp
                 ? mWiring->nativeInventory->projectInventory(*candidate, *session->sessionId(), tick, *revision)
                 : projectInventoryInterestBaseline(*candidate, *mWiring->inventory, *session->sessionId(), tick, *revision))
             : std::optional<InventoryInterestDelivery>{};
-        auto combatSnapshot = candidate && revision && mWiring->combat && mWiring->actors && supportsCombat(connection)
-            ? projectCombatSnapshot(
-                  *candidate, *mWiring->actors, *mWiring->combat, *session->sessionId(), tick, *revision)
+        auto combatSnapshot = candidate && revision && supportsCombat(connection)
+            ? (mWiring->nativeInventory && mWiring->nativeInventory->hasNativeCombat()
+                ? mWiring->nativeInventory->projectCombat(*candidate, *session->sessionId(), tick, *revision)
+                : mWiring->combat && mWiring->actors
+                    ? projectCombatSnapshot(*candidate, *mWiring->actors, *mWiring->combat,
+                        *session->sessionId(), tick, *revision)
+                    : std::optional<LatestWinsCombatSnapshot>{})
             : std::optional<LatestWinsCombatSnapshot>{};
         auto weatherBaseline = candidate && revision && mWiring->world && supportsWeather(connection)
             ? projectWeatherBaseline(*candidate, *mWiring->world, *session->sessionId(), tick, *revision)
@@ -598,7 +602,8 @@ namespace TES3MP::ServerApp
             return false;
         if (wantInventory && !mWiring->inventory && !mWiring->nativeInventory)
             return false;
-        if (wantCombat && (!mWiring->combat || !mWiring->actors))
+        if (wantCombat && (!mWiring->combat || !mWiring->actors)
+            && !(mWiring->nativeInventory && mWiring->nativeInventory->hasNativeCombat()))
             return false;
         if (wantWeather && !mWiring->world)
             return false;
@@ -625,8 +630,11 @@ namespace TES3MP::ServerApp
         if (wantInventory && !inventoryDelivery)
             return false;
         auto combatDelivery = wantCombat
-            ? projectCombatSnapshot(resolved.publication()->state(), *mWiring->actors, *mWiring->combat,
-                  request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+            ? (mWiring->nativeInventory && mWiring->nativeInventory->hasNativeCombat()
+                ? mWiring->nativeInventory->projectCombat(resolved.publication()->state(), request->sessionId(),
+                    tick, mWiring->reducer.canonicalRevision())
+                : projectCombatSnapshot(resolved.publication()->state(), *mWiring->actors, *mWiring->combat,
+                    request->sessionId(), tick, mWiring->reducer.canonicalRevision()))
             : std::nullopt;
         if (wantCombat && !combatDelivery)
             return false;
@@ -1428,7 +1436,20 @@ namespace TES3MP::ServerApp
             }
             std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>> combatViews;
             std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> combatEvents;
-            if (mWiring->combat)
+            if (mWiring->nativeInventory && mWiring->nativeInventory->hasNativeCombat())
+            {
+                for (const auto& target : prepared.candidateState().activeSessions())
+                {
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    if (!connection || !supportsCombat(*connection)) continue;
+                    auto view = mWiring->nativeInventory->projectCombat(prepared.candidateState(),
+                        target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
+                        prepared.candidateNativeInventory());
+                    if (!view) { mFailure = "native combat projection failed"; return false; }
+                    combatViews.emplace_back(*connection, std::move(*view));
+                }
+            }
+            else if (mWiring->combat)
             {
                 const auto& projectedCombat = combatCandidate ? *combatCandidate : *mWiring->combat;
                 const auto& projectedActors = actorCandidate ? *actorCandidate : *mWiring->actors;

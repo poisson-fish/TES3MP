@@ -1,6 +1,7 @@
 #ifndef TES3MP_SERVER_NATIVE_INVENTORY_SERVICE_HPP
 #define TES3MP_SERVER_NATIVE_INVENTORY_SERVICE_HPP
 #include "inventory_interest_projection.hpp"
+#include <tes3mp/combat_replication.hpp>
 #include <tes3mp/native_inventory.hpp>
 
 namespace TES3MP::ServerApp
@@ -28,6 +29,8 @@ namespace TES3MP::ServerApp
         virtual std::optional<InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedNativeInventory* candidate = nullptr) const = 0;
+        virtual std::optional<LatestWinsCombatSnapshot> projectCombat(const CanonicalServerState&,
+            SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory* = nullptr) const { return {}; }
     };
 }
 #endif

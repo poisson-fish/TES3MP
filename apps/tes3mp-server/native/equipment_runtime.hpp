@@ -275,7 +275,8 @@ namespace TES3MP::Native
             const InventoryTransferSuccess& candidate() const;
             std::span<const char> image() const;
         };
-        PreparedTransfer prepare(InventoryTransferCaller caller, InventoryTransferCommand command);
+        PreparedTransfer prepare(InventoryTransferCaller caller, InventoryTransferCommand command,
+            std::optional<size_t> newlyDeadOwner = {});
         PersistenceResult commit(PreparedTransfer& prepared, EquipmentSessionCommitter& durability,
             std::unique_ptr<const InventoryTransferSuccess>& output, EquipmentBytes& bytes);
 
@@ -341,6 +342,7 @@ namespace TES3MP::Native
             EquipmentBytes& bytes, FileFaults& faults);
     private:
         PlainEquipmentValues preparedValues(const PreparedWorldTransfer& prepared, size_t owner) const;
+        std::optional<EquipmentSessionValues::WorldCells> preparedWorldCells(const PreparedWorldTransfer& prepared) const;
         const PlainEquipmentValues& worldValues(const PreparedWorldTransfer* prepared = nullptr) const;
         uint8_t worldCell(ESM::RefNum ref, const PreparedWorldTransfer* prepared = nullptr) const;
         PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
