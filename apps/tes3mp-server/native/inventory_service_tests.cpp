@@ -4285,13 +4285,14 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (melee ? "native-inventory-21\nmanifest "
+            std::ofstream out(descriptor); out << (melee ? "native-inventory-22\nmanifest "
                 : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
-                << "npc \"npc_door_actor\" " << std::quoted(settings.string()) << "\ndestination 60 -240 1 120\n";
+                << "npc \"npc_door_actor\" " << std::quoted(settings.string())
+                << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
         }
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
@@ -4315,14 +4316,15 @@ namespace TES3MP::Native::Testing
             const auto committed = image();
             const auto after = readActorCampaign({reinterpret_cast<const char*>(committed.data()), committed.size()});
             require(after.melee && after.melee->state.mTime > before.melee->state.mTime
-                && after.melee->identity == before.melee->identity,
+                && after.melee->identity == before.melee->identity
+                && !after.melee->state.mReleased && after.melee->target == 0 && !after.melee->contact,
                 "Committed actor tick did not advance the durable bound swing");
             InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, committed);
             auto& resumed = restart.service(); resumed.synchronizeCells(authority);
             require(std::ranges::equal(committed, resumed.inventoryImage()),
                 "Bound swing recovery changed the committed image");
             auto wrongResource = committed;
-            wrongResource.at(64) ^= std::byte{1}; // First identity byte after the bounded V21 header.
+            wrongResource.at(64) ^= std::byte{1}; // First identity byte after the bounded V22 header.
             bool invalid = false;
             try { InventoryHost mismatch(descriptor, testContentManifest(), *registry, *crypto, wrongResource); }
             catch (const std::invalid_argument&) { invalid = true; }
@@ -4335,7 +4337,51 @@ namespace TES3MP::Native::Testing
             resumedTick->commit([&](auto bytes) { resumedCandidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
             require(!originalCandidate.empty() && originalCandidate == resumedCandidate,
                 "Restart changed the next bound swing tick");
-            std::cout << "melee campaign resource=bound swing=durable retry=once restart=exact (synthetic actor, real KF)\n";
+            bool hit = false;
+            uint64_t releaseTick = 0;
+            std::vector<std::byte> releaseImage;
+            for (uint64_t time = 2; time <= 64 && !hit; ++time)
+            {
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                const auto beforeHit = image();
+                std::vector<std::byte> proposal;
+                require(pending->commit([&](auto bytes) { proposal.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && image() == beforeHit, "Rejected melee contact tick mutated the campaign");
+                const auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
+                hit = candidate.melee && candidate.melee->state.mHit;
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Retried melee contact tick did not commit");
+                if (!releaseTick && candidate.melee && candidate.melee->state.mReleased && !hit)
+                { releaseTick = time; releaseImage = image(); }
+            }
+            const auto contactImage = image();
+            const auto contacted = readActorCampaign({reinterpret_cast<const char*>(contactImage.data()), contactImage.size()});
+            require(hit && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
+                "Server contact was not recorded at the bound KF hit key");
+            require(releaseTick && !releaseImage.empty(), "Server attack did not retain a release-before-hit state");
+            std::vector<CanonicalPlayerEntityState> distant(authority.players().begin(), authority.players().end());
+            for (auto& player : distant)
+                player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                    id<ServerTick>(1), Transform(player.transform().cell(), Position3(1000 * 1024, 0, 0),
+                        player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            const auto farPlayers = std::get<CanonicalServerState>(createCanonicalServerState(distant, authority.activeSessions()));
+            InventoryHost missHost(descriptor, testContentManifest(), *registry, *crypto, releaseImage);
+            auto& missService = missHost.service(); missService.synchronizeCells(farPlayers);
+            bool missed = false;
+            for (uint64_t time = releaseTick + 1; time <= 64 && !missed; ++time)
+            {
+                auto pending = missService.prepareNativeTick(farPlayers, id<ServerTick>(time), 1.f/30, {});
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Out-of-reach melee tick did not commit");
+                const auto missImage = missService.inventoryImage();
+                const auto candidate = readActorCampaign({reinterpret_cast<const char*>(missImage.data()), missImage.size()});
+                missed = candidate.melee && candidate.melee->state.mHit;
+                if (missed) require(!candidate.melee->contact && candidate.melee->target == 1,
+                    "Out-of-reach player became a melee contact or changed the selected target");
+            }
+            require(missed, "Out-of-reach path never reached the KF hit key");
+            std::cout << "melee campaign resource=bound release=server contact=hit-key retry=once restart=exact (synthetic actor, real KF)\n";
             return;
         }
         const auto observers = authority;

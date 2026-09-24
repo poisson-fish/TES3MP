@@ -11,10 +11,13 @@ namespace TES3MP::Native
 {
     inline constexpr uint64_t ActorCampaignMagic = 0x3150434154335354;
     inline constexpr uint64_t MeleeActorCampaignMagic = 0x3250434154335354;
+    inline constexpr uint64_t ContactActorCampaignMagic = 0x3350434154335354;
     struct ActorCampaignMelee
     {
         std::string identity;
         MeleeAnimation::Snapshot state;
+        uint64_t target = 0;
+        bool contact = false;
     };
     struct ActorCampaign
     {
@@ -27,7 +30,7 @@ namespace TES3MP::Native
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
-        if (magic != ActorCampaignMagic && magic != MeleeActorCampaignMagic)
+        if (magic != ActorCampaignMagic && magic != MeleeActorCampaignMagic && magic != ContactActorCampaignMagic)
             throw std::invalid_argument("Native actor campaign version invalid");
         const auto inventorySize = getAreaWord(bytes, offset), actorSize = getAreaWord(bytes, offset), tick = getAreaWord(bytes, offset);
         std::array<float, 3> velocity;
@@ -39,7 +42,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native actor velocity invalid");
         }
         std::optional<ActorCampaignMelee> melee;
-        if (magic == MeleeActorCampaignMagic)
+        if (magic == MeleeActorCampaignMagic || magic == ContactActorCampaignMagic)
         {
             const auto length = getAreaWord(bytes, offset);
             if (!length || length > 512 || length > bytes.size() - offset)
@@ -62,6 +65,15 @@ namespace TES3MP::Native
             value.state.mReleased = bool(released); value.state.mHit = bool(hit);
             if (!std::isfinite(value.state.mTime) || !std::isfinite(value.state.mStrength))
                 throw std::invalid_argument("Native melee state nonfinite");
+            if (magic == ContactActorCampaignMagic)
+            {
+                value.target = getAreaWord(bytes, offset);
+                const auto contact = getAreaWord(bytes, offset);
+                if (contact > 1 || (contact && (!value.target || !value.state.mHit))
+                    || (value.state.mReleased != bool(value.target)))
+                    throw std::invalid_argument("Native melee contact state invalid");
+                value.contact = bool(contact);
+            }
             melee = std::move(value);
         }
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset

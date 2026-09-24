@@ -73,6 +73,7 @@ namespace TES3MP::Native
         std::optional<std::vector<ActorSpawnSelection>> mActorSelections;
         std::shared_ptr<InteriorActorScene> mNavigatingActor;
         std::optional<BoundMeleeAnimation> mBoundMelee;
+        bool mMeleeContact = false;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
         bool mRetainTraveler = false;
@@ -113,11 +114,16 @@ namespace TES3MP::Native
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};
         std::optional<MeleeAnimation> mMelee;
+        uint64_t mMeleeTarget = 0;
+        bool mMeleeContacted = false;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity,
-            const std::optional<MeleeAnimation>& melee) const;
+            const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
+        float meleeReach() const;
+        uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
+            uint64_t requested, float reach) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor
         {

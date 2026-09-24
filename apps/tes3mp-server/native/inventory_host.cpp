@@ -77,9 +77,9 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21" && version != "native-inventory-22")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool meleeCampaign = version == "native-inventory-21";
+            const bool meleeCampaign = version == "native-inventory-21" || version == "native-inventory-22";
             const bool neighborhood = meleeCampaign || version == "native-inventory-20";
             const bool traveler = neighborhood || version == "native-inventory-19";
             const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
@@ -251,6 +251,7 @@ namespace TES3MP::Native
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
             binding.mTravelerNeighborhood = neighborhood;
+            binding.mMeleeContact = version == "native-inventory-22";
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;

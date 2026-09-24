@@ -7,6 +7,8 @@
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/containeradd.hpp>
+#include <apps/openmw/mwmechanics/meleestate.hpp>
+#include <components/esm3/loadweap.hpp>
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
@@ -213,6 +215,8 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64)
     {
+        if (mBinding.mMeleeContact && !mBinding.mBoundMelee)
+            throw std::invalid_argument("Native melee contact requires a bound animation");
         if (mBinding.mBoundMelee)
         {
             if (!mBinding.mNavigatingActor || mBinding.mBoundMelee->mResourceIdentity.empty()
@@ -239,7 +243,8 @@ namespace TES3MP::Native
             if (!mBinding.mStreamExteriors || std::ranges::none_of(mBinding.mContainers,
                     [id](const auto& owner) { return owner.mId.value() == id && owner.mPlacement.has_value(); }))
                 throw std::invalid_argument("Navigating NPC has no authoritative inventory owner");
-            mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity, mMelee);
+            mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity,
+                mMelee, mMeleeTarget, mMeleeContacted);
             installActorPosition();
         }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
@@ -930,11 +935,21 @@ namespace TES3MP::Native
             if (bool(decoded.melee) != bool(mMelee)
                 || (decoded.melee && decoded.melee->identity != mBinding.mBoundMelee->mResourceIdentity))
                 throw std::invalid_argument("Native melee resource binding differs from campaign");
+            size_t headerOffset = 0;
+            if (mBinding.mMeleeContact != (getAreaWord(
+                    {reinterpret_cast<const char*>(image.data()), image.size()}, headerOffset) == ContactActorCampaignMagic))
+                throw std::invalid_argument("Native melee contact campaign version differs from binding");
             auto restoredMelee = mMelee;
             if (decoded.melee) restoredMelee->restore(decoded.melee->state);
+            if (decoded.melee && decoded.melee->target
+                && std::ranges::none_of(mBinding.mPlayers,
+                    [&](PlayerId player) { return player.value() == decoded.melee->target; }))
+                throw std::invalid_argument("Native melee target outside bound players");
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
             recoverAreas(std::as_bytes(decoded.inventory), references, decoded.actor);
             mMelee = std::move(restoredMelee);
+            mMeleeTarget = decoded.melee ? decoded.melee->target : 0;
+            mMeleeContacted = decoded.melee && decoded.melee->contact;
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             installActorPosition();
             return;
@@ -949,14 +964,17 @@ namespace TES3MP::Native
     }
 
     EquipmentBytes InventoryService::sealActor(std::span<const char> core, std::span<const char> actor,
-        uint64_t tick, const std::array<float, 3>& velocity, const std::optional<MeleeAnimation>& melee) const
+        uint64_t tick, const std::array<float, 3>& velocity, const std::optional<MeleeAnimation>& melee,
+        uint64_t target, bool contact) const
     {
-        const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size() + 5 * 8 : 0;
+        const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size()
+            + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
         if (core.empty() || actor.empty() || actor.size() > 65536
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, melee ? MeleeActorCampaignMagic : ActorCampaignMagic);
+        putAreaWord(result, melee ? (mBinding.mMeleeContact ? ContactActorCampaignMagic : MeleeActorCampaignMagic)
+            : ActorCampaignMagic);
         putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
         for (float value : velocity) putAreaWord(result, std::bit_cast<uint32_t>(value));
         if (melee)
@@ -968,6 +986,7 @@ namespace TES3MP::Native
             putAreaWord(result, std::bit_cast<uint32_t>(state.mTime));
             putAreaWord(result, std::bit_cast<uint32_t>(state.mStrength));
             putAreaWord(result, state.mReleased); putAreaWord(result, state.mHit);
+            if (mBinding.mMeleeContact) { putAreaWord(result, target); putAreaWord(result, contact); }
         }
         result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
         (void)readActorCampaign(result);
@@ -1009,6 +1028,53 @@ namespace TES3MP::Native
         return owner->mCell;
     }
 
+    float InventoryService::meleeReach() const
+    {
+        const auto id = mBinding.mNavigatingActor->actorId();
+        const auto owner = std::ranges::find_if(mBinding.mContainers,
+            [id](const auto& value) { return value.mId.value() == id; });
+        if (owner == mBinding.mContainers.end()) throw std::invalid_argument("Native melee actor has no inventory");
+        const auto values = mRuntime.installedValues(size_t(owner - mBinding.mContainers.begin()) + 2);
+        const auto equipped = values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+        const ESM::Weapon* weapon = nullptr;
+        if (equipped.isSet())
+        {
+            const auto item = std::ranges::find(values.mObjects, equipped,
+                [](const auto& object) { return object.mRef.mRefNum; });
+            if (item == values.mObjects.end()) throw std::invalid_argument("Native melee weapon identity missing");
+            if (mRuntime.mStore.find(item->mRef.mRefID) == ESM::Weapon::sRecordId)
+                weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+        }
+        return MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon, true);
+    }
+
+    uint64_t InventoryService::meleeContact(const CanonicalServerState& players,
+        const ActorSceneSnapshot& actor, uint64_t requested, float reach) const
+    {
+        const auto cell = actorCell(actor);
+        const osg::Vec3f origin(actor.mPosition[0], actor.mPosition[1], actor.mPosition[2]);
+        uint64_t result = 0;
+        float nearest = std::numeric_limits<float>::infinity();
+        for (const auto& session : players.activeSessions())
+        {
+            const auto* player = players.findPlayer(session.playerId());
+            if (!player || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
+                || (requested && player->playerId().value() != requested)
+                || player->transform().cell() != cell) continue;
+            const auto position = player->transform().position();
+            const osg::Vec3f target(float(double(position.x()) / 1024),
+                float(double(position.y()) / 1024), float(double(position.z()) / 1024));
+            // The inherited player mover supplies a server position, but no
+            // authoritative player hull yet. Center-to-center reach is
+            // conservative until the M4 movement cutover supplies that hull.
+            if (!MWMechanics::isInMeleeReach(origin, target, 0, 0, reach)) continue;
+            const float distance = (target - origin).length2();
+            if (distance < nearest || (distance == nearest && player->playerId().value() < result))
+            { nearest = distance; result = player->playerId().value(); }
+        }
+        return result;
+    }
+
     std::optional<ServerApp::NativeTravelDiagnostics> InventoryService::travelDiagnostics() const
     {
         if (!mBinding.mRetainTraveler) return {};
@@ -1028,6 +1094,8 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> command;
         std::unique_ptr<InteriorActorScene::Prepared> actor;
         std::optional<MeleeAnimation> melee;
+        uint64_t target;
+        bool contact;
         EquipmentBytes before;
         uint64_t tick;
         std::array<float, 3> velocity;
@@ -1035,10 +1103,10 @@ namespace TES3MP::Native
         ServerApp::NativeTravelDiagnostics diagnostics;
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
             std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
-            uint64_t time, std::array<float,3> motion,
+            uint64_t selected, bool contacted, uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
-              before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
+              target(selected), contact(contacted), before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
         bool changesInventory() const noexcept override { return bool(command); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -1050,7 +1118,7 @@ namespace TES3MP::Native
                 const auto compose = [&](std::span<const std::byte> inventory) {
                     const auto retained = readActorCampaign(before).actor;
                     sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
-                        actor ? actor->image() : retained, tick, velocity, melee);
+                        actor ? actor->image() : retained, tick, velocity, melee, target, contact);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -1061,6 +1129,7 @@ namespace TES3MP::Native
                 {
                     if (actor) service.mBinding.mNavigatingActor->install(*actor);
                     service.mMelee = std::move(melee);
+                    service.mMeleeTarget = target; service.mMeleeContacted = contact;
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
@@ -1118,11 +1187,23 @@ namespace TES3MP::Native
         else if (step && step->pathUnavailable()) report.status = Diagnostics::Status::NoPath;
         const auto after = step ? step->snapshot() : before;
         auto melee = mMelee;
-        if (step && melee) (void)melee->advance(seconds);
+        uint64_t target = mMeleeTarget;
+        bool contact = mMeleeContacted;
+        if (step && melee)
+        {
+            if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->windUp() >= 1.f)
+            {
+                const auto selected = meleeContact(players, after, 0, meleeReach());
+                if (selected && melee->release(std::clamp(melee->windUp(), 0.f, 1.f))) target = selected;
+            }
+            const auto hit = melee->advance(seconds);
+            if (mBinding.mMeleeContact && hit && target)
+                contact = meleeContact(players, after, target, meleeReach()) == target;
+        }
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
-            std::move(melee), tick.value(), velocity, report);
+            std::move(melee), target, contact, tick.value(), velocity, report);
     }
     catch (const std::exception& error)
     {

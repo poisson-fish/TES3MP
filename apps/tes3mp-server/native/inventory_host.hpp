@@ -17,6 +17,8 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V22 uses V21's descriptor and adds server-owned release/target and
+    // contact at the authored hit key. It requires a fresh campaign.
     // V21 uses native-inventory-21 with V20 fields, then adds
     // melee "ANIMATION_GROUP" "DIRECTION" SPEED. It binds the resolved KF
     // identity and saves the selected NPC's swing snapshot with each actor

@@ -54,6 +54,11 @@ animation evaluation without graphics. Preserve engine movement, hit keys and
 projectile/spell releases rather than substitute attack timers. Clients render
 committed actions. Timing/collision resources belong to gameplay identity; null
 presentation services must not suppress mechanics.
+V22's first NPC swing selects an active bound player in engine melee reach at
+full wind-up, then rechecks that player's current server position at the KF hit
+key. Its selected identity and contact flag share the durable actor image.
+Inherited player movement supplies positions but no trusted player hull, so
+the current contact check uses strict center reach until native hulls are bound.
 
 **Travel scheduling.** Simulate the union of player areas plus bounded areas around
 active travelers, retaining engine navigation/collision even when both players leave.
@@ -227,20 +232,6 @@ The enumeration remains an engine checklist, not a per-quest adaptation catalog.
 | 15–18: puzzles/triggers; buildings/strongholds; endings; diseases/transformations | Scoped irreversible changes and personal effects; coherent physical variants where necessary. |
 | 19–22: script state; spawns/ambushes; time/rest; menus/dreams/cutscenes | Contextual execution, lifecycle identity, bounded scheduling, protected deadlines, correct UI recipient. |
 | 23–25: death/recovery; parties/late joins; persistence/concurrency | No world rollback or copied journals; coherent recovery and replay-safe effects. |
-
-### Concrete regression examples
-
-Unverified content examples:
-[Fargoth's Ring](https://elderscrolls.fandom.com/wiki/Fargoth%27s_Ring) (items/relationships),
-[The Code Book](https://strategywiki.org/wiki/The_Elder_Scrolls_III%3A_Morrowind/Fighters_Guild) (faction choices),
-[Caius/Mehra Milo](https://elderscrolls.fandom.com/wiki/Mehra_Milo_and_the_Lost_Prophecies) (departure),
-[Corprus](https://help.bethesda.net/app/answers/detail/a_id/17714/~/how-do-i-cure-corprus-disease) (personal effects),
-[Telvanni councilors](https://elderscrolls.fandom.com/wiki/Kill_the_Telvanni_Councilors) (death/respawn),
-[Ahemmusa](https://elderscrolls.fandom.com/wiki/Ahemmusa_Nerevarine) (escort),
-[Redoran stronghold](https://elderscrolls.fandom.com/wiki/Redoran_Stronghold) (construction),
-[the finale](https://en.wikipedia.org/wiki/The_Elder_Scrolls_III%3A_Morrowind) (tools/aftermath).
-M5 in PLAN.md owns implementation order and acceptance; no quest-ID whitelist may
-make its tests pass.
 
 ## Integrity and migration
 
