@@ -1447,6 +1447,10 @@ namespace TES3MP::ServerApp
                         prepared.candidateNativeInventory());
                     if (!view) { mFailure = "native combat projection failed"; return false; }
                     combatViews.emplace_back(*connection, std::move(*view));
+                    auto events = mWiring->nativeInventory->projectCombatEvents(prepared.candidateState(),
+                        target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
+                        prepared.candidateNativeInventory());
+                    if (events) combatEvents.emplace_back(*connection, std::move(*events));
                 }
             }
             else if (mWiring->combat)

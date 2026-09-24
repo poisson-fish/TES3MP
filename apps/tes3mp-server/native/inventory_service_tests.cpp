@@ -4441,6 +4441,13 @@ namespace TES3MP::Native::Testing
                     require(std::ranges::none_of(stagedView->playerInventory.front().equipment,
                         [&](const auto& equipped) { return equipped.slot == slot.slot; }),
                         "Composed hit-key candidate lost player unequip intent");
+                    const auto hitEvents = service.projectCombatEvents(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    require(hitEvents && hitEvents->actorEvents().size() == 1
+                        && hitEvents->actorEvents()[0].targetPlayerId == id<PlayerId>(1)
+                        && hitEvents->actorEvents()[0].hit
+                        && hitEvents->actorEvents()[0].damage > 0,
+                        "Composed hit-key candidate omitted the reliable actor event");
                     composedHit = true;
                 }
                 std::vector<std::byte> durable;
@@ -4581,6 +4588,12 @@ namespace TES3MP::Native::Testing
                         id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
                     require(staged && staged->playerInventory.front().revision.value() > 0,
                         "Player attack candidate could not project to the other client");
+                    const auto attackEvents = service.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    require(attackEvents && attackEvents->events().size() == 1
+                        && attackEvents->events()[0].attackerPlayerId == id<PlayerId>(2)
+                        && attackEvents->events()[0].targetActorId == attack.targetActorId,
+                        "Player attack candidate omitted the reliable event");
                     require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
                         && image() == candidate && pending->commit(accepted) == CanonicalDurabilityResult::Rejected,
                         "Player attack retry or duplicate changed the durable result");

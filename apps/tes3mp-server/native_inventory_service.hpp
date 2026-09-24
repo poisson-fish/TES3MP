@@ -31,6 +31,8 @@ namespace TES3MP::ServerApp
             const PreparedNativeInventory* candidate = nullptr) const = 0;
         virtual std::optional<LatestWinsCombatSnapshot> projectCombat(const CanonicalServerState&,
             SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory* = nullptr) const { return {}; }
+        virtual std::optional<ReliableCombatEventBatch> projectCombatEvents(const CanonicalServerState&,
+            SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory*) const { return {}; }
     };
 }
 #endif

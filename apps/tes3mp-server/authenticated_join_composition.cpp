@@ -123,10 +123,14 @@ namespace TES3MP::ServerApp
                 else if (!mPendingCombat->ensurePlayer(join.player, *mPlayerCombatTemplate, weight))
                     return false;
             }
-            auto combatSnapshot = combatCapable && mPendingCombat && mActors
-                ? projectCombatSnapshot(after, *mActors, *mPendingCombat, join.session, tick, revision)
+            auto combatSnapshot = combatCapable
+                ? mNativeInventory && mNativeInventory->hasNativeCombat()
+                    ? mNativeInventory->projectCombat(after, join.session, tick, revision)
+                    : mPendingCombat && mActors
+                        ? projectCombatSnapshot(after, *mActors, *mPendingCombat, join.session, tick, revision)
+                        : std::optional<LatestWinsCombatSnapshot>{}
                 : std::optional<LatestWinsCombatSnapshot>{};
-            if (combatCapable && (!mPendingCombat || !mActors || !combatSnapshot))
+            if (combatCapable && !combatSnapshot)
                 return false;
             if (mInventory || mPendingInventory || mNativeInventory)
             {

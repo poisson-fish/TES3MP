@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One fresh real-loadout, two-desktop native NPC navigation/disconnect capture."""
+"""Fresh real-loadout two-desktop native NPC navigation and combat captures."""
 
 import argparse
 from dataclasses import asdict
@@ -57,6 +57,87 @@ def trajectory_errors(motions):
                                                 for axis in ("x", "y")}))
                 break
     return errors
+
+
+def verify_combat(output, evidence, processes, relay, manifest):
+    """One real-loadout NPC swing presented to two desktops over impaired UDP."""
+    sequence = dict.fromkeys(evidence, 0)
+    finished = set()
+
+    def samples(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"]
+
+    def wait_for(predicate, description, timeout=45):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = predicate()
+            if result:
+                return result
+            if any(p.poll() is not None for name, p in processes.items() if name not in finished):
+                raise RuntimeError(f"process exited while waiting for {description}")
+            time.sleep(.1)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
+        temporary.replace(control)
+        return wait_for(lambda: next((r for r in records(evidence[role])
+                                     if r.get("sequence") == sequence[role]
+                                     and r.get("event") == "traversal_" + action.split()[0]), None), action)
+
+    wait_for(lambda: all(len(poses(path)) >= 30 and len(samples(role)) >= 5
+                         for role, path in evidence.items()), "two live combat replicas")
+    initial = {role: samples(role)[-1] for role in evidence}
+    actor = poses(evidence["Alice"])[-1]
+    for index, role in enumerate(evidence):
+        command(role, f"pose {actor['x']} {actor['y'] - 60 - 20 * index} {actor['z']} 0 0")
+    victim = wait_for(lambda: next((role for role in evidence
+                                    if any(sample["health"] < initial[role]["health"]
+                                           for sample in samples(role))), None),
+                      "native NPC weapon damage", 35)
+    def hits(role):
+        return [hit for sample in samples(role) for hit in sample["actor_hits"]
+                if hit["target"] == initial[victim]["self"] and hit["hit"] and hit["damage"] > 0]
+
+    wait_for(lambda: all(len(hits(role)) == 1 for role in evidence),
+             "one reliable actor hit on each desktop")
+    other = "Bob" if victim == "Alice" else "Alice"
+    wait_for(lambda: any(p["id"] == initial[victim]["self"]
+                         and abs(p["health"] - samples(victim)[-1]["health"]) < .01
+                         for p in samples(other)[-1]["players"]), "peer sees target health")
+    time.sleep(1)
+    before = {role: samples(role)[-1] for role in evidence}
+    marker = len(records(evidence[victim]))
+    command(victim, "reconnect")
+    wait_for(lambda: any(r.get("event") == "phase8_desktop_status" and r.get("status") == "resumed"
+                         for r in records(evidence[victim])[marker:]), f"{victim} resumed")
+    wait_for(lambda: len([r for r in records(evidence[victim])[marker:]
+                          if r.get("event") == "native_combat_sample"]) >= 3, "fresh combat state")
+    after = {role: samples(role)[-1] for role in evidence}
+    if after[victim]["generation"] <= before[victim]["generation"]:
+        raise RuntimeError("Victim did not receive a new combat session generation")
+    if after[victim]["health"] > before[victim]["health"]:
+        raise RuntimeError("Reconnect restored damaged player health")
+    if any(len(hits(role)) != 1 for role in evidence):
+        raise RuntimeError("Reconnect duplicated the reliable NPC hit")
+    for role in evidence:
+        command(role, "screenshot")
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        if processes[role].returncode:
+            raise RuntimeError(f"{role} did not finish cleanly")
+        finished.add(role)
+    report = dict(success=True, scenario="V24 live NPC weapon damage", victim=victim,
+                  health_loss=initial[victim]["health"] - before[victim]["health"],
+                  reliable_hits={role: hits(role) for role in evidence},
+                  before=before, after=after, relay=asdict(relay.stop()), manifest=manifest,
+                  screenshots=[p.name for p in output.glob("*.png")],
+                  profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
 
 
 def verify_doors(output, evidence, processes, relay, manifest):
@@ -302,7 +383,7 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     cell = "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 20 if args.traveler else 18 if args.doors else 16
+    version = 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "hlavora sadas" if args.doors else "raflod the braggart"
     destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
@@ -314,7 +395,8 @@ def run(args):
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
         f'actors "player" "player"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
-        + ('processing 1 2\n' if args.traveler else ''), encoding="utf-8")
+        + ('processing 1 2\n' if args.traveler or args.combat else '')
+        + ('melee "weapononehand" "chop" 1\n' if args.combat else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
@@ -390,6 +472,9 @@ def run(args):
                        "--tes3mp-content-appearance-record=player"]
             start(role, command)
             client_commands[role] = command
+        if args.combat:
+            verify_combat(output, evidence, processes, relay, manifest)
+            return
         if args.traveler:
             def restart_clients():
                 for role, command in client_commands.items():
@@ -497,9 +582,10 @@ if __name__ == "__main__":
     parser.add_argument("--leave", choices=("Alice", "Bob"))
     parser.add_argument("--doors", action="store_true", help="V18 real-interior door avoidance on two connected clients")
     parser.add_argument("--traveler", action="store_true", help="V20 both clients leave, server restarts mid-trip, clients return")
+    parser.add_argument("--combat", action="store_true", help="V24 live NPC weapon hit, impaired two-client presentation and reconnect")
     args = parser.parse_args()
-    if args.doors and args.traveler:
-        parser.error("choose --doors or --traveler")
-    if not args.doors and not args.traveler and not args.leave:
+    if sum((args.doors, args.traveler, args.combat)) > 1:
+        parser.error("choose --doors, --traveler or --combat")
+    if not args.doors and not args.traveler and not args.combat and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

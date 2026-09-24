@@ -247,6 +247,9 @@ namespace TES3MP::Native
         std::optional<LatestWinsCombatSnapshot> projectCombat(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,
             const PreparedNativeInventory* candidate = nullptr) const override;
+        std::optional<ReliableCombatEventBatch> projectCombatEvents(const CanonicalServerState& players,
+            SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedNativeInventory* candidate) const override;
         // Direct projection to the existing owned wire values. No retained or
         // writable mirror. Candidate baselines stay staged until durable commit.
         std::optional<ServerApp::InventoryInterestDelivery> project(const CanonicalServerState& players,

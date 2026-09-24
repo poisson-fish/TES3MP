@@ -698,6 +698,61 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.applyCombat(snapshot, events, receivedAt);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (mRole == DesktopAutomationRole::NativeTraversal && mOutput
+            && mEvidenceEvents < MaximumEvidenceEvents
+            && (snapshot.serverTick().value() % 5 == 0 || !events.empty()))
+        {
+            mOutput << "{\"event\":\"native_combat_sample\",\"tick\":" << snapshot.serverTick().value()
+                << ",\"generation\":" << snapshot.targetSessionGeneration().value()
+                << ",\"self\":" << snapshot.selfPlayerId().value()
+                << ",\"health\":" << snapshot.selfHealth() << ",\"dead\":"
+                << (snapshot.selfDead() ? "true" : "false") << ",\"actors\":[";
+            bool first = true;
+            for (const auto& actor : snapshot.actors())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"id\":" << actor.actorId.value() << ",\"revision\":"
+                    << actor.combatRevision.value() << ",\"health\":" << actor.health
+                    << ",\"dead\":" << (actor.dead ? "true" : "false") << '}';
+            }
+            mOutput << "],\"players\":[";
+            first = true;
+            for (const auto& player : snapshot.players())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"id\":" << player.playerId.value() << ",\"revision\":"
+                    << player.combatRevision.value() << ",\"health\":" << player.health
+                    << ",\"dead\":" << (player.dead ? "true" : "false") << '}';
+            }
+            mOutput << "],\"actor_hits\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& hit : batch.actorEvents())
+                {
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"attacker\":" << hit.attackerActorId.value() << ",\"target\":"
+                        << hit.targetPlayerId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
+                        << ",\"damage\":" << hit.damage << '}';
+                }
+            mOutput << "],\"player_hits\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& hit : batch.events())
+                {
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"attacker\":" << hit.attackerPlayerId.value() << ",\"target\":"
+                        << hit.targetActorId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
+                        << ",\"damage\":" << hit.damage << ",\"died\":"
+                        << (hit.targetDied ? "true" : "false") << '}';
+                }
+            mOutput << "]}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
         if (mRole == DesktopAutomationRole::MagicSpellCaster || mRole == DesktopAutomationRole::MagicSpellTarget)
         {
             constexpr std::uint64_t CurseFatigueSpell = 13128897029866312148ull;

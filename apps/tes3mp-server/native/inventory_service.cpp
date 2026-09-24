@@ -1328,6 +1328,8 @@ namespace TES3MP::Native
         std::unique_ptr<InteriorActorScene::Prepared> actor;
         std::optional<MeleeAnimation> melee;
         std::optional<ActorCampaignCombat> combat;
+        std::optional<MeleeCombatEvent> playerHit;
+        std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<WeaponWear> wear;
         EquipmentBytes wornCore, wornInventory;
         uint64_t target;
@@ -1340,11 +1342,14 @@ namespace TES3MP::Native
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
             std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
             uint64_t selected, bool contacted, std::optional<ActorCampaignCombat> stagedCombat,
+            std::optional<MeleeCombatEvent> stagedPlayerHit,
+            std::optional<ActorMeleeCombatEvent> stagedActorHit,
             std::vector<WeaponWear> stagedWear, EquipmentBytes core,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
-              combat(std::move(stagedCombat)), wear(std::move(stagedWear)),
+              combat(std::move(stagedCombat)), playerHit(std::move(stagedPlayerHit)),
+              actorHit(std::move(stagedActorHit)), wear(std::move(stagedWear)),
               wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
               tick(time), velocity(motion), diagnostics(report) {}
         bool changesInventory() const noexcept override { return bool(command) || !wear.empty(); }
@@ -1451,6 +1456,8 @@ namespace TES3MP::Native
         auto after = step ? step->snapshot() : before;
         auto melee = mMelee;
         auto combat = mCombat;
+        std::optional<MeleeCombatEvent> playerHit;
+        std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<WeaponWear> wear;
         EquipmentBytes wornCore;
         uint64_t target = mMeleeTarget;
@@ -1508,6 +1515,12 @@ namespace TES3MP::Native
             }
             saveCombatStats(combat->actors[owner], attacker);
             saveCombatStats(combat->actors[2], victim);
+            playerHit = MeleeCombatEvent{playerAttacker,
+                ActorId::fromValue(before.mActor).value(),
+                CombatRevision::fromValue(tick.value()).value(),
+                CombatRevision::fromValue(tick.value()).value(),
+                damage, MeleeDamageStat::Health, success, false,
+                victim.getHealth().getCurrent() <= 0};
             if (victim.getHealth().getCurrent() <= 0)
             {
                 step.reset();
@@ -1527,6 +1540,9 @@ namespace TES3MP::Native
                 contact = meleeContact(players, after, target, meleeReach()) == target;
             if (hit && combat && mBinding.mCombatResolution)
             {
+                bool hitSuccess = false;
+                float hitDamage = 0;
+                bool targetDied = false;
                 auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[2]);
                 const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
                 const auto values = mRuntime.installedValues(mCombatNpcOwner);
@@ -1559,6 +1575,7 @@ namespace TES3MP::Native
                     Misc::Rng::Generator rng;
                     Misc::Rng::deserialize(std::to_string(combat->rng), rng);
                     const bool success = Misc::Rng::roll0to99(rng) < chance;
+                    hitSuccess = success;
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     float damage = 0;
                     if (success && weapon)
@@ -1584,8 +1601,16 @@ namespace TES3MP::Native
                             MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier)});
                     }
                     saveCombatStats(combat->actors[victimIndex], victim);
+                    hitDamage = damage;
+                    targetDied = victim.getHealth().getCurrent() <= 0;
                 }
                 saveCombatStats(combat->actors[2], attacker);
+                if (target)
+                    actorHit = ActorMeleeCombatEvent{ActorId::fromValue(before.mActor).value(),
+                        PlayerId::fromValue(target).value(),
+                        CombatRevision::fromValue(tick.value()).value(),
+                        CombatRevision::fromValue(tick.value()).value(),
+                        hitDamage, MeleeDamageStat::Health, contact && hitSuccess, false, targetDied};
             }
         }
         std::array<float,3> velocity;
@@ -1593,6 +1618,7 @@ namespace TES3MP::Native
         if (!wear.empty()) wornCore = stagedWeaponCore(wear, command.get());
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
             std::move(melee), target, contact, std::move(combat),
+            std::move(playerHit), std::move(actorHit),
             std::move(wear), std::move(wornCore),
             tick.value(), velocity, report);
     }
@@ -1706,6 +1732,31 @@ namespace TES3MP::Native
             visible, skills, others);
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
+    }
+    catch (...) { return {}; }
+
+    std::optional<ReliableCombatEventBatch> InventoryService::projectCombatEvents(
+        const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
+        const PreparedNativeInventory* candidate) const
+    try
+    {
+        if (!mBinding.mCombatResolution || !candidate) return {};
+        const auto* staged = dynamic_cast<const ActorTransaction*>(candidate);
+        const auto* session = players.findActiveSession(target);
+        if (!staged || &staged->service != this || staged->consumed || staged->before != mActorImage
+            || !session || staged->tick != tick.value()
+            || (!staged->playerHit && !staged->actorHit)) return {};
+        const auto* observer = players.findPlayer(session->playerId());
+        const auto scene = staged->actor ? staged->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+        if (!observer || observer->transform().cell() != actorCell(scene)) return {};
+        const std::vector<MeleeCombatEvent> playerEvents = staged->playerHit
+            ? std::vector<MeleeCombatEvent>{*staged->playerHit} : std::vector<MeleeCombatEvent>{};
+        const std::vector<ActorMeleeCombatEvent> actorEvents = staged->actorHit
+            ? std::vector<ActorMeleeCombatEvent>{*staged->actorHit} : std::vector<ActorMeleeCombatEvent>{};
+        auto created = ReliableCombatEventBatch::create(target, session->sessionGeneration(), tick,
+            revision, playerEvents, actorEvents);
+        auto* value = std::get_if<ReliableCombatEventBatch>(&created);
+        return value ? std::optional<ReliableCombatEventBatch>(std::move(*value)) : std::nullopt;
     }
     catch (...) { return {}; }
 
