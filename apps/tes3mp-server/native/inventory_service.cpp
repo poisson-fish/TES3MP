@@ -213,6 +213,13 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64)
     {
+        if (mBinding.mBoundMelee)
+        {
+            if (!mBinding.mNavigatingActor || mBinding.mBoundMelee->mResourceIdentity.empty()
+                || mBinding.mBoundMelee->mResourceIdentity.size() > 512)
+                throw std::invalid_argument("Native melee binding invalid");
+            mMelee = mBinding.mBoundMelee->mAnimation;
+        }
         initializeAreaDoors();
         for (const auto& [id, record] : MWWorld::inventoryRecords(content))
             mItemIds.emplace(record, ItemPrototypeId::fromValue(id).value());
@@ -232,7 +239,7 @@ namespace TES3MP::Native
             if (!mBinding.mStreamExteriors || std::ranges::none_of(mBinding.mContainers,
                     [id](const auto& owner) { return owner.mId.value() == id && owner.mPlacement.has_value(); }))
                 throw std::invalid_argument("Navigating NPC has no authoritative inventory owner");
-            mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity);
+            mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity, mMelee);
             installActorPosition();
         }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
@@ -920,8 +927,14 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             const auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            if (bool(decoded.melee) != bool(mMelee)
+                || (decoded.melee && decoded.melee->identity != mBinding.mBoundMelee->mResourceIdentity))
+                throw std::invalid_argument("Native melee resource binding differs from campaign");
+            auto restoredMelee = mMelee;
+            if (decoded.melee) restoredMelee->restore(decoded.melee->state);
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
             recoverAreas(std::as_bytes(decoded.inventory), references, decoded.actor);
+            mMelee = std::move(restoredMelee);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             installActorPosition();
             return;
@@ -936,13 +949,26 @@ namespace TES3MP::Native
     }
 
     EquipmentBytes InventoryService::sealActor(std::span<const char> core, std::span<const char> actor,
-        uint64_t tick, const std::array<float, 3>& velocity) const
+        uint64_t tick, const std::array<float, 3>& velocity, const std::optional<MeleeAnimation>& melee) const
     {
-        if (core.empty() || actor.empty() || actor.size() > 65536 || core.size() > MaximumNativeInventoryImageBytes-56-actor.size())
+        const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size() + 5 * 8 : 0;
+        if (core.empty() || actor.empty() || actor.size() > 65536
+            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, ActorCampaignMagic); putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
+        putAreaWord(result, melee ? MeleeActorCampaignMagic : ActorCampaignMagic);
+        putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
         for (float value : velocity) putAreaWord(result, std::bit_cast<uint32_t>(value));
+        if (melee)
+        {
+            const auto& identity = mBinding.mBoundMelee->mResourceIdentity;
+            const auto& state = melee->snapshot();
+            putAreaWord(result, identity.size()); result.insert(result.end(), identity.begin(), identity.end());
+            putAreaWord(result, uint64_t(state.mPhase));
+            putAreaWord(result, std::bit_cast<uint32_t>(state.mTime));
+            putAreaWord(result, std::bit_cast<uint32_t>(state.mStrength));
+            putAreaWord(result, state.mReleased); putAreaWord(result, state.mHit);
+        }
         result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
         (void)readActorCampaign(result);
         return result;
@@ -1001,15 +1027,18 @@ namespace TES3MP::Native
         InventoryService& service;
         std::unique_ptr<PreparedNativeInventory> command;
         std::unique_ptr<InteriorActorScene::Prepared> actor;
+        std::optional<MeleeAnimation> melee;
         EquipmentBytes before;
         uint64_t tick;
         std::array<float, 3> velocity;
         bool consumed = false;
         ServerApp::NativeTravelDiagnostics diagnostics;
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
-            std::unique_ptr<InteriorActorScene::Prepared> step, uint64_t time, std::array<float,3> motion,
+            std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
+            uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
-            : service(owner), command(std::move(input)), actor(std::move(step)), before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
+            : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
+              before(owner.mActorImage), tick(time), velocity(motion), diagnostics(report) {}
         bool changesInventory() const noexcept override { return bool(command); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -1021,7 +1050,7 @@ namespace TES3MP::Native
                 const auto compose = [&](std::span<const std::byte> inventory) {
                     const auto retained = readActorCampaign(before).actor;
                     sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
-                        actor ? actor->image() : retained, tick, velocity);
+                        actor ? actor->image() : retained, tick, velocity, melee);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -1031,6 +1060,7 @@ namespace TES3MP::Native
                 else
                 {
                     if (actor) service.mBinding.mNavigatingActor->install(*actor);
+                    service.mMelee = std::move(melee);
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
@@ -1087,9 +1117,12 @@ namespace TES3MP::Native
         if (active && !step) report.status = Diagnostics::Status::Boundary;
         else if (step && step->pathUnavailable()) report.status = Diagnostics::Status::NoPath;
         const auto after = step ? step->snapshot() : before;
+        auto melee = mMelee;
+        if (step && melee) (void)melee->advance(seconds);
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
-        return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step), tick.value(), velocity, report);
+        return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
+            std::move(melee), tick.value(), velocity, report);
     }
     catch (const std::exception& error)
     {

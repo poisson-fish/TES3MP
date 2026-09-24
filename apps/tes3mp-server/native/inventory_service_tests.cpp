@@ -4120,7 +4120,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool avoidance, bool traveler)
+        const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4285,16 +4285,59 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (traveler ? "native-inventory-19\nmanifest "
+            std::ofstream out(descriptor); out << (melee ? "native-inventory-21\nmanifest "
+                : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
                 << "npc \"npc_door_actor\" " << std::quoted(settings.string()) << "\ndestination 60 -240 1 120\n";
+            if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
         }
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (melee)
+        {
+            const auto image = [&] { return std::vector(service.inventoryImage().begin(), service.inventoryImage().end()); };
+            const auto initial = image();
+            const auto before = readActorCampaign({reinterpret_cast<const char*>(initial.data()), initial.size()});
+            require(before.melee && before.melee->identity.find("meshes/xbase_anim.kf") != std::string::npos
+                && before.melee->state.mPhase == MeleeAnimation::Phase::WindUp,
+                "Bound melee source or initial swing was not saved with the native actor");
+            const NativeInventoryCommit rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+            const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            auto first = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {});
+            require(first->commit(rejected) == CanonicalDurabilityResult::Rejected && image() == initial,
+                "Rejected actor tick advanced the bound swing");
+            require(first->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Retried bound swing tick did not commit");
+            const auto committed = image();
+            const auto after = readActorCampaign({reinterpret_cast<const char*>(committed.data()), committed.size()});
+            require(after.melee && after.melee->state.mTime > before.melee->state.mTime
+                && after.melee->identity == before.melee->identity,
+                "Committed actor tick did not advance the durable bound swing");
+            InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, committed);
+            auto& resumed = restart.service(); resumed.synchronizeCells(authority);
+            require(std::ranges::equal(committed, resumed.inventoryImage()),
+                "Bound swing recovery changed the committed image");
+            auto wrongResource = committed;
+            wrongResource.at(64) ^= std::byte{1}; // First identity byte after the bounded V21 header.
+            bool invalid = false;
+            try { InventoryHost mismatch(descriptor, testContentManifest(), *registry, *crypto, wrongResource); }
+            catch (const std::invalid_argument&) { invalid = true; }
+            require(invalid && std::ranges::equal(committed, resumed.inventoryImage()),
+                "Changed saved KF identity passed recovery or changed the live campaign");
+            auto originalTick = service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
+            auto resumedTick = resumed.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {});
+            std::vector<std::byte> originalCandidate, resumedCandidate;
+            originalTick->commit([&](auto bytes) { originalCandidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+            resumedTick->commit([&](auto bytes) { resumedCandidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; });
+            require(!originalCandidate.empty() && originalCandidate == resumedCandidate,
+                "Restart changed the next bound swing tick");
+            std::cout << "melee campaign resource=bound swing=durable retry=once restart=exact (synthetic actor, real KF)\n";
+            return;
+        }
         const auto observers = authority;
         const auto view = [&](ServerApp::NativeInventoryService& owner, uint64_t tick, uint64_t session = 1,
             const PreparedNativeInventory* pending = nullptr) {

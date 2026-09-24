@@ -7,6 +7,7 @@
 #include <components/sceneutil/animationkeys.hpp>
 
 #include "melee_animation.hpp"
+#include "actor_campaign.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -278,6 +279,40 @@ namespace
         require(retryHits == 1 && retriedTick.snapshot() == rejectedTick.snapshot(),
             "Discard and retry changed the staged schedule");
         committed = retriedTick; // Future host installation follows durability.
+        {
+            using namespace TES3MP::Native;
+            const std::string identity = "native-melee-resource-1\nmeshes/test.kf:1:2\n";
+            const auto saved = committed.snapshot();
+            std::vector<char> image;
+            putAreaWord(image, MeleeActorCampaignMagic);
+            putAreaWord(image, 1); putAreaWord(image, 1); putAreaWord(image, 17);
+            for (unsigned i = 0; i < 3; ++i) putAreaWord(image, 0);
+            putAreaWord(image, identity.size()); image.insert(image.end(), identity.begin(), identity.end());
+            putAreaWord(image, uint64_t(saved.mPhase));
+            putAreaWord(image, std::bit_cast<uint32_t>(saved.mTime));
+            putAreaWord(image, std::bit_cast<uint32_t>(saved.mStrength));
+            putAreaWord(image, saved.mReleased); putAreaWord(image, saved.mHit);
+            image.push_back('I'); image.push_back('A');
+            const auto decoded = readActorCampaign(image);
+            require(decoded.tick == 17 && decoded.inventory[0] == 'I' && decoded.actor[0] == 'A'
+                && decoded.melee && decoded.melee->identity == identity && decoded.melee->state == saved,
+                "Durable actor campaign lost bound animation identity or swing state");
+            MeleeAnimation resumed(keys, "weapononehand", "chop", 1.f);
+            resumed.restore(decoded.melee->state);
+            require(resumed.snapshot() == saved && !resumed.advance(1.f / 30),
+                "Recovered committed swing replayed its hit proposal");
+            auto corrupt = image;
+            corrupt[56 + 8 + identity.size()] = char(255); // Phase word.
+            bool invalid = false;
+            try { (void)readActorCampaign(corrupt); }
+            catch (const std::invalid_argument&) { invalid = true; }
+            require(invalid, "Invalid saved swing phase was accepted");
+            auto wrong = saved; wrong.mHit = false;
+            invalid = false;
+            try { resumed.restore(wrong); }
+            catch (const std::invalid_argument&) { invalid = true; }
+            require(invalid && resumed.snapshot() == saved, "Invalid saved swing changed the live schedule");
+        }
         for (int i = 0; i < 30; ++i)
             require(!committed.advance(1.f / 60), "Committed hit replayed during follow-through/completion");
         require(committed.snapshot().mPhase == Phase::Complete, "Follow-through did not finish");

@@ -31,6 +31,8 @@ namespace TES3MP::Native
         struct Navigation
         {
             std::string record, settings;
+            std::string meleeGroup, meleeAttack;
+            float meleeSpeed = 1;
             std::array<float, 3> destination;
             float speed = 120;
             bool doors = false;
@@ -75,9 +77,10 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool neighborhood = version == "native-inventory-20";
+            const bool meleeCampaign = version == "native-inventory-21";
+            const bool neighborhood = meleeCampaign || version == "native-inventory-20";
             const bool traveler = neighborhood || version == "native-inventory-19";
             const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
             const bool streaming = movingActor || version == "native-inventory-14" || version == "native-inventory-15";
@@ -218,6 +221,13 @@ namespace TES3MP::Native
                 in >> std::quoted(nav.record) >> std::quoted(nav.settings);
                 key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
                 if (neighborhood) { key("processing"); in >> nav.cells >> nav.steps; }
+                if (meleeCampaign)
+                {
+                    key("melee"); in >> std::quoted(nav.meleeGroup) >> std::quoted(nav.meleeAttack) >> nav.meleeSpeed;
+                    if (!in || nav.meleeGroup.empty() || nav.meleeGroup.size() > 64
+                        || !std::isfinite(nav.meleeSpeed) || nav.meleeSpeed <= 0 || nav.meleeSpeed > 100)
+                        throw std::invalid_argument("Native melee descriptor invalid");
+                }
                 if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
                     || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096
                     || (neighborhood ? (areaCount > 9 || nav.cells > 9 || nav.steps > 2)
@@ -256,6 +266,8 @@ namespace TES3MP::Native
             if (twoCells) semantic << secondCellText << '\n';
             if (navigation) semantic << std::setprecision(9) << navigation->record << ':' << navigation->speed << ':'
                 << navigation->destination[0] << ':' << navigation->destination[1] << ':' << navigation->destination[2] << '\n';
+            if (meleeCampaign) semantic << navigation->meleeGroup << ':' << navigation->meleeAttack << ':'
+                << navigation->meleeSpeed << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
@@ -498,12 +510,28 @@ namespace TES3MP::Native
                     return scene;
                 };
                 auto scene = createScene();
+                if (!start.navigation->meleeGroup.empty())
+                {
+                    auto bound = scene->bindMeleeAnimation(start.navigation->meleeGroup,
+                        start.navigation->meleeAttack, start.navigation->meleeSpeed);
+                    placement << bound.mResourceIdentity;
+                    start.binding.mBoundMelee = std::move(bound);
+                }
                 if (start.binding.mRetainTraveler)
                 {
-                    start.binding.mNavigationActivity = [scene, createScene](bool active) {
+                    const auto meleeIdentity = start.binding.mBoundMelee
+                        ? start.binding.mBoundMelee->mResourceIdentity : std::string{};
+                    const auto meleeGroup = start.navigation->meleeGroup;
+                    const auto meleeAttack = start.navigation->meleeAttack;
+                    const auto meleeSpeed = start.navigation->meleeSpeed;
+                    start.binding.mNavigationActivity = [scene, createScene, meleeIdentity,
+                        meleeGroup, meleeAttack, meleeSpeed](bool active) {
                         if (active && !scene->loaded())
                         {
                             auto fresh = createScene();
+                            if (!meleeIdentity.empty() && fresh->bindMeleeAnimation(
+                                    meleeGroup, meleeAttack, meleeSpeed).mResourceIdentity != meleeIdentity)
+                                throw std::invalid_argument("Native melee resource changed after binding");
                             scene->reload(*fresh);
                         }
                         else if (!active) scene->unload();

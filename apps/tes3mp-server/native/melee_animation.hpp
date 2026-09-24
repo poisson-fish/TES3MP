@@ -13,7 +13,8 @@ namespace TES3MP::Native
     // Detached CPU scheduling for one complete, non-looping directional melee
     // clip. Copy this value into a tick candidate; only install that copy after
     // durability. Events are proposals, never damage or presentation callbacks.
-    // Resource loading, contact/accuracy, persistence and the host are not wired.
+    // V21 binds its resource and persists the snapshot in the actor tick.
+    // Contact, accuracy and consequences are not wired.
     class MeleeAnimation
     {
     public:
@@ -37,6 +38,9 @@ namespace TES3MP::Native
         bool release(float strength);
         std::optional<int> advance(float duration);
         const Snapshot& snapshot() const { return mState; }
+        // Recovery accepts only a state reachable within this bound clip.
+        // The caller checks the saved resource identity before restoring it.
+        void restore(const Snapshot& state);
 
     private:
         struct Range { float mStart, mStop; };

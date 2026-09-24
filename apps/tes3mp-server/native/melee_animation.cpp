@@ -66,6 +66,27 @@ namespace TES3MP::Native
         return MWMechanics::attackWindUp(mState.mTime, mMinimumAttack, mWindUp.mStop);
     }
 
+    void MeleeAnimation::restore(const Snapshot& state)
+    {
+        if (state.mPhase < Phase::WindUp || state.mPhase > Phase::Complete
+            || !std::isfinite(state.mTime) || !std::isfinite(state.mStrength)
+            || state.mStrength < 0 || state.mStrength > 1
+            || (state.mReleased && state.mPhase == Phase::WindUp && state.mTime > mWindUp.mStop)
+            || (!state.mReleased && (state.mPhase != Phase::WindUp || state.mHit || state.mStrength != 0))
+            || (state.mHit && state.mPhase == Phase::WindUp)
+            || (state.mPhase == Phase::WindUp && (state.mTime < mWindUp.mStart || state.mTime > mWindUp.mStop))
+            || (state.mPhase == Phase::Release && (state.mTime < mRelease.mStart || state.mTime > mRelease.mStop))
+            || (state.mPhase == Phase::Follow &&
+                (state.mTime < mFollow[MWMechanics::attackFollowStrength(state.mStrength) == "small" ? 0
+                    : MWMechanics::attackFollowStrength(state.mStrength) == "medium" ? 1 : 2].mStart
+                 || state.mTime > mFollow[MWMechanics::attackFollowStrength(state.mStrength) == "small" ? 0
+                    : MWMechanics::attackFollowStrength(state.mStrength) == "medium" ? 1 : 2].mStop))
+            || ((state.mPhase == Phase::Follow || state.mPhase == Phase::Complete) && !state.mHit)
+            || (state.mPhase != Phase::WindUp && !state.mReleased))
+            throw std::invalid_argument("Invalid persisted native melee state");
+        mState = state;
+    }
+
     bool MeleeAnimation::release(float strength)
     {
         if (!std::isfinite(strength) || strength < 0 || strength > 1)
