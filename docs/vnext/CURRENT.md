@@ -1,34 +1,33 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active; M3 accepted 2026-09-19.**
-Step 4 has shared [melee primitives](../../apps/openmw/mwmechanics/meleestate.hpp)
-and a detached [directional scheduler](../../apps/tes3mp-server/native/melee_animation.hpp),
-not a native encounter. Stock callers share melee resources, simulation-time death,
-section lookup, wind-up, release skipping, follow-through and hit-key interpretation.
-Directional clips emit one hit proposal; random attacks are unsupported. Resource
-binding and host integration remain unwired; no combat capability or campaign-format change.
+Step 4 has shared [melee primitives](../../apps/openmw/mwmechanics/meleestate.hpp),
+a detached [scheduler](../../apps/tes3mp-server/native/melee_animation.hpp)
+and [scene-bound animation keys](../../apps/tes3mp-server/native/actor_scene.hpp).
+Stock callers share costs, death timing and directional key interpretation.
+The scene resolves third-person KF sources in stock priority and returns one hit
+proposal with resource identity. Custom NPC models and random attacks remain
+unsupported. Host combat and campaign identity are unwired; no encounter yet.
 
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp): **native-inventory-20**,
-fresh campaign, V19 fields plus `processing CELLS STEPS`. One dry interior or nine
-exteriors in the first cell's 3×3 neighborhood; one living unscripted nonleveled
-traveler, 0–128 ordinary doors, 8,192 collision references plus terrain,
-256 nav tiles, 2,048 path points, two 60 Hz substeps per 30 Hz tick.
-Actor/door/inventory state commits together. Saturation pauses both substeps;
-unavailable routes retain destinations. Travel continues without players;
-completion releases scenes. Restart/unload retains physics, destination and
-avoidance/RNG. Origin/destination appearances coalesce; offline players freeze.
+fresh campaign, V19 fields plus `processing CELLS STEPS`. One dry interior or
+nine adjacent exteriors; one unscripted nonleveled traveler, 0–128 doors,
+8,192 collision references plus terrain, 256 nav tiles, 2,048 path points,
+two 60 Hz substeps per tick. Actor/door/inventory commit together. Saturation
+pauses both steps; unavailable routes retain destinations. Travel continues
+without players. Restart/unload retains physics, destination and avoidance/RNG.
+Appearances coalesce; offline players freeze.
 
-Background actors freeze. General AI, combat, scripts, water, automatic door
-activation, sliding neighborhoods and gameplay animation remain unavailable.
-Player movement is inherited; headless packaging is unproved.
+Background actors freeze. General AI, combat, scripts, water, automatic doors,
+sliding neighborhoods and gameplay animation are unavailable. Player movement
+is inherited; headless packaging is unproved.
 
 Verified 2026-09-20 in `build/vnext-desktop-evidence`:
 
 - `tes3mp_native_melee_tests melee-scheduling`:
   `build/logs/m4-melee-scheduling.log`; build:
-  `build/logs/m4-melee-scheduling-build.log`. Synthetic early/held release,
-  speed, hit boundaries, duplicate suppression, follow-through, discarded-copy
-  determinism and input rejection. No durable receipts or live encounter.
+  `build/logs/m4-melee-scheduling-build.log`. Synthetic release timing,
+  duplicate suppression, discarded-copy determinism and input rejection.
 - `tes3mp_native_melee_tests melee-context` and `melee-timing`, separately:
   `build/logs/m4-melee-context.log`, `build/logs/m4-melee-timing.log`;
   build: `build/logs/m4-melee-build.log`. Synthetic actor isolation, miss costs,
@@ -40,8 +39,14 @@ Verified 2026-09-20 in `build/vnext-desktop-evidence`:
   server restart under latency/jitter/loss/reordering: `build/m4-v20-unattended-verified`,
   `build/logs/m4-v20-unattended.log`. Inherited V18: `build/m4-v18-resume-verified`.
 
-Next: bind gameplay animation resources and compose the scheduler, validated player
-contacts, stats/inventory, RNG, attributed death/life and corpse loot in one durable
-tick. Prove durable retries and two-client reconnect convergence.
+Verified 2026-09-24: `tes3mp_native_actor_probe --melee` on real TR Raflod
+resolved `meshes/xbase_anim.kf` and emitted one chop proposal:
+`build/logs/m4-melee-resource-real.log`. Actor-probe and inventory-host builds:
+`build/logs/m4-melee-resource-build.log`, `build/logs/m4-melee-resource-host-build.log`.
+This is a read-only probe.
+
+Next: bind animation identity to a combat campaign; compose scheduler, validated
+player contacts, stats/inventory, RNG, attributed death/life and corpse loot in
+one durable tick. Prove retries and two-client reconnect convergence.
 Exterior graphical crossings remain unverified. Retained M3 campaigns:
 `build/m3-tr-varyon-doors`, `build/m3-tr-noran-dry`.

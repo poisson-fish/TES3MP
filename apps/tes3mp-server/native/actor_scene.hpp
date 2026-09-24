@@ -8,6 +8,7 @@
 #include <vector>
 #include <span>
 #include <components/esm/refid.hpp>
+#include "melee_animation.hpp"
 
 namespace TES3MP::Native
 {
@@ -31,6 +32,11 @@ namespace TES3MP::Native
         bool mGrounded = false;
         std::vector<uint64_t> mContacts;
         float mYaw = 0;
+    };
+    struct BoundMeleeAnimation
+    {
+        MeleeAnimation mAnimation;
+        std::string mResourceIdentity;
     };
 
     // Detached, content-derived interior/exterior navigation and physics. References are
@@ -63,6 +69,10 @@ namespace TES3MP::Native
         size_t bodyCount() const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
+        // Resolve the selected NPC's third-person animation source using stock
+        // source priority. The returned identity must join a combat campaign's
+        // content binding before a swing can become authoritative.
+        BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
         bool loaded() const noexcept { return bool(mImpl); }
         // Release collision/navigation resources, retaining the exact committed
         // image. Reload validates a freshly bound scene before swapping it in.

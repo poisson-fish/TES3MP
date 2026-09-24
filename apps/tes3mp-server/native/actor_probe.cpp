@@ -15,11 +15,12 @@ int main(int argc, const char* const argv[])
     try
     {
         if (argc < 6)
-            throw std::invalid_argument("Usage: actor_probe <interior> <npc-record|--list> <baseanim> <beastanim> <loadout options>");
+            throw std::invalid_argument("Usage: actor_probe <interior> <npc-record|--list> <baseanim> <beastanim> [--melee GROUP ATTACK SPEED] <loadout options>");
         std::vector<const char*> arguments{argv[0]};
+        const bool melee = argc >= 9 && std::string_view(argv[5]) == "--melee";
         const bool avoidance = argc >= 10 && std::string_view(argv[5]) == "--avoid-door";
         const bool navigation = argc >= 10 && (std::string_view(argv[5]) == "--navigate" || avoidance);
-        arguments.insert(arguments.end(), argv + (navigation ? 10 : 5), argv + argc);
+        arguments.insert(arguments.end(), argv + (melee ? 9 : navigation ? 10 : 5), argv + argc);
         TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(
             static_cast<int>(arguments.size()), arguments.data()));
         const auto actors = loadout.placedActors(std::string_view(argv[1]));
@@ -41,6 +42,20 @@ int main(int argc, const char* const argv[])
         const auto actor = std::find_if(actors.begin(), actors.end(), [&](const auto& value) { return value.mRef.mRefID == record; });
         TES3MP::Native::InteriorActorScene scene(loadout, argv[1], actor->mIdentity, argv[3], argv[4]);
         const auto original = scene.snapshot();
+        if (melee)
+        {
+            auto bound = scene.bindMeleeAnimation(argv[6], argv[7], std::stof(argv[8]));
+            for (int i = 0; i < 180; ++i) bound.mAnimation.advance(1.f / 60);
+            if (!bound.mAnimation.release(1.f))
+                throw std::runtime_error("Real animation did not accept melee release");
+            int hits = 0;
+            for (int i = 0; i < 180; ++i) hits += bound.mAnimation.advance(1.f / 60).has_value();
+            if (hits != 1 || bound.mAnimation.snapshot().mPhase != TES3MP::Native::MeleeAnimation::Phase::Complete)
+                throw std::runtime_error("Real animation did not produce one complete melee hit proposal");
+            std::cout << "PASS native-melee-resource actor=" << original.mActor << " group=" << argv[6]
+                << " attack=" << argv[7] << " hits=" << hits << '\n' << bound.mResourceIdentity;
+            return 0;
+        }
         if (navigation)
         {
             const auto doors = avoidance ? loadout.ordinaryDoors(ESM::RefId::stringRefId(argv[1]), 128)
