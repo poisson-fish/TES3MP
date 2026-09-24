@@ -8,9 +8,12 @@
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/containeradd.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
+#include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <components/esm3/loadweap.hpp>
 #include <components/esm3/statstate.hpp>
 #include <components/misc/rng.hpp>
+#include <tes3mp/melee_combat.hpp>
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
@@ -65,6 +68,53 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native combat stat shape invalid");
             }
             return result;
+        }
+        ESM::StatState<float> combatStat(const std::array<float, 5>& fields)
+        {
+            ESM::StatState<float> value;
+            value.mBase = fields[0]; value.mMod = fields[1]; value.mCurrent = fields[2];
+            value.mDamage = fields[3]; value.mProgress = fields[4];
+            return value;
+        }
+        MWMechanics::NpcStats loadCombatStats(const MWWorld::ESMStore& content,
+            const std::array<std::array<float, 5>, ActorCampaignCombat::StatCount>& fields)
+        {
+            MWMechanics::NpcStats stats(content);
+            size_t index = 0;
+            for (int i = 0; i < ESM::Attribute::Length; ++i)
+            {
+                MWMechanics::AttributeValue value;
+                value.readState(combatStat(fields[index++]));
+                stats.setAttribute(ESM::Attribute::indexToRefId(i), value, 0.f);
+            }
+            for (int i = 0; i < 3; ++i)
+            {
+                MWMechanics::DynamicStat<float> value;
+                value.readState(combatStat(fields[index++]));
+                stats.setDynamic(i, value, MWWorld::TimeStamp{});
+            }
+            for (int i = 0; i < ESM::Skill::Length; ++i)
+            {
+                MWMechanics::SkillValue value;
+                value.readState(combatStat(fields[index++]));
+                stats.setSkill(ESM::Skill::indexToRefId(i), value);
+            }
+            return stats;
+        }
+        void saveCombatStats(std::array<std::array<float, 5>, ActorCampaignCombat::StatCount>& fields,
+            const MWMechanics::NpcStats& stats)
+        {
+            size_t index = 0;
+            const auto capture = [&](const auto& stat) {
+                ESM::StatState<float> value;
+                stat.writeState(value);
+                fields[index++] = {value.mBase, value.mMod, value.mCurrent, value.mDamage, value.mProgress};
+            };
+            for (int i = 0; i < ESM::Attribute::Length; ++i)
+                capture(stats.getAttribute(ESM::Attribute::indexToRefId(i)));
+            for (int i = 0; i < 3; ++i) capture(stats.getDynamic(i));
+            for (int i = 0; i < ESM::Skill::Length; ++i)
+                capture(stats.getSkill(ESM::Skill::indexToRefId(i)));
         }
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
         {
@@ -1138,6 +1188,29 @@ namespace TES3MP::Native
         return result;
     }
 
+    EquipmentBytes InventoryService::stagedWeaponCore(int condition) const
+    {
+        const auto equipped = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+        if (!equipped || condition < 0 || condition > equipped->mCondition
+            || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
+            throw std::invalid_argument("Native melee weapon wear candidate invalid");
+        EquipmentSessionValues values{{mRuntime.installedValues(0), mRuntime.installedValues(1)},
+            mWorld.getPtrRegistryRevision() + 1};
+        for (size_t i = 2; i < mRuntime.ownerCount(); ++i)
+            values.mContainers.push_back(mRuntime.installedValues(i));
+        auto& owner = values.mContainers.at(mCombatNpcOwner - 2);
+        if (owner.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] != equipped->mItem)
+            throw std::invalid_argument("Native melee weapon slot changed");
+        const auto item = std::ranges::find(owner.mObjects, equipped->mItem,
+            [](const auto& object) { return object.mRef.mRefNum; });
+        if (item == owner.mObjects.end()) throw std::invalid_argument("Native melee weapon missing");
+        item->mRef.mChargeInt = condition;
+        if (condition == 0) owner.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
+        EquipmentBytes core;
+        mRuntime.encodeSession(std::move(values), core);
+        return core;
+    }
+
     std::optional<ServerApp::NativeTravelDiagnostics> InventoryService::travelDiagnostics() const
     {
         if (!mBinding.mRetainTraveler) return {};
@@ -1159,6 +1232,8 @@ namespace TES3MP::Native
         std::optional<MeleeAnimation> melee;
         std::optional<ActorCampaignCombat> combat;
         std::optional<EquipmentRuntime::EquippedWeaponCondition> weapon;
+        std::optional<int> wornCondition;
+        EquipmentBytes wornCore, wornInventory;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -1170,12 +1245,14 @@ namespace TES3MP::Native
             std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
             uint64_t selected, bool contacted, std::optional<ActorCampaignCombat> stagedCombat,
             std::optional<EquipmentRuntime::EquippedWeaponCondition> stagedWeapon,
+            std::optional<int> condition, EquipmentBytes core,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
-              combat(std::move(stagedCombat)), weapon(std::move(stagedWeapon)), target(selected), contact(contacted), before(owner.mActorImage),
+              combat(std::move(stagedCombat)), weapon(std::move(stagedWeapon)),
+              wornCondition(condition), wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
               tick(time), velocity(motion), diagnostics(report) {}
-        bool changesInventory() const noexcept override { return bool(command); }
+        bool changesInventory() const noexcept override { return bool(command) || wornCondition.has_value(); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
             if (consumed || service.inventoryImage().empty() || before != service.mActorImage
@@ -1187,7 +1264,10 @@ namespace TES3MP::Native
                 EquipmentBytes sealed;
                 const auto compose = [&](std::span<const std::byte> inventory) {
                     const auto retained = readActorCampaign(before).actor;
-                    sealed = service.sealActor({reinterpret_cast<const char*>(inventory.data()), inventory.size()},
+                    const std::span<const char> candidate(reinterpret_cast<const char*>(inventory.data()), inventory.size());
+                    if (wornCondition) wornInventory = service.replaceAreaCore(candidate, wornCore);
+                    const auto selected = wornCondition ? std::span<const char>(wornInventory) : candidate;
+                    sealed = service.sealActor(selected,
                         actor ? actor->image() : retained, tick, velocity, melee, target, contact, combat);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
@@ -1197,6 +1277,12 @@ namespace TES3MP::Native
                 if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
                 else
                 {
+                    if (wornCondition)
+                    {
+                        service.mRuntime.installWeaponWear(service.mCombatNpcOwner, weapon->mItem, *wornCondition);
+                        service.mCoreImage.swap(wornCore);
+                        service.mImage.swap(wornInventory);
+                    }
                     if (actor) service.mBinding.mNavigatingActor->install(*actor);
                     service.mMelee = std::move(melee);
                     service.mMeleeTarget = target; service.mMeleeContacted = contact;
@@ -1258,6 +1344,9 @@ namespace TES3MP::Native
         else if (step && step->pathUnavailable()) report.status = Diagnostics::Status::NoPath;
         const auto after = step ? step->snapshot() : before;
         auto melee = mMelee;
+        auto combat = mCombat;
+        std::optional<int> wornCondition;
+        EquipmentBytes wornCore;
         uint64_t target = mMeleeTarget;
         bool contact = mMeleeContacted;
         if (step && melee)
@@ -1270,12 +1359,79 @@ namespace TES3MP::Native
             const auto hit = melee->advance(seconds);
             if (mBinding.mMeleeContact && hit && target)
                 contact = meleeContact(players, after, target, meleeReach()) == target;
+            if (hit && combat && mBinding.mCombatResolution)
+            {
+                const auto* input = areaDoorCommand(command.get());
+                if (dynamic_cast<const Transaction*>(input) || dynamic_cast<const EquipmentTransaction*>(input)
+                    || dynamic_cast<const WorldTransaction*>(input))
+                    throw std::invalid_argument("Native melee hit conflicts with an inventory command");
+                auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[2]);
+                const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+                const auto values = mRuntime.installedValues(mCombatNpcOwner);
+                const ESM::Weapon* weapon = nullptr;
+                if (held)
+                {
+                    const auto item = std::ranges::find(values.mObjects, held->mItem,
+                        [](const auto& object) { return object.mRef.mRefNum; });
+                    if (item == values.mObjects.end()) throw std::invalid_argument("Native melee weapon identity missing");
+                    weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+                }
+                const float strength = melee->snapshot().mStrength;
+                const float capacity = attacker.getAttribute(ESM::Attribute::Strength).getModified()
+                    * mRuntime.mStore.get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
+                const float weight = std::max(0.f, mRuntime.storage(mCombatNpcOwner).getWeight());
+                const float encumbrance = weight == 0 ? 0.f : capacity == 0 ? 1.f + 1e-6f : weight / capacity;
+                MWMechanics::applyFatigueLoss(attacker, mRuntime.mStore,
+                    weapon ? weapon->mData.mWeight : 0.f, strength, encumbrance);
+                if (contact)
+                {
+                    const size_t victimIndex = mBinding.mPlayers[0].value() == target ? 0 : 1;
+                    auto victim = loadCombatStats(mRuntime.mStore, combat->actors[victimIndex]);
+                    const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
+                        : ESM::Skill::HandToHand;
+                    const int skillValue = int(attacker.getSkill(skill).getModified());
+                    const bool paralyzed = victim.getMagicEffects()
+                        .getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0;
+                    const float chance = MWMechanics::getHitChance(mRuntime.mStore, attacker, victim,
+                        skillValue, false, paralyzed);
+                    Misc::Rng::Generator rng;
+                    Misc::Rng::deserialize(std::to_string(combat->rng), rng);
+                    const bool success = Misc::Rng::roll0to99(rng) < chance;
+                    combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                    float damage = 0;
+                    if (success && weapon)
+                    {
+                        const auto& range = *hit == ESM::Weapon::AT_Chop ? weapon->mData.mChop
+                            : *hit == ESM::Weapon::AT_Slash ? weapon->mData.mSlash : weapon->mData.mThrust;
+                        damage = range[0] + (range[1] - range[0]) * strength;
+                        TES3MP::OpenMwMeleeSettings settings;
+                        const auto& gmst = mRuntime.mStore.get<ESM::GameSetting>();
+                        settings.damageStrengthBase = gmst.find("fDamageStrengthBase")->mValue.getFloat();
+                        settings.damageStrengthMultiplier = gmst.find("fDamageStrengthMult")->mValue.getFloat();
+                        damage = TES3MP::openMwAdjustedWeaponDamage(settings,
+                            attacker.getAttribute(ESM::Attribute::Strength).getModified(),
+                            weapon->mData.mHealth ? float(held->mCondition) / weapon->mData.mHealth : 1.f,
+                            weapon->mData.mHealth != 0, damage);
+                        MWMechanics::applyHitDamage(victim, {{"health", damage}}, MWWorld::TimeStamp{});
+                    }
+                    if (weapon && weapon->mData.mHealth)
+                    {
+                        const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
+                            .find("fWeaponDamageMult")->mValue.getFloat();
+                        wornCondition = MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier);
+                        wornCore = stagedWeaponCore(*wornCondition);
+                    }
+                    saveCombatStats(combat->actors[victimIndex], victim);
+                }
+                saveCombatStats(combat->actors[2], attacker);
+            }
         }
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
-            std::move(melee), target, contact, mCombat,
+            std::move(melee), target, contact, std::move(combat),
             mCombat ? mRuntime.equippedWeaponCondition(mCombatNpcOwner) : std::nullopt,
+            wornCondition, std::move(wornCore),
             tick.value(), velocity, report);
     }
     catch (const std::exception& error)
@@ -1308,7 +1464,7 @@ namespace TES3MP::Native
             ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot()) : std::nullopt;
         auto result = project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
             equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr,
-            {}, actorState ? &*actorState : nullptr);
+            {}, actorState ? &*actorState : nullptr, moving ? moving->wornCondition : std::nullopt);
         if (result)
             for (auto& ground : result->groundItems)
             {
@@ -1328,7 +1484,8 @@ namespace TES3MP::Native
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::project(const CanonicalServerState& players,
         SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedCommand* candidate,
         const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world,
-        const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area, const ActorSceneSnapshot* moving) const
+        const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area,
+        const ActorSceneSnapshot* moving, std::optional<int> wornCondition) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -1338,9 +1495,20 @@ namespace TES3MP::Native
         const auto visibleCell = area.value_or(player->transform().cell());
         const auto index = actor(player->playerId());
         const auto values = [&](size_t owner) {
-            if (world) return mRuntime.preparedValues(*world, owner);
-            if (equipped) return mRuntime.preparedValues(*equipped, owner);
-            return candidate ? mRuntime.preparedValues(candidate->mTransfer, owner) : mRuntime.installedValues(owner);
+            auto state = world ? mRuntime.preparedValues(*world, owner)
+                : equipped ? mRuntime.preparedValues(*equipped, owner)
+                : candidate ? mRuntime.preparedValues(candidate->mTransfer, owner) : mRuntime.installedValues(owner);
+            if (wornCondition && owner == mCombatNpcOwner)
+            {
+                const auto weapon = mRuntime.equippedWeaponCondition(owner);
+                if (!weapon) throw std::invalid_argument("Native melee projection lost equipped weapon");
+                const auto item = std::ranges::find(state.mObjects, weapon->mItem,
+                    [](const auto& object) { return object.mRef.mRefNum; });
+                if (item == state.mObjects.end()) throw std::invalid_argument("Native melee projection lost weapon identity");
+                item->mRef.mChargeInt = *wornCondition;
+                if (*wornCondition == 0) state.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
+            }
+            return state;
         };
         const auto installed = values(index);
         const auto items = stacks(installed, mItemIds, mRuntime.mStore);
@@ -1349,7 +1517,8 @@ namespace TES3MP::Native
         for (int slot = 0; slot < InventoryStore::Slots; ++slot)
             if (installed.mSlots[slot].isSet())
                 equipment.push_back({static_cast<EquipmentSlot>(slot), wireId(installed.mSlots[slot])});
-        const auto version = world ? world->revision() : equipped ? equipped->candidate().mRevision
+        const auto version = wornCondition ? mWorld.getPtrRegistryRevision() + 1
+            : world ? world->revision() : equipped ? equipped->candidate().mRevision
             : candidate ? candidate->candidate().mRevision : mWorld.getPtrRegistryRevision();
         const InventoryBaselineHeader header{ target, session->sessionGeneration(), tick, revision, 0, 1 };
         ServerApp::InventoryInterestDelivery result{ .targetSession = target };

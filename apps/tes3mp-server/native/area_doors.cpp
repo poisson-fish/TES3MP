@@ -72,6 +72,27 @@ namespace TES3MP::Native
         return result;
     }
 
+    EquipmentBytes InventoryService::replaceAreaCore(std::span<const char> area,
+        std::span<const char> core) const
+    {
+        if (!mBinding.mStreamExteriors) return {core.begin(), core.end()};
+        size_t offset = 0;
+        if (get(area, offset) != (mBinding.mActorSelections ? SpawnAreaMagic : AreaMagic))
+            throw std::invalid_argument("Native melee area image version invalid");
+        if (mBinding.mActorSelections && readActorSpawns(area, offset) != *mBinding.mActorSelections)
+            throw std::invalid_argument("Native melee area selections changed");
+        const size_t lengthOffset = offset;
+        const auto oldSize = get(area, offset), doorCount = get(area, offset);
+        if (!oldSize || oldSize > area.size() - offset || doorCount != mAreaDoors.size()
+            || core.size() > MaximumNativeInventoryImageBytes - (area.size() - size_t(oldSize)))
+            throw std::invalid_argument("Native melee area image bounds invalid");
+        EquipmentBytes result(area.begin(), area.begin() + lengthOffset);
+        put(result, core.size()); put(result, doorCount);
+        result.insert(result.end(), core.begin(), core.end());
+        result.insert(result.end(), area.begin() + offset + size_t(oldSize), area.end());
+        return result;
+    }
+
     void InventoryService::recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
         std::span<const char> actor)
     {

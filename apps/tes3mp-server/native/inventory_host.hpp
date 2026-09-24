@@ -17,12 +17,18 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V24 uses V23's image under native-inventory-24 and requires a fresh
+    // campaign. At the selected NPC's KF hit key, detached OpenMW stats and
+    // dedicated RNG resolve accuracy, fatigue and physical weapon damage.
+    // The same durable tick includes condition in the nested inventory image;
+    // a rejected write installs none of them. A simultaneous player inventory
+    // command is rejected at that hit key pending ordered intent composition.
     // V23 uses V22's fields under native-inventory-23 and requires a fresh
     // campaign. Its actor wrapper saves OpenMW-initialized combat attributes,
     // resources and skills for both players and the selected NPC, plus a
     // dedicated combat RNG. Equipped weapon condition remains in the nested
     // inventory image and is sampled from that owner during tick preparation.
-    // Damage, costs, wear and death are not applied yet.
+    // V23 does not apply damage, costs, wear or death.
     // V22 uses V21's descriptor and adds server-owned release/target and
     // contact at the authored hit key. It requires a fresh campaign.
     // V21 uses native-inventory-21 with V20 fields, then adds

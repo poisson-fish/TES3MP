@@ -221,6 +221,8 @@ namespace TES3MP::Native
         // Read the selected stock inventory slot and effective item health.
         // The inventory image remains the only durable writer of condition.
         std::optional<EquippedWeaponCondition> equippedWeaponCondition(size_t owner) const;
+        // Called only after the enclosing actor image has been durably accepted.
+        void installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept;
         class PreparedDoor
         {
             friend class EquipmentRuntime;

@@ -30,6 +30,16 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native equipped weapon condition invalid");
         return EquippedWeaponCondition{item.getCellRef().getRefNum(), condition};
     }
+    void EquipmentRuntime::installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept
+    {
+        auto* inventory = inventoryStorage(owner);
+        auto& slot = inventory->mSlots[InventoryStore::Slot_CarriedRight];
+        Ptr weapon = *slot;
+        if (weapon.getCellRef().getRefNum() != item) std::terminate();
+        weapon.getCellRef().setCharge(condition);
+        if (condition == 0) slot = inventory->end();
+        ++mWorld.mPtrRegistry.mRevision;
+    }
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,

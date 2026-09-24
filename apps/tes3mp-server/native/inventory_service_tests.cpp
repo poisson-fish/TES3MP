@@ -4136,7 +4136,12 @@ namespace TES3MP::Native::Testing
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
-            if (combat) npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
+            if (combat)
+            {
+                npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
+                npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
+                npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
+            }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
@@ -4286,7 +4291,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (combat ? "native-inventory-23\nmanifest "
+            std::ofstream out(descriptor); out << (combat ? "native-inventory-24\nmanifest "
                 : melee ? "native-inventory-22\nmanifest "
                 : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
@@ -4385,14 +4390,53 @@ namespace TES3MP::Native::Testing
             {
                 auto pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
                 const auto beforeHit = image();
+                const auto prior = readActorCampaign({reinterpret_cast<const char*>(beforeHit.data()), beforeHit.size()});
+                const auto conditionBefore = combat
+                    ? dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition() : std::optional<int>{};
                 std::vector<std::byte> proposal;
-                require(pending->commit([&](auto bytes) { proposal.assign(bytes.begin(), bytes.end());
+                size_t rejectedWrites = 0;
+                require(pending->commit([&](auto bytes) { ++rejectedWrites; proposal.assign(bytes.begin(), bytes.end());
                     return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
-                    && image() == beforeHit, "Rejected melee contact tick mutated the campaign");
+                    && rejectedWrites == 1 && image() == beforeHit,
+                    "Rejected melee contact tick wrote more than once or mutated the campaign");
+                if (combat) require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition() == conditionBefore,
+                    "Rejected hit-key tick changed the equipped weapon condition");
                 const auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
                 hit = candidate.melee && candidate.melee->state.mHit;
-                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                if (combat && hit && candidate.melee->contact)
+                {
+                    const auto installedView = service.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    const auto stagedView = service.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    require(pending->changesInventory() && installedView && stagedView
+                        && stagedView->playerInventory.front().revision.value()
+                            == installedView->playerInventory.front().revision.value() + 1,
+                        "Hit-key candidate did not refresh the staged inventory revision");
+                }
+                std::vector<std::byte> durable;
+                size_t acceptedWrites = 0;
+                require(pending->commit([&](auto bytes) { ++acceptedWrites; durable.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                    && acceptedWrites == 1,
                     "Retried melee contact tick did not commit");
+                require(durable == proposal && image() == durable,
+                    "Retried hit-key tick did not install its single durable candidate");
+                if (combat && hit && candidate.melee->contact)
+                {
+                    require(prior.combat && candidate.combat
+                        && candidate.combat->rng != prior.combat->rng
+                        && candidate.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
+                        && candidate.combat->actors[0][8][2] < prior.combat->actors[0][8][2]
+                        && dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition()
+                            == *conditionBefore - 1,
+                        "KF hit did not atomically resolve RNG, fatigue, player health and weapon wear");
+                    InventoryHost hitRestart(descriptor, testContentManifest(), *registry, *crypto, durable);
+                    require(std::ranges::equal(durable, hitRestart.service().inventoryImage())
+                        && dynamic_cast<InventoryService&>(hitRestart.service()).selectedNpcWeaponCondition()
+                            == dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition(),
+                        "Hit-key restart changed the resolved tick or weapon condition");
+                }
                 if (!releaseTick && candidate.melee && candidate.melee->state.mReleased && !hit)
                 { releaseTick = time; releaseImage = image(); }
             }
@@ -4401,6 +4445,37 @@ namespace TES3MP::Native::Testing
             require(hit && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
                 "Server contact was not recorded at the bound KF hit key");
             require(releaseTick && !releaseImage.empty(), "Server attack did not retain a release-before-hit state");
+            if (combat)
+            {
+                auto lowSkill = releaseImage;
+                const auto parts = readActorCampaign({reinterpret_cast<const char*>(lowSkill.data()), lowSkill.size()});
+                const size_t combatEnd = size_t(parts.inventory.data() - reinterpret_cast<const char*>(lowSkill.data()));
+                const size_t skill = 11 + ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade);
+                const size_t base = combatEnd - ActorCampaignCombat::StatCount * 5 * 8 + skill * 5 * 8;
+                std::fill_n(lowSkill.begin() + base, 8, std::byte{});
+                InventoryHost missRollHost(descriptor, testContentManifest(), *registry, *crypto, lowSkill);
+                auto& missRoll = missRollHost.service(); missRoll.synchronizeCells(authority);
+                bool rolled = false;
+                for (uint64_t time = releaseTick + 1; time <= 64 && !rolled; ++time)
+                {
+                    const auto priorImage = missRoll.inventoryImage();
+                    const auto prior = readActorCampaign({reinterpret_cast<const char*>(priorImage.data()), priorImage.size()});
+                    const auto conditionBefore = dynamic_cast<InventoryService&>(missRoll).selectedNpcWeaponCondition();
+                    auto pending = missRoll.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Accuracy-miss tick did not commit");
+                    const auto image = missRoll.inventoryImage();
+                    const auto next = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+                    rolled = next.melee && next.melee->state.mHit;
+                    if (rolled) require(next.melee->contact && prior.combat && next.combat
+                        && next.combat->rng != prior.combat->rng
+                        && next.combat->actors[0][8][2] == prior.combat->actors[0][8][2]
+                        && next.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
+                        && dynamic_cast<InventoryService&>(missRoll).selectedNpcWeaponCondition() == *conditionBefore - 1,
+                        "Accuracy miss omitted the RNG/fatigue/wear cost or dealt damage");
+                }
+                require(rolled, "Low-skill swing never reached the KF hit key");
+            }
             std::vector<CanonicalPlayerEntityState> distant(authority.players().begin(), authority.players().end());
             for (auto& player : distant)
                 player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
@@ -4412,17 +4487,32 @@ namespace TES3MP::Native::Testing
             bool missed = false;
             for (uint64_t time = releaseTick + 1; time <= 64 && !missed; ++time)
             {
+                const auto priorImage = missService.inventoryImage();
+                const auto prior = readActorCampaign({reinterpret_cast<const char*>(priorImage.data()), priorImage.size()});
+                const auto conditionBefore = combat
+                    ? dynamic_cast<InventoryService&>(missService).selectedNpcWeaponCondition() : std::optional<int>{};
                 auto pending = missService.prepareNativeTick(farPlayers, id<ServerTick>(time), 1.f/30, {});
                 require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
                     "Out-of-reach melee tick did not commit");
                 const auto missImage = missService.inventoryImage();
                 const auto candidate = readActorCampaign({reinterpret_cast<const char*>(missImage.data()), missImage.size()});
                 missed = candidate.melee && candidate.melee->state.mHit;
-                if (missed) require(!candidate.melee->contact && candidate.melee->target == 1,
-                    "Out-of-reach player became a melee contact or changed the selected target");
+                if (missed)
+                {
+                    require(!candidate.melee->contact && candidate.melee->target == 1,
+                        "Out-of-reach player became a melee contact or changed the selected target");
+                    if (combat) require(prior.combat && candidate.combat
+                        && candidate.combat->rng == prior.combat->rng
+                        && candidate.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
+                        && candidate.combat->actors[0][8][2] == prior.combat->actors[0][8][2]
+                        && dynamic_cast<InventoryService&>(missService).selectedNpcWeaponCondition() == conditionBefore,
+                        "Out-of-reach swing changed RNG, health or wear, or omitted its fatigue cost");
+                }
             }
             require(missed, "Out-of-reach path never reached the KF hit key");
-            std::cout << "melee campaign resource=bound release=server contact=hit-key retry=once restart=exact (synthetic actor, real KF)\n";
+            std::cout << "melee campaign resource=bound release=server contact=hit-key retry=once restart=exact"
+                << (combat ? " damage=fatigue+health+wear rng=durable" : "")
+                << " (synthetic actor, real KF)\n";
             return;
         }
         const auto observers = authority;

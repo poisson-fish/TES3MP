@@ -14,7 +14,7 @@ namespace TES3MP::Native
     // clip. Copy this value into a tick candidate; only install that copy after
     // durability. Events are proposals, never damage or presentation callbacks.
     // V21 binds its resource and persists the snapshot in the actor tick.
-    // V22 validates contact in the host; accuracy and consequences are pending.
+    // V22 validates contact in the host; V24 resolves the bounded NPC hit.
     class MeleeAnimation
     {
     public:
