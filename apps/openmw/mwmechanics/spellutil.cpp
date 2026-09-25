@@ -111,12 +111,17 @@ namespace MWMechanics
 
     int getEffectiveEnchantmentCastCost(float castCost, const MWWorld::Ptr& actor)
     {
+        return getEffectiveEnchantmentCastCost(castCost,
+            static_cast<float>(actor.getClass().getSkill(actor, ESM::Skill::Enchant)));
+    }
+
+    int getEffectiveEnchantmentCastCost(float castCost, float enchantSkill)
+    {
         /*
          * Each point of enchant skill above/under 10 subtracts/adds
          * one percent of enchantment cost while minimum is 1.
          */
-        float eSkill = actor.getClass().getSkill(actor, ESM::Skill::Enchant);
-        const float result = castCost - (castCost / 100) * (eSkill - 10);
+        const float result = castCost - (castCost / 100) * (enchantSkill - 10);
 
         return static_cast<int>((result < 1) ? 1 : result);
     }

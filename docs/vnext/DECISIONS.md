@@ -49,33 +49,31 @@ activity/identity. AI, physics and combat share authoritative actor inventories;
 wear, charge, death and loot cannot have competing stores. Preserve stock callers
 and dependency checks; avoid whole-engine refactoring or a full World/UI wrapper.
 
-**Gameplay animation.** Extract shared gameplay timing, retaining necessary CPU
-animation evaluation without graphics. Preserve engine movement, hit keys and
-projectile/spell releases rather than substitute attack timers. Clients render
-committed actions. Timing/collision resources belong to gameplay identity; null
-presentation services must not suppress mechanics.
-V22's first NPC swing selects an active bound player in engine melee reach at
-full wind-up, then rechecks that player's current server position at the KF hit
-key. Its selected identity and contact flag share the durable actor image.
-Inherited player movement supplies positions but no trusted player hull, so
-the current contact check uses strict center reach until native hulls are bound.
+**Gameplay animation.** Retain CPU gameplay timing without graphics. Preserve
+engine movement, hit keys and projectile/spell releases. Clients render commits;
+timing/collision resources enter gameplay identity, and null presentation must
+not suppress mechanics. V22 selects an active player in engine melee reach at
+full wind-up, rechecking server position at the KF hit key. Selection/contact
+persist with the actor. Inherited player movement lacks trusted hulls, so contact
+uses strict center reach until native hulls are bound.
 
-**Travel scheduling.** Simulate the union of player areas plus bounded areas around
-active travelers, retaining engine navigation/collision even when both players leave.
-Simulation demand is independent of replication interest; simulate each actor once.
-Bound cells, actors and tick work; report saturation without losing destinations or
-completion. Preserve inactive state, stock Travel compatibility guards and travel
-state across unload/restart. Abstract travel/automatic fast-forward is not selected.
-V20 admits a fixed neighborhood atomically; saturation pauses both substeps.
-Cell/step limits may change on restart without resetting destinations. Origin and
-destination visibility coalesce by placement ID, suppressing authored local NPCs.
-Offline native-session players freeze; client velocity cannot enter legacy simulation.
+**Travel scheduling.** Simulate the union of player areas and bounded traveler
+areas with engine navigation/collision after players leave, once per actor and
+independent of replication interest. Bound cells, actors and tick work; retain
+destinations, completion, inactive state and stock Travel guards across restart.
+No abstract travel/fast-forward. V20 admits neighborhoods atomically and pauses
+both substeps on saturation. Restart may change limits without resetting travel.
+Coalesce visibility by placement ID; suppress authored local NPCs. Offline
+players freeze; client velocity cannot enter legacy simulation.
 
-**Composed ticks.** Evolve the single native mutation slot into one composed native
-transaction per tick: ordered intents, actor/door simulation, resources, effects,
-wear, death/loot, RNG and receipts. Prove isolated staging; durability precedes
-installation/publication. Measure serialization, commit costs and overruns early;
-preserve acknowledgment guarantees during optimization.
+**Composed ticks.** One native transaction per tick owns ordered intents,
+actor/door simulation, resources, effects, wear, death/loot, RNG and receipts.
+Stage in isolation; persist before installation/publication. Measure commit
+costs and overruns; preserve acknowledgment guarantees.
+For `WhenUsed` launches, the item instance pays charge with the projectile in
+that tick; a later miss keeps the paid charge. The pending source retains the
+item instance and enchantment record identities so contact survives moving the
+item after launch.
 V17 stages ordinary-door proposals against committed NPC hulls before the two NPC
 physics steps; those steps see staged door angles. Inventory, doors and actor state
 install only after the same commit. Door angles have one durable owner in the area
@@ -92,21 +90,17 @@ gameplay consequences. Start with server-time contacts; measure latency before a
 bounded historical actor/obstacle queries. Full-world rewind is not selected. Reuse
 timestamped replication, reliable action/life events and latest-wins motion.
 
-**Movement smoothness (target).** Player movement cutover is M4's final implementation
-step, after smooth replication and unified engine collision/physics are verified
-across actors, doors and projectiles. Retain inherited player movement until then;
-combat acceptance requires server-validated player positions and contacts.
-Start with stock physics stepping; tune snapshot frequency separately.
-Interpolate timestamped remote snapshots with bounded extrapolation;
-use latest-wins movement snapshots and reliable durable events. Local players
-predict immediately using shared movement/collision rules and compatible fixed
-steps. Restore authoritative physics state at acknowledged input, then replay
-unacknowledged inputs. Define dynamic-obstacle timestamps/revisions and sufficient
-history for contact reconciliation. Separate collision correction from visual
-blending; reset history on teleports, respawns and cell transitions. Exercise
-latency/jitter/loss from the first NPC slice; require correction size/frequency
-and tick-overrun budgets before player cutover. Existing smoothing/input-history scaffolding
-does not establish OpenMW physics replay.
+**Movement smoothness (target).** Cut player movement over last, after smooth
+replication and unified engine collision across actors, doors and projectiles.
+Until then retain inherited movement and validate combat positions/contacts on
+the server. Start with stock physics; tune snapshot frequency separately.
+Interpolate timestamped remote snapshots with bounded extrapolation; use
+latest-wins motion and reliable events. Predict locally with shared rules and
+fixed steps, restore physics at acknowledged input, then replay pending input.
+Timestamp dynamic obstacles for contact reconciliation. Separate collision
+correction from visual blending; reset history on teleport, respawn and cell
+transition. Measure latency/jitter/loss, correction frequency/size and tick
+overruns before cutover. Existing smoothing scaffolding does not prove replay.
 
 ## Cooperative progression design
 

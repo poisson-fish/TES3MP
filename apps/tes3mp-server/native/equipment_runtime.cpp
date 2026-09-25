@@ -40,6 +40,14 @@ namespace TES3MP::Native
         if (condition == 0) slot = inventory->end();
         ++mWorld.mPtrRegistry.mRevision;
     }
+    void EquipmentRuntime::installEnchantmentCharge(size_t owner, ESM::RefNum item, float charge) noexcept
+    {
+        Ptr source = mWorld.getPtr(item);
+        if (!source.hasLiveReference() || source.mContainerStore != &storage(owner)
+            || source.getCellRef().getRefNum() != item) std::terminate();
+        source.getCellRef().setEnchantmentCharge(charge);
+        ++mWorld.mPtrRegistry.mRevision;
+    }
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,

@@ -17,6 +17,8 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V28 adds a source-tagged projectile and durable WhenUsed item charge.
+    // It requires a fresh campaign under native-inventory-28.
     // V27 adds one durable, server-contacted Target spell projectile under
     // native-inventory-27 and requires a fresh campaign. Its launch cost,
     // in-flight state and resolved effect share composed actor ticks.

@@ -223,6 +223,7 @@ namespace TES3MP::Native
         std::optional<EquippedWeaponCondition> equippedWeaponCondition(size_t owner) const;
         // Called only after the enclosing actor image has been durably accepted.
         void installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept;
+        void installEnchantmentCharge(size_t owner, ESM::RefNum item, float charge) noexcept;
         class PreparedRespawn
         {
             friend class EquipmentRuntime;

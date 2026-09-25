@@ -80,6 +80,7 @@ namespace TES3MP::Native
         bool mNpcLifecycle = false;
         bool mMagicUse = false;
         bool mMagicProjectile = false;
+        bool mMagicItemUse = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
@@ -126,6 +127,13 @@ namespace TES3MP::Native
             EquipmentRuntime::EquippedWeaponCondition before;
             int condition;
         };
+        struct ItemCharge
+        {
+            size_t owner;
+            ESM::RefNum item;
+            float before;
+            float after;
+        };
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};
         std::optional<MeleeAnimation> mMelee;
@@ -147,7 +155,8 @@ namespace TES3MP::Native
         float meleeReach() const;
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
             uint64_t requested, float reach) const;
-        EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command) const;
+        EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command,
+            const std::optional<ItemCharge>& charge = {}) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor
@@ -280,6 +289,7 @@ namespace TES3MP::Native
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
             const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {},
             const ActorSceneSnapshot* moving = nullptr, std::span<const WeaponWear> wear = {},
+            const std::optional<ItemCharge>& charge = {},
             const ActorCampaignCombat* stagedCombat = nullptr,
             const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
     };

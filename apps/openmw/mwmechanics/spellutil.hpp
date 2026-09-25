@@ -45,6 +45,7 @@ namespace MWMechanics
     int calcSpellCost(const ESM::Spell& spell, const MWWorld::ESMStore& store);
 
     int getEffectiveEnchantmentCastCost(float castCost, const MWWorld::Ptr& actor);
+    int getEffectiveEnchantmentCastCost(float castCost, float enchantSkill);
     int getEffectiveEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::Ptr& actor);
     int getEnchantmentCharge(const ESM::Enchantment& enchantment);
     int getEnchantmentCharge(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& store);

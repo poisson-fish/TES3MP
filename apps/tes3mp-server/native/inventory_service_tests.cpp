@@ -4153,6 +4153,8 @@ namespace TES3MP::Native::Testing
             ESM::Spell targetRestore;
             ESM::Spell targetDamage;
             ESM::Enchantment rangedEnchantment;
+            ESM::Enchantment usedEnchantment;
+            ESM::Clothing usedItem;
             if (spell)
             {
                 restore.blank();
@@ -4189,6 +4191,20 @@ namespace TES3MP::Native::Testing
                     targetDamage.mEffects.populate({
                         {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10}});
                     npc.mSpells.mList.push_back(targetDamage.mId);
+                    usedEnchantment.blank();
+                    usedEnchantment.mId = ESM::RefId::stringRefId("npc_used_damage");
+                    usedEnchantment.mData.mType = ESM::Enchantment::WhenUsed;
+                    usedEnchantment.mData.mCost = 2;
+                    usedEnchantment.mData.mCharge = 20;
+                    usedEnchantment.mEffects.populate({
+                        {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
+                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10}});
+                    usedItem = *base.store().get<ESM::Clothing>().find(
+                        ESM::RefId::stringRefId("common_shirt_01"));
+                    usedItem.mId = ESM::RefId::stringRefId("npc_used_shirt");
+                    usedItem.mEnchant = usedEnchantment.mId;
+                    usedItem.mScript = {};
+                    npc.mInventory.mList.push_back({1, usedItem.mId});
                 }
                 rangedEnchantment.blank();
                 rangedEnchantment.mId = ESM::RefId::stringRefId("npc_ranged_enchantment");
@@ -4215,6 +4231,13 @@ namespace TES3MP::Native::Testing
                 }
                 out.startRecord(ESM::Enchantment::sRecordId, 0);
                 rangedEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                if (projectile)
+                {
+                    out.startRecord(ESM::Enchantment::sRecordId, 0);
+                    usedEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                    out.startRecord(ESM::Clothing::sRecordId, 0);
+                    usedItem.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                }
             }
             ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
             floor.mModel = "placement-floor.osgt";
@@ -4414,7 +4437,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (projectile ? "native-inventory-27\nmanifest "
+            std::ofstream out(descriptor); out << (projectile ? "native-inventory-28\nmanifest "
                 : spell ? "native-inventory-26\nmanifest "
                 : lifecycle ? "native-inventory-25\nmanifest "
                 : combat ? "native-inventory-24\nmanifest "
@@ -4800,7 +4823,7 @@ namespace TES3MP::Native::Testing
                         "Target launch did not install its durable projectile");
                     auto unknownSource = launched;
                     const size_t sourceOffset = size_t(launchedState.inventory.data()
-                        - reinterpret_cast<const char*>(launched.data())) - 80;
+                        - reinterpret_cast<const char*>(launched.data())) - 96;
                     unknownSource[sourceOffset] ^= std::byte{1};
                     bool rejectedSource = false;
                     try { InventoryHost invalidFlight(descriptor, testContentManifest(), *registry, *crypto,
@@ -4905,6 +4928,121 @@ namespace TES3MP::Native::Testing
                                 "World obstruction missed Target without preserving paid cost and target health");
                     }
                     require(missed, "Blocked projectile never resolved as a miss");
+                    const auto runItem = [&](bool obstructed) {
+                        const auto& itemPlayers = obstructed ? blockedPlayers : targetPlayers;
+                        InventoryHost itemHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& itemService = itemHost.service(); itemService.synchronizeCells(itemPlayers);
+                        const auto baseline = itemService.projectInventory(itemPlayers, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                        require(baseline && !baseline->playerInventory.empty(), "Enchanted item inventory missing");
+                        const auto& inventory = baseline->playerInventory.front();
+                        const auto item = std::ranges::find(inventory.stacks,
+                            id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                ESM::RefId::stringRefId("npc_used_shirt"))),
+                            &CanonicalItemStack::prototypeId);
+                        require(item != inventory.stacks.end(), "WhenUsed item absent from caster inventory");
+                        auto itemUse = targetUse;
+                        itemUse.sourceKind = MagicUseSourceKind::EnchantedItem;
+                        itemUse.sourceId = item->stackId.value();
+                        itemUse.expectedInventoryRevision = inventory.revision;
+                        auto wrongItem = itemUse; wrongItem.sourceId ^= 1;
+                        require(!itemService.prepareMagicUse(itemPlayers, proposal(wrongItem), id<ServerTick>(castTick)),
+                            "Unknown WhenUsed instance entered the launch path");
+                        auto staleItem = itemUse;
+                        staleItem.expectedInventoryRevision = InventoryRevision::initial();
+                        if (staleItem.expectedInventoryRevision != inventory.revision)
+                            require(!itemService.prepareMagicUse(itemPlayers, proposal(staleItem),
+                                id<ServerTick>(castTick)), "Stale item inventory revision entered the launch path");
+                        auto prepared = itemService.prepareMagicUse(itemPlayers, proposal(itemUse), id<ServerTick>(castTick));
+                        require(bool(prepared), "Owned WhenUsed item rejected before launch");
+                        auto launch = itemService.prepareNativeTick(itemPlayers, id<ServerTick>(castTick),
+                            1.f/30, std::move(prepared));
+                        std::vector<std::byte> candidate;
+                        require(launch->commit([&](auto bytes) {
+                            candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(itemService.inventoryImage(), contactImage),
+                            "Rejected WhenUsed launch spent charge or installed a projectile");
+                        const auto pending = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
+                        require(pending.projectile && pending.projectile->sourceKind == 1
+                            && pending.projectile->source == itemUse.sourceId && pending.projectile->effectSource
+                            && pending.combat->actors[0][9][2] == contacted.combat->actors[0][9][2],
+                            "WhenUsed launch failed to retain item identity without magicka cost");
+                        const auto launchedEffect = itemService.projectCombatEvents(itemPlayers, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick), launch.get());
+                        require(launchedEffect && launchedEffect->magicEvents().size() == 1
+                            && launchedEffect->magicEvents().front().selfHealthDelta > 0
+                            && pending.combat->actors[0][8][2] > contacted.combat->actors[0][8][2]
+                            && launchedEffect->magicEvents().front().targetHealthDelta == 0,
+                            "WhenUsed Self effect was not separated from pending Target damage");
+                        require(launch->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "WhenUsed launch did not commit");
+                        auto unknownEffect = candidate;
+                        const size_t effectOffset = size_t(pending.inventory.data()
+                            - reinterpret_cast<const char*>(candidate.data())) - 56;
+                        unknownEffect[effectOffset] ^= std::byte{1};
+                        bool rejectedEffect = false;
+                        try { InventoryHost invalidItemFlight(descriptor, testContentManifest(), *registry, *crypto,
+                            unknownEffect); }
+                        catch (const std::invalid_argument&) { rejectedEffect = true; }
+                        require(rejectedEffect, "Unknown saved enchantment source installed on recovery");
+                        const auto charged = itemService.projectInventory(itemPlayers, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                        const auto spent = std::ranges::find(charged->playerInventory.front().stacks,
+                            item->stackId, &CanonicalItemStack::stackId);
+                        require(spent != charged->playerInventory.front().stacks.end()
+                            && std::bit_cast<float>(spent->enchantmentCharge) >= 0
+                            && std::bit_cast<float>(spent->enchantmentCharge) < 20,
+                            "WhenUsed item charge was not installed with projectile");
+                        require(!itemService.prepareMagicUse(itemPlayers, proposal(itemUse), id<ServerTick>(castTick + 1)),
+                            "Duplicate WhenUsed request entered during pending flight");
+                        InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                        auto& flight = resumed.service(); flight.synchronizeCells(itemPlayers);
+                        const auto durableCharge = flight.projectInventory(itemPlayers, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                        const auto restoredItem = std::ranges::find(durableCharge->playerInventory.front().stacks,
+                            item->stackId, &CanonicalItemStack::stackId);
+                        require(restoredItem != durableCharge->playerInventory.front().stacks.end()
+                            && restoredItem->enchantmentCharge == spent->enchantmentCharge,
+                            "Flight restart restored pre-launch item charge");
+                        bool finished = false;
+                        for (uint64_t time = castTick + 1; time < castTick + 90 && !finished; ++time)
+                        {
+                            auto step = flight.prepareNativeTick(itemPlayers, id<ServerTick>(time), 1.f/30, {});
+                            const auto alice = flight.projectCombatEvents(itemPlayers, id<SessionId>(1),
+                                id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                            const auto bob = flight.projectCombatEvents(itemPlayers, id<SessionId>(2),
+                                id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                            require(step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "WhenUsed projectile flight failed to commit");
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(
+                                flight.inventoryImage().data()), flight.inventoryImage().size()});
+                            finished = !state.projectile;
+                            if (finished)
+                            {
+                                require(alice && bob && alice->magicEvents().size() == 1
+                                    && std::ranges::equal(alice->magicEvents(), bob->magicEvents())
+                                    && alice->magicEvents().front().sourceKind == MagicUseSourceKind::EnchantedItem
+                                    && alice->magicEvents().front().castSucceeded == !obstructed
+                                    && (obstructed ? state.combat->actors[2][8][2] == contacted.combat->actors[2][8][2]
+                                        : state.combat->actors[2][8][2] < contacted.combat->actors[2][8][2]),
+                                    "WhenUsed contact or miss diverged across clients");
+                                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto,
+                                    std::vector<std::byte>(flight.inventoryImage().begin(), flight.inventoryImage().end()));
+                                restored.service().synchronizeCells(reconnected);
+                                const auto a = restored.service().projectCombat(reconnected, id<SessionId>(1),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time));
+                                const auto b = restored.service().projectCombat(reconnected, id<SessionId>(2),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time));
+                                require(a && b && std::ranges::equal(a->actors(), b->actors())
+                                    && a->actors().front().health == state.combat->actors[2][8][2],
+                                    "Two-client WhenUsed reconnect lost durable outcome");
+                            }
+                        }
+                        require(finished, "WhenUsed projectile never resolved");
+                    };
+                    runItem(false);
+                    runItem(true);
                 }
                 std::cout << "instant spell=OpenMW mixed restore cost=atomic clients=two restart=reconnected\n";
                 return;
