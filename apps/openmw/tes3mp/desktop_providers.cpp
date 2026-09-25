@@ -1137,8 +1137,11 @@ namespace TES3MP::OpenMWAdapter
                     for (const auto& [slot, record] : records)
                         if (slot != int(EquipmentSlot::Ammunition)) appearance.push_back(record);
                     auto remote=nativeRemotes.find(motion->placement);
+                    const auto corpseId = ContainerId::fromValue(motion->placement);
+                    const bool presentedCorpse = corpseId && observedContainerRevisions.contains(*corpseId);
                     if (remote != nativeRemotes.end() && (remote->second.cell != ptr.getCell()
-                        || remote->second.equipment != appearance || !remote->second.actor->ptr().getRefData().getBaseNode()))
+                        || (!presentedCorpse && remote->second.equipment != appearance)
+                        || !remote->second.actor->ptr().getRefData().getBaseNode()))
                     { world->enable(remote->second.source); nativeRemotes.erase(remote); remote=nativeRemotes.end(); }
                     if (remote == nativeRemotes.end())
                     {
@@ -2170,6 +2173,10 @@ namespace TES3MP::OpenMWAdapter
         {
             if (!mapping || ptr.isEmpty())
                 return std::nullopt;
+            for (const auto& [placement, remote] : nativeRemotes)
+                if (remote.actor && remote.actor->ptr() == ptr)
+                    if (const auto id = ContainerId::fromValue(placement); id && observedContainerRevisions.contains(*id))
+                        return id;
             const auto refNum = ptr.getCellRef().getRefNum();
             const auto found = std::ranges::find_if(mapping->containers, [&](const auto& container) {
                 return container.refNumIndex == refNum.mIndex
@@ -2337,6 +2344,17 @@ namespace TES3MP::OpenMWAdapter
                                     << " stacks=" << player.stacks.size() << " equipped=" << player.equipment.size();
             }
 
+            // A reconnect can deliver the corpse baseline before any local
+            // native actor replica exists. Materialize equipment/motion first
+            // so its moved inventory owner resolves to the same replica.
+            if (std::ranges::any_of(containers, [&](const auto& baseline) {
+                    return (baseline.container.value() & MWWorld::PlacedRefTag)
+                        && !nativeRemotes.contains(baseline.container.value());
+                }))
+            {
+                const auto applied = applyPublicEquipment(equipment, receivedAt);
+                if (applied != ProviderResult::Accepted) return applied;
+            }
             std::map<ContainerId, ContainerRevision> desiredContainers;
             for (const auto& baseline : containers)
             {
@@ -2356,7 +2374,16 @@ namespace TES3MP::OpenMWAdapter
                     ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
                     if (!ptr.isEmpty() && ptr.getCell() != resolveCell(baseline.cell, *mapping))
                         return ProviderResult::ContentMappingFailed;
-                    if (!ptr.isEmpty())
+                    const auto remote = nativeRemotes.find(baseline.container.value());
+                    if (remote != nativeRemotes.end())
+                    {
+                        // A moving NPC's source placement stays at its authored
+                        // position; its corpse inventory belongs to the replica.
+                        if (ptr.isEmpty() || remote->second.source != ptr || !remote->second.actor)
+                            return ProviderResult::ContentMappingFailed;
+                        ptr = remote->second.actor->ptr();
+                    }
+                    else if (!ptr.isEmpty())
                     {
                         const auto& p = ptr.getCellRef().getPosition().pos;
                         for (float v : p)
@@ -2372,9 +2399,10 @@ namespace TES3MP::OpenMWAdapter
                 if (ptr.isEmpty())
                     continue;
                 auto& store = ptr.getClass().getContainerStore(ptr);
-                // Actor baselines currently cover content-defined corpses only.
-                // A live local actor must not be converted into a loot container.
-                if (ptr.getClass().isActor() && !ptr.getClass().getCreatureStats(ptr).isDead())
+                // Content-defined corpses and the selected native NPC may own
+                // loot. A live local actor must not become a loot container.
+                if (ptr.getClass().isActor() && !nativeRemotes.contains(baseline.container.value())
+                    && !ptr.getClass().getCreatureStats(ptr).isDead())
                     return ProviderResult::PresentationFailed;
                 if (!baseline.equipment.empty() && !ptr.getClass().hasInventoryStore(ptr))
                     return ProviderResult::ContentMappingFailed;
@@ -2417,6 +2445,15 @@ namespace TES3MP::OpenMWAdapter
                 // callbacks; an already-open loot window still needs a refresh.
                 MWBase::Environment::get().getWindowManager()->inventoryUpdated(ptr);
                 observedContainerRevisions.insert_or_assign(baseline.container, baseline.revision);
+            }
+            for (const auto& [id, revision] : observedContainerRevisions)
+            {
+                (void)revision;
+                if (desiredContainers.contains(id)) continue;
+                const auto remote = nativeRemotes.find(id.value());
+                if (remote == nativeRemotes.end()) continue;
+                world->enable(remote->second.source);
+                nativeRemotes.erase(remote);
             }
             std::erase_if(observedContainerRevisions,
                 [&](const auto& value) { return !desiredContainers.contains(value.first); });

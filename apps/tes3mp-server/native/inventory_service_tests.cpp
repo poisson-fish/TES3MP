@@ -4120,7 +4120,8 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat)
+        const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
+        bool lifecycle)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4291,7 +4292,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (combat ? "native-inventory-24\nmanifest "
+            std::ofstream out(descriptor); out << (lifecycle ? "native-inventory-25\nmanifest "
+                : combat ? "native-inventory-24\nmanifest "
                 : melee ? "native-inventory-22\nmanifest "
                 : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
@@ -4301,6 +4303,7 @@ namespace TES3MP::Native::Testing
                 << "npc \"npc_door_actor\" " << std::quoted(settings.string())
                 << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
+            if (lifecycle) out << "respawn 3\n";
         }
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
@@ -4358,8 +4361,9 @@ namespace TES3MP::Native::Testing
             {
                 auto corrupt = committed;
                 const auto parts = readActorCampaign({reinterpret_cast<const char*>(corrupt.data()), corrupt.size()});
-                const auto offset = size_t(parts.inventory.data() - reinterpret_cast<const char*>(corrupt.data()))
-                    - (1 + 3 * ActorCampaignCombat::StatCount * 5) * 8;
+                const auto offset = lifecycle ? size_t(56 + 8 + parts.melee->identity.size() + 7 * 8)
+                    : size_t(parts.inventory.data() - reinterpret_cast<const char*>(corrupt.data()))
+                        - (1 + 3 * ActorCampaignCombat::StatCount * 5) * 8;
                 std::fill_n(corrupt.begin() + offset, 8, std::byte{});
                 bool invalidRng = false;
                 try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, corrupt); }
@@ -4487,7 +4491,10 @@ namespace TES3MP::Native::Testing
                 const auto parts = readActorCampaign({reinterpret_cast<const char*>(lowSkill.data()), lowSkill.size()});
                 const size_t combatEnd = size_t(parts.inventory.data() - reinterpret_cast<const char*>(lowSkill.data()));
                 const size_t skill = 11 + ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade);
-                const size_t base = combatEnd - ActorCampaignCombat::StatCount * 5 * 8 + skill * 5 * 8;
+                const size_t base = lifecycle
+                    ? 56 + 8 + parts.melee->identity.size() + 7 * 8 + 8
+                        + 2 * ActorCampaignCombat::StatCount * 5 * 8 + skill * 5 * 8
+                    : combatEnd - ActorCampaignCombat::StatCount * 5 * 8 + skill * 5 * 8;
                 std::fill_n(lowSkill.begin() + base, 8, std::byte{});
                 InventoryHost missRollHost(descriptor, testContentManifest(), *registry, *crypto, lowSkill);
                 auto& missRoll = missRollHost.service(); missRoll.synchronizeCells(authority);
@@ -4601,6 +4608,9 @@ namespace TES3MP::Native::Testing
                     if (dead) deathTick = time;
                 }
                 require(dead, "Authenticated player attacks never killed the shared NPC");
+                const auto firstLifeItems = lifecycle
+                    ? dynamic_cast<InventoryService&>(service).selectedNpcItemIdentities()
+                    : std::vector<ESM::RefNum>{};
                 const auto corpseImage = image();
                 InventoryHost corpseRestart(descriptor, testContentManifest(), *registry, *crypto, corpseImage);
                 auto& corpse = corpseRestart.service(); corpse.synchronizeCells(authority);
@@ -4662,6 +4672,100 @@ namespace TES3MP::Native::Testing
                     id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
                 require(resumedCombat && resumedCombat->actors().size() == 1 && resumedCombat->actors()[0].dead,
                     "Reconnect lost the NPC death presentation state");
+                if (lifecycle)
+                {
+                    const auto deadImage = std::vector(lootRestart.service().inventoryImage().begin(),
+                        lootRestart.service().inventoryImage().end());
+                    const auto deadState = readActorCampaign({reinterpret_cast<const char*>(deadImage.data()), deadImage.size()});
+                    require(deadState.life && deadState.life->generation == 1
+                        && deadState.life->respawnTick == deathTick + 3
+                        && deadState.life->deaths.size() == 1
+                        && deadState.life->deaths[0] == ActorDeathEvent{1, deathTick, 2},
+                        "NPC death lost its life, deadline or attributed event");
+                    auto invalidHistory = deadImage;
+                    const auto killerOffset = size_t(deadState.inventory.data()
+                        - reinterpret_cast<const char*>(deadImage.data())) - 8;
+                    std::fill_n(invalidHistory.begin() + killerOffset, 8, std::byte{});
+                    bool rejectedHistory = false;
+                    try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalidHistory); }
+                    catch (const std::invalid_argument&) { rejectedHistory = true; }
+                    require(rejectedHistory && std::ranges::equal(deadImage, lootRestart.service().inventoryImage()),
+                        "Malformed attributed death installed or changed the surviving corpse");
+                    auto waiting = lootRestart.service().prepareNativeTick(reconnected,
+                        id<ServerTick>(deathTick + 2), 1.f/30, {});
+                    require(waiting->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Dead NPC deadline did not survive recovery");
+                    auto respawning = lootRestart.service().prepareNativeTick(reconnected,
+                        id<ServerTick>(deathTick + 3), 1.f/30, {});
+                    const auto stagedLife = lootRestart.service().projectCombat(reconnected, id<SessionId>(2),
+                        id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3), respawning.get());
+                    const auto stagedItems = lootRestart.service().projectInventory(reconnected, id<SessionId>(2),
+                        id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3), respawning.get());
+                    require(stagedLife && stagedLife->actors().size() == 1 && !stagedLife->actors()[0].dead
+                        && stagedItems && stagedItems->containers.empty() && stagedItems->equipment
+                        && stagedItems->equipment->actors.size() == 1,
+                        "Respawn candidate did not project restored life and closed corpse together");
+                    std::vector<std::byte> respawnCandidate;
+                    require(respawning->commit([&](auto bytes) { respawnCandidate.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && readActorCampaign({reinterpret_cast<const char*>(lootRestart.service().inventoryImage().data()),
+                            lootRestart.service().inventoryImage().size()}).life->generation == 1,
+                        "Rejected respawn changed the old corpse life");
+                    require(respawning->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && std::ranges::equal(respawnCandidate, lootRestart.service().inventoryImage()),
+                        "NPC actor/inventory respawn did not commit atomically");
+                    const auto revived = readActorCampaign({reinterpret_cast<const char*>(respawnCandidate.data()),
+                        respawnCandidate.size()});
+                    require(revived.life && revived.life->generation == 2 && revived.life->bornTick == deathTick + 3
+                        && !revived.life->respawnTick && revived.life->deaths == deadState.life->deaths
+                        && revived.combat && revived.combat->actors[2] == revived.life->spawnStats,
+                        "NPC respawn lost its generation, history or restored stats");
+                    const auto fresh = lootRestart.service().projectInventory(reconnected, id<SessionId>(2),
+                        id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3));
+                    auto staleTake = take;
+                    staleTake.sessionGeneration = id<SessionGeneration>(2);
+                    require(fresh && fresh->containers.empty() && fresh->equipment
+                        && fresh->equipment->actors.size() == 1
+                        && dynamic_cast<InventoryService&>(lootRestart.service()).selectedNpcWeaponCondition().value_or(0) > 0
+                        && !lootRestart.service().prepareInventory(reconnected, bind(reconnected, staleTake).proposal()),
+                        "Respawn left corpse access open or accepted stale loot");
+                    const auto secondLifeItems = dynamic_cast<InventoryService&>(lootRestart.service())
+                        .selectedNpcItemIdentities();
+                    require(secondLifeItems.size() == firstLifeItems.size()
+                        && std::ranges::none_of(secondLifeItems, [&](auto item) {
+                            return std::ranges::find(firstLifeItems, item) != firstLifeItems.end(); }),
+                        "NPC respawn did not replace the complete inventory with fresh identities");
+                    require(fresh->equipment->motions.size() == 1, "Revived NPC motion identity missing");
+                    const auto* resumedAttacker = reconnected.findPlayer(id<PlayerId>(2));
+                    ClientMeleeAttackCommand staleAttack{id<SessionId>(2),id<SessionGeneration>(2),
+                        CommandSequence::initial(),id<CommandId>(deathTick + 4),
+                        id<CanonicalRevision>(deathTick + 4),
+                        id<ActorId>(fresh->equipment->motions[0].placement),id<ServerTick>(deathTick + 1),
+                        CombatRevision::initial(),CombatRevision::initial(),MeleeAttackType::Chop,1.f};
+                    const ServerCommandProposal staleProposal(id<SessionId>(2),id<SessionGeneration>(2),
+                        CommandSequence::initial(),id<CommandId>(deathTick + 4),
+                        id<CanonicalRevision>(deathTick + 4),
+                        EntityPrecondition(resumedAttacker->entityId(),resumedAttacker->entityRevision(),
+                            resumedAttacker->authorityEpoch()),MeleeAttackCommandProposal(staleAttack));
+                    require(!lootRestart.service().prepareMeleeAttack(reconnected, staleProposal,
+                        id<ServerTick>(deathTick + 4)), "Previous-life attack reached the revived NPC");
+                    staleAttack.sourceServerTick = id<ServerTick>(deathTick + 4);
+                    const ServerCommandProposal staleRevisionProposal(id<SessionId>(2),id<SessionGeneration>(2),
+                        CommandSequence::initial(),id<CommandId>(deathTick + 4),
+                        id<CanonicalRevision>(deathTick + 4),
+                        EntityPrecondition(resumedAttacker->entityId(),resumedAttacker->entityRevision(),
+                            resumedAttacker->authorityEpoch()),MeleeAttackCommandProposal(staleAttack));
+                    require(!lootRestart.service().prepareMeleeAttack(reconnected, staleRevisionProposal,
+                        id<ServerTick>(deathTick + 4)), "Previous-life target revision reached the revived NPC");
+                    try
+                    {
+                        InventoryHost revivedRestart(descriptor, testContentManifest(), *registry, *crypto, respawnCandidate);
+                        require(std::ranges::equal(respawnCandidate, revivedRestart.service().inventoryImage()),
+                            "NPC new life changed across restart");
+                    }
+                    catch (const std::exception& error)
+                    { throw std::runtime_error(std::string("NPC new life restart: ") + error.what()); }
+                }
                 InventoryHost routedHost(descriptor, testContentManifest(), *registry, *crypto, atContact);
                 auto& routedService = routedHost.service(); routedService.synchronizeCells(authority);
                 NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);

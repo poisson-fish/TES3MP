@@ -223,6 +223,23 @@ namespace TES3MP::Native
         std::optional<EquippedWeaponCondition> equippedWeaponCondition(size_t owner) const;
         // Called only after the enclosing actor image has been durably accepted.
         void installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept;
+        class PreparedRespawn
+        {
+            friend class EquipmentRuntime;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit PreparedRespawn(std::unique_ptr<State> state);
+        public:
+            ~PreparedRespawn();
+            std::span<const char> image() const;
+            size_t owner() const;
+            const PlainEquipmentValues& values() const;
+            size_t revision() const;
+        };
+        // Rebuild one placed actor's starting inventory with fresh item identities.
+        // The caller persists image() with the actor life and frame before install.
+        std::unique_ptr<PreparedRespawn> prepareRespawn(size_t owner, const PlainEquipmentValues& baseline);
+        void installRespawn(PreparedRespawn& prepared) noexcept;
         class PreparedDoor
         {
             friend class EquipmentRuntime;

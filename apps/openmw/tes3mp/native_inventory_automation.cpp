@@ -22,6 +22,8 @@
 #include <map>
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <osgDB/WriteFile>
 
 #include <stdexcept>
@@ -30,7 +32,7 @@ namespace TES3MP::OpenMWAdapter
 {
     namespace
     {
-        // The capture resolves the server's placed container (barrel or chest),
+        // The capture resolves the server's placed container or corpse,
         // real GUI models and their click/count/drop delegates. No inventory command
         // or local gameplay mutation is synthesized by the evidence driver.
         MWWorld::Ptr placedContainer(ContainerId id)
@@ -41,12 +43,22 @@ namespace TES3MP::OpenMWAdapter
             if (!expected) return result;
             auto* cell = MWBase::Environment::get().getWorldScene()->getCurrentCell();
             if (cell)
+            {
                 cell->forEachType<ESM::Container>([&](const MWWorld::Ptr& ptr) {
                     const auto ref = ptr.getCellRef().getRefNum();
                     if (ref == *expected)
                         result = ptr;
                     return result.isEmpty();
                 });
+                cell->forEachType<ESM::NPC>([&](const MWWorld::Ptr& ptr) {
+                    if (ptr.getCellRef().getRefNum() == *expected) result = ptr;
+                    return result.isEmpty();
+                });
+                cell->forEachType<ESM::Creature>([&](const MWWorld::Ptr& ptr) {
+                    if (ptr.getCellRef().getRefNum() == *expected) result = ptr;
+                    return result.isEmpty();
+                });
+            }
             return result;
         }
 
@@ -364,16 +376,34 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal activation focus differs from requested record");
             world->getPlayer().activate();
         }
+        else if (action == "attack")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal attack requires game focus");
+            std::vector<MWWorld::Ptr> targets;
+            mPresentation.appendMeleeTargets(targets);
+            if ((targets.size() != 1 || targets.front().isEmpty()
+                    || !world->getPlayer().interceptMeleeHit(1.f, ESM::Weapon::AT_Chop, targets.front()))
+                && (!mNativeContainerCount || *mNativeContainerCount == 0))
+                throw std::runtime_error("Traversal attack has no live native actor target");
+        }
         else if (action == "open")
         {
             if (!mNativeContainerId) throw std::runtime_error("Traversal shared container not bound");
-            const auto ptr = placedContainer(*mNativeContainerId);
+            auto ptr = placedContainer(*mNativeContainerId);
+            std::vector<MWWorld::Ptr> targets;
+            mPresentation.appendMeleeTargets(targets);
+            if (targets.size() == 1 && !targets.front().isEmpty()
+                && targets.front().getClass().getCreatureStats(targets.front()).isDead())
+                ptr = targets.front();
             if (ptr.isEmpty()) throw std::runtime_error("Traversal shared container missing");
             wm->pushGuiMode(MWGui::GM_Container, ptr);
         }
         else if (action == "takeall")
         {
             if (!wm->containsMode(MWGui::GM_Container)) throw std::runtime_error("Traversal loot window not open");
+            containerWindow()->getItemView()->update();
+            if (containerWindow()->getItemView()->getModel()->getItemCount() == 0)
+                throw std::runtime_error("Traversal corpse GUI has no inventory items");
             auto* button = containerWindow()->getWidget("TakeButton");
             button->eventMouseButtonClick(button);
         }

@@ -77,9 +77,9 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21" && version != "native-inventory-22" && version != "native-inventory-23" && version != "native-inventory-24")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21" && version != "native-inventory-22" && version != "native-inventory-23" && version != "native-inventory-24" && version != "native-inventory-25")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool meleeCampaign = version == "native-inventory-21" || version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24";
+            const bool meleeCampaign = version == "native-inventory-21" || version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25";
             const bool neighborhood = meleeCampaign || version == "native-inventory-20";
             const bool traveler = neighborhood || version == "native-inventory-19";
             const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
@@ -184,6 +184,7 @@ namespace TES3MP::Native
             std::optional<CellId> secondWireCell;
             std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
             std::optional<Navigation> navigation;
+            uint64_t respawnDelayTicks = 27'000;
             size_t areaCount = 2;
             if (streaming)
             {
@@ -228,6 +229,12 @@ namespace TES3MP::Native
                         || !std::isfinite(nav.meleeSpeed) || nav.meleeSpeed <= 0 || nav.meleeSpeed > 100)
                         throw std::invalid_argument("Native melee descriptor invalid");
                 }
+                if (version == "native-inventory-25")
+                {
+                    key("respawn"); in >> respawnDelayTicks;
+                    if (!in || !respawnDelayTicks || respawnDelayTicks > 30ull * 60 * 60 * 24)
+                        throw std::invalid_argument("Native NPC respawn deadline invalid");
+                }
                 if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
                     || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096
                     || (neighborhood ? (areaCount > 9 || nav.cells > 9 || nav.steps > 2)
@@ -251,9 +258,11 @@ namespace TES3MP::Native
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
             binding.mTravelerNeighborhood = neighborhood;
-            binding.mMeleeContact = version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24";
-            binding.mCombatState = version == "native-inventory-23" || version == "native-inventory-24";
-            binding.mCombatResolution = version == "native-inventory-24";
+            binding.mMeleeContact = version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25";
+            binding.mCombatState = version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25";
+            binding.mCombatResolution = version == "native-inventory-24" || version == "native-inventory-25";
+            binding.mNpcLifecycle = version == "native-inventory-25";
+            binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
@@ -271,6 +280,7 @@ namespace TES3MP::Native
                 << navigation->destination[0] << ':' << navigation->destination[1] << ':' << navigation->destination[2] << '\n';
             if (meleeCampaign) semantic << navigation->meleeGroup << ':' << navigation->meleeAttack << ':'
                 << navigation->meleeSpeed << '\n';
+            if (binding.mNpcLifecycle) semantic << "respawn:" << respawnDelayTicks << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,

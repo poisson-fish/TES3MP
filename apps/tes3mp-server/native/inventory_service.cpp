@@ -343,8 +343,27 @@ namespace TES3MP::Native
             if (!mBinding.mStreamExteriors || std::ranges::none_of(mBinding.mContainers,
                     [id](const auto& owner) { return owner.mId.value() == id && owner.mPlacement.has_value(); }))
                 throw std::invalid_argument("Navigating NPC has no authoritative inventory owner");
+            if (mBinding.mNpcLifecycle)
+            {
+                if (!mCombat || mCombat->actors[2][8][2] <= 0 || !mBinding.mNpcRespawnDelayTicks
+                    || mBinding.mNpcRespawnDelayTicks > 30ull * 60 * 60 * 24)
+                    throw std::invalid_argument("Native NPC lifecycle requires a living placed actor and bounded delay");
+                mRespawnInventory = mRuntime.installedValues(mCombatNpcOwner);
+                std::vector<ESM::RefId> ids;
+                for (const auto& object : mRespawnInventory.mObjects)
+                    for (auto ref : {object.mRef.mRefID, object.mRef.mOwner, object.mRef.mSoul,
+                             object.mRef.mFaction, object.mRef.mKey, object.mRef.mTrap})
+                        if (!ref.empty()) ids.push_back(ref);
+                const auto envelope = mRuntime.expectedEnvelope(mRespawnInventory.mActor);
+                ActorCampaignLife life;
+                life.spawnStats = mCombat->actors[2];
+                life.spawnActor = mBinding.mNavigatingActor->image();
+                encodeEquipment(mRespawnInventory, {envelope, mRuntime.mStore, ids, mRuntime.mScriptLocals, true},
+                    life.spawnInventory);
+                mLife = std::move(life);
+            }
             mActorImage = sealActor(mImage, mBinding.mNavigatingActor->image(), mActorTick, mActorVelocity,
-                mMelee, mMeleeTarget, mMeleeContacted, mCombat);
+                mMelee, mMeleeTarget, mMeleeContacted, mCombat, mLife);
             installActorPosition();
         }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
@@ -1063,7 +1082,9 @@ namespace TES3MP::Native
             || (attack.attackType != MeleeAttackType::Chop && attack.attackType != MeleeAttackType::Slash
                 && attack.attackType != MeleeAttackType::Thrust)
             || !std::isfinite(attack.attackStrength) || attack.attackStrength < 0 || attack.attackStrength > 1
-            || attack.sourceServerTick.value() > tick.value() || tick.value() - attack.sourceServerTick.value() > 16)
+            || attack.sourceServerTick.value() > tick.value() || tick.value() - attack.sourceServerTick.value() > 64
+            || (mLife && (attack.sourceServerTick.value() < mLife->bornTick
+                || attack.expectedTargetRevision.value() < mLife->bornTick)))
             return {};
         const size_t owner = actor(player->playerId());
         if (mCombat->actors[owner][8][2] <= 0 || mCombat->actors[2][8][2] <= 0)
@@ -1106,10 +1127,24 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native melee resource binding differs from campaign");
             if (bool(decoded.combat) != mBinding.mCombatState)
                 throw std::invalid_argument("Native combat campaign version differs from binding");
+            if (bool(decoded.life) != mBinding.mNpcLifecycle)
+                throw std::invalid_argument("Native NPC lifecycle campaign version differs from binding");
             size_t headerOffset = 0;
             const auto magic = getAreaWord({reinterpret_cast<const char*>(image.data()), image.size()}, headerOffset);
-            if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic))
+            if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
+                    || magic == LifeActorCampaignMagic))
                 throw std::invalid_argument("Native melee contact campaign version differs from binding");
+            PlainEquipmentValues baseline;
+            if (decoded.life)
+            {
+                const auto envelope = mRuntime.expectedEnvelope(mRuntime.ownerPtr(mCombatNpcOwner).getCellRef().getRefNum());
+                decodeEquipment(decoded.life->spawnInventory,
+                    {envelope, mRuntime.mStore, references, mRuntime.mScriptLocals, true}, baseline);
+                if (baseline.mObjects.size() > PlainEquipmentValues::MaxItems
+                    || decoded.life->spawnStats[8][2] <= 0)
+                    throw std::invalid_argument("Native NPC respawn baseline invalid");
+                (void)mBinding.mNavigatingActor->prepareRestore(decoded.life->spawnActor, actorDoorFrames());
+            }
             auto restoredMelee = mMelee;
             if (decoded.melee) restoredMelee->restore(decoded.melee->state);
             if (decoded.melee && decoded.melee->target
@@ -1122,6 +1157,8 @@ namespace TES3MP::Native
             mMeleeTarget = decoded.melee ? decoded.melee->target : 0;
             mMeleeContacted = decoded.melee && decoded.melee->contact;
             mCombat = decoded.combat;
+            mLife = decoded.life;
+            mRespawnInventory.swap(baseline);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             installActorPosition();
             return;
@@ -1137,17 +1174,20 @@ namespace TES3MP::Native
 
     EquipmentBytes InventoryService::sealActor(std::span<const char> core, std::span<const char> actor,
         uint64_t tick, const std::array<float, 3>& velocity, const std::optional<MeleeAnimation>& melee,
-        uint64_t target, bool contact, const std::optional<ActorCampaignCombat>& combat) const
+        uint64_t target, bool contact, const std::optional<ActorCampaignCombat>& combat,
+        const std::optional<ActorCampaignLife>& life) const
     {
         const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size()
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
         const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8 : 0;
+        const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + 3 * life->deaths.size()) * 8
+            + life->spawnActor.size() + life->spawnInventory.size() : 0;
         if (core.empty() || actor.empty() || actor.size() > 65536
-            || 56 + meleeSize + combatSize + actor.size() > MaximumNativeInventoryImageBytes
-            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - actor.size())
+            || 56 + meleeSize + combatSize + lifeSize + actor.size() > MaximumNativeInventoryImageBytes
+            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, combat ? CombatActorCampaignMagic
+        putAreaWord(result, life ? LifeActorCampaignMagic : combat ? CombatActorCampaignMagic
             : melee ? (mBinding.mMeleeContact ? ContactActorCampaignMagic : MeleeActorCampaignMagic)
             : ActorCampaignMagic);
         putAreaWord(result, core.size()); putAreaWord(result, actor.size()); putAreaWord(result, tick);
@@ -1169,6 +1209,19 @@ namespace TES3MP::Native
             for (const auto& actorStats : combat->actors)
                 for (const auto& stat : actorStats)
                     for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
+        }
+        if (life)
+        {
+            putAreaWord(result, life->generation); putAreaWord(result, life->bornTick);
+            putAreaWord(result, life->respawnTick);
+            for (const auto& stat : life->spawnStats)
+                for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
+            putAreaWord(result, life->spawnActor.size()); putAreaWord(result, life->spawnInventory.size());
+            result.insert(result.end(), life->spawnActor.begin(), life->spawnActor.end());
+            result.insert(result.end(), life->spawnInventory.begin(), life->spawnInventory.end());
+            putAreaWord(result, life->deaths.size());
+            for (const auto& death : life->deaths)
+            { putAreaWord(result, death.life); putAreaWord(result, death.tick); putAreaWord(result, death.killer); }
         }
         result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
         (void)readActorCampaign(result);
@@ -1328,10 +1381,12 @@ namespace TES3MP::Native
         std::unique_ptr<InteriorActorScene::Prepared> actor;
         std::optional<MeleeAnimation> melee;
         std::optional<ActorCampaignCombat> combat;
+        std::optional<ActorCampaignLife> life;
+        std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
         std::optional<MeleeCombatEvent> playerHit;
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<WeaponWear> wear;
-        EquipmentBytes wornCore, wornInventory;
+        EquipmentBytes wornCore, wornInventory, respawnCore;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -1342,17 +1397,21 @@ namespace TES3MP::Native
         ActorTransaction(InventoryService& owner, std::unique_ptr<PreparedNativeInventory> input,
             std::unique_ptr<InteriorActorScene::Prepared> step, std::optional<MeleeAnimation> swing,
             uint64_t selected, bool contacted, std::optional<ActorCampaignCombat> stagedCombat,
+            std::optional<ActorCampaignLife> stagedLife,
+            std::unique_ptr<EquipmentRuntime::PreparedRespawn> stagedRespawn,
             std::optional<MeleeCombatEvent> stagedPlayerHit,
             std::optional<ActorMeleeCombatEvent> stagedActorHit,
             std::vector<WeaponWear> stagedWear, EquipmentBytes core,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
-              combat(std::move(stagedCombat)), playerHit(std::move(stagedPlayerHit)),
+              combat(std::move(stagedCombat)), life(std::move(stagedLife)), respawn(std::move(stagedRespawn)),
+              playerHit(std::move(stagedPlayerHit)),
               actorHit(std::move(stagedActorHit)), wear(std::move(stagedWear)),
               wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
-              tick(time), velocity(motion), diagnostics(report) {}
-        bool changesInventory() const noexcept override { return bool(command) || !wear.empty(); }
+              tick(time), velocity(motion), diagnostics(report)
+        { if (respawn) respawnCore.assign(respawn->image().begin(), respawn->image().end()); }
+        bool changesInventory() const noexcept override { return bool(command) || !wear.empty() || bool(respawn); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
             if (consumed || service.inventoryImage().empty() || before != service.mActorImage
@@ -1367,9 +1426,10 @@ namespace TES3MP::Native
                     const auto retained = readActorCampaign(before).actor;
                     const std::span<const char> candidate(reinterpret_cast<const char*>(inventory.data()), inventory.size());
                     if (!wear.empty()) wornInventory = service.replaceAreaCore(candidate, wornCore);
-                    const auto selected = !wear.empty() ? std::span<const char>(wornInventory) : candidate;
+                    if (respawn) wornInventory = service.replaceAreaCore(candidate, respawn->image());
+                    const auto selected = !wornInventory.empty() ? std::span<const char>(wornInventory) : candidate;
                     sealed = service.sealActor(selected,
-                        actor ? actor->image() : retained, tick, velocity, melee, target, contact, combat);
+                        actor ? actor->image() : retained, tick, velocity, melee, target, contact, combat, life);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -1385,10 +1445,17 @@ namespace TES3MP::Native
                         service.mCoreImage.swap(wornCore);
                         service.mImage.swap(wornInventory);
                     }
+                    if (respawn)
+                    {
+                        service.mRuntime.installRespawn(*respawn);
+                        service.mCoreImage.swap(respawnCore);
+                        service.mImage.swap(wornInventory);
+                    }
                     if (actor) service.mBinding.mNavigatingActor->install(*actor);
                     service.mMelee = std::move(melee);
                     service.mMeleeTarget = target; service.mMeleeContacted = contact;
                     service.mCombat = std::move(combat);
+                    service.mLife = std::move(life);
                     service.mActorTick = tick; service.mActorVelocity = velocity;
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
@@ -1427,8 +1494,12 @@ namespace TES3MP::Native
             playerAttacker = attack->attacker;
             command.reset();
         }
-        if (!mBinding.mDoors.empty()) command = prepareAreaDoor(0, false, players, tick, seconds, std::move(command));
-        else if (!command) command = prepareDoorStep(players, tick, seconds);
+        const bool dueRespawn = mLife && mLife->respawnTick && tick.value() >= mLife->respawnTick && !command;
+        if (!dueRespawn)
+        {
+            if (!mBinding.mDoors.empty()) command = prepareAreaDoor(0, false, players, tick, seconds, std::move(command));
+            else if (!command) command = prepareDoorStep(players, tick, seconds);
+        }
         const auto before = mBinding.mNavigatingActor->snapshot();
         bool active = mBinding.mRetainTraveler && !mBinding.mNavigatingActor->arrived();
         for (const auto& session : players.activeSessions())
@@ -1456,12 +1527,27 @@ namespace TES3MP::Native
         auto after = step ? step->snapshot() : before;
         auto melee = mMelee;
         auto combat = mCombat;
+        auto life = mLife;
+        std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
         std::optional<MeleeCombatEvent> playerHit;
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<WeaponWear> wear;
         EquipmentBytes wornCore;
         uint64_t target = mMeleeTarget;
         bool contact = mMeleeContacted;
+        if (dueRespawn)
+        {
+            if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
+            respawn = mRuntime.prepareRespawn(mCombatNpcOwner, mRespawnInventory);
+            step = mBinding.mNavigatingActor->prepareRestore(life->spawnActor, doors);
+            after = step->snapshot();
+            combat->actors[2] = life->spawnStats;
+            melee = mBinding.mBoundMelee->mAnimation;
+            target = 0; contact = false;
+            ++life->generation;
+            life->bornTick = tick.value();
+            life->respawnTick = 0;
+        }
         if (playerAttack && combat)
         {
             const size_t owner = actor(playerAttacker);
@@ -1523,12 +1609,20 @@ namespace TES3MP::Native
                 victim.getHealth().getCurrent() <= 0};
             if (victim.getHealth().getCurrent() <= 0)
             {
+                if (life)
+                {
+                    if (life->deaths.size() >= ActorCampaignLife::MaximumDeaths
+                        || tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
+                        throw std::invalid_argument("NPC death history or deadline exhausted");
+                    life->deaths.push_back({life->generation, tick.value(), playerAttacker.value()});
+                    life->respawnTick = tick.value() + mBinding.mNpcRespawnDelayTicks;
+                }
                 step.reset();
                 after = before;
                 report.status = Diagnostics::Status::Idle;
             }
         }
-        if (step && melee && (!combat || combat->actors[2][8][2] > 0))
+        if (step && !respawn && melee && (!combat || combat->actors[2][8][2] > 0))
         {
             if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->windUp() >= 1.f)
             {
@@ -1614,10 +1708,10 @@ namespace TES3MP::Native
             }
         }
         std::array<float,3> velocity;
-        for (size_t i=0; i<3; ++i) velocity[i]=(after.mPosition[i]-before.mPosition[i])*30;
+        for (size_t i=0; i<3; ++i) velocity[i]=respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
         if (!wear.empty()) wornCore = stagedWeaponCore(wear, command.get());
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
-            std::move(melee), target, contact, std::move(combat),
+            std::move(melee), target, contact, std::move(combat), std::move(life), std::move(respawn),
             std::move(playerHit), std::move(actorHit),
             std::move(wear), std::move(wornCore),
             tick.value(), velocity, report);
@@ -1653,7 +1747,8 @@ namespace TES3MP::Native
         auto result = project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
             equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr,
             {}, actorState ? &*actorState : nullptr, moving ? std::span<const WeaponWear>(moving->wear) : std::span<const WeaponWear>{},
-            moving && moving->combat ? &*moving->combat : nullptr);
+            moving && moving->combat ? &*moving->combat : nullptr,
+            moving ? moving->respawn.get() : nullptr);
         if (result)
             for (auto& ground : result->groundItems)
             {
@@ -1765,7 +1860,8 @@ namespace TES3MP::Native
         const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world,
         const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area,
         const ActorSceneSnapshot* moving, std::span<const WeaponWear> wear,
-        const ActorCampaignCombat* stagedCombat) const
+        const ActorCampaignCombat* stagedCombat,
+        const EquipmentRuntime::PreparedRespawn* respawn) const
     try
     {
         if (mRuntime.mRestartActor || mRuntime.mFailedClosed) return std::nullopt;
@@ -1775,7 +1871,8 @@ namespace TES3MP::Native
         const auto visibleCell = area.value_or(player->transform().cell());
         const auto index = actor(player->playerId());
         const auto values = [&](size_t owner) {
-            auto state = world ? mRuntime.preparedValues(*world, owner)
+            auto state = respawn && respawn->owner() == owner ? respawn->values()
+                : world ? mRuntime.preparedValues(*world, owner)
                 : equipped ? mRuntime.preparedValues(*equipped, owner)
                 : candidate ? mRuntime.preparedValues(candidate->mTransfer, owner) : mRuntime.installedValues(owner);
             for (const auto& change : wear) if (owner == change.owner)
@@ -1795,7 +1892,8 @@ namespace TES3MP::Native
         for (int slot = 0; slot < InventoryStore::Slots; ++slot)
             if (installed.mSlots[slot].isSet())
                 equipment.push_back({static_cast<EquipmentSlot>(slot), wireId(installed.mSlots[slot])});
-        const auto commandVersion = world ? world->revision() : equipped ? equipped->candidate().mRevision
+        const auto commandVersion = respawn ? respawn->revision()
+            : world ? world->revision() : equipped ? equipped->candidate().mRevision
             : candidate ? candidate->candidate().mRevision : mWorld.getPtrRegistryRevision();
         const auto version = commandVersion + wear.size();
         const InventoryBaselineHeader header{ target, session->sessionGeneration(), tick, revision, 0, 1 };

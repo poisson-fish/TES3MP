@@ -77,6 +77,8 @@ namespace TES3MP::Native
         bool mMeleeContact = false;
         bool mCombatState = false;
         bool mCombatResolution = false;
+        bool mNpcLifecycle = false;
+        uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
         bool mRetainTraveler = false;
@@ -127,11 +129,14 @@ namespace TES3MP::Native
         uint64_t mMeleeTarget = 0;
         bool mMeleeContacted = false;
         std::optional<ActorCampaignCombat> mCombat;
+        std::optional<ActorCampaignLife> mLife;
+        PlainEquipmentValues mRespawnInventory;
         size_t mCombatNpcOwner = 0;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity,
             const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact,
-            const std::optional<ActorCampaignCombat>& combat) const;
+            const std::optional<ActorCampaignCombat>& combat,
+            const std::optional<ActorCampaignLife>& life) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         float meleeReach() const;
@@ -231,6 +236,14 @@ namespace TES3MP::Native
             const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
             return weapon ? std::optional{weapon->mCondition} : std::nullopt;
         }
+        std::vector<ESM::RefNum> selectedNpcItemIdentities() const
+        {
+            std::vector<ESM::RefNum> result;
+            if (!mCombat) return result;
+            for (const auto& item : mRuntime.installedValues(mCombatNpcOwner).mObjects)
+                result.push_back(item.mRef.mRefNum);
+            return result;
+        }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
@@ -259,7 +272,8 @@ namespace TES3MP::Native
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
             const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {},
             const ActorSceneSnapshot* moving = nullptr, std::span<const WeaponWear> wear = {},
-            const ActorCampaignCombat* stagedCombat = nullptr) const;
+            const ActorCampaignCombat* stagedCombat = nullptr,
+            const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
     };
 }
 #endif

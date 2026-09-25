@@ -59,7 +59,7 @@ def trajectory_errors(motions):
     return errors
 
 
-def verify_combat(output, evidence, processes, relay, manifest):
+def verify_combat(output, evidence, processes, relay, manifest, immediate_reconnect=False):
     """One real-loadout NPC swing presented to two desktops over impaired UDP."""
     sequence = dict.fromkeys(evidence, 0)
     finished = set()
@@ -108,7 +108,8 @@ def verify_combat(output, evidence, processes, relay, manifest):
     wait_for(lambda: any(p["id"] == initial[victim]["self"]
                          and abs(p["health"] - samples(victim)[-1]["health"]) < .01
                          for p in samples(other)[-1]["players"]), "peer sees target health")
-    time.sleep(1)
+    if not immediate_reconnect:
+        time.sleep(1)
     before = {role: samples(role)[-1] for role in evidence}
     marker = len(records(evidence[victim]))
     command(victim, "reconnect")
@@ -133,7 +134,102 @@ def verify_combat(output, evidence, processes, relay, manifest):
     report = dict(success=True, scenario="V24 live NPC weapon damage", victim=victim,
                   health_loss=initial[victim]["health"] - before[victim]["health"],
                   reliable_hits={role: hits(role) for role in evidence},
-                  before=before, after=after, relay=asdict(relay.stop()), manifest=manifest,
+                  before=before, after=after, immediate_reconnect=immediate_reconnect,
+                  relay=asdict(relay.stop()), manifest=manifest,
+                  screenshots=[p.name for p in output.glob("*.png")],
+                  profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+
+
+def verify_life_encounter(output, evidence, processes, relay, manifest, maximum_attacks):
+    """Real-loadout desktop attack capture, one corpse transfer and immediate resume."""
+    sequence = dict.fromkeys(evidence, 0)
+    finished = set()
+
+    def samples(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"]
+
+    def inventories(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "traversal_inventory"]
+
+    def wait_for(predicate, description, timeout=35):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = predicate()
+            if result:
+                return result
+            exited = [(name, p.poll()) for name, p in processes.items()
+                      if name not in finished and p.poll() is not None]
+            if exited:
+                raise RuntimeError(f"process exited: {description}: {exited}")
+            time.sleep(.1)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
+        temporary.replace(control)
+        return wait_for(lambda: next((r for r in records(evidence[role])
+                                     if r.get("sequence") == sequence[role]
+                                     and r.get("event") == "traversal_" + action.split()[0]), None), action)
+
+    wait_for(lambda: all(len(poses(path)) >= 20 and len(samples(role)) >= 3
+                         for role, path in evidence.items()), "live actor and combat baselines")
+    for role in evidence:
+        command(role, "screenshot")
+    starting = {role: samples(role)[-1] for role in evidence}
+    actor = poses(evidence["Alice"])[-1]
+    command("Alice", f"pose {actor['x']} {actor['y'] - 55} {actor['z']} 0 0")
+    command("Bob", f"pose {actor['x'] + 35} {actor['y'] - 70} {actor['z']} 0 0")
+    attacks = 0
+    deadline = time.monotonic() + 65
+    while attacks < maximum_attacks and time.monotonic() < deadline and not samples("Alice")[-1]["actors"][0]["dead"]:
+        command("Alice", "attack")
+        attacks += 1
+        time.sleep(.5)
+    wait_for(lambda: all(samples(role)[-1]["actors"][0]["dead"] for role in evidence),
+             "both clients show one NPC death", 10)
+    death = {role: samples(role)[-1] for role in evidence}
+    observed_hits = {role: [hit for sample in samples(role) for hit in sample["player_hits"]]
+                     for role in evidence}
+    if not all(any(hit["died"] for hit in hits) for hits in observed_hits.values()):
+        raise RuntimeError("Reliable attributed killing hit missing on a client")
+    # Reconnect at the death edge, while earlier movement packets can still be in flight.
+    marker = len(records(evidence["Bob"]))
+    command("Bob", "reconnect")
+    wait_for(lambda: any(r.get("event") == "phase8_desktop_status"
+                         and r.get("status") in ("resumed", "resume_failed")
+                         for r in records(evidence["Bob"])[marker:]), "immediate post-death resume", 20)
+    statuses = [r["status"] for r in records(evidence["Bob"])[marker:]
+                if r.get("event") == "phase8_desktop_status"]
+    if "resumed" not in statuses:
+        raise RuntimeError(f"Immediate post-death resume failed: {statuses}")
+    wait_for(lambda: samples("Bob")[-1]["generation"] > death["Bob"]["generation"]
+             and samples("Bob")[-1]["actors"][0]["dead"]
+             and inventories("Bob")[-1]["container_count"] > 0,
+             "resumed corpse baseline")
+    original_corpse = inventories("Bob")[-1]
+    command("Bob", "open")
+    command("Bob", "takeall")
+    wait_for(lambda: inventories("Bob")[-1]["container_count"] == 0
+             and inventories("Bob")[-1]["player_count"] > original_corpse["player_count"],
+             "durable shared corpse loot")
+    wait_for(lambda: inventories("Alice")[-1]["container_count"] == 0,
+             "second client sees emptied corpse")
+    for role in evidence:
+        command(role, "screenshot")
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        if processes[role].returncode:
+            raise RuntimeError(f"{role} did not finish cleanly")
+        finished.add(role)
+    report = dict(success=True, scenario="V25 live NPC death and corpse loot", attacks=attacks,
+                  initial=starting, death=death, reliable_player_hits=observed_hits,
+                  original_corpse=original_corpse, looted=inventories("Bob")[-1],
+                  resume_statuses=statuses, relay=asdict(relay.stop()), manifest=manifest,
                   screenshots=[p.name for p in output.glob("*.png")],
                   profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")
     output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -383,9 +479,9 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     cell = "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 25 if args.life_encounter else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "hlavora sadas" if args.doors else "raflod the braggart"
-    destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 70 385 40"
+    destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
@@ -393,15 +489,18 @@ def run(args):
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
-        f'actors "player" "player"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
+        f'actors "{npc if args.life_encounter else "player"}" "{npc if args.life_encounter else "player"}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
-        + ('processing 1 2\n' if args.traveler or args.combat else '')
-        + ('melee "weapononehand" "chop" 1\n' if args.combat else ''), encoding="utf-8")
+        + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter else '')
+        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter else '')
+        + ('respawn 27000\n' if args.life_encounter else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
     if args.traveler:
         common["spawn_positions"] = "-563200:71680:394240"
+    if args.life_encounter:
+        common["spawn_positions"] = "-563200:-307200:394240"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
                                  join_password_file="join-password.txt", player_identity_file="players.txt")
@@ -420,6 +519,8 @@ def run(args):
             tokens[10:13] = [str((-80 - 80 * index) * 1024), "-204800", "-128000"]
         if args.traveler:
             tokens[10:13] = ["-563200", str((70 + 40 * index) * 1024), "394240"]
+        if args.life_encounter:
+            tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
         identities.append(" ".join(tokens))
@@ -472,8 +573,11 @@ def run(args):
                        "--tes3mp-content-appearance-record=player"]
             start(role, command)
             client_commands[role] = command
+        if args.life_encounter:
+            verify_life_encounter(output, evidence, processes, relay, manifest, args.attack_limit)
+            return
         if args.combat:
-            verify_combat(output, evidence, processes, relay, manifest)
+            verify_combat(output, evidence, processes, relay, manifest, args.immediate_reconnect)
             return
         if args.traveler:
             def restart_clients():
@@ -583,9 +687,14 @@ if __name__ == "__main__":
     parser.add_argument("--doors", action="store_true", help="V18 real-interior door avoidance on two connected clients")
     parser.add_argument("--traveler", action="store_true", help="V20 both clients leave, server restarts mid-trip, clients return")
     parser.add_argument("--combat", action="store_true", help="V24 live NPC weapon hit, impaired two-client presentation and reconnect")
+    parser.add_argument("--immediate-reconnect", action="store_true", help="Reconnect at the live hit convergence edge")
+    parser.add_argument("--life-encounter", action="store_true", help="V25 live NPC kill, corpse loot and immediate reconnect")
+    parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
-    if sum((args.doors, args.traveler, args.combat)) > 1:
-        parser.error("choose --doors, --traveler or --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.leave:
+    if sum((args.doors, args.traveler, args.combat, args.life_encounter)) > 1:
+        parser.error("choose one capture mode")
+    if args.immediate_reconnect and not args.combat:
+        parser.error("--immediate-reconnect requires --combat")
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

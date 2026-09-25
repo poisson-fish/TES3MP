@@ -237,6 +237,12 @@ namespace TES3MP::OpenMWAdapter
             .expectedCombatRevision = *mSecurityCombatRevision };
     }
 
+    std::optional<MeleeAttackCapture> DesktopAutomation::captureMeleeAttack() noexcept
+    {
+        return mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput
+            ? mDesktopInput->captureMeleeAttack() : std::nullopt;
+    }
+
     std::optional<MagicUseCapture> DesktopAutomation::captureMagicUse() noexcept
     {
         if (mRole == DesktopAutomationRole::MagicSpellCaster && !mMagicSubmitted && mMagicPlayer
@@ -619,6 +625,8 @@ namespace TES3MP::OpenMWAdapter
             }
         if (nativeInventoryRole())
         {
+            const auto previousPlayerCount = mNativePlayerCount;
+            const auto previousContainerCount = mNativeContainerCount;
             if (mRole == DesktopAutomationRole::NativeTraversal)
             {
                 mTraversalGround = groundItems;
@@ -645,6 +653,9 @@ namespace TES3MP::OpenMWAdapter
             // reports Resumed. The wire generation is the continuity witness.
             if (player.header.targetSessionGeneration > SessionGeneration::initial())
                 mNativeInventoryAfterResume = true;
+            if (mRole == DesktopAutomationRole::NativeTraversal
+                && (mNativePlayerCount != previousPlayerCount || mNativeContainerCount != previousContainerCount))
+                writeNativeInventory("traversal_inventory");
             return applied;
         }
         if (mRole == DesktopAutomationRole::MagicSpellCaster)

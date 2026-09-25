@@ -183,10 +183,14 @@ namespace TES3MP::OpenMWAdapter
         bool preserves(const LatestWinsSnapshot& snapshot, SessionGeneration generation, const ResumeContinuity& prior)
         {
             const auto current = continuity(snapshot);
+            // Commands already in flight may commit after the last snapshot
+            // seen by the old connection. Resume must preserve identity and
+            // never roll back its entity or command acknowledgement.
             return current && snapshot.header().targetSessionGeneration() == generation
                 && current->session == prior.session && current->player == prior.player
-                && current->entity == prior.entity && current->revision == prior.revision
-                && current->acknowledged == prior.acknowledged;
+                && current->entity == prior.entity && current->revision >= prior.revision
+                && (!prior.acknowledged || (current->acknowledged
+                    && *current->acknowledged >= *prior.acknowledged));
         }
 
         bool preservesDialogueChoice(const LatestWinsSnapshot& snapshot, SessionGeneration generation,

@@ -63,6 +63,7 @@ namespace TES3MP::OpenMWAdapter
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
+        std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
         std::optional<MagicUseCapture> captureMagicUse() noexcept override;
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
         void clearSessionState() noexcept override;

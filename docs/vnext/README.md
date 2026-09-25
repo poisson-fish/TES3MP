@@ -3,8 +3,8 @@
 Build cooperative multiplayer OpenMW for compatible modpacks, including Tamriel
 Rebuilt. Players explore and fight together and complete campaigns independently;
 another's actions or absence must not permanently block their opportunities.
-NPC respawn and personal progression remain targets. Clients retain OpenMW
-graphics and visual mods.
+Personal progression remains a target. Clients retain OpenMW graphics and
+visual mods.
 
 ## Chosen route
 
@@ -24,9 +24,9 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking remains engine-independent. M4 now has bounded native travel, weapon
-hits, death and corpse loot. [CURRENT.md](CURRENT.md) distinguishes synthetic
-checks from live evidence and names the next action. Migrate in slices
+Networking remains engine-independent. M4 has bounded native travel, weapon
+hits, death, corpse loot and one NPC's respawn. [CURRENT.md](CURRENT.md)
+distinguishes synthetic checks from live evidence and names the next action. Migrate in slices
 with one canonical writer.
 
 ## Product boundaries

@@ -603,4 +603,98 @@ namespace TES3MP::Native
         install();
         phase.set(Phase::Retirement);
     }
+
+    struct EquipmentRuntime::PreparedRespawn::State
+    {
+        EquipmentRuntime* runtime;
+        size_t owner;
+        size_t beforeRevision;
+        ESM::RefNum counter;
+        std::unique_ptr<RestoredPlainEquipment> restored;
+        ContainerStore* candidate;
+        PtrRegistry::Index registry;
+        std::vector<ContainerStoreIterator> slots;
+        ContainerStoreIterator selected;
+        EquipmentBytes image;
+        PlainEquipmentValues values;
+        State(EquipmentRuntime& ownerRuntime, size_t ownerIndex, ContainerStore& live)
+            : runtime(&ownerRuntime), owner(ownerIndex), beforeRevision(ownerRuntime.mWorld.getPtrRegistryRevision()),
+              slots(InventoryStore::Slots, live.end()), selected(live.end()) {}
+    };
+    EquipmentRuntime::PreparedRespawn::PreparedRespawn(std::unique_ptr<State> state) : mState(std::move(state)) {}
+    EquipmentRuntime::PreparedRespawn::~PreparedRespawn() = default;
+    std::span<const char> EquipmentRuntime::PreparedRespawn::image() const { return mState->image; }
+    size_t EquipmentRuntime::PreparedRespawn::owner() const { return mState->owner; }
+    const PlainEquipmentValues& EquipmentRuntime::PreparedRespawn::values() const { return mState->values; }
+    size_t EquipmentRuntime::PreparedRespawn::revision() const { return mState->beforeRevision + 1; }
+
+    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareRespawn(
+        size_t owner, const PlainEquipmentValues& baseline)
+    {
+        if (!mConnected || mRestartActor || mFailedClosed || owner < 2 || owner >= ownerCount()
+            || !inventoryStorage(owner) || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
+            throw std::invalid_argument("NPC respawn owner or runtime invalid");
+        const auto actorId = ownerPtr(owner).getCellRef().getRefNum();
+        baseline.validate(mStore, actorId, mScriptLocals.get());
+        auto replacement = baseline;
+        auto counter = mWorld.getLastGeneratedRefNum();
+        if (counter.mContentFile != -1 || replacement.mObjects.size() > UINT32_MAX - counter.mIndex)
+            throw std::invalid_argument("NPC respawn item identity counter exhausted");
+        std::map<ESM::RefNum, ESM::RefNum> identities;
+        for (auto& object : replacement.mObjects)
+        {
+            const auto prior = object.mRef.mRefNum;
+            const ESM::RefNum fresh{++counter.mIndex, -1};
+            identities.emplace(prior, fresh);
+            object.mRef.mRefNum = fresh;
+        }
+        for (auto& slot : replacement.mSlots)
+            if (slot.isSet()) slot = identities.at(slot);
+        if (replacement.mSelected.isSet()) replacement.mSelected = identities.at(replacement.mSelected);
+        replacement.mLastGenerated = counter;
+        EquipmentSessionValues values{{installedValues(0), installedValues(1)},
+            mWorld.getPtrRegistryRevision() + 1};
+        for (size_t i = 2; i < ownerCount(); ++i)
+            values.mContainers.push_back(i == owner ? replacement : installedValues(i));
+        auto& live = storage(owner);
+        auto staged = std::make_unique<PreparedRespawn::State>(*this, owner, live);
+        staged->counter = counter;
+        staged->values = replacement;
+        encodeSession(std::move(values), staged->image);
+        staged->restored = std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
+            replacement, mStore, actorId, mScriptLocals));
+        auto& candidate = staged->restored->installationStorage(mStore, actorId, counter);
+        staged->candidate = &candidate;
+        staged->registry = mWorld.mPtrRegistry.mIndex;
+        for (const auto& object : installedValues(owner).mObjects)
+            staged->registry.erase(object.mRef.mRefNum);
+        candidate.forEachStored([&](auto& node, auto it) {
+            it.mContainer = &live;
+            Ptr ptr(&node, nullptr);
+            ptr.mContainerStore = &live;
+            const auto id = node.mRef.getRefNum();
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (id == replacement.mSlots[slot]) staged->slots[slot] = it;
+            if (id == replacement.mSelected) staged->selected = it;
+            if (!staged->registry.emplace(id, ptr).second)
+                throw std::invalid_argument("NPC respawn item identity collision");
+        });
+        if (staged->registry.size() > registryBound())
+            throw std::invalid_argument("NPC respawn registry bound exceeded");
+        return std::unique_ptr<PreparedRespawn>(new PreparedRespawn(std::move(staged)));
+    }
+
+    void EquipmentRuntime::installRespawn(PreparedRespawn& prepared) noexcept
+    {
+        auto& staged = *prepared.mState;
+        assert(staged.runtime == this && staged.beforeRevision == mWorld.getPtrRegistryRevision());
+        auto& live = storage(staged.owner);
+        installStorage(live, *staged.candidate, true);
+        auto& equipped = *inventoryStorage(staged.owner);
+        std::copy(staged.slots.begin(), staged.slots.end(), equipped.mSlots.begin());
+        equipped.mSelectedEnchantItem = staged.selected;
+        mWorld.mPtrRegistry.mIndex.swap(staged.registry);
+        mWorld.mPtrRegistry.mRevision = staged.beforeRevision + 1;
+        mWorld.mPtrRegistry.mLastGenerated = staged.counter;
+    }
 }

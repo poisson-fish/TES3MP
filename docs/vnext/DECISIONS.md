@@ -1,7 +1,7 @@
 # Durable decisions
 
-CURRENT.md records implementation. M4 runtime decisions are approved; respawn tuning
-and script-scoping proposals remain labeled. Replace superseded rules; append no history.
+CURRENT.md records implementation. M4 runtime decisions are approved;
+script-scoping proposals remain labeled. Replace superseded rules; append no history.
 
 ## Product, authority and reuse
 
@@ -124,17 +124,17 @@ loss of another character's progression is not. Personal campaign state primaril
 owns journals, choices, relationships, faction progress, rewards and script history.
 Whole private campaigns are not the default response to an NPC death.
 
-**Lifecycle contract (M4).** Design stable placement/life generations, attributed
-death events, corpse inventories and respawn deadlines surviving unload/restart from
-the start.
-Old requests cannot affect new lives. OpenMW supplies origin/reconstruction data;
-authored corpses, summons, scripted spawns and deleted placements must not become
-permanent spawn points. M4 records causal events; M5 owns personal quest credit.
+**Lifecycle contract (M4).** Stable placement/life generations, attributed death
+events, corpse inventories and deadlines survive unload/restart. Old requests
+cannot affect new lives. OpenMW supplies reconstruction data; authored corpses,
+summons, scripted spawns and deleted placements are not permanent spawn points.
+M4 records causal events; M5 owns personal quest credit.
 
-**Respawn policy proposal:** configurable 15-minute real-time delay for initially
-living content-placed NPCs, including mod placements regardless of single-player
-respawn flags. Delay tuning remains separate from lifecycle identity/persistence;
-game-time skips cannot accelerate deadlines. No NPC list.
+**V25 deadline rule:** one initially living content-placed NPC respawns after a
+descriptor-bound delay in authoritative 30 Hz ticks (the capture uses 27,000,
+or 15 minutes while the server runs). Game-time skips and downtime do not advance it. Actor and
+inventory restore together with fresh item identities. Wider spawn and tuning
+policy awaits evidence.
 
 Separate three kinds of state:
 
@@ -151,7 +151,7 @@ loot is an economy choice; quest rewards remain one-time. Camping can still dela
 access indefinitely and needs a separate fairness policy.
 
 [Stock NPC respawn](../../apps/openmw/mwclass/npc.cpp) checks flags/delays and restores
-actor data/placement; multiplayer respawn is unimplemented.
+actor data/placement; V25 uses bounded placement and its own durable deadline.
 [Death counting](../../apps/openmw/mwmechanics/actors.cpp) aggregates by record ID;
 quest-facing history needs character/participation context. A keeps credit through
 revival; B can earn their own later. Define party, summon, environmental and pre-quest
