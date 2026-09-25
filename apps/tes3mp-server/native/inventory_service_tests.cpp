@@ -4147,6 +4147,7 @@ namespace TES3MP::Native::Testing
                 npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
             }
             ESM::Spell restore;
+            ESM::Spell mixedRestore;
             if (spell)
             {
                 restore.blank();
@@ -4156,6 +4157,15 @@ namespace TES3MP::Native::Testing
                 restore.mData.mCost = 1;
                 restore.mEffects.populate({{ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 20, 20}});
                 npc.mSpells.mList.push_back(restore.mId);
+                mixedRestore.blank();
+                mixedRestore.mId = ESM::RefId::stringRefId("npc_mixed_restore");
+                mixedRestore.mData.mType = ESM::Spell::ST_Spell;
+                mixedRestore.mData.mFlags = ESM::Spell::F_Always;
+                mixedRestore.mData.mCost = 1;
+                mixedRestore.mEffects.populate({
+                    {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 20, 20},
+                    {ESM::MagicEffect::RestoreMagicka, {}, {}, ESM::RT_Self, 0, 0, 1, 1}});
+                npc.mSpells.mList.push_back(mixedRestore.mId);
             }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
@@ -4164,6 +4174,7 @@ namespace TES3MP::Native::Testing
             if (spell)
             {
                 out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                out.startRecord(ESM::Spell::sRecordId, 0); mixedRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
             }
             ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
             floor.mModel = "placement-floor.osgt";
@@ -4621,7 +4632,30 @@ namespace TES3MP::Native::Testing
                     routedService.inventoryImage().size()});
                 require(deduplicated.combat && deduplicated.combat->actors[0][9][2] == routedState.combat->actors[0][9][2],
                     "Duplicate spell spent magicka twice");
-                std::cout << "instant spell=OpenMW Restore Health cost=atomic clients=two restart=reconnected\n";
+                InventoryHost mixedHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                auto& mixedService = mixedHost.service(); mixedService.synchronizeCells(authority);
+                auto mixedUse = use;
+                mixedUse.sourceId = [] {
+                    uint64_t value = 14695981039346656037ull;
+                    for (unsigned char c : std::string_view("npc_mixed_restore"))
+                        value = (value ^ c) * 1099511628211ull;
+                    return value;
+                }();
+                auto mixedPrepared = mixedService.prepareMagicUse(authority, proposal(mixedUse), id<ServerTick>(castTick));
+                require(bool(mixedPrepared), "Known mixed instant effects did not enter the shared cast path");
+                auto mixedCast = mixedService.prepareNativeTick(authority, id<ServerTick>(castTick), 1.f/30,
+                    std::move(mixedPrepared));
+                require(mixedCast && mixedCast->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Mixed instant effects did not commit atomically");
+                const auto mixedImage = mixedService.inventoryImage();
+                const auto mixedState = readActorCampaign({reinterpret_cast<const char*>(mixedImage.data()), mixedImage.size()});
+                require(mixedState.combat && mixedState.combat->actors[0][8][2] > contacted.combat->actors[0][8][2]
+                    && mixedState.combat->actors[0][9][2] == contacted.combat->actors[0][9][2],
+                    "Mixed instant effects failed to combine healing with net magicka cost");
+                InventoryHost mixedRestart(descriptor, testContentManifest(), *registry, *crypto, mixedImage);
+                require(std::ranges::equal(mixedRestart.service().inventoryImage(), mixedImage),
+                    "Mixed instant effect state changed on restart");
+                std::cout << "instant spell=OpenMW mixed restore cost=atomic clients=two restart=reconnected\n";
                 return;
             }
             if (combat)

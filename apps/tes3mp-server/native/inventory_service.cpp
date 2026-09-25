@@ -2,6 +2,7 @@
 #include "inventory_service.hpp"
 #include "actor_inventory.hpp"
 #include "actor_campaign.hpp"
+#include "magic_runtime.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -9,12 +10,9 @@
 #include <apps/openmw/mwworld/containeradd.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
-#include <apps/openmw/mwmechanics/spelleffects.hpp>
-#include <apps/openmw/mwmechanics/spellutil.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <components/esm3/loadweap.hpp>
 #include <components/esm3/loadspel.hpp>
-#include <components/esm3/loadmgef.hpp>
 #include <components/esm3/statstate.hpp>
 #include <components/misc/rng.hpp>
 #include <tes3mp/melee_combat.hpp>
@@ -1088,9 +1086,9 @@ namespace TES3MP::Native
     public:
         ClientMagicUseCommand use;
         PlayerId caster;
-        const ESM::Spell* spell;
-        SpellTransaction(ClientMagicUseCommand input, PlayerId player, const ESM::Spell* record)
-            : use(std::move(input)), caster(player), spell(record) {}
+        PreparedInstantSpell spell;
+        SpellTransaction(ClientMagicUseCommand input, PlayerId player, PreparedInstantSpell record)
+            : use(std::move(input)), caster(player), spell(std::move(record)) {}
         bool changesInventory() const noexcept override { return false; }
         CanonicalDurabilityResult commit(const NativeInventoryCommit&) noexcept override
         { return CanonicalDurabilityResult::Rejected; }
@@ -1124,23 +1122,9 @@ namespace TES3MP::Native
                 selected = mRuntime.mStore.get<ESM::Spell>().search(id);
             }
         if (!selected) return {};
-        if (selected->mData.mType != ESM::Spell::ST_Spell
-            || !(selected->mData.mFlags & ESM::Spell::F_Always)
-            || selected->mEffects.mList.size() != 1)
-            return {};
-        const auto& effect = selected->mEffects.mList.front().mData;
-        const auto* magic = mRuntime.mStore.get<ESM::MagicEffect>().search(effect.mEffectID);
-        if (!magic || effect.mEffectID != ESM::MagicEffect::RestoreHealth
-            || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
-            || effect.mMagnMin <= 0 || effect.mMagnMin != effect.mMagnMax
-            || effect.mMagnMax > 1000
-            || (magic->mData.mFlags & (ESM::MagicEffect::NoDuration | ESM::MagicEffect::AppliedOnce)))
-            return {};
-        const int cost = MWMechanics::calcSpellCost(*selected, mRuntime.mStore);
-        if (cost < 0 || cost > 1000000
-            || mCombat->actors[actor(player->playerId())][9][2] < cost)
-            return {};
-        return std::make_unique<SpellTransaction>(use, player->playerId(), selected);
+        auto prepared = prepareInstantSpell(*selected, mRuntime.mStore);
+        if (!prepared || mCombat->actors[actor(player->playerId())][9][2] < prepared->cost) return {};
+        return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(*prepared));
     }
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareMeleeAttack(
@@ -1576,7 +1560,7 @@ namespace TES3MP::Native
         const SpellTransaction* spellUse = dynamic_cast<const SpellTransaction*>(command.get());
         std::optional<ClientMagicUseCommand> playerSpell;
         PlayerId spellCaster = mBinding.mPlayers[0];
-        const ESM::Spell* spellRecord = nullptr;
+        std::optional<PreparedInstantSpell> spellRecord;
         if (spellUse)
         {
             playerSpell = spellUse->use;
@@ -1737,26 +1721,15 @@ namespace TES3MP::Native
         {
             const size_t owner = actor(spellCaster);
             auto caster = loadCombatStats(mRuntime.mStore, combat->actors[owner]);
-            const int cost = MWMechanics::calcSpellCost(*spellRecord, mRuntime.mStore);
-            if (caster.getHealth().getCurrent() <= 0 || cost < 0
-                || caster.getMagicka().getCurrent() < cost)
-                throw std::invalid_argument("Native spell became stale before tick composition");
-            // Stock CastSpell rolls even when Always Succeeds makes the result certain.
             Misc::Rng::Generator rng;
             Misc::Rng::deserialize(std::to_string(combat->rng), rng);
-            (void)Misc::Rng::roll0to99(rng);
+            const auto result = resolveInstantSpell(*spellRecord, caster, rng);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
-            const float beforeHealth = caster.getHealth().getCurrent();
-            auto magicka = caster.getMagicka();
-            magicka.setCurrent(magicka.getCurrent() - cost);
-            caster.setMagicka(magicka);
-            MWMechanics::restoreHealth(caster, float(spellRecord->mEffects.mList.front().mData.mMagnMin));
-            const float healed = caster.getHealth().getCurrent() - beforeHealth;
             saveCombatStats(combat->actors[owner], caster);
             spellCast = MagicUseCombatEvent{spellCaster, MagicUseSourceKind::Spell, playerSpell->sourceId,
                 MagicUseTargetKind::Self, 0, CombatRevision::fromValue(tick.value()).value(),
-                CombatRevision::fromValue(tick.value()).value(), true, healed, 0.f,
-                -float(cost), 0.f, 0.f, 0.f, false};
+                CombatRevision::fromValue(tick.value()).value(), true, result.health, 0.f,
+                result.magicka, result.fatigue, 0.f, 0.f, false};
         }
         if (step && !respawn && melee && (!combat || combat->actors[2][8][2] > 0))
         {
