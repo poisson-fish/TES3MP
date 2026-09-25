@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <span>
@@ -67,6 +68,10 @@ namespace TES3MP::Native
         // or authenticated player input. Invalid input leaves the scene unchanged.
         ActorSceneSnapshot step(const std::array<float, 3>& velocity);
         size_t bodyCount() const;
+        // First server-owned collision along a spell bolt segment. Zero means
+        // world geometry; an absent result means the segment stayed clear.
+        std::optional<uint64_t> projectileContact(const std::array<float, 3>& from,
+            const std::array<float, 3>& to) const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
         // Resolve the selected NPC's third-person animation source using stock

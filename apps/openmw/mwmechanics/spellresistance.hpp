@@ -1,6 +1,8 @@
 #ifndef MWMECHANICS_SPELLRESISTANCE_H
 #define MWMECHANICS_SPELLRESISTANCE_H
 
+#include <components/misc/rng.hpp>
+
 namespace ESM
 {
     struct Spell;
@@ -14,6 +16,7 @@ namespace MWWorld
 
 namespace MWMechanics
 {
+    class CreatureStats;
     class MagicEffects;
 
     /// Get an effect multiplier for applying an effect cast by the given actor in the given spell (optional).
@@ -33,6 +36,12 @@ namespace MWMechanics
     /// Get the resistance attribute against an effect for a given actor. This will add together
     /// ResistX and Weakness to X effects relevant against the given effect.
     float getEffectResistanceAttribute(ESM::RefId effectId, const MagicEffects* actorEffects);
+
+    // The same resistance roll for detached server-side actor stats. The caller
+    // supplies the stock spell success chance and the composed tick's RNG.
+    float getEffectResistance(ESM::RefId effectId, const CreatureStats& target,
+        float castChance, float fatigueTerm, bool noMagnitude, Misc::Rng::Generator& rng,
+        const MagicEffects* effects = nullptr);
 }
 
 #endif

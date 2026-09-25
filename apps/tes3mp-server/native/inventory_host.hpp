@@ -17,6 +17,9 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V27 adds one durable, server-contacted Target spell projectile under
+    // native-inventory-27 and requires a fresh campaign. Its launch cost,
+    // in-flight state and resolved effect share composed actor ticks.
     // V26 uses V25's image under native-inventory-26 and requires a fresh
     // campaign. It admits base-known, Always Succeeds, fixed, zero-duration
     // Self Restore Health/Magicka/Fatigue spells through the composed combat tick.

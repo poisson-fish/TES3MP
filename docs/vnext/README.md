@@ -24,8 +24,7 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking remains engine-independent. M4 has bounded native travel, weapon
-hits, death, corpse loot and one NPC's respawn. [CURRENT.md](CURRENT.md)
+Networking remains engine-independent. [CURRENT.md](CURRENT.md)
 distinguishes synthetic checks from live evidence and names the next action. Migrate in slices
 with one canonical writer.
 

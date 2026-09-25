@@ -14,6 +14,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t ContactActorCampaignMagic = 0x3350434154335354;
     inline constexpr uint64_t CombatActorCampaignMagic = 0x3450434154335354;
     inline constexpr uint64_t LifeActorCampaignMagic = 0x3550434154335354;
+    inline constexpr uint64_t ProjectileActorCampaignMagic = 0x3650434154335354;
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
     // nested equipment image, committed with this wrapper.
@@ -49,6 +50,12 @@ namespace TES3MP::Native
         std::vector<char> spawnInventory;
         std::vector<ActorDeathEvent> deaths;
     };
+    struct ActorCampaignProjectile
+    {
+        uint64_t caster = 0, source = 0, target = 0, generation = 0, expiresTick = 0;
+        std::array<float, 3> position{}, step{};
+        bool operator==(const ActorCampaignProjectile&) const = default;
+    };
     struct ActorCampaign
     {
         std::span<const char> inventory, actor;
@@ -57,6 +64,7 @@ namespace TES3MP::Native
         std::optional<ActorCampaignMelee> melee;
         std::optional<ActorCampaignCombat> combat;
         std::optional<ActorCampaignLife> life;
+        std::optional<ActorCampaignProjectile> projectile;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes)
     {
@@ -64,7 +72,7 @@ namespace TES3MP::Native
         const auto magic = getAreaWord(bytes, offset);
         if (magic != ActorCampaignMagic && magic != MeleeActorCampaignMagic
             && magic != ContactActorCampaignMagic && magic != CombatActorCampaignMagic
-            && magic != LifeActorCampaignMagic)
+            && magic != LifeActorCampaignMagic && magic != ProjectileActorCampaignMagic)
             throw std::invalid_argument("Native actor campaign version invalid");
         const auto inventorySize = getAreaWord(bytes, offset), actorSize = getAreaWord(bytes, offset), tick = getAreaWord(bytes, offset);
         std::array<float, 3> velocity;
@@ -77,7 +85,8 @@ namespace TES3MP::Native
         }
         std::optional<ActorCampaignMelee> melee;
         if (magic == MeleeActorCampaignMagic || magic == ContactActorCampaignMagic
-            || magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic)
+            || magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic
+            || magic == ProjectileActorCampaignMagic)
         {
             const auto length = getAreaWord(bytes, offset);
             if (!length || length > 512 || length > bytes.size() - offset)
@@ -100,7 +109,8 @@ namespace TES3MP::Native
             value.state.mReleased = bool(released); value.state.mHit = bool(hit);
             if (!std::isfinite(value.state.mTime) || !std::isfinite(value.state.mStrength))
                 throw std::invalid_argument("Native melee state nonfinite");
-            if (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic)
+            if (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
+                || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic)
             {
                 value.target = getAreaWord(bytes, offset);
                 const auto contact = getAreaWord(bytes, offset);
@@ -112,7 +122,8 @@ namespace TES3MP::Native
             melee = std::move(value);
         }
         std::optional<ActorCampaignCombat> combat;
-        if (magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic)
+        if (magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic
+            || magic == ProjectileActorCampaignMagic)
         {
             auto& state = combat.emplace();
             const auto rng = getAreaWord(bytes, offset);
@@ -131,7 +142,7 @@ namespace TES3MP::Native
                     }
         }
         std::optional<ActorCampaignLife> life;
-        if (magic == LifeActorCampaignMagic)
+        if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic)
         {
             auto& state = life.emplace();
             state.generation = getAreaWord(bytes, offset);
@@ -177,10 +188,45 @@ namespace TES3MP::Native
                     : state.bornTick <= state.deaths.back().tick))
                 throw std::invalid_argument("Native NPC life chronology invalid");
         }
+        std::optional<ActorCampaignProjectile> projectile;
+        if (magic == ProjectileActorCampaignMagic)
+        {
+            const auto present = getAreaWord(bytes, offset);
+            if (present > 1) throw std::invalid_argument("Native projectile presence invalid");
+            if (present)
+            {
+                auto& value = projectile.emplace();
+                value.caster = getAreaWord(bytes, offset); value.source = getAreaWord(bytes, offset);
+                value.target = getAreaWord(bytes, offset); value.generation = getAreaWord(bytes, offset);
+                value.expiresTick = getAreaWord(bytes, offset);
+                for (float& component : value.position)
+                {
+                    const auto bits = getAreaWord(bytes, offset);
+                    if (bits > UINT32_MAX) throw std::invalid_argument("Native projectile position bits invalid");
+                    component = std::bit_cast<float>(uint32_t(bits));
+                    if (!std::isfinite(component) || std::abs(component) > 1e7f)
+                        throw std::invalid_argument("Native projectile position invalid");
+                }
+                float length2 = 0;
+                for (float& component : value.step)
+                {
+                    const auto bits = getAreaWord(bytes, offset);
+                    if (bits > UINT32_MAX) throw std::invalid_argument("Native projectile step bits invalid");
+                    component = std::bit_cast<float>(uint32_t(bits));
+                    if (!std::isfinite(component) || std::abs(component) > 1000.f)
+                        throw std::invalid_argument("Native projectile step invalid");
+                    length2 += component * component;
+                }
+                if (!value.caster || !value.source || !value.target || !value.generation
+                    || value.generation != life->generation || value.expiresTick <= tick
+                    || value.expiresTick - tick > 90 || length2 < 1.f || length2 > 1e6f)
+                    throw std::invalid_argument("Native projectile identity or lifetime invalid");
+            }
+        }
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset
             || actorSize != bytes.size()-offset-inventorySize)
             throw std::invalid_argument("Native actor campaign lengths invalid");
-        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life)};
+        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life), std::move(projectile)};
     }
 }
 #endif

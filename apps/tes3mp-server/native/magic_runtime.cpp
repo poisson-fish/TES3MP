@@ -3,6 +3,7 @@
 #include <apps/openmw/mwmechanics/creaturestats.hpp>
 #include <apps/openmw/mwmechanics/spelleffects.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
+#include <apps/openmw/mwmechanics/spellresistance.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadspel.hpp>
@@ -19,10 +20,12 @@ namespace TES3MP::Native
         {
             return effect.mEffectID == ESM::MagicEffect::RestoreHealth
                 || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
-                || effect.mEffectID == ESM::MagicEffect::RestoreFatigue;
+                || effect.mEffectID == ESM::MagicEffect::RestoreFatigue
+                || effect.mEffectID == ESM::MagicEffect::DamageHealth;
         }
 
-        void applyInstantEffect(const ESM::ENAMstruct& effect, MWMechanics::CreatureStats& target)
+        void applyInstantEffect(const ESM::ENAMstruct& effect, MWMechanics::CreatureStats& target,
+            Misc::Rng::Generator* rng, const MWWorld::ESMStore* content)
         {
             const float magnitude = float(effect.mMagnMin);
             if (effect.mEffectID == ESM::MagicEffect::RestoreHealth)
@@ -31,6 +34,16 @@ namespace TES3MP::Native
                 MWMechanics::restoreDynamicStat(target, 1, magnitude);
             else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
                 MWMechanics::restoreDynamicStat(target, 2, magnitude);
+            else if (effect.mEffectID == ESM::MagicEffect::DamageHealth)
+            {
+                if (!rng || !content)
+                    throw std::invalid_argument("Resistible native effect requires composed RNG and content");
+                const float resistance = MWMechanics::getEffectResistance(effect.mEffectID,
+                    target, 100.f, target.getFatigueTerm(*content), false, *rng);
+                auto health = target.getHealth();
+                health.setCurrent(health.getCurrent() - magnitude * (1.f - resistance / 100.f));
+                target.setHealth(health);
+            }
             else throw std::invalid_argument("Unsupported native instant effect");
         }
     }
@@ -57,6 +70,7 @@ namespace TES3MP::Native
             const auto& effect = entry.mData;
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
             if (!magic || !supportedInstantEffect(effect)
+                || (effect.mEffectID == ESM::MagicEffect::DamageHealth && effect.mRange != ESM::RT_Target)
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
                 || effect.mArea != 0 || effect.mDuration != 0
@@ -83,7 +97,7 @@ namespace TES3MP::Native
     }
 
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
-        MWMechanics::CreatureStats& target)
+        MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng, const MWWorld::ESMStore* content)
     {
         if (range != ESM::RT_Self && range != ESM::RT_Touch && range != ESM::RT_Target)
             throw std::invalid_argument("Native instant effect range invalid");
@@ -91,13 +105,13 @@ namespace TES3MP::Native
         const float beforeMagicka = target.getMagicka().getCurrent();
         const float beforeFatigue = target.getFatigue().getCurrent();
         for (const auto& effect : effects.effects)
-            if (effect.mRange == range) applyInstantEffect(effect, target);
+            if (effect.mRange == range) applyInstantEffect(effect, target, rng, content);
         return {target.getHealth().getCurrent() - beforeHealth,
             target.getMagicka().getCurrent() - beforeMagicka,
             target.getFatigue().getCurrent() - beforeFatigue};
     }
 
-    InstantSpellResult resolveInstantSpell(const PreparedInstantSpell& spell,
+    InstantSpellResult launchInstantSpell(const PreparedInstantSpell& spell,
         MWMechanics::CreatureStats& caster, Misc::Rng::Generator& rng)
     {
         if (caster.getHealth().getCurrent() <= 0 || caster.getMagicka().getCurrent() < spell.cost)
@@ -107,8 +121,9 @@ namespace TES3MP::Native
         auto magicka = caster.getMagicka();
         magicka.setCurrent(magicka.getCurrent() - spell.cost);
         caster.setMagicka(magicka);
-        auto result = applyInstantEffects(spell.effects, ESM::RT_Self, caster);
+        auto result = applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng);
         result.magicka -= float(spell.cost);
         return result;
     }
+
 }

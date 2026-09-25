@@ -36,33 +36,38 @@ namespace MWMechanics
         const auto magicEffect = MWBase::Environment::get().getESMStore()->get<ESM::MagicEffect>().find(effectId);
 
         const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-        const MWMechanics::MagicEffects* magicEffects = &stats.getMagicEffects();
-        if (effects)
-            magicEffects = effects;
-
-        float resistance = getEffectResistanceAttribute(effectId, magicEffects);
-
-        float willpower = stats.getAttribute(ESM::Attribute::Willpower).getModified();
-        float luck = stats.getAttribute(ESM::Attribute::Luck).getModified();
-        float x = (willpower + 0.1f * luck) * stats.getFatigueTerm();
-
-        // This makes spells that are easy to cast harder to resist and vice versa
         float castChance = 100.f;
         if (spell != nullptr && !caster.isEmpty() && caster.getClass().isActor())
             castChance = getSpellSuccessChance(spell, caster, nullptr, false, false); // Uncapped casting chance
+        auto& prng = MWBase::Environment::get().getWorld()->getPrng();
+        return getEffectResistance(effectId, stats, castChance, stats.getFatigueTerm(),
+            bool(magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude), prng, effects);
+    }
+
+    float getEffectResistance(ESM::RefId effectId, const CreatureStats& stats,
+        float castChance, float fatigueTerm, bool noMagnitude, Misc::Rng::Generator& prng,
+        const MagicEffects* effects)
+    {
+        if (ESM::MagicEffect::getResistanceEffect(effectId).empty())
+            return 0.f;
+        const MagicEffects* magicEffects = effects ? effects : &stats.getMagicEffects();
+        float resistance = getEffectResistanceAttribute(effectId, magicEffects);
+        float willpower = stats.getAttribute(ESM::Attribute::Willpower).getModified();
+        float luck = stats.getAttribute(ESM::Attribute::Luck).getModified();
+        float x = (willpower + 0.1f * luck) * fatigueTerm;
+        // This makes spells that are easy to cast harder to resist and vice versa.
         if (castChance > 0)
             x *= 50 / castChance;
 
-        auto& prng = MWBase::Environment::get().getWorld()->getPrng();
         float roll = Misc::Rng::rollClosedProbability(prng) * 100;
-        if (magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+        if (noMagnitude)
             roll -= resistance;
 
         if (x <= roll)
             x = 0;
         else
         {
-            if (magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+            if (noMagnitude)
                 x = 100;
             else
                 x = roll / std::min(x, 100.f);

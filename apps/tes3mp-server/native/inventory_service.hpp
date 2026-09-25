@@ -79,6 +79,7 @@ namespace TES3MP::Native
         bool mCombatResolution = false;
         bool mNpcLifecycle = false;
         bool mMagicUse = false;
+        bool mMagicProjectile = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
@@ -132,13 +133,15 @@ namespace TES3MP::Native
         bool mMeleeContacted = false;
         std::optional<ActorCampaignCombat> mCombat;
         std::optional<ActorCampaignLife> mLife;
+        std::optional<ActorCampaignProjectile> mProjectile;
         PlainEquipmentValues mRespawnInventory;
         size_t mCombatNpcOwner = 0;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity,
             const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact,
             const std::optional<ActorCampaignCombat>& combat,
-            const std::optional<ActorCampaignLife>& life) const;
+            const std::optional<ActorCampaignLife>& life,
+            const std::optional<ActorCampaignProjectile>& projectile) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         float meleeReach() const;

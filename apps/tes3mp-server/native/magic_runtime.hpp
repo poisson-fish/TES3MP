@@ -41,8 +41,11 @@ namespace TES3MP::Native
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
-        MWMechanics::CreatureStats& target);
-    InstantSpellResult resolveInstantSpell(const PreparedInstantSpell& spell,
+        MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
+        const MWWorld::ESMStore* content = nullptr);
+    // Launch spends the source cost and resolves Self effects. Target effects stay
+    // in the prepared plan until the authoritative contact step supplies a target.
+    InstantSpellResult launchInstantSpell(const PreparedInstantSpell& spell,
         MWMechanics::CreatureStats& caster, Misc::Rng::Generator& rng);
 }
 

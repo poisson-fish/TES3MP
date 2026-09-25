@@ -43,6 +43,7 @@
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
 #include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
+#include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -501,6 +502,29 @@ namespace TES3MP::Native
     }
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
+    std::optional<uint64_t> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
+        const std::array<float, 3>& to) const
+    {
+        if (!mImpl) throw std::invalid_argument("Projectile scene is unloaded");
+        for (float value : from)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Projectile origin invalid");
+        for (float value : to)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Projectile endpoint invalid");
+        const btVector3 start(from[0], from[1], from[2]), end(to[0], to[1], to[2]);
+        btSphereShape sphere(4.f);
+        const btTransform startFrame(btQuaternion::getIdentity(), start);
+        const btTransform endFrame(btQuaternion::getIdentity(), end);
+        btCollisionWorld::ClosestConvexResultCallback hit(start, end);
+        hit.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
+        hit.m_collisionFilterMask = MWPhysics::CollisionType_World
+            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor;
+        mImpl->mWorld.convexSweepTest(&sphere, startFrame, endFrame, hit);
+        if (!hit.hasHit()) return {};
+        return hit.m_hitCollisionObject == mImpl->mActor->mCollisionObject
+            ? mImpl->mActorId : 0;
+    }
     const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
 
     BoundMeleeAnimation InteriorActorScene::bindMeleeAnimation(

@@ -59,8 +59,12 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 3. Retain bounded simulation around active travelers after both players leave.
    Cover processing range, cell boundaries, unload/restart and preserved
    destinations/completion; never simulate an actor twice.
-4. Generalize OpenMW melee, casting, effects, projectiles and enchantments.
-   Preserve costs, wear and durability; validate misses, targeting and retries.
+4. Generalize OpenMW combat through one cast lifecycle: prepare source/effects,
+   pay spell cost or item charge, launch, resolve server contact, apply effects.
+   Prove a resistible Target spell with durable projectile/outcome first, then
+   enchantment charge/use on that path, then effect durations and areas. Finish
+   melee targets, knockout, armor, block and resistances. Preserve wear and
+   durability; validate misses, targeting, retries and two-client reconnect.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.
