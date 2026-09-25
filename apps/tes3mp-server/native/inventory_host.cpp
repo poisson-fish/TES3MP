@@ -262,7 +262,7 @@ namespace TES3MP::Native
             binding.mCombatState = version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26";
             binding.mCombatResolution = version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26";
             binding.mNpcLifecycle = version == "native-inventory-25" || version == "native-inventory-26";
-            binding.mInstantSpell = version == "native-inventory-26";
+            binding.mMagicUse = version == "native-inventory-26";
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();

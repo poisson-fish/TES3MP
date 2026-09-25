@@ -426,9 +426,16 @@ namespace MWMechanics
 {
     void restoreHealth(CreatureStats& stats, float magnitude)
     {
-        auto health = stats.getHealth();
-        health.setCurrent(health.getCurrent() + magnitude);
-        stats.setHealth(health);
+        restoreDynamicStat(stats, Stats::Health, magnitude);
+    }
+
+    void restoreDynamicStat(CreatureStats& stats, int index, float magnitude)
+    {
+        if (index < Stats::Health || index > Stats::Fatigue)
+            throw std::invalid_argument("Restore dynamic stat index invalid");
+        auto value = stats.getDynamic(index);
+        value.setCurrent(value.getCurrent() + magnitude);
+        stats.setDynamic(index, value);
     }
 
     void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase)
@@ -757,9 +764,9 @@ namespace MWMechanics
                 restoreHealth(target.getClass().getCreatureStats(target), effect.mMagnitude);
             }
             else if (effect.mEffectId == ESM::MagicEffect::RestoreMagicka)
-                adjustDynamicStat(target, Stats::Magicka, effect.mMagnitude);
+                restoreDynamicStat(target.getClass().getCreatureStats(target), Stats::Magicka, effect.mMagnitude);
             else if (effect.mEffectId == ESM::MagicEffect::RestoreFatigue)
-                adjustDynamicStat(target, Stats::Fatigue, effect.mMagnitude);
+                restoreDynamicStat(target.getClass().getCreatureStats(target), Stats::Fatigue, effect.mMagnitude);
             else if (effect.mEffectId == ESM::MagicEffect::SunDamage)
             {
                 //// isInCell shouldn't be needed, but updateActor called during game start

@@ -44,7 +44,7 @@ namespace TES3MP
         virtual bool hasLeveledActors() const noexcept { return false; }
         virtual bool hasActorMotion() const noexcept { return false; }
         virtual bool hasNativeCombat() const noexcept { return false; }
-        virtual bool hasNativeInstantSpell() const noexcept { return false; }
+        virtual bool hasNativeMagicUse() const noexcept { return false; }
         // Resolve inherited player motion against the native area domain. This
         // never grants interior travel; the engine adapter may permit contiguous
         // exterior crossings while explicit relocations remain transactional.

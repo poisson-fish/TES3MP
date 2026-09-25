@@ -78,7 +78,7 @@ namespace TES3MP::Native
         bool mCombatState = false;
         bool mCombatResolution = false;
         bool mNpcLifecycle = false;
-        bool mInstantSpell = false;
+        bool mMagicUse = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
@@ -231,7 +231,7 @@ namespace TES3MP::Native
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
         bool hasNativeCombat() const noexcept override { return mBinding.mCombatResolution; }
-        bool hasNativeInstantSpell() const noexcept override { return mBinding.mInstantSpell; }
+        bool hasNativeMagicUse() const noexcept override { return mBinding.mMagicUse; }
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }

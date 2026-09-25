@@ -658,7 +658,7 @@ int main(int argc, char** argv)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
     if (nativeInventory && nativeInventory->hasNativeCombat())
         optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
-    if (nativeInventory && nativeInventory->hasNativeInstantSpell())
+    if (nativeInventory && nativeInventory->hasNativeMagicUse())
         optionalCapabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
     if (combatContent && meleeContactHistory)
     {

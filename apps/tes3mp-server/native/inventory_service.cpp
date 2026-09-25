@@ -1097,7 +1097,7 @@ namespace TES3MP::Native
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareMagicUse(
         const CanonicalServerState& players, const ServerCommandProposal& proposal, ServerTick tick)
     {
-        if (!mBinding.mInstantSpell || !mCombat || !mBinding.mNavigatingActor) return {};
+        if (!mBinding.mMagicUse || !mCombat || !mBinding.mNavigatingActor) return {};
         const auto* input = std::get_if<MagicUseCommandProposal>(&proposal.payload());
         if (!input) return {};
         const auto& use = input->command();
@@ -1123,7 +1123,8 @@ namespace TES3MP::Native
             }
         if (!selected) return {};
         auto prepared = prepareInstantSpell(*selected, mRuntime.mStore);
-        if (!prepared || mCombat->actors[actor(player->playerId())][9][2] < prepared->cost) return {};
+        if (!prepared || !prepared->effects.onlyRange(ESM::RT_Self)
+            || mCombat->actors[actor(player->playerId())][9][2] < prepared->cost) return {};
         return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(*prepared));
     }
 

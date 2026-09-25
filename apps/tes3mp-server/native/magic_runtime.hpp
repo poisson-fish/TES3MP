@@ -8,16 +8,25 @@
 
 namespace ESM { struct Spell; }
 namespace MWWorld { class ESMStore; }
-namespace MWMechanics { class NpcStats; }
+namespace MWMechanics { class CreatureStats; }
 
 namespace TES3MP::Native
 {
-    // A bounded, detached cast. The caller owns authentication and source/target
-    // identity; this runtime owns OpenMW record rules, costs and direct effects.
+    // Source-neutral effect plan. Spell and enchantment records both carry an
+    // ESM::EffectList; non-self targets require authoritative contact.
+    struct PreparedInstantEffects
+    {
+        std::vector<ESM::ENAMstruct> effects;
+        bool onlyRange(int range) const noexcept;
+        bool hasRange(int range) const noexcept;
+    };
+
+    // A bounded, detached spell cast. The caller owns authentication and
+    // spell knowledge; this runtime owns OpenMW record rules, costs and effects.
     struct PreparedInstantSpell
     {
         int cost = 0;
-        std::vector<ESM::ENAMstruct> effects;
+        PreparedInstantEffects effects;
     };
 
     struct InstantSpellResult
@@ -27,10 +36,14 @@ namespace TES3MP::Native
         float fatigue = 0;
     };
 
+    std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
+        const MWWorld::ESMStore& content);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content);
+    InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
+        MWMechanics::CreatureStats& target);
     InstantSpellResult resolveInstantSpell(const PreparedInstantSpell& spell,
-        MWMechanics::NpcStats& caster, Misc::Rng::Generator& rng);
+        MWMechanics::CreatureStats& caster, Misc::Rng::Generator& rng);
 }
 
 #endif

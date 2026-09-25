@@ -6,6 +6,7 @@
 #include "inventory_service.hpp"
 #include "inventory_host.hpp"
 #include "actor_campaign.hpp"
+#include "magic_runtime.hpp"
 #include "loadout.hpp"
 #include <apps/openmw/tes3mp/remote_motion.hpp>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/protocol_frame.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwgui/inventoryitemmodel.hpp>
 #include <apps/openmw/mwgui/sortfilteritemmodel.hpp>
@@ -4148,6 +4150,8 @@ namespace TES3MP::Native::Testing
             }
             ESM::Spell restore;
             ESM::Spell mixedRestore;
+            ESM::Spell targetRestore;
+            ESM::Enchantment rangedEnchantment;
             if (spell)
             {
                 restore.blank();
@@ -4166,6 +4170,22 @@ namespace TES3MP::Native::Testing
                     {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 20, 20},
                     {ESM::MagicEffect::RestoreMagicka, {}, {}, ESM::RT_Self, 0, 0, 1, 1}});
                 npc.mSpells.mList.push_back(mixedRestore.mId);
+                targetRestore.blank();
+                targetRestore.mId = ESM::RefId::stringRefId("npc_target_restore");
+                targetRestore.mData.mType = ESM::Spell::ST_Spell;
+                targetRestore.mData.mFlags = ESM::Spell::F_Always;
+                targetRestore.mData.mCost = 1;
+                targetRestore.mEffects.populate({
+                    {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 7, 7}});
+                npc.mSpells.mList.push_back(targetRestore.mId);
+                rangedEnchantment.blank();
+                rangedEnchantment.mId = ESM::RefId::stringRefId("npc_ranged_enchantment");
+                rangedEnchantment.mData.mType = ESM::Enchantment::WhenUsed;
+                rangedEnchantment.mData.mCost = 1;
+                rangedEnchantment.mData.mCharge = 20;
+                rangedEnchantment.mEffects.populate({
+                    {ESM::MagicEffect::RestoreFatigue, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
+                    {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 7, 7}});
             }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
@@ -4175,6 +4195,9 @@ namespace TES3MP::Native::Testing
             {
                 out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
                 out.startRecord(ESM::Spell::sRecordId, 0); mixedRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                out.startRecord(ESM::Spell::sRecordId, 0); targetRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                out.startRecord(ESM::Enchantment::sRecordId, 0);
+                rangedEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
             }
             ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
             floor.mModel = "placement-floor.osgt";
@@ -4208,6 +4231,38 @@ namespace TES3MP::Native::Testing
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
             Loadout loadout(readLoadoutOptions(3, arguments));
+            if (spell)
+            {
+                const auto& content = loadout.store();
+                const auto& enchantment = *content.get<ESM::Enchantment>().find(
+                    ESM::RefId::stringRefId("npc_ranged_enchantment"));
+                const auto& targetSpell = *content.get<ESM::Spell>().find(
+                    ESM::RefId::stringRefId("npc_target_restore"));
+                const auto preparedTarget = prepareInstantSpell(targetSpell, content);
+                require(preparedTarget && preparedTarget->effects.hasRange(ESM::RT_Target)
+                    && !preparedTarget->effects.onlyRange(ESM::RT_Self),
+                    "Target spell failed source-neutral range preparation");
+                auto effects = prepareInstantEffects(enchantment.mEffects, content);
+                require(effects && effects->hasRange(ESM::RT_Self) && effects->hasRange(ESM::RT_Target)
+                    && !effects->onlyRange(ESM::RT_Self),
+                    "Enchantment effects did not prepare through the source-neutral range path");
+                auto invalid = enchantment.mEffects;
+                invalid.mList.front().mData.mDuration = 1;
+                require(!prepareInstantEffects(invalid, content),
+                    "Unsupported duration entered the instant effect path");
+                MWMechanics::NpcStats target(content);
+                target.initializeExplicitStats(*content.get<ESM::NPC>().find(
+                    ESM::RefId::stringRefId("npc_door_actor")), 2.f);
+                auto health = target.getHealth(); health.setCurrent(health.getCurrent() - 10.f); target.setHealth(health);
+                auto fatigue = target.getFatigue(); fatigue.setCurrent(fatigue.getCurrent() - 10.f);
+                target.setFatigue(fatigue);
+                const auto self = applyInstantEffects(*effects, ESM::RT_Self, target);
+                require(self.fatigue == 5.f && self.health == 0.f,
+                    "Self range applied the target enchantment effect");
+                const auto hit = applyInstantEffects(*effects, ESM::RT_Target, target);
+                require(hit.health == 7.f && hit.fatigue == 0.f,
+                    "Target range applied the self enchantment effect");
+            }
             const auto cell = ESM::RefId::stringRefId("NPC Door Path Test");
             const auto actor = loadout.placedActors(cell).at(0).mIdentity;
             const auto door = loadout.ordinaryDoors(cell, 128).at(0).mIdentity;
@@ -4546,6 +4601,15 @@ namespace TES3MP::Native::Testing
                     id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
                 require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),
                     "Unsupported target escaped the bounded spell slice");
+                invalidUse = use;
+                invalidUse.sourceId = [] {
+                    uint64_t value = 14695981039346656037ull;
+                    for (unsigned char c : std::string_view("npc_target_restore"))
+                        value = (value ^ c) * 1099511628211ull;
+                    return value;
+                }();
+                require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),
+                    "Prepared Target effect was applied through a Self cast without projectile contact");
                 auto preparedUse = service.prepareMagicUse(authority, proposal(use), id<ServerTick>(castTick));
                 require(bool(preparedUse), "Known self Restore Health spell rejected");
                 auto cast = service.prepareNativeTick(authority, id<ServerTick>(castTick), 1.f/30,
