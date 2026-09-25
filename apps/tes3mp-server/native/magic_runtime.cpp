@@ -1,6 +1,7 @@
 #include "magic_runtime.hpp"
 
 #include <apps/openmw/mwmechanics/creaturestats.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/spelleffects.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
 #include <apps/openmw/mwmechanics/spellresistance.hpp>
@@ -92,14 +93,14 @@ namespace TES3MP::Native
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content)
     {
-        if (spell.mData.mType != ESM::Spell::ST_Spell
-            || !(spell.mData.mFlags & ESM::Spell::F_Always)) return std::nullopt;
+        if (spell.mData.mType != ESM::Spell::ST_Spell) return std::nullopt;
         auto effects = prepareInstantEffects(spell.mEffects, content);
         if (!effects) return std::nullopt;
         PreparedInstantSpell result;
         result.effects = std::move(*effects);
         result.cost = MWMechanics::calcSpellCost(spell, content);
         if (result.cost < 0 || result.cost > 1000000) return std::nullopt;
+        result.source = &spell;
         return result;
     }
 
@@ -118,19 +119,21 @@ namespace TES3MP::Native
             target.getFatigue().getCurrent() - beforeFatigue};
     }
 
-    InstantSpellResult launchInstantSpell(const PreparedInstantSpell& spell,
-        MWMechanics::CreatureStats& caster, Misc::Rng::Generator& rng)
+    InstantSpellLaunch launchInstantSpell(const PreparedInstantSpell& spell,
+        MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng)
     {
-        if (caster.getHealth().getCurrent() <= 0 || caster.getMagicka().getCurrent() < spell.cost)
+        if (!spell.source || caster.getHealth().getCurrent() <= 0
+            || caster.getMagicka().getCurrent() < spell.cost)
             throw std::invalid_argument("Native spell became stale before tick composition");
-        // Stock CastSpell consumes this roll even for Always Succeeds.
-        (void)Misc::Rng::roll0to99(rng);
+        const bool succeeded = Misc::Rng::roll0to99(rng)
+            < MWMechanics::getSpellSuccessChance(*spell.source, caster, content, true, false);
         auto magicka = caster.getMagicka();
         magicka.setCurrent(magicka.getCurrent() - spell.cost);
         caster.setMagicka(magicka);
-        auto result = applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng);
+        auto result = succeeded ? applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng, &content)
+            : InstantSpellResult{};
         result.magicka -= float(spell.cost);
-        return result;
+        return {succeeded, result};
     }
 
 }

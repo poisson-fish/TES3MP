@@ -2,13 +2,13 @@
 #define TES3MP_NATIVE_MAGIC_RUNTIME_HPP
 
 #include <components/esm3/effectlist.hpp>
+#include <components/esm3/loadspel.hpp>
 #include <components/misc/rng.hpp>
 #include <optional>
 #include <vector>
 
-namespace ESM { struct Spell; }
 namespace MWWorld { class ESMStore; }
-namespace MWMechanics { class CreatureStats; }
+namespace MWMechanics { class CreatureStats; class NpcStats; }
 
 namespace TES3MP::Native
 {
@@ -22,12 +22,14 @@ namespace TES3MP::Native
         bool hasRange(int range) const noexcept;
     };
 
-    // A bounded, detached spell cast. The caller owns authentication and
-    // spell knowledge; this runtime owns OpenMW record rules, costs and effects.
+    // A bounded spell cast. The source points into the caller's stable ESMStore;
+    // that store must outlive preparation and the composed launch tick.
+    // The caller owns authentication and spell knowledge.
     struct PreparedInstantSpell
     {
         int cost = 0;
         PreparedInstantEffects effects;
+        const ESM::Spell* source = nullptr;
     };
 
     struct InstantSpellResult
@@ -35,6 +37,12 @@ namespace TES3MP::Native
         float health = 0;
         float magicka = 0;
         float fatigue = 0;
+    };
+
+    struct InstantSpellLaunch
+    {
+        bool succeeded = false;
+        InstantSpellResult result;
     };
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
@@ -46,8 +54,8 @@ namespace TES3MP::Native
         const MWWorld::ESMStore* content = nullptr);
     // Launch spends the source cost and resolves Self effects. Target effects stay
     // in the prepared plan until the authoritative contact step supplies a target.
-    InstantSpellResult launchInstantSpell(const PreparedInstantSpell& spell,
-        MWMechanics::CreatureStats& caster, Misc::Rng::Generator& rng);
+    InstantSpellLaunch launchInstantSpell(const PreparedInstantSpell& spell,
+        MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng);
 }
 
 #endif

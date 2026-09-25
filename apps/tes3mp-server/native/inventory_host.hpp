@@ -17,6 +17,9 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V32 retains up to eight independently identified projectiles in one actor
+    // tick/image, resolving concurrent contacts and deduplicating pending casts.
+    // It requires a fresh campaign under native-inventory-32.
     // V31 adds direct player targets using server position contact and durable
     // target kind. It requires a fresh campaign under native-inventory-31.
     // V30 adds bounded Target area effects centered on server projectile

@@ -17,6 +17,7 @@
 #include <tes3mp/protocol_frame.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
+#include <apps/openmw/mwmechanics/spellutil.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwgui/inventoryitemmodel.hpp>
 #include <apps/openmw/mwgui/sortfilteritemmodel.hpp>
@@ -4125,7 +4126,7 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget)
+        bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4149,8 +4150,10 @@ namespace TES3MP::Native::Testing
                 npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
             }
             ESM::Spell restore;
+            ESM::Spell ordinaryRestore;
             ESM::Spell mixedRestore;
             ESM::Spell targetRestore;
+            ESM::Spell ordinaryTarget;
             ESM::Spell targetDamage;
             ESM::Spell timedResistance;
             ESM::Spell targetResistance;
@@ -4166,6 +4169,10 @@ namespace TES3MP::Native::Testing
                 restore.mData.mCost = 1;
                 restore.mEffects.populate({{ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 20, 20}});
                 npc.mSpells.mList.push_back(restore.mId);
+                ordinaryRestore = restore;
+                ordinaryRestore.mId = ESM::RefId::stringRefId("npc_ordinary_restore");
+                ordinaryRestore.mData.mFlags = 0;
+                npc.mSpells.mList.push_back(ordinaryRestore.mId);
                 mixedRestore.blank();
                 mixedRestore.mId = ESM::RefId::stringRefId("npc_mixed_restore");
                 mixedRestore.mData.mType = ESM::Spell::ST_Spell;
@@ -4183,6 +4190,10 @@ namespace TES3MP::Native::Testing
                 targetRestore.mEffects.populate({
                     {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 7, 7}});
                 npc.mSpells.mList.push_back(targetRestore.mId);
+                ordinaryTarget = targetRestore;
+                ordinaryTarget.mId = ESM::RefId::stringRefId("npc_ordinary_target");
+                ordinaryTarget.mData.mFlags = 0;
+                npc.mSpells.mList.push_back(ordinaryTarget.mId);
                 if (timed)
                 {
                     timedResistance.blank();
@@ -4241,8 +4252,10 @@ namespace TES3MP::Native::Testing
             if (spell)
             {
                 out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                out.startRecord(ESM::Spell::sRecordId, 0); ordinaryRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
                 out.startRecord(ESM::Spell::sRecordId, 0); mixedRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
                 out.startRecord(ESM::Spell::sRecordId, 0); targetRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                out.startRecord(ESM::Spell::sRecordId, 0); ordinaryTarget.save(out); out.endRecord(ESM::Spell::sRecordId);
                 if (timed)
                 {
                     out.startRecord(ESM::Spell::sRecordId, 0);
@@ -4317,6 +4330,36 @@ namespace TES3MP::Native::Testing
                 require(preparedTarget && preparedTarget->effects.hasRange(ESM::RT_Target)
                     && !preparedTarget->effects.onlyRange(ESM::RT_Self),
                     "Target spell failed source-neutral range preparation");
+                auto ordinary = targetSpell;
+                ordinary.mData.mFlags = 0;
+                const auto preparedOrdinary = prepareInstantSpell(ordinary, content);
+                require(bool(preparedOrdinary), "Ordinary spell rejected before its OpenMW success roll");
+                const auto& actorRecord = *content.get<ESM::NPC>().find(
+                    ESM::RefId::stringRefId("npc_door_actor"));
+                MWMechanics::NpcStats failing(content), succeeding(content);
+                failing.initializeExplicitStats(actorRecord, 2.f);
+                succeeding.initializeExplicitStats(actorRecord, 2.f);
+                failing.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Sound),
+                    MWMechanics::EffectParam(1000.f));
+                succeeding.getSkill(ESM::Skill::Restoration).setBase(100);
+                succeeding.setAttribute(ESM::Attribute::Willpower, 100.f);
+                succeeding.setAttribute(ESM::Attribute::Luck, 100.f);
+                require(MWMechanics::getSpellSuccessChance(ordinary, failing, content) == 0.f
+                    && MWMechanics::getSpellSuccessChance(ordinary, succeeding, content) == 100.f,
+                    "Detached OpenMW success chance ignored skill or Sound");
+                const float failedMagicka = failing.getMagicka().getCurrent();
+                const float passedMagicka = succeeding.getMagicka().getCurrent();
+                Misc::Rng::Generator failedRng(222), passedRng(222), expectedRng(222);
+                (void)Misc::Rng::roll0to99(expectedRng);
+                const auto failedCast = launchInstantSpell(*preparedOrdinary, failing, content, failedRng);
+                const auto passedCast = launchInstantSpell(*preparedOrdinary, succeeding, content, passedRng);
+                require(!failedCast.succeeded && passedCast.succeeded
+                    && failedCast.result.health == 0 && failedCast.result.magicka == -preparedOrdinary->cost
+                    && passedCast.result.magicka == -preparedOrdinary->cost
+                    && failing.getMagicka().getCurrent() == failedMagicka - preparedOrdinary->cost
+                    && succeeding.getMagicka().getCurrent() == passedMagicka - preparedOrdinary->cost
+                    && failedRng == expectedRng && passedRng == expectedRng,
+                    "Ordinary failed/successful casts did not pay cost and consume one roll");
                 auto damageSpell = targetSpell;
                 damageSpell.mEffects.populate({
                     {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10}});
@@ -4324,8 +4367,6 @@ namespace TES3MP::Native::Testing
                 require(preparedDamage && preparedDamage->effects.onlyRange(ESM::RT_Target),
                     "Resistible Target damage did not enter the shared effect plan");
                 MWMechanics::NpcStats unresisted(content), resisted(content);
-                const auto& actorRecord = *content.get<ESM::NPC>().find(
-                    ESM::RefId::stringRefId("npc_door_actor"));
                 unresisted.initializeExplicitStats(actorRecord, 2.f);
                 resisted.initializeExplicitStats(actorRecord, 2.f);
                 resisted.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::ResistMagicka),
@@ -4472,7 +4513,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (playerTarget ? "native-inventory-31\nmanifest "
+            std::ofstream out(descriptor); out << (collection ? "native-inventory-32\nmanifest "
+                : playerTarget ? "native-inventory-31\nmanifest "
                 : area ? "native-inventory-30\nmanifest "
                 : timed ? "native-inventory-29\nmanifest "
                 : projectile ? "native-inventory-28\nmanifest "
@@ -4693,6 +4735,169 @@ namespace TES3MP::Native::Testing
                         EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
                         MagicUseCommandProposal(input));
                 };
+                if (collection)
+                {
+                    const auto hash = [](std::string_view name) {
+                        uint64_t value = 14695981039346656037ull;
+                        for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                        return value;
+                    };
+                    auto entities = std::vector(authority.players().begin(), authority.players().end());
+                    const auto moveCaster = [&](int64_t y) {
+                        const auto& original = entities.front();
+                        entities.front() = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                            original, id<ServerTick>(1), Transform(original.transform().cell(),
+                                Position3(60 * 1024, y, 1024), original.transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                        return std::get<CanonicalServerState>(createCanonicalServerState(
+                            entities, authority.activeSessions()));
+                    };
+                    auto playersAtLaunch = moveCaster(-200 * 1024);
+                    InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                    auto& flight = campaign.service(); flight.synchronizeCells(playersAtLaunch);
+                    auto input = use;
+                    input.sourceId = hash("npc_target_damage");
+                    input.targetKind = MagicUseTargetKind::Actor;
+                    input.targetId = flight.projectInventory(playersAtLaunch, id<SessionId>(1),
+                        id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
+                    auto firstIntent = flight.prepareMagicUse(playersAtLaunch, proposal(input), id<ServerTick>(castTick));
+                    require(bool(firstIntent), "First concurrent Target cast rejected");
+                    auto firstTick = flight.prepareNativeTick(playersAtLaunch, id<ServerTick>(castTick),
+                        1.f/30, std::move(firstIntent));
+                    std::vector<std::byte> firstImage;
+                    require(firstTick && firstTick->commit([&](auto bytes) {
+                        firstImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(flight.inventoryImage(), contactImage),
+                        "Rejected first launch changed the campaign");
+                    require(firstTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "First concurrent Target cast did not commit");
+                    const auto first = readActorCampaign({reinterpret_cast<const char*>(firstImage.data()), firstImage.size()});
+                    require(first.projectiles.size() == 1 && first.projectiles[0].commandId == input.commandId.value(),
+                        "First cast did not retain its command identity");
+                    const int64_t nextY = int64_t(std::lround(
+                        (first.projectiles[0].position[1] + first.projectiles[0].step[1]) * 1024));
+                    auto playersAtSecond = moveCaster(nextY);
+                    flight.synchronizeCells(playersAtSecond);
+                    auto second = input;
+                    second.commandId = id<CommandId>(castTick + 1);
+                    second.sourceServerTick = id<ServerTick>(castTick + 1);
+                    require(!flight.prepareMagicUse(playersAtSecond, proposal(input), id<ServerTick>(castTick + 1)),
+                        "Pending command retry entered a second flight");
+                    auto secondIntent = flight.prepareMagicUse(playersAtSecond, proposal(second),
+                        id<ServerTick>(castTick + 1));
+                    require(bool(secondIntent), "Independent cast was blocked by pending flight");
+                    auto secondTick = flight.prepareNativeTick(playersAtSecond, id<ServerTick>(castTick + 1),
+                        1.f/30, std::move(secondIntent));
+                    std::vector<std::byte> pairedImage;
+                    require(secondTick && secondTick->commit([&](auto bytes) {
+                        pairedImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(flight.inventoryImage(), firstImage),
+                        "Rejected second launch changed the first flight");
+                    const auto paired = readActorCampaign({reinterpret_cast<const char*>(pairedImage.data()),
+                        pairedImage.size()});
+                    require(paired.projectiles.size() == 2
+                        && paired.projectiles[0].commandId == input.commandId.value()
+                        && paired.projectiles[1].commandId == second.commandId.value()
+                        && paired.combat->actors[0][9][2] == contacted.combat->actors[0][9][2] - 2,
+                        "Two independent flights were not staged together");
+                    require(secondTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Concurrent launch did not commit");
+                    auto malformed = pairedImage;
+                    const size_t countOffset = size_t(paired.inventory.data()
+                        - reinterpret_cast<const char*>(pairedImage.data()))
+                        - (8 + paired.timedEffects.size() * 24) - (8 + paired.projectiles.size() * 15 * 8);
+                    malformed[countOffset] = std::byte{9};
+                    bool rejectedCount = false;
+                    try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, malformed); }
+                    catch (const std::invalid_argument&) { rejectedCount = true; }
+                    require(rejectedCount, "Oversized projectile collection installed on recovery");
+                    malformed = pairedImage;
+                    const size_t secondCommandOffset = countOffset + 8 + 15 * 8 + 8 * 8;
+                    std::copy_n(malformed.begin() + countOffset + 8 + 8 * 8, 8,
+                        malformed.begin() + secondCommandOffset);
+                    bool rejectedDuplicate = false;
+                    try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, malformed); }
+                    catch (const std::invalid_argument&) { rejectedDuplicate = true; }
+                    require(rejectedDuplicate, "Duplicate saved pending command installed on recovery");
+                    InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, pairedImage);
+                    auto& resumed = restarted.service(); resumed.synchronizeCells(playersAtSecond);
+                    require(!resumed.prepareMagicUse(playersAtSecond, proposal(input), id<ServerTick>(castTick + 2)),
+                        "Restart admitted duplicate pending command");
+                    bool resolvedTogether = false;
+                    for (uint64_t time = castTick + 2; time < castTick + 90; ++time)
+                    {
+                        const auto prior = std::vector(resumed.inventoryImage().begin(), resumed.inventoryImage().end());
+                        auto step = resumed.prepareNativeTick(playersAtSecond, id<ServerTick>(time), 1.f/30, {});
+                        std::vector<std::byte> candidate;
+                        require(step && step->commit([&](auto bytes) {
+                            candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(resumed.inventoryImage(), prior),
+                            "Rejected concurrent contact changed the campaign");
+                        const auto state = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                            candidate.size()});
+                        const auto outcome = resumed.projectCombatEvents(playersAtSecond, id<SessionId>(1),
+                            id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        const size_t hits = outcome ? std::ranges::count_if(outcome->magicEvents(), [&](const auto& event) {
+                            return event.targetKind == MagicUseTargetKind::Actor && event.targetId == input.targetId
+                                && event.castSucceeded && event.targetHealthDelta < 0;
+                        }) : 0;
+                        if (hits == 2) resolvedTogether = true;
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Concurrent contact did not commit");
+                        if (state.projectiles.empty())
+                        {
+                            require(resolvedTogether && state.combat->actors[2][8][2]
+                                < paired.combat->actors[2][8][2] - 10,
+                                "Concurrent flights did not resolve two contacts in one durable tick");
+                            InventoryHost completed(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                            require(std::ranges::equal(completed.service().inventoryImage(), candidate),
+                                "Concurrent outcome changed on restart");
+                            std::cout << "projectiles=2 contact=concurrent retry=deduplicated restart=stable\n";
+                            return;
+                        }
+                    }
+                    require(false, "Concurrent projectiles did not resolve before expiry");
+                }
+                {
+                    InventoryHost ordinaryHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                    auto& ordinaryService = ordinaryHost.service(); ordinaryService.synchronizeCells(authority);
+                    auto ordinaryUse = use;
+                    ordinaryUse.sourceId = [] {
+                        uint64_t value = 14695981039346656037ull;
+                        for (unsigned char c : std::string_view("npc_ordinary_restore"))
+                            value = (value ^ c) * 1099511628211ull;
+                        return value;
+                    }();
+                    auto prepared = ordinaryService.prepareMagicUse(authority,
+                        proposal(ordinaryUse), id<ServerTick>(castTick));
+                    require(bool(prepared), "Known ordinary spell rejected before cast roll");
+                    auto cast = ordinaryService.prepareNativeTick(authority, id<ServerTick>(castTick),
+                        1.f/30, std::move(prepared));
+                    std::vector<std::byte> candidate;
+                    require(cast && cast->commit([&](auto bytes) {
+                        candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(contactImage, ordinaryService.inventoryImage()),
+                        "Rejected ordinary cast changed the installed campaign");
+                    const auto staged = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                        candidate.size()});
+                    const auto events = ordinaryService.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(castTick), id<CanonicalRevision>(castTick), cast.get());
+                    require(staged.combat && !staged.projectile && events && events->magicEvents().size() == 1
+                        && staged.combat->actors[0][9][2] == contacted.combat->actors[0][9][2] - 1
+                        && (events->magicEvents().front().castSucceeded
+                            ? staged.combat->actors[0][8][2] > contacted.combat->actors[0][8][2]
+                            : staged.combat->actors[0][8][2] == contacted.combat->actors[0][8][2]),
+                        "Ordinary cast outcome, cost or Self effect escaped its durable tick");
+                    require(cast->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Ordinary cast failed durable commit after rollback");
+                    InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                    require(std::ranges::equal(candidate, restarted.service().inventoryImage()),
+                        "Ordinary cast outcome changed on restart");
+                }
                 if (timed)
                 {
                     InventoryHost timedHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
@@ -5221,6 +5426,41 @@ namespace TES3MP::Native::Testing
                     targetUse.targetKind = MagicUseTargetKind::Actor;
                     targetUse.targetId = targetService.projectInventory(targetPlayers, id<SessionId>(1),
                         id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
+                    {
+                        InventoryHost ordinaryHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& ordinaryService = ordinaryHost.service(); ordinaryService.synchronizeCells(targetPlayers);
+                        auto ordinaryUse = targetUse;
+                        ordinaryUse.sourceId = [] {
+                            uint64_t value = 14695981039346656037ull;
+                            for (unsigned char c : std::string_view("npc_ordinary_target"))
+                                value = (value ^ c) * 1099511628211ull;
+                            return value;
+                        }();
+                        auto prepared = ordinaryService.prepareMagicUse(targetPlayers,
+                            proposal(ordinaryUse), id<ServerTick>(castTick));
+                        require(bool(prepared), "Ordinary Target spell rejected before cast roll");
+                        auto launch = ordinaryService.prepareNativeTick(targetPlayers,
+                            id<ServerTick>(castTick), 1.f/30, std::move(prepared));
+                        std::vector<std::byte> candidate;
+                        require(launch && launch->commit([&](auto bytes) {
+                            candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(contactImage, ordinaryService.inventoryImage()),
+                            "Rejected ordinary Target launch changed the campaign");
+                        const auto staged = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                            candidate.size()});
+                        const auto event = ordinaryService.projectCombatEvents(targetPlayers, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick), launch.get());
+                        require(staged.combat && event && event->magicEvents().size() == 1
+                            && bool(staged.projectile) == event->magicEvents().front().castSucceeded
+                            && staged.combat->actors[0][9][2] == contacted.combat->actors[0][9][2] - 1,
+                            "Ordinary Target success roll did not govern durable projectile launch");
+                        require(launch->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Ordinary Target outcome did not commit");
+                        InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                        require(std::ranges::equal(candidate, restarted.service().inventoryImage()),
+                            "Ordinary Target outcome changed on restart");
+                    }
                     if (timed)
                     {
                         InventoryHost resistanceHost(descriptor, testContentManifest(), *registry, *crypto,

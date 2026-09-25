@@ -24,6 +24,7 @@ namespace MWWorld
 
 namespace MWMechanics
 {
+    class NpcStats;
     enum class EffectCostMethod
     {
         GameSpell,
@@ -68,6 +69,9 @@ namespace MWMechanics
         ESM::RefId* effectiveSchool = nullptr, bool cap = true, bool checkMagicka = true);
     float getSpellSuccessChance(const ESM::RefId& spellId, const MWWorld::Ptr& actor,
         ESM::RefId* effectiveSchool = nullptr, bool cap = true, bool checkMagicka = true);
+    // Detached NPC stats use the same OpenMW calculation during server tick staging.
+    float getSpellSuccessChance(const ESM::Spell& spell, const NpcStats& actor,
+        const MWWorld::ESMStore& store, bool cap = true, bool checkMagicka = true);
 
     ESM::RefId getSpellSchool(const ESM::RefId& spellId, const MWWorld::Ptr& actor);
     ESM::RefId getSpellSchool(const ESM::Spell* spell, const MWWorld::Ptr& actor);
