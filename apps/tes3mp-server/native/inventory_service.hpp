@@ -131,6 +131,7 @@ namespace TES3MP::Native
             size_t owner;
             EquipmentRuntime::EquippedWeaponCondition before;
             int condition;
+            int slot = MWWorld::InventoryStore::Slot_CarriedRight;
         };
         struct ItemCharge
         {
@@ -260,6 +261,12 @@ namespace TES3MP::Native
             if (!mCombat) return {};
             const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
             return weapon ? std::optional{weapon->mCondition} : std::nullopt;
+        }
+        std::optional<int> selectedNpcArmorCondition(int slot) const
+        {
+            if (!mCombat) return {};
+            const auto armor = mRuntime.equippedArmorCondition(mCombatNpcOwner, slot);
+            return armor ? std::optional{armor->mCondition} : std::nullopt;
         }
         std::optional<float> selectedNpcWeaponCharge() const
         {

@@ -30,6 +30,21 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native equipped weapon condition invalid");
         return EquippedWeaponCondition{item.getCellRef().getRefNum(), condition};
     }
+    std::optional<EquipmentRuntime::EquippedWeaponCondition> EquipmentRuntime::equippedArmorCondition(size_t owner, int slot) const
+    {
+        if (slot < 0 || slot >= InventoryStore::Slots) return {};
+        const auto* equipped = inventoryStorage(owner);
+        if (!equipped) return {};
+        const auto selected = equipped->mSlots[slot];
+        if (selected == equipped->end()) return {};
+        const Ptr item = *selected;
+        if (item.getType() != ESM::Armor::sRecordId) return {};
+        const auto maximum = mStore.get<ESM::Armor>().find(item.getCellRef().getRefId())->mData.mHealth;
+        const int condition = item.getClass().hasItemHealth(item) ? item.getClass().getItemHealth(item) : 0;
+        if (condition < 0 || condition > maximum)
+            throw std::invalid_argument("Native equipped armor condition invalid");
+        return EquippedWeaponCondition{item.getCellRef().getRefNum(), condition};
+    }
     void EquipmentRuntime::installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept
     {
         auto* inventory = inventoryStorage(owner);
@@ -37,6 +52,16 @@ namespace TES3MP::Native
         Ptr weapon = *slot;
         if (weapon.getCellRef().getRefNum() != item) std::terminate();
         weapon.getCellRef().setCharge(condition);
+        if (condition == 0) slot = inventory->end();
+        ++mWorld.mPtrRegistry.mRevision;
+    }
+    void EquipmentRuntime::installArmorWear(size_t owner, int index, ESM::RefNum item, int condition) noexcept
+    {
+        auto* inventory = inventoryStorage(owner);
+        auto& slot = inventory->mSlots[index];
+        Ptr armor = *slot;
+        if (armor.getCellRef().getRefNum() != item) std::terminate();
+        armor.getCellRef().setCharge(condition);
         if (condition == 0) slot = inventory->end();
         ++mWorld.mPtrRegistry.mRevision;
     }

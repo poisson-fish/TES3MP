@@ -8,6 +8,7 @@
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/containeradd.hpp>
+#include <apps/openmw/mwclass/armor.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
@@ -1627,7 +1628,7 @@ namespace TES3MP::Native
     EquipmentBytes InventoryService::stagedWeaponCore(std::span<const WeaponWear> wear,
         const PreparedNativeInventory* command, std::span<const ItemCharge> charges) const
     {
-        if (wear.size() > 2 || charges.size() > 2 || (wear.empty() && charges.empty())
+        if (wear.size() > 4 || charges.size() > 2 || (wear.empty() && charges.empty())
             || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - wear.size() - charges.size())
             throw std::invalid_argument("Native melee weapon wear candidate invalid");
         command = areaDoorCommand(command);
@@ -1659,17 +1660,22 @@ namespace TES3MP::Native
             const auto& change = wear[index];
             if (change.owner >= mRuntime.ownerCount() || change.condition < 0
                 || change.condition > change.before.mCondition
-                || std::ranges::any_of(wear.first(index), [&](const auto& earlier) { return earlier.owner == change.owner; })
-                || mRuntime.equippedWeaponCondition(change.owner) != change.before)
+                || change.slot < 0 || change.slot >= MWWorld::InventoryStore::Slots
+                || std::ranges::any_of(wear.first(index), [&](const auto& earlier) {
+                    return earlier.owner == change.owner && earlier.slot == change.slot;
+                })
+                || (change.slot == MWWorld::InventoryStore::Slot_CarriedRight
+                    ? mRuntime.equippedWeaponCondition(change.owner)
+                    : mRuntime.equippedArmorCondition(change.owner, change.slot)) != change.before)
                 throw std::invalid_argument("Native melee weapon wear owner invalid");
             auto& owner = change.owner < 2 ? values.mActors[change.owner] : values.mContainers.at(change.owner - 2);
-            if (owner.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] != change.before.mItem)
+            if (owner.mSlots[change.slot] != change.before.mItem)
                 throw std::invalid_argument("Native melee weapon slot changed");
             const auto item = std::ranges::find(owner.mObjects, change.before.mItem,
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == owner.mObjects.end()) throw std::invalid_argument("Native melee weapon missing");
             item->mRef.mChargeInt = change.condition;
-            if (change.condition == 0) owner.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
+            if (change.condition == 0) owner.mSlots[change.slot] = {};
         }
         for (size_t index = 0; index < charges.size(); ++index)
         {
@@ -1768,7 +1774,9 @@ namespace TES3MP::Native
             try
             {
                 for (const auto& change : wear)
-                    if (service.mRuntime.equippedWeaponCondition(change.owner) != change.before)
+                    if ((change.slot == MWWorld::InventoryStore::Slot_CarriedRight
+                            ? service.mRuntime.equippedWeaponCondition(change.owner)
+                            : service.mRuntime.equippedArmorCondition(change.owner, change.slot)) != change.before)
                         return CanonicalDurabilityResult::Rejected;
                 for (const auto& charge : charges)
                 {
@@ -1799,7 +1807,10 @@ namespace TES3MP::Native
                     if (!wear.empty() || !charges.empty())
                     {
                         for (const auto& change : wear)
-                            service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition);
+                            if (change.slot == MWWorld::InventoryStore::Slot_CarriedRight)
+                                service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition);
+                            else service.mRuntime.installArmorWear(change.owner, change.slot, change.before.mItem,
+                                change.condition);
                         for (const auto& charge : charges)
                         {
                             if (charge.consume) service.mRuntime.installConsumedMagicItem(charge.owner, charge.item);
@@ -1993,6 +2004,137 @@ namespace TES3MP::Native
             stageTimedResistance(*plan, ESM::RT_Target, victimIndex, tick.value(), timedEffects);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
         };
+        const auto& gmst = mRuntime.mStore.get<ESM::GameSetting>();
+        const auto armorRating = [&](size_t owner, const MWMechanics::NpcStats& stats) {
+            const auto* inventory = mRuntime.inventoryStorage(owner);
+            if (!inventory) throw std::invalid_argument("Native armor defender has no inventory");
+            const float skill = stats.getSkill(ESM::Skill::Unarmored).getModified();
+            const float unarmored = gmst.find("fUnarmoredBase1")->mValue.getFloat() * skill
+                * gmst.find("fUnarmoredBase2")->mValue.getFloat() * skill;
+            constexpr std::array slots{
+                std::pair{MWWorld::InventoryStore::Slot_Cuirass, .30f},
+                std::pair{MWWorld::InventoryStore::Slot_CarriedLeft, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_Helmet, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_Greaves, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_Boots, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_LeftPauldron, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_RightPauldron, .10f},
+                std::pair{MWWorld::InventoryStore::Slot_LeftGauntlet, .05f},
+                std::pair{MWWorld::InventoryStore::Slot_RightGauntlet, .05f}};
+            float rating = stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Shield).getMagnitude();
+            for (const auto& [slot, weight] : slots)
+            {
+                float part = unarmored;
+                const auto selected = inventory->getSlot(slot);
+                if (selected != inventory->end() && selected->getType() == ESM::Armor::sRecordId)
+                {
+                    const auto item = *selected;
+                    const auto& armor = static_cast<const MWClass::Armor&>(item.getClass());
+                    part = armor.getSkillAdjustedArmorRating(item,
+                        stats.getSkill(armor.getEquipmentSkill(item, mRuntime.mStore)).getModified(),
+                        mRuntime.mStore);
+                    if (item.getClass().hasItemHealth(item))
+                        part *= item.getClass().getItemNormalizedHealth(item);
+                }
+                rating += part * weight;
+            }
+            if (!std::isfinite(rating) || rating < 0 || rating > 1'000'000)
+                throw std::invalid_argument("Native armor rating invalid");
+            return rating;
+        };
+        const auto defendHit = [&](size_t defender, MWMechanics::NpcStats& victim,
+            const MWMechanics::NpcStats& attacker, const ESM::Weapon* weapon, float strength,
+            float attackerWeight, float attackerSkill, const std::array<float, 3>& attackerPosition,
+            const std::array<float, 3>& defenderPosition, float defenderYaw, bool movingForward,
+            float& damage, Misc::Rng::Generator& rng) {
+            if (!std::isfinite(damage) || damage < 0 || damage > 1'000'000)
+                throw std::invalid_argument("Native melee damage invalid before defense");
+            bool blocked = false;
+            const auto shield = mRuntime.equippedArmorCondition(defender, MWWorld::InventoryStore::Slot_CarriedLeft);
+            if (shield && shield->mCondition > 0 && !victim.getKnockedDown()
+                && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() <= 0)
+            {
+                const float dx = attackerPosition[0] - defenderPosition[0];
+                const float dy = attackerPosition[1] - defenderPosition[1];
+                const float forwardX = -std::sin(defenderYaw), forwardY = std::cos(defenderYaw);
+                const float angle = std::atan2(dx * forwardY - dy * forwardX,
+                    dx * forwardX + dy * forwardY) * 180.f / std::numbers::pi_v<float>;
+                if (angle >= gmst.find("fCombatBlockLeftAngle")->mValue.getFloat()
+                    && angle <= gmst.find("fCombatBlockRightAngle")->mValue.getFloat())
+                {
+                    TES3MP::OpenMwMeleeSettings settings;
+                    settings.swingBlockMultiplier = gmst.find("fSwingBlockMult")->mValue.getFloat();
+                    settings.swingBlockBase = gmst.find("fSwingBlockBase")->mValue.getFloat();
+                    settings.blockStillBonus = gmst.find("fBlockStillBonus")->mValue.getFloat();
+                    settings.blockMinimumChance = float(gmst.find("iBlockMinChance")->mValue.getInteger());
+                    settings.blockMaximumChance = float(gmst.find("iBlockMaxChance")->mValue.getInteger());
+                    TES3MP::OpenMwMeleeAttacker blockerValues, attackerValues;
+                    blockerValues.agility = victim.getAttribute(ESM::Attribute::Agility).getModified();
+                    blockerValues.luck = victim.getAttribute(ESM::Attribute::Luck).getModified();
+                    blockerValues.fatigueTerm = victim.getFatigueTerm(mRuntime.mStore);
+                    attackerValues.agility = attacker.getAttribute(ESM::Attribute::Agility).getModified();
+                    attackerValues.luck = attacker.getAttribute(ESM::Attribute::Luck).getModified();
+                    attackerValues.weaponSkill = attackerSkill;
+                    attackerValues.fatigueTerm = attacker.getFatigueTerm(mRuntime.mStore);
+                    const float chance = TES3MP::openMwMeleeBlockChance(settings,
+                        victim.getSkill(ESM::Skill::Block).getModified(), blockerValues, attackerValues,
+                        strength, !movingForward);
+                    blocked = Misc::Rng::roll0to99(rng) < chance;
+                    if (blocked)
+                    {
+                        const int shieldLoss = std::min(shield->mCondition, int(damage));
+                        if (shieldLoss)
+                            wear.push_back({defender, *shield, shield->mCondition - shieldLoss,
+                                MWWorld::InventoryStore::Slot_CarriedLeft});
+                        const float capacity = victim.getAttribute(ESM::Attribute::Strength).getModified()
+                            * gmst.find("fEncumbranceStrMult")->mValue.getFloat();
+                        const float weight = std::max(0.f, mRuntime.storage(defender).getWeight());
+                        settings.fatigueBlockBase = gmst.find("fFatigueBlockBase")->mValue.getFloat();
+                        settings.fatigueBlockMultiplier = gmst.find("fFatigueBlockMult")->mValue.getFloat();
+                        settings.weaponFatigueBlockMultiplier = gmst.find("fWeaponFatigueBlockMult")->mValue.getFloat();
+                        std::optional<TES3MP::OpenMwMeleeWeapon> weaponValues;
+                        if (weapon) { weaponValues.emplace(); weaponValues->weight = attackerWeight; }
+                        const float cost = TES3MP::openMwMeleeBlockFatigueCost(settings,
+                            weight == 0 ? 0.f : capacity == 0 ? 1.f : weight / capacity,
+                            weaponValues, strength);
+                        auto fatigue = victim.getFatigue();
+                        fatigue.setCurrent(fatigue.getCurrent() - cost);
+                        victim.setFatigue(fatigue);
+                        victim.setBlock(true);
+                        damage = 0;
+                    }
+                }
+            }
+            if (!blocked && damage > 0)
+            {
+                TES3MP::OpenMwMeleeSettings settings;
+                settings.combatArmorMinimumMultiplier = gmst.find("fCombatArmorMinMult")->mValue.getFloat();
+                const float original = damage;
+                const float adjusted = TES3MP::openMwArmorAdjustedDamage(settings, damage, armorRating(defender, victim));
+                damage = std::max(1.f, adjusted);
+                const int roll = Misc::Rng::roll0to99(rng);
+                int slot = MWWorld::InventoryStore::Slot_Cuirass;
+                if (roll >= 90) slot = MWWorld::InventoryStore::Slot_CarriedLeft;
+                else if (roll >= 85) slot = MWWorld::InventoryStore::Slot_RightGauntlet;
+                else if (roll >= 80) slot = MWWorld::InventoryStore::Slot_LeftGauntlet;
+                else if (roll >= 70) slot = MWWorld::InventoryStore::Slot_RightPauldron;
+                else if (roll >= 60) slot = MWWorld::InventoryStore::Slot_LeftPauldron;
+                else if (roll >= 50) slot = MWWorld::InventoryStore::Slot_Boots;
+                else if (roll >= 40) slot = MWWorld::InventoryStore::Slot_Greaves;
+                else if (roll >= 30) slot = MWWorld::InventoryStore::Slot_Helmet;
+                if (slot == MWWorld::InventoryStore::Slot_CarriedLeft
+                    && !mRuntime.equippedArmorCondition(defender, slot))
+                    slot = roll >= 95 ? MWWorld::InventoryStore::Slot_Cuirass
+                        : MWWorld::InventoryStore::Slot_LeftPauldron;
+                if (const auto armor = mRuntime.equippedArmorCondition(defender, slot))
+                {
+                    const int loss = std::min(armor->mCondition, int(std::ceil(std::max(0.f, original - adjusted))));
+                    if (loss) wear.push_back({defender, *armor, armor->mCondition - loss, slot});
+                }
+            }
+            combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+            return blocked;
+        };
         if (dueRespawn)
         {
             if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
@@ -2051,6 +2193,7 @@ namespace TES3MP::Native
             const bool success = Misc::Rng::roll0to99(rng) < chance;
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             float damage = 0;
+            bool blocked = false;
             const bool healthUnarmed = mBinding.mKnockoutRules
                 && (victim.getKnockedDown() || paralyzed);
             const auto damagedStat = weapon || healthUnarmed ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
@@ -2067,7 +2210,6 @@ namespace TES3MP::Native
                     attacker.getAttribute(ESM::Attribute::Strength).getModified(),
                     weapon->mData.mHealth ? float(held->mCondition) / weapon->mData.mHealth : 1.f,
                     weapon->mData.mHealth != 0, damage);
-                MWMechanics::applyHitDamage(victim, {{"health", damage}}, MWWorld::TimeStamp{});
             }
             else if (success)
             {
@@ -2076,15 +2218,31 @@ namespace TES3MP::Native
                         attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength)
                     : MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
                         attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
-                MWMechanics::applyHitDamage(victim, {{healthUnarmed ? "health" : "fatigue", damage}},
-                    MWWorld::TimeStamp{});
+            }
+            const float weaponDamage = damage;
+            if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
+                throw std::invalid_argument("Native player melee damage invalid");
+            if (success && damage > 0)
+            {
+                const auto* player = players.findPlayer(playerAttacker);
+                const auto position = player->transform().position();
+                const std::array<float, 3> attackerPosition{float(double(position.x()) / 1024),
+                    float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                blocked = defendHit(2, victim, attacker, weapon, strength,
+                    weapon ? weapon->mData.mWeight : 0.f, attacker.getSkill(skill).getModified(),
+                    attackerPosition, after.mPosition, after.mYaw,
+                    (after.mPosition[0] - before.mPosition[0]) * -std::sin(after.mYaw)
+                        + (after.mPosition[1] - before.mPosition[1]) * std::cos(after.mYaw) > 0,
+                    damage, rng);
+                MWMechanics::applyHitDamage(victim, {{damagedStat == MeleeDamageStat::Health ? "health" : "fatigue",
+                    damage}}, MWWorld::TimeStamp{});
             }
             if (weapon && weapon->mData.mHealth)
             {
                 const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
                     .find("fWeaponDamageMult")->mValue.getFloat();
                 wear.push_back({owner, *held,
-                    MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier)});
+                    MWMechanics::weaponConditionAfterHit(held->mCondition, weaponDamage, success, multiplier)});
             }
             if (success && weapon) applyStrike(owner, *held, *weapon, attacker, victim, 2, rng);
             saveCombatStats(combat->actors[owner], attacker);
@@ -2106,7 +2264,7 @@ namespace TES3MP::Native
                 ActorId::fromValue(before.mActor).value(),
                 CombatRevision::fromValue(tick.value()).value(),
                 CombatRevision::fromValue(tick.value()).value(),
-                damage, damagedStat, success, false,
+                damage, damagedStat, success, blocked,
                 victim.getHealth().getCurrent() <= 0};
             if (victim.getHealth().getCurrent() <= 0)
             {
@@ -2391,6 +2549,7 @@ namespace TES3MP::Native
             if (hit && combat && mBinding.mCombatResolution)
             {
                 bool hitSuccess = false;
+                bool hitBlocked = false;
                 float hitDamage = 0;
                 MeleeDamageStat hitStat = MeleeDamageStat::Health;
                 bool targetDied = false;
@@ -2433,6 +2592,7 @@ namespace TES3MP::Native
                     hitSuccess = success;
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     float damage = 0;
+                    bool blocked = false;
                     const bool healthUnarmed = mBinding.mKnockoutRules
                         && (victim.getKnockedDown() || paralyzed);
                     const auto damagedStat = weapon || healthUnarmed ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
@@ -2449,7 +2609,6 @@ namespace TES3MP::Native
                             attacker.getAttribute(ESM::Attribute::Strength).getModified(),
                             weapon->mData.mHealth ? float(held->mCondition) / weapon->mData.mHealth : 1.f,
                             weapon->mData.mHealth != 0, damage);
-                        MWMechanics::applyHitDamage(victim, {{"health", damage}}, MWWorld::TimeStamp{});
                     }
                     else if (success)
                     {
@@ -2458,7 +2617,26 @@ namespace TES3MP::Native
                                 attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength)
                             : MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
                                 attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
-                        MWMechanics::applyHitDamage(victim, {{healthUnarmed ? "health" : "fatigue", damage}},
+                    }
+                    const float weaponDamage = damage;
+                    if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
+                        throw std::invalid_argument("Native NPC melee damage invalid");
+                    if (success && damage > 0)
+                    {
+                        const auto* player = players.findPlayer(mBinding.mPlayers[victimIndex]);
+                        const auto position = player->transform().position();
+                        const std::array<float, 3> defenderPosition{float(double(position.x()) / 1024),
+                            float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                        const float defenderYaw = float(double(player->transform().orientation().z().value())
+                            * (2.0 * std::numbers::pi_v<double> / 4294967296.0));
+                        blocked = defendHit(victimIndex, victim, attacker, weapon, strength,
+                            weapon ? weapon->mData.mWeight : 0.f, attacker.getSkill(skill).getModified(),
+                            after.mPosition, defenderPosition, defenderYaw,
+                            double(player->linearVelocity().x()) * -std::sin(defenderYaw)
+                                + double(player->linearVelocity().y()) * std::cos(defenderYaw) > 0,
+                            damage, rng);
+                        MWMechanics::applyHitDamage(victim,
+                            {{damagedStat == MeleeDamageStat::Health ? "health" : "fatigue", damage}},
                             MWWorld::TimeStamp{});
                     }
                     if (weapon && weapon->mData.mHealth)
@@ -2466,7 +2644,7 @@ namespace TES3MP::Native
                         const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
                             .find("fWeaponDamageMult")->mValue.getFloat();
                         wear.push_back({mCombatNpcOwner, *held,
-                            MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier)});
+                            MWMechanics::weaponConditionAfterHit(held->mCondition, weaponDamage, success, multiplier)});
                     }
                     if (success && weapon)
                         applyStrike(mCombatNpcOwner, *held, *weapon, attacker, victim, victimIndex, rng);
@@ -2476,6 +2654,7 @@ namespace TES3MP::Native
                             && victim.getFatigue().getCurrent() < 0;
                     hitDamage = damage;
                     hitStat = damagedStat;
+                    hitBlocked = blocked;
                     targetDied = victim.getHealth().getCurrent() <= 0;
                 }
                 saveCombatStats(combat->actors[2], attacker);
@@ -2487,7 +2666,7 @@ namespace TES3MP::Native
                         PlayerId::fromValue(target).value(),
                         CombatRevision::fromValue(tick.value()).value(),
                         CombatRevision::fromValue(tick.value()).value(),
-                        hitDamage, hitStat, contact && hitSuccess, false, targetDied};
+                        hitDamage, hitStat, contact && hitSuccess, hitBlocked, targetDied};
             }
         }
         std::array<float,3> velocity;
@@ -2668,7 +2847,7 @@ namespace TES3MP::Native
                     [](const auto& object) { return object.mRef.mRefNum; });
                 if (item == state.mObjects.end()) throw std::invalid_argument("Native melee projection lost weapon identity");
                 item->mRef.mChargeInt = change.condition;
-                if (change.condition == 0) state.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
+                if (change.condition == 0) state.mSlots[change.slot] = {};
             }
             for (const auto& charge : charges) if (owner == charge.owner)
             {

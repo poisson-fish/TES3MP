@@ -6638,6 +6638,20 @@ int main(int argc, char** argv)
                 true, true, true, true, true, false, false, false, false, false, false, false, true);
             std::cout << "PASS npc-knockout\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-armor-block")
+        {
+            const auto root = std::filesystem::absolute(argv[2]);
+            std::filesystem::create_directories(root);
+            const auto config = std::filesystem::absolute(argv[3]);
+            const auto settings = std::filesystem::absolute(argv[4]);
+            TES3MP::Native::Testing::checkNpcDoors(root / "armor", config, settings,
+                true, true, true, true, true, false, false, false, false, false, false, false,
+                false, true, false);
+            TES3MP::Native::Testing::checkNpcDoors(root / "block", config, settings,
+                true, true, true, true, true, false, false, false, false, false, false, false,
+                false, true, true);
+            std::cout << "PASS npc-armor-block\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "npc-door-avoidance")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),std::filesystem::absolute(argv[4]), true);

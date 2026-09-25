@@ -4127,13 +4127,15 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout)
+        bool strike, bool knockout, bool defense, bool shield)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
         writeDoorFixtureModel(scratch);
         std::filesystem::create_directory(scratch / "openmw");
         std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw" / "openmw.cfg");
+        ESM::Weapon defenseWeapon;
+        float defenseStrengthBase = 0, defenseStrengthMultiplier = 0;
         // Synthetic room/placements on the retained real loadout. NPC hull and
         // inventory mechanics come from OpenMW; this is not a published-mod proof.
         {
@@ -4145,6 +4147,29 @@ namespace TES3MP::Native::Testing
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
             ESM::Enchantment strikeEnchantment;
             ESM::Weapon strikeWeapon;
+            std::vector<ESM::Armor> defenseArmor;
+            if (defense)
+            {
+                defenseWeapon = *base.store().get<ESM::Weapon>().find(ESM::RefId::stringRefId("iron shortsword"));
+                defenseStrengthBase = base.store().get<ESM::GameSetting>()
+                    .find("fDamageStrengthBase")->mValue.getFloat();
+                defenseStrengthMultiplier = base.store().get<ESM::GameSetting>()
+                    .find("fDamageStrengthMult")->mValue.getFloat();
+                const std::array types{ESM::Armor::Helmet, ESM::Armor::Cuirass, ESM::Armor::Greaves,
+                    ESM::Armor::LPauldron, ESM::Armor::RPauldron, ESM::Armor::LGauntlet,
+                    ESM::Armor::RGauntlet, ESM::Armor::Boots, ESM::Armor::Shield};
+                for (size_t index = 0; index < types.size() - size_t(!shield); ++index)
+                {
+                    ESM::Armor armor; armor.blank();
+                    armor.mId = ESM::RefId::stringRefId("npc_defense_" + std::to_string(index));
+                    armor.mData.mType = types[index]; armor.mData.mWeight = 5;
+                    armor.mData.mArmor = 60; armor.mData.mHealth = 100;
+                    if (types[index] == ESM::Armor::Boots)
+                        armor.mParts.mParts.push_back({ESM::PRT_LFoot, {}, {}});
+                    npc.mInventory.mList.push_back({1, armor.mId});
+                    defenseArmor.push_back(armor);
+                }
+            }
             if (strike)
             {
                 strikeEnchantment.blank();
@@ -4165,6 +4190,7 @@ namespace TES3MP::Native::Testing
                 npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
+                if (shield) npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Block)] = 100;
                 npc.mInventory.mList.push_back({1, strike ? strikeWeapon.mId
                     : ESM::RefId::stringRefId("iron shortsword")});
             }
@@ -4280,6 +4306,19 @@ namespace TES3MP::Native::Testing
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            for (const auto& armor : defenseArmor)
+            {
+                out.startRecord(ESM::Armor::sRecordId, 0);
+                armor.save(out); out.endRecord(ESM::Armor::sRecordId);
+            }
+            if (shield)
+                for (const auto name : {"iBlockMinChance", "iBlockMaxChance"})
+                {
+                    ESM::GameSetting setting; setting.mId = ESM::RefId::stringRefId(name);
+                    setting.mValue.setType(ESM::VT_Int); setting.mValue.setInteger(100);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0);
+                    setting.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+                }
             if (strike)
             {
                 out.startRecord(ESM::Enchantment::sRecordId, 0);
@@ -4548,6 +4587,16 @@ namespace TES3MP::Native::Testing
             "Door participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
             CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
         auto authority = players(SessionGeneration::initial(), 1, 2);
+        if (shield)
+        {
+            std::vector<CanonicalPlayerEntityState> facing(authority.players().begin(), authority.players().end());
+            for (auto& entity : facing)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity,
+                    id<ServerTick>(1), Transform(entity.transform().cell(), entity.transform().position(),
+                        Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0x80000000u))),
+                    LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(facing, authority.activeSessions()));
+        }
         std::vector<PersistedPlayerIdentity> records;
         for (uint64_t i : {1, 2})
         {
@@ -4558,7 +4607,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (knockout ? "native-inventory-33\nmanifest "
+            std::ofstream out(descriptor); out << ((knockout || defense) ? "native-inventory-33\nmanifest "
                 : collection ? "native-inventory-32\nmanifest "
                 : playerTarget ? "native-inventory-31\nmanifest "
                 : area ? "native-inventory-30\nmanifest "
@@ -4581,6 +4630,191 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (defense)
+        {
+            const auto condition = [&](const auto& delivery, bool shieldOnly) {
+                const auto& inventory = delivery.playerInventory.front();
+                uint32_t total = 0;
+                for (const auto& equipped : inventory.equipment)
+                {
+                    if (shieldOnly != (equipped.slot == EquipmentSlot::CarriedLeft)) continue;
+                    if (!shieldOnly && (equipped.slot == EquipmentSlot::CarriedRight
+                        || equipped.slot == EquipmentSlot::Shirt)) continue;
+                    const auto item = std::ranges::find(inventory.stacks, equipped.stackId,
+                        &CanonicalItemStack::stackId);
+                    require(item != inventory.stacks.end(), "Defense equipment identity missing");
+                    total += item->condition;
+                }
+                return total;
+            };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            bool resolved = false;
+            uint64_t defendedTick = 0;
+            for (uint64_t time = 1; time <= 64 && !resolved; ++time)
+            {
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                require(bool(pending), "Defense tick did not prepare");
+                const auto before = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                const auto prior = readActorCampaign({reinterpret_cast<const char*>(before.data()), before.size()});
+                const auto current = service.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(time), id<CanonicalRevision>(time));
+                const auto events = service.projectCombatEvents(authority, id<SessionId>(1),
+                    id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                std::vector<std::byte> proposed;
+                require(pending->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && std::ranges::equal(before, service.inventoryImage()),
+                    "Rejected armor/block hit changed the campaign");
+                if (events && !events->actorEvents().empty() && events->actorEvents()[0].hit)
+                {
+                    const auto staged = service.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    const auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+                    const auto& hit = events->actorEvents()[0];
+                    require(current && staged && candidate.combat && prior.combat
+                        && candidate.combat->rng != prior.combat->rng,
+                        "Defense hit omitted inventory, stats or RNG");
+                    if (shield)
+                        require(hit.blocked && hit.damage == 0
+                            && candidate.combat->actors[0][8][2] == prior.combat->actors[0][8][2]
+                            && candidate.combat->actors[0][10][2] < prior.combat->actors[0][10][2]
+                            && condition(*staged, true) < condition(*current, true),
+                            "Shield block did not stage fatigue and shield wear without health loss");
+                    else
+                    {
+                        TES3MP::OpenMwMeleeSettings settings;
+                        settings.damageStrengthBase = defenseStrengthBase;
+                        settings.damageStrengthMultiplier = defenseStrengthMultiplier;
+                        const auto& strength = prior.combat->actors[2]
+                            [ESM::Attribute::refIdToIndex(ESM::Attribute::Strength)];
+                        const float modifiedStrength = std::max(0.f, strength[0] - strength[3] + strength[1]);
+                        const float swing = candidate.melee->state.mStrength;
+                        const float raw = TES3MP::openMwAdjustedWeaponDamage(settings, modifiedStrength,
+                            float(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition().value())
+                                / defenseWeapon.mData.mHealth, true,
+                            defenseWeapon.mData.mChop[0]
+                                + (defenseWeapon.mData.mChop[1] - defenseWeapon.mData.mChop[0]) * swing);
+                        require(!hit.blocked && hit.damage > 0 && hit.damage < raw
+                            && candidate.combat->actors[0][8][2] < prior.combat->actors[0][8][2]
+                            && condition(*staged, false) < condition(*current, false),
+                            "Armor hit did not stage reduced health damage and armor wear");
+                    }
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && std::ranges::equal(proposed, service.inventoryImage()),
+                        "Armor/block hit did not commit its rejected candidate exactly");
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                    auto& recovered = restart.service(); recovered.synchronizeCells(authority);
+                    const auto restored = recovered.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(std::ranges::equal(proposed, recovered.inventoryImage()) && restored
+                        && condition(*restored, shield) == condition(*staged, shield),
+                        "Armor/block restart changed the durable equipment outcome");
+                    resolved = true;
+                    defendedTick = time;
+                }
+                else require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Defense setup tick did not commit");
+            }
+            require(resolved, "No defended melee hit resolved");
+            if (shield)
+            {
+                const auto view = service.projectInventory(authority, id<SessionId>(2),
+                    id<ServerTick>(defendedTick), id<CanonicalRevision>(defendedTick));
+                require(view && view->equipment && view->equipment->motions.size() == 1,
+                    "NPC facing unavailable for shield fixture");
+                const auto& motion = view->equipment->motions.front();
+                std::vector<CanonicalPlayerEntityState> facing(authority.players().begin(), authority.players().end());
+                auto& attacker = facing[1];
+                const Position3 front(int64_t(std::llround((motion.position[0] - std::sin(motion.yaw) * 30) * 1024)),
+                    int64_t(std::llround((motion.position[1] + std::cos(motion.yaw) * 30) * 1024)),
+                    int64_t(std::llround(motion.position[2] * 1024)));
+                attacker = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(attacker,
+                    id<ServerTick>(defendedTick + 1), Transform(attacker.transform().cell(), front,
+                        attacker.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(facing, authority.activeSessions()));
+                service.synchronizeCells(authority);
+            }
+            const auto npcArmorCondition = [&](const InventoryService& runtime) {
+                int total = 0;
+                for (int slot : {MWWorld::InventoryStore::Slot_Helmet,
+                        MWWorld::InventoryStore::Slot_Cuirass, MWWorld::InventoryStore::Slot_Greaves,
+                        MWWorld::InventoryStore::Slot_LeftPauldron, MWWorld::InventoryStore::Slot_RightPauldron,
+                        MWWorld::InventoryStore::Slot_LeftGauntlet, MWWorld::InventoryStore::Slot_RightGauntlet,
+                        MWWorld::InventoryStore::Slot_Boots})
+                    total += runtime.selectedNpcArmorCondition(slot).value_or(0);
+                return total;
+            };
+            bool playerResolved = false;
+            const auto* attackingPlayer = authority.findPlayer(id<PlayerId>(2));
+            for (uint64_t time = defendedTick + 1; time <= defendedTick + 64 && !playerResolved; ++time)
+            {
+                const auto before = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                const auto prior = readActorCampaign({reinterpret_cast<const char*>(before.data()), before.size()});
+                const auto view = service.projectInventory(authority, id<SessionId>(2),
+                    id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(view && view->equipment && view->equipment->motions.size() == 1,
+                    "Player defense fixture lost NPC target");
+                ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                    CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                    id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                    CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                    CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                    EntityPrecondition(attackingPlayer->entityId(), attackingPlayer->entityRevision(),
+                        attackingPlayer->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                auto request = service.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                require(bool(request), "Player attack against armored NPC rejected");
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                    std::move(request));
+                const auto outcome = service.projectCombatEvents(authority, id<SessionId>(1),
+                    id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                const auto beforeArmor = npcArmorCondition(dynamic_cast<InventoryService&>(service));
+                const auto beforeShield = dynamic_cast<InventoryService&>(service)
+                    .selectedNpcArmorCondition(MWWorld::InventoryStore::Slot_CarriedLeft);
+                std::vector<std::byte> proposed;
+                require(pending->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && std::ranges::equal(before, service.inventoryImage())
+                    && beforeArmor == npcArmorCondition(dynamic_cast<InventoryService&>(service)),
+                    "Rejected player hit changed NPC armor");
+                if (outcome && !outcome->events().empty() && outcome->events().front().hit)
+                {
+                    const auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+                    const auto& hit = outcome->events().front();
+                    require(candidate.combat && prior.combat, "Player hit omitted durable NPC stats");
+                    if (shield)
+                        require(hit.blocked && hit.damage == 0
+                            && candidate.combat->actors[2][8][2] == prior.combat->actors[2][8][2]
+                            && candidate.combat->actors[2][10][2] < prior.combat->actors[2][10][2],
+                            "NPC shield did not block with fatigue cost");
+                    else
+                        require(!hit.blocked && hit.damage > 0
+                            && candidate.combat->actors[2][8][2] < prior.combat->actors[2][8][2],
+                            "NPC armor did not reduce a player melee hit");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && std::ranges::equal(proposed, service.inventoryImage()),
+                        "Player hit did not commit its exact candidate");
+                    const auto& runtime = dynamic_cast<InventoryService&>(service);
+                    if (shield)
+                        require(runtime.selectedNpcArmorCondition(MWWorld::InventoryStore::Slot_CarriedLeft)
+                            < beforeShield, "NPC shield did not wear on block");
+                    else require(npcArmorCondition(runtime) < beforeArmor,
+                        "NPC armor did not wear on player hit");
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                    const auto& recovered = dynamic_cast<const InventoryService&>(restart.service());
+                    require(std::ranges::equal(proposed, restart.service().inventoryImage())
+                        && npcArmorCondition(recovered) == npcArmorCondition(runtime),
+                        "NPC defense changed after restart");
+                    playerResolved = true;
+                }
+                else require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Player defense setup tick did not commit");
+            }
+            require(playerResolved, "No player hit resolved against NPC defense");
+            std::cout << "defense=" << (shield ? "block" : "armor")
+                << " defenders=player+npc rejection=atomic restart=exact hit=durable\n";
+            return;
+        }
         if (melee)
         {
             if (combat)
