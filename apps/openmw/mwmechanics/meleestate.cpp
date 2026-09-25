@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadweap.hpp>
@@ -66,6 +67,34 @@ namespace MWMechanics
         return TES3MP::openMwHandToHandDamage(settings, handToHandSkill,
             attacker.getAttribute(ESM::Attribute::Strength).getModified(), attackStrength,
             false, false, 1.f, false);
+    }
+
+    float getUnarmedHealthDamage(const MWWorld::ESMStore& content, const CreatureStats& attacker,
+        float handToHandSkill, float attackStrength)
+    {
+        const auto& store = content.get<ESM::GameSetting>();
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.minimumHandToHandMultiplier = store.find("fMinHandToHandMult")->mValue.getFloat();
+        settings.maximumHandToHandMultiplier = store.find("fMaxHandToHandMult")->mValue.getFloat();
+        settings.handToHandHealthPercent = store.find("fHandtoHandHealthPer")->mValue.getFloat();
+        return TES3MP::openMwHandToHandDamage(settings, handToHandSkill,
+            attacker.getAttribute(ESM::Attribute::Strength).getModified(), attackStrength,
+            false, false, 1.f, true);
+    }
+
+    void restoreCombatFatigue(CreatureStats& actor, const MWWorld::ESMStore& content, float seconds)
+    {
+        auto fatigue = actor.getFatigue();
+        if (fatigue.getCurrent() >= fatigue.getBase()) return;
+        const auto& settings = content.get<ESM::GameSetting>();
+        const float base = settings.find("fFatigueReturnBase")->mValue.getFloat();
+        const float multiplier = settings.find("fFatigueReturnMult")->mValue.getFloat();
+        const float endurance = actor.getAttribute(ESM::Attribute::Endurance).getModified();
+        const float restored = fatigue.getCurrent() + seconds * (base + multiplier * endurance);
+        if (!std::isfinite(restored) || std::abs(restored) > 1'000'000)
+            throw std::invalid_argument("Native fatigue restoration invalid");
+        fatigue.setCurrent(restored);
+        actor.setFatigue(fatigue);
     }
 
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier)

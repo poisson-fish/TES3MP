@@ -4127,7 +4127,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike)
+        bool strike, bool knockout)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4558,7 +4558,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (collection ? "native-inventory-32\nmanifest "
+            std::ofstream out(descriptor); out << (knockout ? "native-inventory-33\nmanifest "
+                : collection ? "native-inventory-32\nmanifest "
                 : playerTarget ? "native-inventory-31\nmanifest "
                 : area ? "native-inventory-30\nmanifest "
                 : timed ? "native-inventory-29\nmanifest "
@@ -6048,6 +6049,7 @@ namespace TES3MP::Native::Testing
                     require(prepared && prepared->commit(accepted) == CanonicalDurabilityResult::Committed,
                         "Unarmed fixture unequip did not commit");
                     bool fatigueHit = false;
+                    uint64_t fatigueHitTick = 0;
                     for (uint64_t time = unequipTick + 1; time <= unequipTick + 128 && !fatigueHit; ++time)
                     {
                         const std::vector beforeBare(bare.inventoryImage().begin(), bare.inventoryImage().end());
@@ -6083,6 +6085,7 @@ namespace TES3MP::Native::Testing
                             && firstEvent->events().front().damagedStat == MeleeDamageStat::Fatigue,
                             "Unarmed effect event did not reach both clients");
                         fatigueHit = firstEvent->events().front().hit;
+                        if (fatigueHit) fatigueHitTick = time;
                         if (fatigueHit)
                             require(prior.combat && next.combat
                                 && firstEvent->events().front().damage > 0
@@ -6108,6 +6111,131 @@ namespace TES3MP::Native::Testing
                         }
                     }
                     require(fatigueHit, "Unarmed attack never applied fatigue damage");
+                    if (knockout)
+                    {
+                        auto knockedImage = std::vector(bare.inventoryImage().begin(), bare.inventoryImage().end());
+                        auto knocked = readActorCampaign({reinterpret_cast<const char*>(knockedImage.data()),
+                            knockedImage.size()});
+                        const uint64_t knockoutLimit = fatigueHitTick + 256;
+                        for (uint64_t time = fatigueHitTick + 1;
+                            !knocked.combat->knockedDown[2] && time <= knockoutLimit; ++time)
+                        {
+                            const auto view = bare.projectInventory(authority, id<SessionId>(2),
+                                id<ServerTick>(time), id<CanonicalRevision>(time));
+                            require(view && view->equipment && view->equipment->motions.size() == 1,
+                                "Unarmed knockout target disappeared");
+                            ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                                id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                                CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                                EntityPrecondition(attackingPlayer->entityId(), attackingPlayer->entityRevision(),
+                                    attackingPlayer->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                            auto request = bare.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                            require(bool(request), "Repeated unarmed knockout attack rejected");
+                            auto tick = bare.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                                std::move(request));
+                            require(tick && tick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Repeated unarmed knockout attack failed to commit");
+                            knockedImage.assign(bare.inventoryImage().begin(), bare.inventoryImage().end());
+                            knocked = readActorCampaign({reinterpret_cast<const char*>(knockedImage.data()),
+                                knockedImage.size()});
+                            fatigueHitTick = time;
+                        }
+                        require(knocked.combat && knocked.combat->knockedDown[2]
+                            && knocked.combat->actors[2][10][2] < 0,
+                            "Unarmed fatigue damage did not commit durable knockout");
+                        InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, knockedImage);
+                        recovered.service().synchronizeCells(authority);
+                        const auto restored = readActorCampaign({reinterpret_cast<const char*>(
+                            recovered.service().inventoryImage().data()), recovered.service().inventoryImage().size()});
+                        require(restored.combat && restored.combat->knockedDown[2],
+                            "Restart lost the knocked-down actor state");
+                        auto malformedKnockout = knockedImage;
+                        const size_t knockoutOffset = 56 + 8 + knocked.melee->identity.size() + 7 * 8
+                            + (1 + 3 * ActorCampaignCombat::StatCount * 5) * 8;
+                        malformedKnockout.at(knockoutOffset) = std::byte{2};
+                        bool rejectedKnockout = false;
+                        try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto,
+                            malformedKnockout); }
+                        catch (const std::invalid_argument&) { rejectedKnockout = true; }
+                        require(rejectedKnockout, "Malformed durable knockout installed on recovery");
+                        uint64_t healthTick = fatigueHitTick;
+                        bool healthHit = false;
+                        for (uint64_t time = fatigueHitTick + 1; time <= fatigueHitTick + 128 && !healthHit; ++time)
+                        {
+                            const std::vector priorImage(bare.inventoryImage().begin(), bare.inventoryImage().end());
+                            const auto prior = readActorCampaign({reinterpret_cast<const char*>(priorImage.data()),
+                                priorImage.size()});
+                            require(prior.combat && prior.combat->knockedDown[2],
+                                "Knockout recovered before an unarmed health hit landed");
+                            const auto view = bare.projectInventory(authority, id<SessionId>(2),
+                                id<ServerTick>(time), id<CanonicalRevision>(time));
+                            require(view && view->equipment && view->equipment->motions.size() == 1,
+                                "Knocked-down target disappeared from contact");
+                            ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                                id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                                CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                                EntityPrecondition(attackingPlayer->entityId(), attackingPlayer->entityRevision(),
+                                    attackingPlayer->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                            auto request = bare.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                            require(bool(request), "Unarmed follow-up against knocked-down actor rejected");
+                            auto tick = bare.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                                std::move(request));
+                            std::vector<std::byte> candidate;
+                            require(tick && tick->commit([&](auto bytes) { candidate.assign(bytes.begin(), bytes.end());
+                                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                                && std::ranges::equal(priorImage, bare.inventoryImage()),
+                                "Rejected unarmed health hit mutated knockout or health");
+                            const auto outcome = bare.projectCombatEvents(authority, id<SessionId>(1),
+                                id<ServerTick>(time), id<CanonicalRevision>(time), tick.get());
+                            const auto other = bare.projectCombatEvents(authority, id<SessionId>(2),
+                                id<ServerTick>(time), id<CanonicalRevision>(time), tick.get());
+                            const auto damaged = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                                candidate.size()});
+                            require(outcome && other && outcome->events().size() == 1
+                                && std::ranges::equal(outcome->events(), other->events())
+                                && outcome->events().front().damagedStat == MeleeDamageStat::Health
+                                && damaged.combat && damaged.combat->knockedDown[2],
+                                "Knocked-down unarmed attempt diverged across two clients");
+                            require(std::ranges::equal(prior.actor, damaged.actor)
+                                && prior.melee && damaged.melee
+                                && prior.melee->state == damaged.melee->state,
+                                "Knocked-down NPC moved or advanced its attack");
+                            healthHit = outcome->events().front().hit;
+                            if (healthHit)
+                                require(damaged.combat->actors[2][8][2] < prior.combat->actors[2][8][2],
+                                    "Confirmed unarmed health hit did not damage the knocked-down actor");
+                            require(tick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && std::ranges::equal(candidate, bare.inventoryImage()),
+                                "Unarmed health outcome was not durable");
+                            healthTick = time;
+                        }
+                        require(healthHit, "No unarmed health hit landed during knockout");
+                        bool recoveredFatigue = false;
+                        for (uint64_t time = healthTick + 1; time <= healthTick + 1500; ++time)
+                        {
+                            auto restoration = bare.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                            require(restoration && restoration->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Knockout recovery tick did not commit");
+                            const auto image = bare.inventoryImage();
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+                            if (state.combat && !state.combat->knockedDown[2])
+                            {
+                                require(state.combat->actors[2][10][2] >= 0,
+                                    "Knockout recovered before fatigue returned");
+                                recoveredFatigue = true;
+                                break;
+                            }
+                        }
+                        require(recoveredFatigue, "Knockout did not recover under stock fatigue restoration");
+                        std::cout << "knockout=durable unarmed-health=committed recovery=fatigue-timed clients=two\n";
+                        return;
+                    }
                     std::cout << "unarmed effect=OpenMW fatigue durability=atomic clients=two restart=reconnected\n";
                 }
                 const auto current = readActorCampaign({reinterpret_cast<const char*>(atContact.data()), atContact.size()});

@@ -29,6 +29,9 @@ namespace MWMechanics
     // fatigue. This detached-stats form shares the stock damage calculation.
     float getUnarmedFatigueDamage(const MWWorld::ESMStore& store, const CreatureStats& attacker,
         float handToHandSkill, float attackStrength);
+    float getUnarmedHealthDamage(const MWWorld::ESMStore& store, const CreatureStats& attacker,
+        float handToHandSkill, float attackStrength);
+    void restoreCombatFatigue(CreatureStats& actor, const MWWorld::ESMStore& store, float seconds);
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier);
     float getMeleeWeaponReach(const MWWorld::ESMStore& store, const ESM::Weapon* weapon, bool npc);
     bool isInMeleeReach(const osg::Vec3f& attacker, const osg::Vec3f& target,

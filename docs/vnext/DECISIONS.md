@@ -94,6 +94,12 @@ with a 32-unit sphere at body center, choosing the earliest hit against NPC/worl
 collision. This bounded proxy remains until shared player hull physics is bound.
 
 **Movement smoothness (target).** Cut player movement over last, after smooth
+**V33 fatigue knockout.** The combat image records knockout. Active actors
+recover fatigue at OpenMW's combat rate; inactive actors pause. Negative
+fatigue prevents attacks and redirects unarmed damage to health. Recovery
+occurs at zero fatigue. Animation-specific get-up timing remains pending.
+
+**Movement smoothness (target).** Cut player movement over last, after smooth
 replication and unified engine collision across actors, doors and projectiles.
 Until then retain inherited movement and validate combat positions/contacts on
 the server. Start with stock physics; tune snapshot frequency separately.

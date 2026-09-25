@@ -97,6 +97,8 @@ namespace TES3MP::Native
                     capture(stats.getSkill(ESM::Skill::indexToRefId(i)));
                 if (index != result.actors[actor].size())
                     throw std::invalid_argument("Native combat stat shape invalid");
+                result.knockedDown[actor] = stats.getHealth().getCurrent() > 0
+                    && stats.getFatigue().getCurrent() < 0;
             }
             return result;
         }
@@ -1148,6 +1150,7 @@ namespace TES3MP::Native
             || use.sessionId != proposal.sessionId() || use.sessionGeneration != proposal.sessionGeneration()
             || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
             || player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot())
+            || (mBinding.mKnockoutRules && mCombat->knockedDown[actor(player->playerId())])
             || (use.sourceKind != MagicUseSourceKind::Spell
                 && (use.sourceKind != MagicUseSourceKind::EnchantedItem || !mBinding.mMagicItemUse))
             || !use.sourceId || (mBinding.mMagicProjectileCollection && !use.commandId.value())
@@ -1278,7 +1281,8 @@ namespace TES3MP::Native
                 || attack.expectedTargetRevision.value() < mLife->bornTick)))
             return {};
         const size_t owner = actor(player->playerId());
-        if (mCombat->actors[owner][8][2] <= 0 || mCombat->actors[2][8][2] <= 0)
+        if (mCombat->actors[owner][8][2] <= 0 || mCombat->actors[2][8][2] <= 0
+            || (mBinding.mKnockoutRules && mCombat->knockedDown[owner]))
             return {};
         const auto held = mRuntime.equippedWeaponCondition(owner);
         if ((held && held->mCondition <= 0)
@@ -1330,23 +1334,27 @@ namespace TES3MP::Native
             if (mBinding.mMagicProjectile != (magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                     || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic)
+                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic)
                 || (mBinding.mMagicItemUse && magic != EnchantedProjectileActorCampaignMagic
                     && magic != TimedActorCampaignMagic && magic != AreaActorCampaignMagic
-                    && magic != PlayerTargetActorCampaignMagic && magic != MultipleProjectileActorCampaignMagic)
+                    && magic != PlayerTargetActorCampaignMagic && magic != MultipleProjectileActorCampaignMagic
+                    && magic != KnockoutActorCampaignMagic)
                 || (mBinding.mMagicTimed != (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
-                    || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic))
+                    || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
+                    || magic == KnockoutActorCampaignMagic))
                 || (mBinding.mMagicArea != (magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic))
+                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
                 || (mBinding.mMagicPlayerTarget != (magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic))
-                || (mBinding.mMagicProjectileCollection != (magic == MultipleProjectileActorCampaignMagic)))
+                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
+                || (mBinding.mMagicProjectileCollection != (magic == MultipleProjectileActorCampaignMagic
+                    || magic == KnockoutActorCampaignMagic))
+                || (mBinding.mKnockoutRules != (magic == KnockoutActorCampaignMagic)))
                 throw std::invalid_argument("Native projectile campaign version differs from binding");
             if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
                     || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                     || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic))
+                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
                 throw std::invalid_argument("Native melee contact campaign version differs from binding");
             PlainEquipmentValues baseline;
             if (decoded.life)
@@ -1439,7 +1447,8 @@ namespace TES3MP::Native
     {
         const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size()
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
-        const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8 : 0;
+        const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8
+            + (mBinding.mKnockoutRules ? 3 * 8 : 0) : 0;
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + 3 * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
@@ -1454,7 +1463,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mMagicProjectileCollection ? MultipleProjectileActorCampaignMagic
+        putAreaWord(result, mBinding.mKnockoutRules ? KnockoutActorCampaignMagic
+            : mBinding.mMagicProjectileCollection ? MultipleProjectileActorCampaignMagic
             : mBinding.mMagicPlayerTarget ? PlayerTargetActorCampaignMagic
             : mBinding.mMagicArea ? AreaActorCampaignMagic
             : mBinding.mMagicTimed ? TimedActorCampaignMagic
@@ -1482,6 +1492,8 @@ namespace TES3MP::Native
             for (const auto& actorStats : combat->actors)
                 for (const auto& stat : actorStats)
                     for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
+            if (mBinding.mKnockoutRules)
+                for (bool value : combat->knockedDown) putAreaWord(result, value);
         }
         if (life)
         {
@@ -1898,6 +1910,30 @@ namespace TES3MP::Native
         auto life = mLife;
         auto projectiles = mProjectiles;
         auto timedEffects = mTimedEffects;
+        uint64_t target = mMeleeTarget;
+        bool contact = mMeleeContacted;
+        if (combat && mBinding.mKnockoutRules)
+        {
+            for (size_t index = 0; index < combat->actors.size(); ++index)
+            {
+                const bool awake = index == 2 ? active
+                    : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                        return session.playerId() == mBinding.mPlayers[index];
+                    });
+                if (!awake || combat->actors[index][8][2] <= 0) continue;
+                auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index]);
+                MWMechanics::restoreCombatFatigue(stats, mRuntime.mStore, seconds);
+                combat->knockedDown[index] = stats.getHealth().getCurrent() > 0
+                    && stats.getFatigue().getCurrent() < 0;
+                saveCombatStats(combat->actors[index], stats);
+            }
+            if (combat->knockedDown[2])
+            {
+                step.reset(); after = before; report.status = Diagnostics::Status::Idle;
+                melee = mBinding.mBoundMelee->mAnimation;
+                target = 0; contact = false;
+            }
+        }
         const uint64_t elapsedTicks = tick.value() - mActorTick;
         for (auto& effect : timedEffects)
         {
@@ -1921,8 +1957,6 @@ namespace TES3MP::Native
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
         EquipmentBytes wornCore;
-        uint64_t target = mMeleeTarget;
-        bool contact = mMeleeContacted;
         const auto applyStrike = [&](size_t owner, const EquipmentRuntime::EquippedWeaponCondition& held,
             const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,
             size_t victimIndex, Misc::Rng::Generator& rng) {
@@ -1966,6 +2000,8 @@ namespace TES3MP::Native
             step = mBinding.mNavigatingActor->prepareRestore(life->spawnActor, doors);
             after = step->snapshot();
             combat->actors[2] = life->spawnStats;
+            combat->knockedDown[2] = life->spawnStats[8][2] > 0
+                && life->spawnStats[10][2] < 0;
             melee = mBinding.mBoundMelee->mAnimation;
             target = 0; contact = false;
             std::erase_if(projectiles, [](const auto& pending) {
@@ -1981,6 +2017,7 @@ namespace TES3MP::Native
             const size_t owner = actor(playerAttacker);
             auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[owner]);
             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[2]);
+            if (mBinding.mKnockoutRules) victim.setKnockedDown(combat->knockedDown[2]);
             addTimedResistance(attacker, timedEffects, owner);
             addTimedResistance(victim, timedEffects, 2);
             const auto held = mRuntime.equippedWeaponCondition(owner);
@@ -2014,7 +2051,9 @@ namespace TES3MP::Native
             const bool success = Misc::Rng::roll0to99(rng) < chance;
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             float damage = 0;
-            const auto damagedStat = weapon ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
+            const bool healthUnarmed = mBinding.mKnockoutRules
+                && (victim.getKnockedDown() || paralyzed);
+            const auto damagedStat = weapon || healthUnarmed ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
             if (success && weapon)
             {
                 const auto& range = playerAttack->attackType == MeleeAttackType::Chop ? weapon->mData.mChop
@@ -2032,9 +2071,13 @@ namespace TES3MP::Native
             }
             else if (success)
             {
-                damage = MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
-                    attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
-                MWMechanics::applyHitDamage(victim, {{"fatigue", damage}}, MWWorld::TimeStamp{});
+                damage = healthUnarmed
+                    ? MWMechanics::getUnarmedHealthDamage(mRuntime.mStore, attacker,
+                        attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength)
+                    : MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
+                        attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
+                MWMechanics::applyHitDamage(victim, {{healthUnarmed ? "health" : "fatigue", damage}},
+                    MWWorld::TimeStamp{});
             }
             if (weapon && weapon->mData.mHealth)
             {
@@ -2046,6 +2089,19 @@ namespace TES3MP::Native
             if (success && weapon) applyStrike(owner, *held, *weapon, attacker, victim, 2, rng);
             saveCombatStats(combat->actors[owner], attacker);
             saveCombatStats(combat->actors[2], victim);
+            if (mBinding.mKnockoutRules)
+            {
+                combat->knockedDown[owner] = attacker.getHealth().getCurrent() > 0
+                    && attacker.getFatigue().getCurrent() < 0;
+                combat->knockedDown[2] = victim.getHealth().getCurrent() > 0
+                    && victim.getFatigue().getCurrent() < 0;
+                if (combat->knockedDown[2])
+                {
+                    step.reset(); after = before; report.status = Diagnostics::Status::Idle;
+                    melee = mBinding.mBoundMelee->mAnimation;
+                    target = 0; contact = false;
+                }
+            }
             playerHit = MeleeCombatEvent{playerAttacker,
                 ActorId::fromValue(before.mActor).value(),
                 CombatRevision::fromValue(tick.value()).value(),
@@ -2084,6 +2140,9 @@ namespace TES3MP::Native
             if (spellCharge) charges.push_back(*spellCharge);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             saveCombatStats(combat->actors[owner], caster);
+            if (mBinding.mKnockoutRules)
+                combat->knockedDown[owner] = caster.getHealth().getCurrent() > 0
+                    && caster.getFatigue().getCurrent() < 0;
             spellCasts.push_back(MagicUseCombatEvent{spellCaster, playerSpell->sourceKind, playerSpell->sourceId,
                 playerSpell->targetKind, playerSpell->targetId, CombatRevision::fromValue(tick.value()).value(),
                 CombatRevision::fromValue(tick.value()).value(), launch.succeeded, launch.result.health,
@@ -2275,6 +2334,17 @@ namespace TES3MP::Native
                                 victim, &rng, &mRuntime.mStore);
                             stageTimedResistance(selected[index], ESM::RT_Target, index, tick.value(), timedEffects);
                             saveCombatStats(combat->actors[index], victim);
+                            if (mBinding.mKnockoutRules)
+                            {
+                                combat->knockedDown[index] = victim.getHealth().getCurrent() > 0
+                                    && victim.getFatigue().getCurrent() < 0;
+                                if (index == 2 && combat->knockedDown[2])
+                                {
+                                    step.reset(); after = before; report.status = Diagnostics::Status::Idle;
+                                    melee = mBinding.mBoundMelee->mAnimation;
+                                    target = 0; contact = false;
+                                }
+                            }
                             const bool died = victim.getHealth().getCurrent() <= 0;
                             if (died && index == 2 && life)
                             {
@@ -2307,7 +2377,8 @@ namespace TES3MP::Native
             if (projectiles.size() > flyingCount) remaining.push_back(projectiles.back());
             projectiles = std::move(remaining);
         }
-        if (step && !respawn && melee && (!combat || combat->actors[2][8][2] > 0))
+        if (step && !respawn && melee && (!combat || (combat->actors[2][8][2] > 0
+                && (!mBinding.mKnockoutRules || !combat->knockedDown[2]))))
         {
             if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->windUp() >= 1.f)
             {
@@ -2346,6 +2417,8 @@ namespace TES3MP::Native
                 {
                     const size_t victimIndex = mBinding.mPlayers[0].value() == target ? 0 : 1;
                     auto victim = loadCombatStats(mRuntime.mStore, combat->actors[victimIndex]);
+                    if (mBinding.mKnockoutRules)
+                        victim.setKnockedDown(combat->knockedDown[victimIndex]);
                     addTimedResistance(victim, timedEffects, victimIndex);
                     const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
                         : ESM::Skill::HandToHand;
@@ -2360,7 +2433,9 @@ namespace TES3MP::Native
                     hitSuccess = success;
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     float damage = 0;
-                    const auto damagedStat = weapon ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
+                    const bool healthUnarmed = mBinding.mKnockoutRules
+                        && (victim.getKnockedDown() || paralyzed);
+                    const auto damagedStat = weapon || healthUnarmed ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
                     if (success && weapon)
                     {
                         const auto& range = *hit == ESM::Weapon::AT_Chop ? weapon->mData.mChop
@@ -2378,9 +2453,13 @@ namespace TES3MP::Native
                     }
                     else if (success)
                     {
-                        damage = MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
-                            attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
-                        MWMechanics::applyHitDamage(victim, {{"fatigue", damage}}, MWWorld::TimeStamp{});
+                        damage = healthUnarmed
+                            ? MWMechanics::getUnarmedHealthDamage(mRuntime.mStore, attacker,
+                                attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength)
+                            : MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
+                                attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
+                        MWMechanics::applyHitDamage(victim, {{healthUnarmed ? "health" : "fatigue", damage}},
+                            MWWorld::TimeStamp{});
                     }
                     if (weapon && weapon->mData.mHealth)
                     {
@@ -2392,11 +2471,17 @@ namespace TES3MP::Native
                     if (success && weapon)
                         applyStrike(mCombatNpcOwner, *held, *weapon, attacker, victim, victimIndex, rng);
                     saveCombatStats(combat->actors[victimIndex], victim);
+                    if (mBinding.mKnockoutRules)
+                        combat->knockedDown[victimIndex] = victim.getHealth().getCurrent() > 0
+                            && victim.getFatigue().getCurrent() < 0;
                     hitDamage = damage;
                     hitStat = damagedStat;
                     targetDied = victim.getHealth().getCurrent() <= 0;
                 }
                 saveCombatStats(combat->actors[2], attacker);
+                if (mBinding.mKnockoutRules)
+                    combat->knockedDown[2] = attacker.getHealth().getCurrent() > 0
+                        && attacker.getFatigue().getCurrent() < 0;
                 if (target)
                     actorHit = ActorMeleeCombatEvent{ActorId::fromValue(before.mActor).value(),
                         PlayerId::fromValue(target).value(),

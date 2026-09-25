@@ -17,6 +17,9 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V33 saves fatigue knockout for both players and the selected NPC. Active
+    // actors recover fatigue at the stock combat rate; knocked actors cannot
+    // attack, and unarmed hits then damage health. Fresh campaign required.
     // V32 retains up to eight independently identified projectiles in one actor
     // tick/image, resolving concurrent contacts and deduplicating pending casts.
     // It requires a fresh campaign under native-inventory-32.
