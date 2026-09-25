@@ -236,6 +236,115 @@ def verify_life_encounter(output, evidence, processes, relay, manifest, maximum_
     print(json.dumps(report, indent=2), flush=True)
 
 
+def verify_unarmed_effect(output, evidence, processes, relay, manifest, maximum_attacks):
+    """Two desktops observe one OpenMW hand-to-hand fatigue hit and reconnect."""
+    sequence = dict.fromkeys(evidence, 0)
+    finished = set()
+
+    def samples(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"]
+
+    def inventory(role):
+        return [r for r in records(evidence[role]) if r.get("event") == "traversal_inventory"]
+
+    def wait_for(predicate, description, timeout=35):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = predicate()
+            if result:
+                return result
+            if any(p.poll() is not None for name, p in processes.items() if name not in finished):
+                raise RuntimeError(f"process exited while waiting for {description}")
+            time.sleep(.1)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
+        for attempt in range(30):
+            try:
+                temporary.replace(control)
+                break
+            except PermissionError:
+                if attempt == 29:
+                    raise
+                time.sleep(.03)
+        return wait_for(lambda: next((r for r in records(evidence[role])
+                                     if r.get("sequence") == sequence[role]
+                                     and r.get("event") == "traversal_" + action.split()[0]), None), action)
+
+    wait_for(lambda: all(len(samples(role)) >= 3 and len(inventory(role)) >= 1
+                         for role in evidence), "two combat and inventory baselines")
+    actor = poses(evidence["Alice"])[-1]
+    command("Alice", f"pose {actor['x']} {actor['y'] - 55} {actor['z']} 0 0")
+    command("Bob", f"pose {actor['x'] + 35} {actor['y'] - 70} {actor['z']} 0 0")
+    initial = {role: samples(role)[-1] for role in evidence}
+
+    def fatigue_hits(role):
+        return [(sample["tick"], hit) for sample in samples(role)
+                for hit in sample["player_hits"]
+                if hit["attacker"] == initial["Alice"]["self"] and hit["stat"] == 1
+                and hit["hit"] and hit["damage"] > 0]
+
+    def attempts_seen(role):
+        return [(sample["tick"], hit) for sample in samples(role)
+                for hit in sample["player_hits"]
+                if hit["attacker"] == initial["Alice"]["self"] and hit["stat"] == 1]
+
+    attempts = 0
+    while attempts < maximum_attacks and not all(fatigue_hits(role) for role in evidence):
+        previous = {role: len(attempts_seen(role)) for role in evidence}
+        command("Alice", "attack")
+        attempts += 1
+        wait_for(lambda: all(len(attempts_seen(role)) > previous[role] for role in evidence),
+                 "both clients receive the unarmed attack result", 10)
+    wait_for(lambda: all(fatigue_hits(role) for role in evidence), "shared unarmed fatigue event", 10)
+    hit_damage = fatigue_hits("Alice")[0][1]["damage"]
+    threshold = initial["Alice"]["actors"][0]["fatigue"] - hit_damage + .01
+    def shared_effect():
+        left = {sample["actors"][0]["fatigue"] for sample in samples("Alice")
+                if sample["actors"] and sample["actors"][0]["fatigue"] <= threshold}
+        right = {sample["actors"][0]["fatigue"] for sample in samples("Bob")
+                 if sample["actors"] and sample["actors"][0]["fatigue"] <= threshold}
+        return left & right
+    wait_for(shared_effect, "two-client fatigue convergence", 10)
+    before = {role: samples(role)[-1] for role in evidence}
+    if any(before[role]["actors"][0]["health"] != initial[role]["actors"][0]["health"]
+           or before[role]["actors"][0]["fatigue"] >= initial[role]["actors"][0]["fatigue"]
+           for role in evidence):
+        raise RuntimeError("Unarmed hit changed health or did not reduce actor fatigue")
+    time.sleep(1)  # Let the attack receipt settle before exercising reconnect.
+    marker = len(records(evidence["Bob"]))
+    command("Bob", "reconnect")
+    wait_for(lambda: any(r.get("event") == "phase8_desktop_status" and r.get("status") == "resumed"
+                         for r in records(evidence["Bob"])[marker:]), "Bob reconnect", 20)
+    wait_for(lambda: samples("Bob")[-1]["generation"] > before["Bob"]["generation"]
+             and abs(samples("Bob")[-1]["actors"][0]["fatigue"]
+                     - samples("Alice")[-1]["actors"][0]["fatigue"]) < .01,
+             "reconnected fatigue convergence")
+    after = {role: samples(role)[-1] for role in evidence}
+    if any(len(fatigue_hits(role)) != 1
+           or after[role]["actors"][0]["health"] != initial[role]["actors"][0]["health"]
+           for role in evidence):
+        raise RuntimeError("Reconnect duplicated the effect event or changed health")
+    for role in evidence:
+        command(role, "screenshot")
+        command(role, "quit")
+        processes[role].wait(timeout=15)
+        if processes[role].returncode:
+            raise RuntimeError(f"{role} did not finish cleanly")
+        finished.add(role)
+    report = dict(success=True, scenario="Native OpenMW unarmed fatigue effect", attempts=attempts,
+                  initial=initial, before=before, after=after,
+                  reliable_hits={role: fatigue_hits(role) for role in evidence},
+                  relay=asdict(relay.stop()), manifest=manifest,
+                  screenshots=[p.name for p in output.glob("*.png")])
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+
+
 def verify_doors(output, evidence, processes, relay, manifest):
     """Real content and desktop activation; no synthetic placements or server commands."""
     sequence = dict.fromkeys(evidence, 0)
@@ -479,9 +588,9 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     cell = "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 25 if args.life_encounter else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "hlavora sadas" if args.doors else "raflod the braggart"
-    destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter else "-550 70 385 40"
+    destination = "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
@@ -491,15 +600,15 @@ def run(args):
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
         f'actors "{npc if args.life_encounter else "player"}" "{npc if args.life_encounter else "player"}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
-        + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter else '')
-        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter else '')
-        + ('respawn 27000\n' if args.life_encounter else ''), encoding="utf-8")
+        + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect else '')
+        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect else '')
+        + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
     if args.traveler:
         common["spawn_positions"] = "-563200:71680:394240"
-    if args.life_encounter:
+    if args.life_encounter or args.unarmed_effect:
         common["spawn_positions"] = "-563200:-307200:394240"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
@@ -519,7 +628,7 @@ def run(args):
             tokens[10:13] = [str((-80 - 80 * index) * 1024), "-204800", "-128000"]
         if args.traveler:
             tokens[10:13] = ["-563200", str((70 + 40 * index) * 1024), "394240"]
-        if args.life_encounter:
+        if args.life_encounter or args.unarmed_effect:
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
@@ -573,6 +682,9 @@ def run(args):
                        "--tes3mp-content-appearance-record=player"]
             start(role, command)
             client_commands[role] = command
+        if args.unarmed_effect:
+            verify_unarmed_effect(output, evidence, processes, relay, manifest, args.attack_limit)
+            return
         if args.life_encounter:
             verify_life_encounter(output, evidence, processes, relay, manifest, args.attack_limit)
             return
@@ -689,12 +801,13 @@ if __name__ == "__main__":
     parser.add_argument("--combat", action="store_true", help="V24 live NPC weapon hit, impaired two-client presentation and reconnect")
     parser.add_argument("--immediate-reconnect", action="store_true", help="Reconnect at the live hit convergence edge")
     parser.add_argument("--life-encounter", action="store_true", help="V25 live NPC kill, corpse loot and immediate reconnect")
+    parser.add_argument("--unarmed-effect", action="store_true", help="Live OpenMW unarmed fatigue effect on two desktops and reconnect")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
-    if sum((args.doors, args.traveler, args.combat, args.life_encounter)) > 1:
+    if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.leave:
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

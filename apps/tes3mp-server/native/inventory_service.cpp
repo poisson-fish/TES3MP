@@ -1090,14 +1090,19 @@ namespace TES3MP::Native
         if (mCombat->actors[owner][8][2] <= 0 || mCombat->actors[2][8][2] <= 0)
             return {};
         const auto held = mRuntime.equippedWeaponCondition(owner);
-        if (!held || held->mCondition <= 0 || player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot()))
-            return {}; // Unarmed damage and cross-cell contacts are outside this slice.
-        const auto values = mRuntime.installedValues(owner);
-        const auto item = std::ranges::find(values.mObjects, held->mItem,
-            [](const auto& object) { return object.mRef.mRefNum; });
-        if (item == values.mObjects.end() || mRuntime.mStore.find(item->mRef.mRefID) != ESM::Weapon::sRecordId)
+        if ((held && held->mCondition <= 0)
+            || player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot()))
             return {};
-        const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+        const ESM::Weapon* weapon = nullptr;
+        if (held)
+        {
+            const auto values = mRuntime.installedValues(owner);
+            const auto item = std::ranges::find(values.mObjects, held->mItem,
+                [](const auto& object) { return object.mRef.mRefNum; });
+            if (item == values.mObjects.end() || mRuntime.mStore.find(item->mRef.mRefID) != ESM::Weapon::sRecordId)
+                return {};
+            weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+        }
         const auto& position = player->transform().position();
         const osg::Vec3f origin(float(double(position.x()) / 1024), float(double(position.y()) / 1024),
             float(double(position.z()) / 1024));
@@ -1554,20 +1559,27 @@ namespace TES3MP::Native
             auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[owner]);
             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[2]);
             const auto held = mRuntime.equippedWeaponCondition(owner);
-            if (!held || held->mCondition <= 0 || victim.getHealth().getCurrent() <= 0)
+            if ((held && held->mCondition <= 0) || victim.getHealth().getCurrent() <= 0)
                 throw std::invalid_argument("Native player attack became stale before tick composition");
-            const auto values = mRuntime.installedValues(owner);
-            const auto item = std::ranges::find(values.mObjects, held->mItem,
-                [](const auto& object) { return object.mRef.mRefNum; });
-            if (item == values.mObjects.end()) throw std::invalid_argument("Native player weapon identity missing");
-            const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+            const ESM::Weapon* weapon = nullptr;
+            if (held)
+            {
+                const auto values = mRuntime.installedValues(owner);
+                const auto item = std::ranges::find(values.mObjects, held->mItem,
+                    [](const auto& object) { return object.mRef.mRefNum; });
+                if (item == values.mObjects.end() || mRuntime.mStore.find(item->mRef.mRefID) != ESM::Weapon::sRecordId)
+                    throw std::invalid_argument("Native player weapon identity missing");
+                weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+            }
             const float strength = playerAttack->attackStrength;
             const float capacity = attacker.getAttribute(ESM::Attribute::Strength).getModified()
                 * mRuntime.mStore.get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
             const float weight = std::max(0.f, mRuntime.storage(owner).getWeight());
             const float encumbrance = weight == 0 ? 0.f : capacity == 0 ? 1.f + 1e-6f : weight / capacity;
-            MWMechanics::applyFatigueLoss(attacker, mRuntime.mStore, weapon->mData.mWeight, strength, encumbrance);
-            const auto skill = MWMechanics::getWeaponType(weapon->mData.mType)->mSkill;
+            MWMechanics::applyFatigueLoss(attacker, mRuntime.mStore,
+                weapon ? weapon->mData.mWeight : 0.f, strength, encumbrance);
+            const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
+                : ESM::Skill::HandToHand;
             const bool paralyzed = victim.getMagicEffects()
                 .getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0;
             const float chance = MWMechanics::getHitChance(mRuntime.mStore, attacker, victim,
@@ -1577,7 +1589,8 @@ namespace TES3MP::Native
             const bool success = Misc::Rng::roll0to99(rng) < chance;
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             float damage = 0;
-            if (success)
+            const auto damagedStat = weapon ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
+            if (success && weapon)
             {
                 const auto& range = playerAttack->attackType == MeleeAttackType::Chop ? weapon->mData.mChop
                     : playerAttack->attackType == MeleeAttackType::Slash ? weapon->mData.mSlash : weapon->mData.mThrust;
@@ -1592,7 +1605,13 @@ namespace TES3MP::Native
                     weapon->mData.mHealth != 0, damage);
                 MWMechanics::applyHitDamage(victim, {{"health", damage}}, MWWorld::TimeStamp{});
             }
-            if (weapon->mData.mHealth)
+            else if (success)
+            {
+                damage = MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
+                    attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
+                MWMechanics::applyHitDamage(victim, {{"fatigue", damage}}, MWWorld::TimeStamp{});
+            }
+            if (weapon && weapon->mData.mHealth)
             {
                 const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
                     .find("fWeaponDamageMult")->mValue.getFloat();
@@ -1605,7 +1624,7 @@ namespace TES3MP::Native
                 ActorId::fromValue(before.mActor).value(),
                 CombatRevision::fromValue(tick.value()).value(),
                 CombatRevision::fromValue(tick.value()).value(),
-                damage, MeleeDamageStat::Health, success, false,
+                damage, damagedStat, success, false,
                 victim.getHealth().getCurrent() <= 0};
             if (victim.getHealth().getCurrent() <= 0)
             {
@@ -1636,6 +1655,7 @@ namespace TES3MP::Native
             {
                 bool hitSuccess = false;
                 float hitDamage = 0;
+                MeleeDamageStat hitStat = MeleeDamageStat::Health;
                 bool targetDied = false;
                 auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[2]);
                 const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
@@ -1672,6 +1692,7 @@ namespace TES3MP::Native
                     hitSuccess = success;
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     float damage = 0;
+                    const auto damagedStat = weapon ? MeleeDamageStat::Health : MeleeDamageStat::Fatigue;
                     if (success && weapon)
                     {
                         const auto& range = *hit == ESM::Weapon::AT_Chop ? weapon->mData.mChop
@@ -1687,6 +1708,12 @@ namespace TES3MP::Native
                             weapon->mData.mHealth != 0, damage);
                         MWMechanics::applyHitDamage(victim, {{"health", damage}}, MWWorld::TimeStamp{});
                     }
+                    else if (success)
+                    {
+                        damage = MWMechanics::getUnarmedFatigueDamage(mRuntime.mStore, attacker,
+                            attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
+                        MWMechanics::applyHitDamage(victim, {{"fatigue", damage}}, MWWorld::TimeStamp{});
+                    }
                     if (weapon && weapon->mData.mHealth)
                     {
                         const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
@@ -1696,6 +1723,7 @@ namespace TES3MP::Native
                     }
                     saveCombatStats(combat->actors[victimIndex], victim);
                     hitDamage = damage;
+                    hitStat = damagedStat;
                     targetDied = victim.getHealth().getCurrent() <= 0;
                 }
                 saveCombatStats(combat->actors[2], attacker);
@@ -1704,7 +1732,7 @@ namespace TES3MP::Native
                         PlayerId::fromValue(target).value(),
                         CombatRevision::fromValue(tick.value()).value(),
                         CombatRevision::fromValue(tick.value()).value(),
-                        hitDamage, MeleeDamageStat::Health, contact && hitSuccess, false, targetDied};
+                        hitDamage, hitStat, contact && hitSuccess, false, targetDied};
             }
         }
         std::array<float,3> velocity;

@@ -25,6 +25,10 @@ namespace MWMechanics
         const CreatureStats& victim, int skillValue, bool unaware, bool paralyzed);
     void applyFatigueLoss(CreatureStats& attacker, const MWWorld::ESMStore& store,
         float weaponWeight, float attackStrength, float normalizedEncumbrance);
+    // The ordinary NPC hand-to-hand hit against a standing target damages
+    // fatigue. This detached-stats form shares the stock damage calculation.
+    float getUnarmedFatigueDamage(const MWWorld::ESMStore& store, const CreatureStats& attacker,
+        float handToHandSkill, float attackStrength);
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier);
     float getMeleeWeaponReach(const MWWorld::ESMStore& store, const ESM::Weapon* weapon, bool npc);
     bool isInMeleeReach(const osg::Vec3f& attacker, const osg::Vec3f& target,

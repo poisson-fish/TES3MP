@@ -4141,6 +4141,7 @@ namespace TES3MP::Native::Testing
             {
                 npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
+                npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
                 npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
             }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
@@ -4560,6 +4561,93 @@ namespace TES3MP::Native::Testing
                 const auto* attackingPlayer = authority.findPlayer(id<PlayerId>(2));
                 require(attackingPlayer != nullptr, "Second combat participant missing");
                 const auto atContact = image();
+                {
+                    InventoryHost bareHost(descriptor, testContentManifest(), *registry, *crypto, atContact);
+                    auto& bare = bareHost.service(); bare.synchronizeCells(authority);
+                    const auto start = readActorCampaign({reinterpret_cast<const char*>(atContact.data()), atContact.size()});
+                    const auto inventory = bare.projectInventory(authority, id<SessionId>(2),
+                        id<ServerTick>(start.tick), id<CanonicalRevision>(start.tick));
+                    require(inventory && !inventory->playerInventory.empty(), "Unarmed player inventory unavailable");
+                    const auto& carried = inventory->playerInventory.front();
+                    const auto equipped = std::ranges::find(carried.equipment, EquipmentSlot::CarriedRight,
+                        &EquipmentBinding::slot);
+                    require(equipped != carried.equipment.end(), "Unarmed fixture has no right-hand weapon");
+                    const auto stack = std::ranges::find(carried.stacks, equipped->stackId, &CanonicalItemStack::stackId);
+                    require(stack != carried.stacks.end(), "Unarmed fixture weapon stack missing");
+                    const uint64_t unequipTick = start.tick + 1;
+                    ClientInventoryTransactionCommand unequip{id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(unequipTick), id<CanonicalRevision>(unequipTick),
+                        InventoryTransactionKind::UnequipItem, {}, stack->prototypeId, stack->stackId, 1,
+                        EquipmentSlot::CarriedRight, carried.revision, {}, {}, Position3(0,0,0)};
+                    auto intent = bare.prepareInventory(authority, bind(authority, unequip).proposal());
+                    require(bool(intent), "Unarmed fixture unequip rejected");
+                    auto prepared = bare.prepareNativeTick(authority, id<ServerTick>(unequipTick), 1.f/30,
+                        std::move(intent));
+                    require(prepared && prepared->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Unarmed fixture unequip did not commit");
+                    bool fatigueHit = false;
+                    for (uint64_t time = unequipTick + 1; time <= unequipTick + 128 && !fatigueHit; ++time)
+                    {
+                        const std::vector beforeBare(bare.inventoryImage().begin(), bare.inventoryImage().end());
+                        const auto prior = readActorCampaign({reinterpret_cast<const char*>(beforeBare.data()), beforeBare.size()});
+                        const auto view = bare.projectInventory(authority, id<SessionId>(2),
+                            id<ServerTick>(time), id<CanonicalRevision>(time));
+                        require(view && view->equipment && view->equipment->motions.size() == 1,
+                            "Unarmed attack lost the target");
+                        ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                            CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                            id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                            CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                        const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                            CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                            EntityPrecondition(attackingPlayer->entityId(), attackingPlayer->entityRevision(),
+                                attackingPlayer->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                        auto request = bare.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                        require(bool(request), "Authenticated unarmed attack rejected");
+                        auto tick = bare.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                            std::move(request));
+                        std::vector<std::byte> candidate;
+                        require(tick && tick->commit([&](auto bytes) { candidate.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(beforeBare, bare.inventoryImage()),
+                            "Rejected unarmed effect mutated the campaign");
+                        const auto next = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
+                        const auto firstEvent = bare.projectCombatEvents(authority, id<SessionId>(1),
+                            id<ServerTick>(time), id<CanonicalRevision>(time), tick.get());
+                        const auto secondEvent = bare.projectCombatEvents(authority, id<SessionId>(2),
+                            id<ServerTick>(time), id<CanonicalRevision>(time), tick.get());
+                        require(firstEvent && secondEvent && firstEvent->events().size() == 1
+                            && std::ranges::equal(firstEvent->events(), secondEvent->events())
+                            && firstEvent->events().front().damagedStat == MeleeDamageStat::Fatigue,
+                            "Unarmed effect event did not reach both clients");
+                        fatigueHit = firstEvent->events().front().hit;
+                        if (fatigueHit)
+                            require(prior.combat && next.combat
+                                && firstEvent->events().front().damage > 0
+                                && next.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
+                                && next.combat->actors[2][8][2] == prior.combat->actors[2][8][2],
+                                "OpenMW unarmed hit did not damage fatigue only");
+                        require(tick->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && std::ranges::equal(candidate, bare.inventoryImage()),
+                            "Unarmed effect did not commit its single durable candidate");
+                        if (fatigueHit)
+                        {
+                            InventoryHost resumedBare(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                            const auto reconnected = players(id<SessionGeneration>(2), 1, 2);
+                            resumedBare.service().synchronizeCells(reconnected);
+                            const auto alice = resumedBare.service().projectCombat(reconnected, id<SessionId>(1),
+                                id<ServerTick>(time), id<CanonicalRevision>(time));
+                            const auto bob = resumedBare.service().projectCombat(reconnected, id<SessionId>(2),
+                                id<ServerTick>(time), id<CanonicalRevision>(time));
+                            require(alice && bob && alice->actors().size() == 1 && bob->actors().size() == 1
+                                && alice->actors().front() == bob->actors().front()
+                                && alice->actors().front().fatigue == next.combat->actors[2][10][2],
+                                "Unarmed fatigue effect diverged across restart and two-client reconnect");
+                        }
+                    }
+                    require(fatigueHit, "Unarmed attack never applied fatigue damage");
+                    std::cout << "unarmed effect=OpenMW fatigue durability=atomic clients=two restart=reconnected\n";
+                }
                 const auto current = readActorCampaign({reinterpret_cast<const char*>(atContact.data()), atContact.size()});
                 bool dead = false;
                 uint64_t deathTick = 0;

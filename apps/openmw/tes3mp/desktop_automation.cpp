@@ -716,7 +716,7 @@ namespace TES3MP::OpenMWAdapter
             mOutput << "{\"event\":\"native_combat_sample\",\"tick\":" << snapshot.serverTick().value()
                 << ",\"generation\":" << snapshot.targetSessionGeneration().value()
                 << ",\"self\":" << snapshot.selfPlayerId().value()
-                << ",\"health\":" << snapshot.selfHealth() << ",\"dead\":"
+                << ",\"health\":" << snapshot.selfHealth() << ",\"fatigue\":" << snapshot.selfFatigue() << ",\"dead\":"
                 << (snapshot.selfDead() ? "true" : "false") << ",\"actors\":[";
             bool first = true;
             for (const auto& actor : snapshot.actors())
@@ -725,6 +725,7 @@ namespace TES3MP::OpenMWAdapter
                 first = false;
                 mOutput << "{\"id\":" << actor.actorId.value() << ",\"revision\":"
                     << actor.combatRevision.value() << ",\"health\":" << actor.health
+                    << ",\"fatigue\":" << actor.fatigue
                     << ",\"dead\":" << (actor.dead ? "true" : "false") << '}';
             }
             mOutput << "],\"players\":[";
@@ -735,6 +736,7 @@ namespace TES3MP::OpenMWAdapter
                 first = false;
                 mOutput << "{\"id\":" << player.playerId.value() << ",\"revision\":"
                     << player.combatRevision.value() << ",\"health\":" << player.health
+                    << ",\"fatigue\":" << player.fatigue
                     << ",\"dead\":" << (player.dead ? "true" : "false") << '}';
             }
             mOutput << "],\"actor_hits\":[";
@@ -746,7 +748,7 @@ namespace TES3MP::OpenMWAdapter
                     first = false;
                     mOutput << "{\"attacker\":" << hit.attackerActorId.value() << ",\"target\":"
                         << hit.targetPlayerId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
-                        << ",\"damage\":" << hit.damage << '}';
+                        << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat) << '}';
                 }
             mOutput << "],\"player_hits\":[";
             first = true;
@@ -757,7 +759,7 @@ namespace TES3MP::OpenMWAdapter
                     first = false;
                     mOutput << "{\"attacker\":" << hit.attackerPlayerId.value() << ",\"target\":"
                         << hit.targetActorId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
-                        << ",\"damage\":" << hit.damage << ",\"died\":"
+                        << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat) << ",\"died\":"
                         << (hit.targetDied ? "true" : "false") << '}';
                 }
             mOutput << "]}\n";

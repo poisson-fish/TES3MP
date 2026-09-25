@@ -55,6 +55,19 @@ namespace MWMechanics
         attacker.setFatigue(fatigue);
     }
 
+    float getUnarmedFatigueDamage(const MWWorld::ESMStore& content, const CreatureStats& attacker,
+        float handToHandSkill, float attackStrength)
+    {
+        const auto& store = content.get<ESM::GameSetting>();
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.minimumHandToHandMultiplier = store.find("fMinHandToHandMult")->mValue.getFloat();
+        settings.maximumHandToHandMultiplier = store.find("fMaxHandToHandMult")->mValue.getFloat();
+        // This slice admits ordinary NPCs and the stock no-strength option.
+        return TES3MP::openMwHandToHandDamage(settings, handToHandSkill,
+            attacker.getAttribute(ESM::Attribute::Strength).getModified(), attackStrength,
+            false, false, 1.f, false);
+    }
+
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier)
     {
         if (!hit) damage = 0.f;
