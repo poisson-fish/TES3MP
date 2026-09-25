@@ -300,14 +300,14 @@ namespace TES3MP::Native
                 inventory.unstack(item, 1, split);
             },
             [&] {
-                // Auto-selection doesn't activate item scripts/constant effects
-                // until the complete slot set changes. Reject rather than skip
-                // a winning enchanted item and choose a different stock result.
+                // Auto-selection doesn't activate scripts or constant effects.
+                // A strike-only weapon has no equip-time effect; its charge and
+                // effects are handled at confirmed combat contact.
                 for (const auto& slot : inventory.mSlots)
                     if (slot != inventory.end())
                     {
                         const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
-                        if (!record.mScript.empty() || !record.mEnchant.empty())
+                        if (!record.mStrikeOnly && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
                     }
                 effects(index).mListener.equipmentChanged();

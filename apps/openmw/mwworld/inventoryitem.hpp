@@ -4,6 +4,7 @@
 #include "containerstore.hpp"
 #include "equipmentslots.hpp"
 #include "esmstore.hpp"
+#include <components/esm3/loadench.hpp>
 
 namespace MWWorld
 {
@@ -28,15 +29,22 @@ namespace MWWorld
         const void* mBase;
         ESM::RefId mScript, mEnchant;
         EquipmentSlots mSlots;
+        bool mStrikeOnly = false;
     };
     inline InventoryItemRecord inventoryItemRecord(const ESMStore& store, ESM::RefId id)
     {
-        return visitInventoryRecord(store, id, [](const auto& base) {
+        auto result = visitInventoryRecord(store, id, [](const auto& base) {
             using T = std::remove_cvref_t<decltype(base)>;
             InventoryItemRecord result{T::sRecordId, &base, base.mScript, {}, equipmentSlots(base)};
             if constexpr (requires { base.mEnchant; }) result.mEnchant = base.mEnchant;
             return result;
         });
+        if (result.mType == ESM::Weapon::sRecordId && result.mScript.empty() && !result.mEnchant.empty())
+        {
+            const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
+            result.mStrikeOnly = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes;
+        }
+        return result;
     }
 
     inline void validateEquipmentItemSlots(const InventoryItemRecord& record, ESM::RefNum identity, int64_t count,
@@ -47,7 +55,7 @@ namespace MWWorld
             if (identity == slots[slot])
             {
                 if (found || !record.mSlots.contains(slot) || count == 0 || (!record.mSlots.mStack && std::abs(count) != 1)
-                    || ((!record.mEnchant.empty() || !record.mScript.empty())
+                    || ((!record.mStrikeOnly && (!record.mEnchant.empty() || !record.mScript.empty()))
                         && (slot != InventoryStore::Slot_Shirt || !npcStats)))
                     throw std::invalid_argument("Invalid equipment slot, count, duplicate item or unavailable effects");
                 found = true;

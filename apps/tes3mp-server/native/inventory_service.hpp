@@ -163,7 +163,7 @@ namespace TES3MP::Native
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
             uint64_t requested, float reach) const;
         EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command,
-            const std::optional<ItemCharge>& charge = {}) const;
+            std::span<const ItemCharge> charges = {}) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor
@@ -260,6 +260,15 @@ namespace TES3MP::Native
             const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
             return weapon ? std::optional{weapon->mCondition} : std::nullopt;
         }
+        std::optional<float> selectedNpcWeaponCharge() const
+        {
+            if (!mCombat) return {};
+            const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+            if (!weapon) return {};
+            for (const auto& item : mRuntime.installedValues(mCombatNpcOwner).mObjects)
+                if (item.mRef.mRefNum == weapon->mItem) return item.mRef.mEnchantmentCharge;
+            return {};
+        }
         std::vector<ESM::RefNum> selectedNpcItemIdentities() const
         {
             std::vector<ESM::RefNum> result;
@@ -296,7 +305,7 @@ namespace TES3MP::Native
             const EquipmentRuntime::PreparedWorldTransfer* world = nullptr,
             const EquipmentRuntime::PreparedDoor* door = nullptr, std::optional<CellId> area = {},
             const ActorSceneSnapshot* moving = nullptr, std::span<const WeaponWear> wear = {},
-            const std::optional<ItemCharge>& charge = {},
+            std::span<const ItemCharge> charges = {},
             const ActorCampaignCombat* stagedCombat = nullptr,
             const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
     };

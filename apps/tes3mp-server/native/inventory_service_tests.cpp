@@ -4126,7 +4126,8 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection)
+        bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
+        bool strike)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4142,12 +4143,30 @@ namespace TES3MP::Native::Testing
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
+            ESM::Enchantment strikeEnchantment;
+            ESM::Weapon strikeWeapon;
+            if (strike)
+            {
+                strikeEnchantment.blank();
+                strikeEnchantment.mId = ESM::RefId::stringRefId("npc_strike_enchantment");
+                strikeEnchantment.mData.mType = ESM::Enchantment::WhenStrikes;
+                strikeEnchantment.mData.mCost = 2;
+                strikeEnchantment.mData.mCharge = 20;
+                strikeEnchantment.mEffects.populate({
+                    {ESM::MagicEffect::RestoreFatigue, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
+                    {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 5, 5}});
+                strikeWeapon = *base.store().get<ESM::Weapon>().find(
+                    ESM::RefId::stringRefId("iron shortsword"));
+                strikeWeapon.mId = ESM::RefId::stringRefId("npc_strike_sword");
+                strikeWeapon.mEnchant = strikeEnchantment.mId;
+            }
             if (combat)
             {
                 npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
-                npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
+                npc.mInventory.mList.push_back({1, strike ? strikeWeapon.mId
+                    : ESM::RefId::stringRefId("iron shortsword")});
             }
             ESM::Spell restore;
             ESM::Spell ordinaryRestore;
@@ -4261,6 +4280,13 @@ namespace TES3MP::Native::Testing
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            if (strike)
+            {
+                out.startRecord(ESM::Enchantment::sRecordId, 0);
+                strikeEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                out.startRecord(ESM::Weapon::sRecordId, 0);
+                strikeWeapon.save(out); out.endRecord(ESM::Weapon::sRecordId);
+            }
             if (spell)
             {
                 out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
@@ -4644,14 +4670,19 @@ namespace TES3MP::Native::Testing
                 const auto prior = readActorCampaign({reinterpret_cast<const char*>(beforeHit.data()), beforeHit.size()});
                 const auto conditionBefore = combat
                     ? dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition() : std::optional<int>{};
+                const auto chargeBefore = strike
+                    ? dynamic_cast<InventoryService&>(service).selectedNpcWeaponCharge() : std::optional<float>{};
                 std::vector<std::byte> proposal;
                 size_t rejectedWrites = 0;
+                float hitPhysicalDamage = 0.f;
                 require(pending->commit([&](auto bytes) { ++rejectedWrites; proposal.assign(bytes.begin(), bytes.end());
                     return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
                     && rejectedWrites == 1 && image() == beforeHit,
                     "Rejected melee contact tick wrote more than once or mutated the campaign");
                 if (combat) require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition() == conditionBefore,
                     "Rejected hit-key tick changed the equipped weapon condition");
+                if (strike) require(dynamic_cast<InventoryService&>(service).selectedNpcWeaponCharge() == chargeBefore,
+                    "Rejected hit-key tick changed strike charge");
                 auto candidate = readActorCampaign({reinterpret_cast<const char*>(proposal.data()), proposal.size()});
                 hit = candidate.melee && candidate.melee->state.mHit;
                 if (combat && hit && candidate.melee->contact)
@@ -4686,7 +4717,7 @@ namespace TES3MP::Native::Testing
                     require(pending->changesInventory() && installedView && stagedView,
                         "Composed hit-key candidate lost staged inventory projection");
                     require(stagedView->playerInventory.front().revision.value()
-                            == installedView->playerInventory.front().revision.value() + 2,
+                            == installedView->playerInventory.front().revision.value() + (strike ? 3 : 2),
                         "Composed hit-key candidate lost second inventory revision");
                     require(std::ranges::none_of(stagedView->playerInventory.front().equipment,
                         [&](const auto& equipped) { return equipped.slot == slot.slot; }),
@@ -4698,6 +4729,7 @@ namespace TES3MP::Native::Testing
                         && hitEvents->actorEvents()[0].hit
                         && hitEvents->actorEvents()[0].damage > 0,
                         "Composed hit-key candidate omitted the reliable actor event");
+                    hitPhysicalDamage = hitEvents->actorEvents()[0].damage;
                     composedHit = true;
                 }
                 std::vector<std::byte> durable;
@@ -4712,11 +4744,22 @@ namespace TES3MP::Native::Testing
                 {
                     require(prior.combat && candidate.combat
                         && candidate.combat->rng != prior.combat->rng
-                        && candidate.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
-                        && candidate.combat->actors[0][8][2] < prior.combat->actors[0][8][2]
+                        && (strike || candidate.combat->actors[2][10][2] < prior.combat->actors[2][10][2])
+                        && (strike || candidate.combat->actors[0][8][2] < prior.combat->actors[0][8][2])
                         && dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition()
                             == *conditionBefore - 1,
                         "KF hit did not atomically resolve RNG, fatigue, player health and weapon wear");
+                    if (strike)
+                    {
+                        const auto spent = dynamic_cast<InventoryService&>(service).selectedNpcWeaponCharge();
+                        require(chargeBefore && spent && *chargeBefore == -1.f && *spent == 18.f,
+                            "Confirmed strike did not commit its item charge with the hit");
+                        const auto previousHealth = prior.combat->actors[0][8][2];
+                        const auto expectedHealth = std::min(prior.combat->actors[0][8][0],
+                            previousHealth - hitPhysicalDamage + 5.f);
+                        require(std::abs(candidate.combat->actors[0][8][2] - expectedHealth) < 0.01f,
+                            "Confirmed strike did not compose Target effect with physical damage");
+                    }
                     InventoryHost hitRestart(descriptor, testContentManifest(), *registry, *crypto, durable);
                     require(std::ranges::equal(durable, hitRestart.service().inventoryImage())
                         && dynamic_cast<InventoryService&>(hitRestart.service()).selectedNpcWeaponCondition()
@@ -5930,6 +5973,9 @@ namespace TES3MP::Native::Testing
                         && next.combat->actors[2][10][2] < prior.combat->actors[2][10][2]
                         && dynamic_cast<InventoryService&>(missRoll).selectedNpcWeaponCondition() == *conditionBefore - 1,
                         "Accuracy miss omitted the RNG/fatigue/wear cost or dealt damage");
+                    if (rolled && strike)
+                        require(dynamic_cast<InventoryService&>(missRoll).selectedNpcWeaponCharge() == -1.f,
+                            "Accuracy miss spent strike charge");
                 }
                 require(rolled, "Low-skill swing never reached the KF hit key");
             }
@@ -5964,6 +6010,9 @@ namespace TES3MP::Native::Testing
                         && candidate.combat->actors[0][8][2] == prior.combat->actors[0][8][2]
                         && dynamic_cast<InventoryService&>(missService).selectedNpcWeaponCondition() == conditionBefore,
                         "Out-of-reach swing changed RNG, health or wear, or omitted its fatigue cost");
+                    if (strike)
+                        require(dynamic_cast<InventoryService&>(missService).selectedNpcWeaponCharge() == -1.f,
+                            "Out-of-reach swing spent strike charge");
                 }
             }
             require(missed, "Out-of-reach path never reached the KF hit key");
@@ -6063,6 +6112,7 @@ namespace TES3MP::Native::Testing
                 }
                 const auto current = readActorCampaign({reinterpret_cast<const char*>(atContact.data()), atContact.size()});
                 bool dead = false;
+                bool playerStrikeObserved = false;
                 uint64_t deathTick = 0;
                 for (uint64_t time = current.tick + 1; time <= current.tick + 128 && !dead; ++time)
                 {
@@ -6090,7 +6140,7 @@ namespace TES3MP::Native::Testing
                     const auto proposed = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
                     require(proposed.combat && beforeParts.combat
                         && proposed.combat->rng != beforeParts.combat->rng
-                        && proposed.combat->actors[1][10][2] < beforeParts.combat->actors[1][10][2],
+                        && (strike || proposed.combat->actors[1][10][2] < beforeParts.combat->actors[1][10][2]),
                         "Player attack omitted durable RNG or fatigue cost");
                     const auto staged = service.projectInventory(authority, id<SessionId>(1),
                         id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
@@ -6102,6 +6152,28 @@ namespace TES3MP::Native::Testing
                         && attackEvents->events()[0].attackerPlayerId == id<PlayerId>(2)
                         && attackEvents->events()[0].targetActorId == attack.targetActorId,
                         "Player attack candidate omitted the reliable event");
+                    if (strike && attackEvents->events()[0].hit && !playerStrikeObserved)
+                    {
+                        const auto stagedAttacker = service.projectInventory(authority, id<SessionId>(2),
+                            id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                        const auto weaponCharge = [](const auto& inventory) {
+                            const auto slot = std::ranges::find(inventory.equipment, EquipmentSlot::CarriedRight,
+                                &EquipmentBinding::slot);
+                            if (slot == inventory.equipment.end()) throw std::runtime_error("Strike weapon not equipped");
+                            const auto item = std::ranges::find(inventory.stacks, slot->stackId,
+                                &CanonicalItemStack::stackId);
+                            if (item == inventory.stacks.end()) throw std::runtime_error("Strike weapon missing");
+                            return std::bit_cast<float>(item->enchantmentCharge);
+                        };
+                        require(stagedAttacker && weaponCharge(view->playerInventory.front()) == -1.f
+                            && weaponCharge(stagedAttacker->playerInventory.front()) == 18.f,
+                            "Player strike did not stage weapon charge with the hit");
+                        const float expectedHealth = std::min(beforeParts.combat->actors[2][8][0],
+                            beforeParts.combat->actors[2][8][2] - attackEvents->events()[0].damage + 5.f);
+                        require(std::abs(proposed.combat->actors[2][8][2] - expectedHealth) < 0.01f,
+                            "Player strike did not stage Target effect with physical damage");
+                        playerStrikeObserved = true;
+                    }
                     require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
                         && image() == candidate && pending->commit(accepted) == CanonicalDurabilityResult::Rejected,
                         "Player attack retry or duplicate changed the durable result");
@@ -6109,6 +6181,7 @@ namespace TES3MP::Native::Testing
                     if (dead) deathTick = time;
                 }
                 require(dead, "Authenticated player attacks never killed the shared NPC");
+                if (strike) require(playerStrikeObserved, "No confirmed player strike applied its enchantment");
                 const auto firstLifeItems = lifecycle
                     ? dynamic_cast<InventoryService&>(service).selectedNpcItemIdentities()
                     : std::vector<ESM::RefNum>{};

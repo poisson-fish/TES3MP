@@ -195,8 +195,9 @@ namespace TES3MP::Native
     // V5 retains container-only discovery. V5/v6 initialize player inventories
     // from their winning NPC bases, then shared owners, through one loot stream.
     // They auto-equip ordinary starting gear using stock NPC selection, without
-    // importing character saves or running chargen/actor/item scripts. Selected enchanted
-    // gear rejects until the required services exist; recovery never auto-equips.
+    // importing character saves or running chargen/actor/item scripts. A script-free
+    // WhenStrikes weapon may equip; other enchanted gear needs effect services.
+    // Recovery never auto-equips.
     // Existing native-inventory-4 uses the legacy actor lines:
     // actors "NPC_BASE" COUNT "NPC_BASE" COUNT
     // shirt "CLOTHING_BASE"

@@ -1613,10 +1613,10 @@ namespace TES3MP::Native
     }
 
     EquipmentBytes InventoryService::stagedWeaponCore(std::span<const WeaponWear> wear,
-        const PreparedNativeInventory* command, const std::optional<ItemCharge>& charge) const
+        const PreparedNativeInventory* command, std::span<const ItemCharge> charges) const
     {
-        if (wear.size() > 2 || (wear.empty() && !charge)
-            || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - wear.size() - size_t(charge.has_value()))
+        if (wear.size() > 2 || charges.size() > 2 || (wear.empty() && charges.empty())
+            || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - wear.size() - charges.size())
             throw std::invalid_argument("Native melee weapon wear candidate invalid");
         command = areaDoorCommand(command);
         const auto* transfer = dynamic_cast<const Transaction*>(command);
@@ -1631,10 +1631,10 @@ namespace TES3MP::Native
         const uint64_t revision = transfer ? transfer->prepared.candidate().mRevision
             : equipment ? equipment->prepared.candidate().mRevision
             : world ? world->prepared.revision() : mWorld.getPtrRegistryRevision();
-        if (revision >= std::numeric_limits<size_t>::max() - wear.size() - size_t(charge.has_value()))
+        if (revision >= std::numeric_limits<size_t>::max() - wear.size() - charges.size())
             throw std::invalid_argument("Native melee inventory revision exhausted");
         EquipmentSessionValues values{{candidateValues(0), candidateValues(1)},
-            revision + wear.size() + size_t(charge.has_value())};
+            revision + wear.size() + charges.size()};
         for (size_t i = 2; i < mRuntime.ownerCount(); ++i)
             values.mContainers.push_back(candidateValues(i));
         if (world)
@@ -1659,23 +1659,29 @@ namespace TES3MP::Native
             item->mRef.mChargeInt = change.condition;
             if (change.condition == 0) owner.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
         }
-        if (charge)
+        for (size_t index = 0; index < charges.size(); ++index)
         {
-            if (charge->owner >= 2 || (!charge->consume && (!std::isfinite(charge->after) || charge->after < 0)))
+            const auto& charge = charges[index];
+            if (std::ranges::any_of(charges.first(index), [&](const auto& earlier) {
+                    return earlier.item == charge.item;
+                })) throw std::invalid_argument("Duplicate native item charge source");
+            if (charge.owner >= mRuntime.ownerCount()
+                || (!charge.consume && (!std::isfinite(charge.after) || charge.after < 0)))
                 throw std::invalid_argument("Native item charge candidate invalid");
-            auto& owner = values.mActors[charge->owner];
-            const auto item = std::ranges::find(owner.mObjects, charge->item,
+            auto& owner = charge.owner < 2 ? values.mActors[charge.owner]
+                : values.mContainers.at(charge.owner - 2);
+            const auto item = std::ranges::find(owner.mObjects, charge.item,
                 [](const auto& object) { return object.mRef.mRefNum; });
-            if (item == owner.mObjects.end() || item->mRef.mEnchantmentCharge != charge->before)
+            if (item == owner.mObjects.end() || item->mRef.mEnchantmentCharge != charge.before)
                 throw std::invalid_argument("Native item charge source changed");
-            if (charge->consume)
+            if (charge.consume)
             {
                 if (item->mRef.mCount <= 0) throw std::invalid_argument("Native consumed item stack changed");
                 --item->mRef.mCount;
                 if (item->mRef.mCount == 0)
-                    for (auto& slot : owner.mSlots) if (slot == charge->item) slot = {};
+                    for (auto& slot : owner.mSlots) if (slot == charge.item) slot = {};
             }
-            else item->mRef.mEnchantmentCharge = charge->after;
+            else item->mRef.mEnchantmentCharge = charge.after;
         }
         EquipmentBytes core;
         mRuntime.encodeSession(std::move(values), core);
@@ -1710,7 +1716,7 @@ namespace TES3MP::Native
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<MagicUseCombatEvent> spellCasts;
         std::vector<WeaponWear> wear;
-        std::optional<ItemCharge> charge;
+        std::vector<ItemCharge> charges;
         EquipmentBytes wornCore, wornInventory, respawnCore;
         uint64_t target;
         bool contact;
@@ -1729,7 +1735,7 @@ namespace TES3MP::Native
             std::optional<MeleeCombatEvent> stagedPlayerHit,
             std::optional<ActorMeleeCombatEvent> stagedActorHit,
             std::vector<MagicUseCombatEvent> stagedSpellCasts,
-            std::vector<WeaponWear> stagedWear, std::optional<ItemCharge> stagedCharge, EquipmentBytes core,
+            std::vector<WeaponWear> stagedWear, std::vector<ItemCharge> stagedCharges, EquipmentBytes core,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
@@ -1738,11 +1744,11 @@ namespace TES3MP::Native
               respawn(std::move(stagedRespawn)),
               playerHit(std::move(stagedPlayerHit)),
               actorHit(std::move(stagedActorHit)), spellCasts(std::move(stagedSpellCasts)),
-              wear(std::move(stagedWear)), charge(std::move(stagedCharge)),
+              wear(std::move(stagedWear)), charges(std::move(stagedCharges)),
               wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
               tick(time), velocity(motion), diagnostics(report)
         { if (respawn) respawnCore.assign(respawn->image().begin(), respawn->image().end()); }
-        bool changesInventory() const noexcept override { return bool(command) || !wear.empty() || bool(charge) || bool(respawn); }
+        bool changesInventory() const noexcept override { return bool(command) || !wear.empty() || !charges.empty() || bool(respawn); }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
             if (consumed || service.inventoryImage().empty() || before != service.mActorImage
@@ -1752,12 +1758,12 @@ namespace TES3MP::Native
                 for (const auto& change : wear)
                     if (service.mRuntime.equippedWeaponCondition(change.owner) != change.before)
                         return CanonicalDurabilityResult::Rejected;
-                if (charge)
+                for (const auto& charge : charges)
                 {
-                    const auto source = service.mWorld.getPtr(charge->item);
-                    if (!source.hasLiveReference() || source.mContainerStore != &service.mRuntime.storage(charge->owner)
-                        || source.getCellRef().getEnchantmentCharge() != charge->before
-                        || (charge->consume && source.getCellRef().getCount() <= 0))
+                    const auto source = service.mWorld.getPtr(charge.item);
+                    if (!source.hasLiveReference() || source.mContainerStore != &service.mRuntime.storage(charge.owner)
+                        || source.getCellRef().getEnchantmentCharge() != charge.before
+                        || (charge.consume && source.getCellRef().getCount() <= 0))
                         return CanonicalDurabilityResult::Rejected;
                 }
                 EquipmentBytes sealed;
@@ -1778,14 +1784,14 @@ namespace TES3MP::Native
                 if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
                 else
                 {
-                    if (!wear.empty() || charge)
+                    if (!wear.empty() || !charges.empty())
                     {
                         for (const auto& change : wear)
                             service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition);
-                        if (charge)
+                        for (const auto& charge : charges)
                         {
-                            if (charge->consume) service.mRuntime.installConsumedMagicItem(charge->owner, charge->item);
-                            else service.mRuntime.installEnchantmentCharge(charge->owner, charge->item, charge->after);
+                            if (charge.consume) service.mRuntime.installConsumedMagicItem(charge.owner, charge.item);
+                            else service.mRuntime.installEnchantmentCharge(charge.owner, charge.item, charge.after);
                         }
                         service.mCoreImage.swap(wornCore);
                         service.mImage.swap(wornInventory);
@@ -1913,10 +1919,46 @@ namespace TES3MP::Native
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<MagicUseCombatEvent> spellCasts;
         std::vector<WeaponWear> wear;
-        std::optional<ItemCharge> charge;
+        std::vector<ItemCharge> charges;
         EquipmentBytes wornCore;
         uint64_t target = mMeleeTarget;
         bool contact = mMeleeContacted;
+        const auto applyStrike = [&](size_t owner, const EquipmentRuntime::EquippedWeaponCondition& held,
+            const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,
+            size_t victimIndex, Misc::Rng::Generator& rng) {
+            if (weapon.mEnchant.empty()) return;
+            const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(weapon.mEnchant);
+            if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenStrikes) return;
+            const auto plan = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore);
+            if (!plan || std::ranges::any_of(plan->effects,
+                    [](const auto& effect) { return effect.mArea != 0; }))
+                throw std::invalid_argument("Native strike enchantment effects unsupported");
+            const auto values = mRuntime.installedValues(owner);
+            const auto item = std::ranges::find(values.mObjects, held.mItem,
+                [](const auto& object) { return object.mRef.mRefNum; });
+            if (item == values.mObjects.end())
+                throw std::invalid_argument("Native strike weapon identity missing");
+            const float baseCost = MWMechanics::getEnchantmentCastCost(*enchantment, mRuntime.mStore);
+            if (!std::isfinite(baseCost) || baseCost < 0 || baseCost > 1'000'000)
+                throw std::invalid_argument("Native strike enchantment cost invalid");
+            const int cost = MWMechanics::getEffectiveEnchantmentCastCost(baseCost,
+                attacker.getSkill(ESM::Skill::Enchant).getModified());
+            const int maximum = MWMechanics::getEnchantmentCharge(*enchantment, mRuntime.mStore);
+            const float beforeCharge = item->mRef.mEnchantmentCharge;
+            const float available = beforeCharge == -1.f ? float(maximum) : beforeCharge;
+            if (cost < 1 || maximum < 1 || maximum > 1'000'000 || !std::isfinite(available)
+                || available > maximum)
+                throw std::invalid_argument("Native strike enchantment charge invalid");
+            if (available < cost) return;
+            charges.push_back(ItemCharge{owner, held.mItem, beforeCharge, available - cost});
+            applyInstantEffects(*plan, ESM::RT_Self, attacker, &rng, &mRuntime.mStore);
+            applyInstantEffects(*plan, ESM::RT_Touch, victim, &rng, &mRuntime.mStore);
+            applyInstantEffects(*plan, ESM::RT_Target, victim, &rng, &mRuntime.mStore);
+            stageTimedResistance(*plan, ESM::RT_Self, owner, tick.value(), timedEffects);
+            stageTimedResistance(*plan, ESM::RT_Touch, victimIndex, tick.value(), timedEffects);
+            stageTimedResistance(*plan, ESM::RT_Target, victimIndex, tick.value(), timedEffects);
+            combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+        };
         if (dueRespawn)
         {
             if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
@@ -2001,6 +2043,7 @@ namespace TES3MP::Native
                 wear.push_back({owner, *held,
                     MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier)});
             }
+            if (success && weapon) applyStrike(owner, *held, *weapon, attacker, victim, 2, rng);
             saveCombatStats(combat->actors[owner], attacker);
             saveCombatStats(combat->actors[2], victim);
             playerHit = MeleeCombatEvent{playerAttacker,
@@ -2038,7 +2081,7 @@ namespace TES3MP::Native
                 : launchInstantSpell(*spellRecord, caster, mRuntime.mStore, rng);
             if (launch.succeeded)
                 stageTimedResistance(spellRecord->effects, ESM::RT_Self, owner, tick.value(), timedEffects);
-            charge = spellCharge;
+            if (spellCharge) charges.push_back(*spellCharge);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             saveCombatStats(combat->actors[owner], caster);
             spellCasts.push_back(MagicUseCombatEvent{spellCaster, playerSpell->sourceKind, playerSpell->sourceId,
@@ -2281,6 +2324,7 @@ namespace TES3MP::Native
                 MeleeDamageStat hitStat = MeleeDamageStat::Health;
                 bool targetDied = false;
                 auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[2]);
+                addTimedResistance(attacker, timedEffects, 2);
                 const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
                 const auto values = mRuntime.installedValues(mCombatNpcOwner);
                 const ESM::Weapon* weapon = nullptr;
@@ -2302,6 +2346,7 @@ namespace TES3MP::Native
                 {
                     const size_t victimIndex = mBinding.mPlayers[0].value() == target ? 0 : 1;
                     auto victim = loadCombatStats(mRuntime.mStore, combat->actors[victimIndex]);
+                    addTimedResistance(victim, timedEffects, victimIndex);
                     const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
                         : ESM::Skill::HandToHand;
                     const int skillValue = int(attacker.getSkill(skill).getModified());
@@ -2344,6 +2389,8 @@ namespace TES3MP::Native
                         wear.push_back({mCombatNpcOwner, *held,
                             MWMechanics::weaponConditionAfterHit(held->mCondition, damage, success, multiplier)});
                     }
+                    if (success && weapon)
+                        applyStrike(mCombatNpcOwner, *held, *weapon, attacker, victim, victimIndex, rng);
                     saveCombatStats(combat->actors[victimIndex], victim);
                     hitDamage = damage;
                     hitStat = damagedStat;
@@ -2360,12 +2407,12 @@ namespace TES3MP::Native
         }
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
-        if (!wear.empty() || charge) wornCore = stagedWeaponCore(wear, command.get(), charge);
+        if (!wear.empty() || !charges.empty()) wornCore = stagedWeaponCore(wear, command.get(), charges);
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
             std::move(melee), target, contact, std::move(combat), std::move(life),
             std::move(projectiles), std::move(timedEffects), std::move(respawn),
             std::move(playerHit), std::move(actorHit), std::move(spellCasts),
-            std::move(wear), std::move(charge), std::move(wornCore),
+            std::move(wear), std::move(charges), std::move(wornCore),
             tick.value(), velocity, report);
     }
     catch (const std::exception& error)
@@ -2399,7 +2446,7 @@ namespace TES3MP::Native
         auto result = project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
             equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr,
             {}, actorState ? &*actorState : nullptr, moving ? std::span<const WeaponWear>(moving->wear) : std::span<const WeaponWear>{},
-            moving ? moving->charge : std::optional<ItemCharge>{},
+            moving ? std::span<const ItemCharge>(moving->charges) : std::span<const ItemCharge>{},
             moving && moving->combat ? &*moving->combat : nullptr,
             moving ? moving->respawn.get() : nullptr);
         if (result)
@@ -2514,7 +2561,7 @@ namespace TES3MP::Native
         const EquipmentRuntime::PreparedEquipment* equipped, const EquipmentRuntime::PreparedWorldTransfer* world,
         const EquipmentRuntime::PreparedDoor* door, std::optional<CellId> area,
         const ActorSceneSnapshot* moving, std::span<const WeaponWear> wear,
-        const std::optional<ItemCharge>& charge,
+        std::span<const ItemCharge> charges,
         const ActorCampaignCombat* stagedCombat,
         const EquipmentRuntime::PreparedRespawn* respawn) const
     try
@@ -2538,21 +2585,21 @@ namespace TES3MP::Native
                 item->mRef.mChargeInt = change.condition;
                 if (change.condition == 0) state.mSlots[MWWorld::InventoryStore::Slot_CarriedRight] = {};
             }
-            if (charge && owner == charge->owner)
+            for (const auto& charge : charges) if (owner == charge.owner)
             {
-                const auto item = std::ranges::find(state.mObjects, charge->item,
+                const auto item = std::ranges::find(state.mObjects, charge.item,
                     [](const auto& object) { return object.mRef.mRefNum; });
-                if (item == state.mObjects.end() || item->mRef.mEnchantmentCharge != charge->before)
+                if (item == state.mObjects.end() || item->mRef.mEnchantmentCharge != charge.before)
                     throw std::invalid_argument("Native magic projection lost item identity");
-                if (charge->consume)
+                if (charge.consume)
                 {
                     if (item->mRef.mCount <= 0)
                         throw std::invalid_argument("Native magic projection lost consumable count");
                     --item->mRef.mCount;
                     if (item->mRef.mCount == 0)
-                        for (auto& slot : state.mSlots) if (slot == charge->item) slot = {};
+                        for (auto& slot : state.mSlots) if (slot == charge.item) slot = {};
                 }
-                else item->mRef.mEnchantmentCharge = charge->after;
+                else item->mRef.mEnchantmentCharge = charge.after;
             }
             return state;
         };
@@ -2566,7 +2613,7 @@ namespace TES3MP::Native
         const auto commandVersion = respawn ? respawn->revision()
             : world ? world->revision() : equipped ? equipped->candidate().mRevision
             : candidate ? candidate->candidate().mRevision : mWorld.getPtrRegistryRevision();
-        const auto version = commandVersion + wear.size() + size_t(charge.has_value());
+        const auto version = commandVersion + wear.size() + charges.size();
         const InventoryBaselineHeader header{ target, session->sessionGeneration(), tick, revision, 0, 1 };
         ServerApp::InventoryInterestDelivery result{ .targetSession = target };
         auto inventory = ReliablePlayerInventoryBaseline::create(header, player->playerId(),
@@ -2674,7 +2721,7 @@ namespace TES3MP::Native
                     || std::abs(int64_t(exterior->gridX()) - visibleCell.asExterior()->gridX()) > 1
                     || std::abs(int64_t(exterior->gridY()) - visibleCell.asExterior()->gridY()) > 1) continue;
                 auto neighbor = project(players, target, tick, revision, candidate, equipped, world, door,
-                    domain->mCell, moving, wear, charge, stagedCombat);
+                    domain->mCell, moving, wear, charges, stagedCombat);
                 if (!neighbor || neighbor->groundItems.size() != 1 || !neighbor->equipment) return std::nullopt;
                 result.groundItems.front().neighbors.push_back(std::move(neighbor->groundItems.front()));
                 actors.insert(actors.end(), neighbor->equipment->actors.begin(), neighbor->equipment->actors.end());
