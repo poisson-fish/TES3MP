@@ -353,7 +353,7 @@ namespace TES3MP::OpenMWAdapter
                 || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
                 throw std::runtime_error("Traversal setup pose invalid");
         }
-        else if (action == "activate" || action == "put")
+        else if (action == "activate" || action == "put" || action == "cast")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
@@ -385,6 +385,12 @@ namespace TES3MP::OpenMWAdapter
                     || !world->getPlayer().interceptMeleeHit(1.f, ESM::Weapon::AT_Chop, targets.front()))
                 && (!mNativeContainerCount || *mNativeContainerCount == 0))
                 throw std::runtime_error("Traversal attack has no live native actor target");
+        }
+        else if (action == "cast")
+        {
+            if (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(
+                    true, ESM::RefId::stringRefId(record), {}, {}))
+                throw std::runtime_error("Traversal cast has no mapped spell release");
         }
         else if (action == "open")
         {

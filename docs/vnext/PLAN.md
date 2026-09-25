@@ -59,9 +59,10 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 3. Retain bounded simulation around active travelers after both players leave.
    Cover processing range, cell boundaries, unload/restart and preserved
    destinations/completion; never simulate an actor twice.
-4. Add one melee encounter with coherent resources, wear, death and loot;
-   extend through effects, spells/projectiles and enchantments. Validate reach,
-   misses, friendly targeting and retries/reconnect.
+4. Add melee with coherent resources, wear, death and loot. Extract OpenMW
+   casting, effects and projectile mechanics for server-owned, content-selected
+   spells; reuse the effect path for enchantments. Validate targets, misses,
+   persistence and retries/reconnect.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.

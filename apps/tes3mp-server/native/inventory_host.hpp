@@ -17,6 +17,9 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V26 uses V25's image under native-inventory-26 and requires a fresh
+    // campaign. It admits one base-known, Always Succeeds, fixed, zero-duration
+    // Self Restore Health spell through the composed native combat tick.
     // V24 uses V23's image under native-inventory-24 and requires a fresh
     // campaign. At the selected NPC's KF hit key, detached OpenMW stats and
     // dedicated RNG resolve accuracy, fatigue and physical weapon damage.

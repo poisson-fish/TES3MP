@@ -577,9 +577,7 @@ namespace TES3MP::ServerApp
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& hello = state->negotiatedHello();
             if (!hello
-                || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeInstantMagicCapability())
-                || !std::ranges::binary_search(
-                    hello->negotiatedCapabilities(), authoritativeTimedAreaMagicCapability()))
+                || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeInstantMagicCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;

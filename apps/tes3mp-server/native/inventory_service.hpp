@@ -78,6 +78,7 @@ namespace TES3MP::Native
         bool mCombatState = false;
         bool mCombatResolution = false;
         bool mNpcLifecycle = false;
+        bool mInstantSpell = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.
@@ -117,6 +118,7 @@ namespace TES3MP::Native
         class AreaDoorTransaction;
         class ActorTransaction;
         class AttackTransaction;
+        class SpellTransaction;
         struct WeaponWear
         {
             size_t owner;
@@ -208,6 +210,8 @@ namespace TES3MP::Native
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::unique_ptr<PreparedNativeInventory> prepareMeleeAttack(
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
+        std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
+            const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
         std::span<const std::byte> inventoryImage() const noexcept override;
         void synchronizeCells(const CanonicalServerState& players) override;
         std::array<bool, 2> activeCells() const noexcept { return mActiveCells; }
@@ -227,6 +231,7 @@ namespace TES3MP::Native
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
         bool hasNativeCombat() const noexcept override { return mBinding.mCombatResolution; }
+        bool hasNativeInstantSpell() const noexcept override { return mBinding.mInstantSpell; }
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }

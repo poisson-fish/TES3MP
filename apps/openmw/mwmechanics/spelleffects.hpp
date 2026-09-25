@@ -14,6 +14,9 @@ namespace MWWorld
 namespace MWMechanics
 {
     class CreatureStats;
+    // The stat mutation used by Restore Health. Explicit stats let a server
+    // stage the same OpenMW effect before publishing it to a live actor.
+    void restoreHealth(CreatureStats& stats, float magnitude);
     // Shared attribute mutation; explicit stats also permit isolated preparation.
     void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase = false);
     struct MagicApplicationResult

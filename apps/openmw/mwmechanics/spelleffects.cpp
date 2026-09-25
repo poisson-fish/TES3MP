@@ -424,6 +424,13 @@ namespace
 
 namespace MWMechanics
 {
+    void restoreHealth(CreatureStats& stats, float magnitude)
+    {
+        auto health = stats.getHealth();
+        health.setCurrent(health.getCurrent() + magnitude);
+        stats.setHealth(health);
+    }
+
     void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase)
     {
         auto value = stats.getAttribute(attribute);
@@ -747,7 +754,7 @@ namespace MWMechanics
             else if (effect.mEffectId == ESM::MagicEffect::RestoreHealth)
             {
                 affectedHealth = true;
-                adjustDynamicStat(target, Stats::Health, effect.mMagnitude);
+                restoreHealth(target.getClass().getCreatureStats(target), effect.mMagnitude);
             }
             else if (effect.mEffectId == ESM::MagicEffect::RestoreMagicka)
                 adjustDynamicStat(target, Stats::Magicka, effect.mMagnitude);

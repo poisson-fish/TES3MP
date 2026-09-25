@@ -1193,7 +1193,19 @@ namespace TES3MP
                                     {
                                         requiresSpatialAdvance = false;
                                         const auto& magicCommand = magicUse->command();
-                                        if (!prepared.mCombat || !prepared.mInventory || !actors || !directMagic)
+                                        if (mNativeInventory && mNativeInventory->hasNativeInstantSpell())
+                                        {
+                                            if (prepared.mNativeInventory)
+                                                disposition = CommandDisposition::CombatRejected;
+                                            else
+                                            {
+                                                prepared.mNativeInventory = mNativeInventory->prepareMagicUse(
+                                                    *prepared.mState, proposal, tick);
+                                                disposition = prepared.mNativeInventory ? CommandDisposition::Applied
+                                                    : CommandDisposition::CombatRejected;
+                                            }
+                                        }
+                                        else if (!prepared.mCombat || !prepared.mInventory || !actors || !directMagic)
                                             disposition = CommandDisposition::CombatRejected;
                                         else
                                         {

@@ -20,6 +20,8 @@
 #include <apps/openmw/mwgui/sortfilteritemmodel.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include <components/esm3/loadench.hpp>
+#include <components/esm3/loadspel.hpp>
+#include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
@@ -4121,7 +4123,7 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle)
+        bool lifecycle, bool spell)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4144,10 +4146,25 @@ namespace TES3MP::Native::Testing
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
                 npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
             }
+            ESM::Spell restore;
+            if (spell)
+            {
+                restore.blank();
+                restore.mId = ESM::RefId::stringRefId("npc_instant_restore");
+                restore.mData.mType = ESM::Spell::ST_Spell;
+                restore.mData.mFlags = ESM::Spell::F_Always;
+                restore.mData.mCost = 1;
+                restore.mEffects.populate({{ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 20, 20}});
+                npc.mSpells.mList.push_back(restore.mId);
+            }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            if (spell)
+            {
+                out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
+            }
             ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
             floor.mModel = "placement-floor.osgt";
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
@@ -4293,7 +4310,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (lifecycle ? "native-inventory-25\nmanifest "
+            std::ofstream out(descriptor); out << (spell ? "native-inventory-26\nmanifest "
+                : lifecycle ? "native-inventory-25\nmanifest "
                 : combat ? "native-inventory-24\nmanifest "
                 : melee ? "native-inventory-22\nmanifest "
                 : traveler ? "native-inventory-19\nmanifest "
@@ -4486,6 +4504,126 @@ namespace TES3MP::Native::Testing
             require(hit && (!combat || composedHit) && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
                 "Server contact was not recorded at the bound KF hit key");
             require(releaseTick && !releaseImage.empty(), "Server attack did not retain a release-before-hit state");
+            if (spell)
+            {
+                require(contacted.combat && contacted.combat->actors[0][8][2] < contacted.combat->actors[0][8][0],
+                    "Instant spell fixture did not injure its caster");
+                const uint64_t castTick = contacted.tick + 1;
+                const uint64_t sourceId = [] {
+                    uint64_t value = 14695981039346656037ull;
+                    for (unsigned char c : std::string_view("npc_instant_restore"))
+                        value = (value ^ c) * 1099511628211ull;
+                    return value;
+                }();
+                ClientMagicUseCommand use{id<SessionId>(1), SessionGeneration::initial(),
+                    CommandSequence::initial(), id<CommandId>(castTick), id<CanonicalRevision>(castTick),
+                    MagicUseSourceKind::Spell, sourceId, MagicUseTargetKind::Self, 0,
+                    id<ServerTick>(castTick), CombatRevision::initial(), CombatRevision::initial(),
+                    InventoryRevision::initial()};
+                const auto* caster = authority.findPlayer(id<PlayerId>(1));
+                const auto proposal = [&](const ClientMagicUseCommand& input) {
+                    return ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(),
+                        input.commandSequence, input.commandId, input.observedCanonicalRevision,
+                        EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
+                        MagicUseCommandProposal(input));
+                };
+                auto invalidUse = use; invalidUse.sourceId ^= 1;
+                require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),
+                    "Unknown spell ID entered native combat");
+                invalidUse = use; invalidUse.targetKind = MagicUseTargetKind::Actor;
+                invalidUse.targetId = service.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
+                require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),
+                    "Unsupported target escaped the bounded spell slice");
+                auto preparedUse = service.prepareMagicUse(authority, proposal(use), id<ServerTick>(castTick));
+                require(bool(preparedUse), "Known self Restore Health spell rejected");
+                auto cast = service.prepareNativeTick(authority, id<ServerTick>(castTick), 1.f/30,
+                    std::move(preparedUse));
+                const auto prior = image();
+                std::vector<std::byte> candidate;
+                require(cast && cast->commit([&](auto bytes) { candidate.assign(bytes.begin(), bytes.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && image() == prior, "Rejected spell cast changed the campaign");
+                const auto next = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
+                require(next.combat && next.combat->actors[0][8][2] > contacted.combat->actors[0][8][2]
+                    && next.combat->actors[0][9][2] == contacted.combat->actors[0][9][2] - 1
+                    && next.combat->rng != contacted.combat->rng,
+                    "OpenMW instant Restore Health did not share the durable magicka and health result");
+                const auto aliceEvent = service.projectCombatEvents(authority, id<SessionId>(1),
+                    id<ServerTick>(castTick), id<CanonicalRevision>(castTick), cast.get());
+                const auto bobEvent = service.projectCombatEvents(authority, id<SessionId>(2),
+                    id<ServerTick>(castTick), id<CanonicalRevision>(castTick), cast.get());
+                require(aliceEvent && bobEvent && aliceEvent->magicEvents().size() == 1
+                    && std::ranges::equal(aliceEvent->magicEvents(), bobEvent->magicEvents())
+                    && aliceEvent->magicEvents().front().castSucceeded,
+                    "Instant spell event did not reach both clients");
+                require(cast->commit(accepted) == CanonicalDurabilityResult::Committed && image() == candidate,
+                    "Instant spell did not install its one durable candidate");
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                const auto reconnected = players(id<SessionGeneration>(2), 1, 2);
+                restarted.service().synchronizeCells(reconnected);
+                const auto alice = restarted.service().projectCombat(reconnected, id<SessionId>(1),
+                    id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                const auto bob = restarted.service().projectCombat(reconnected, id<SessionId>(2),
+                    id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                require(alice && bob && alice->selfHealth() == bob->players().front().health
+                    && alice->selfHealth() == next.combat->actors[0][8][2]
+                    && alice->selfMagicka() == next.combat->actors[0][9][2],
+                    "Restart/reconnect diverged on the server-owned spell result");
+                InventoryHost routedHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                auto& routedService = routedHost.service(); routedService.synchronizeCells(authority);
+                NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+                CanonicalCommandReducer reducer(authority, observability, testContentManifest());
+                const auto catalog = ServerScriptStateCatalog::create({}).value();
+                auto scripts = CanonicalScriptState::initial(catalog).value();
+                std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{26};
+                const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+                    ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+                auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                    ServerApp::CanonicalPersistenceFile::open(scratch / "routed-spell.bin", identity));
+                require(reducer.configureDurability(*file, nullptr, nullptr, nullptr, nullptr, nullptr,
+                    &scripts, &routedService), "Native spell reducer durability wiring failed");
+                auto routedUse = use;
+                routedUse.observedCanonicalRevision = reducer.canonicalRevision();
+                const auto routed = proposal(routedUse);
+                Clock clock;
+                ServerCommandIntakeCoordinator intake(clock, observability, MonotonicInstant::fromNanoseconds(0),
+                    id<ServerTick>(castTick), IngressOrdinal::initial());
+                require(intake.submit(routed) == CommandSubmissionResult::Accepted,
+                    "Authenticated spell intake failed");
+                clock.value = castTick * 33'333'334;
+                auto batch = intake.pump();
+                require(batch && batch.batches().size() == 1, "Spell intake produced no tick");
+                auto pending = reducer.prepareTick(batch.batches().front());
+                require(pending.result() && pending.result().dispositions()[0].disposition() == CommandDisposition::Applied
+                    && reducer.stageNativeDoorStep(pending, id<ServerTick>(castTick), 1.f/30)
+                    && reducer.commit(std::move(pending)), "Authenticated spell did not commit through the server reducer");
+                const auto routedState = readActorCampaign({reinterpret_cast<const char*>(routedService.inventoryImage().data()),
+                    routedService.inventoryImage().size()});
+                require(routedState.combat && routedState.combat->actors[0][8][2] == next.combat->actors[0][8][2]
+                    && routedState.combat->actors[0][9][2] == next.combat->actors[0][9][2],
+                    "Server reducer routed spell to a different combat writer");
+                ServerCommandIntakeCoordinator duplicateIntake(clock, observability,
+                    MonotonicInstant::fromNanoseconds(0), id<ServerTick>(castTick + 1), IngressOrdinal::initial());
+                require(duplicateIntake.submit(routed) == CommandSubmissionResult::Accepted,
+                    "Duplicate spell intake failed");
+                clock.value = (castTick + 1) * 33'333'334;
+                auto duplicateBatch = duplicateIntake.pump();
+                require(duplicateBatch && duplicateBatch.batches().size() == 1,
+                    "Duplicate spell intake produced no tick");
+                auto duplicate = reducer.prepareTick(duplicateBatch.batches().front());
+                const auto disposition = duplicate.result().dispositions()[0].disposition();
+                require((disposition == CommandDisposition::DuplicateCommandId
+                        || disposition == CommandDisposition::AlreadyFinalized)
+                    && reducer.stageNativeDoorStep(duplicate, id<ServerTick>(castTick + 1), 1.f/30)
+                    && reducer.commit(std::move(duplicate)), "Duplicate spell request escaped its receipt");
+                const auto deduplicated = readActorCampaign({reinterpret_cast<const char*>(routedService.inventoryImage().data()),
+                    routedService.inventoryImage().size()});
+                require(deduplicated.combat && deduplicated.combat->actors[0][9][2] == routedState.combat->actors[0][9][2],
+                    "Duplicate spell spent magicka twice");
+                std::cout << "instant spell=OpenMW Restore Health cost=atomic clients=two restart=reconnected\n";
+                return;
+            }
             if (combat)
             {
                 auto lowSkill = releaseImage;

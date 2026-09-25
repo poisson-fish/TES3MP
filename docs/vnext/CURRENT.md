@@ -1,40 +1,39 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** V25 persists one initially living
-placed NPC's life generation, attributed deaths and respawn deadline. Death
-opens shared corpse loot. Respawn atomically restores actor state and baseline
-inventory with fresh item identities; stale-life requests and rejected writes
-leave the prior state intact. V25 needs a fresh campaign and `respawn TICKS`.
+**M4 in [PLAN.md](PLAN.md) is active.** V26 adds one native spell slice to
+V25's placed NPC life cycle. An authenticated, base-known OpenMW spell with one
+fixed, zero-duration Self Restore Health effect and the Always Succeeds flag
+spends OpenMW spell cost and restores health in the composed server tick. The
+health, magicka, actor state and reliable event commit together. V26 requires a
+fresh campaign. Other spell effects, target types, spell acquisition and
+projectiles remain unwired.
 
-[Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-**native-inventory-25**, one dry interior or nine adjacent exteriors, one
-traveler, 0–128 doors, two 60 Hz substeps per 30 Hz tick. Saturation pauses
-both steps. Travel and life deadlines persist without players and across
-restart; offline players freeze.
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp): one dry interior
+or nine adjacent exteriors, one traveler, 0–128 doors, two 60 Hz substeps per
+30 Hz tick. Saturation pauses both steps. Travel and NPC respawn deadlines
+persist without players and across restart; offline players freeze.
 
-Verified 2026-09-24: `npc-life-cycle` in
-`build/logs/m4-npc-life-final-test.log` covers death, malformed history,
-loot, rejected respawn, fresh identities, stale-life rejection and restart.
-Builds: `build/logs/m4-npc-life-final-server-build.log`,
-`build/logs/m4-immediate-resume-desktop-build.log`.
+Verified 2026-09-24: V25 `npc-life-cycle` in
+`build/logs/m4-npc-life-final-test.log` covers death, loot, respawn and restart.
+The first combat effect, OpenMW hand-to-hand fatigue damage, passed
+`build/logs/m4-unarmed-effect-test-03.log` and the two-desktop capture at
+`build/logs/m4-unarmed-live-07/result.json`.
 
-The live Raflod kill, immediate Bob reconnect and GUI corpse loot passed in
-`build/logs/m4-npc-life-live-15/result.json`. Moving-NPC reconnect:
-`build/logs/m4-immediate-resume-live-01/result.json`.
-
-The first bounded combat effect is ordinary hand-to-hand fatigue damage
-against a standing target. OpenMW's melee calculation and stat mutation run
-inside the native server tick; its fatigue result, damage type and actor state
-share the attack's durability and replication. `npc-life-cycle` in
-`build/logs/m4-unarmed-effect-test-03.log` covers rejection, both session
-projections and restart/reconnect. The live two-desktop capture
-`build/logs/m4-unarmed-live-07/result.json` records one 50-point hit: both
-clients saw Raflod's fatigue fall from 219 to 169 while health stayed 100;
-Bob's reconnect retained 169 under 100 ms one-way latency, jitter and 10% loss.
+Verified 2026-09-24: V26 `npc-instant-spell` in
+`build/logs/m4-instant-spell-test-07.log` covers invalid source/target,
+rejected durability, two projections, reducer routing, duplicate receipt and
+restart/reconnect. The two-desktop capture
+`build/m4-instant-spell-live-04/result.json` uses a synthetic room on a real
+loadout and shows Alice healed from 27.8 to
+35 and spent one magicka; both clients received one event, and Bob's reconnect
+retained the result under 100 ms one-way latency, jitter and 10% loss.
+Production server/client builds:
+`build/logs/m4-instant-spell-server-build-02.log`,
+`build/logs/m4-instant-spell-client-build-03.log`.
 
 Background actors freeze. General AI, scripts, water, sliding neighborhoods,
-armor, block, resistances, magic effects, unarmed knockout/health damage,
-werewolf/nondefault strength scaling and player hulls remain unwired. Player
-movement is inherited. Next: spells/projectiles, then enchantments. Cut player
-movement over last, after shared collision and smoothness are verified. M3
-content campaigns: `build/m3-tr-varyon-doors`, `build/m3-tr-noran-dry`.
+armor, block, resistances, sustained magic effects, broad spells/projectiles,
+enchantments, unarmed knockout/health damage, werewolf scaling and player
+hulls remain unwired. Player movement is inherited. Next: one target spell
+projectile with server-owned flight/contact, then enchantments. Cut player
+movement over last, after shared collision and smoothness are verified.

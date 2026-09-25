@@ -245,6 +245,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<MagicUseCapture> DesktopAutomation::captureMagicUse() noexcept
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput)
+            return mDesktopInput->captureMagicUse();
         if (mRole == DesktopAutomationRole::MagicSpellCaster && !mMagicSubmitted && mMagicPlayer
             && mMagicInventoryRevision && mMagicCasterRevision && mMagicTargetRevision && mMagicSourceTick
             && mStartedAt && mNow && mNow->nanoseconds() - mStartedAt->nanoseconds() >= 3 * Second)
@@ -716,7 +718,8 @@ namespace TES3MP::OpenMWAdapter
             mOutput << "{\"event\":\"native_combat_sample\",\"tick\":" << snapshot.serverTick().value()
                 << ",\"generation\":" << snapshot.targetSessionGeneration().value()
                 << ",\"self\":" << snapshot.selfPlayerId().value()
-                << ",\"health\":" << snapshot.selfHealth() << ",\"fatigue\":" << snapshot.selfFatigue() << ",\"dead\":"
+                << ",\"health\":" << snapshot.selfHealth() << ",\"fatigue\":" << snapshot.selfFatigue()
+                << ",\"magicka\":" << snapshot.selfMagicka() << ",\"dead\":"
                 << (snapshot.selfDead() ? "true" : "false") << ",\"actors\":[";
             bool first = true;
             for (const auto& actor : snapshot.actors())
@@ -736,7 +739,7 @@ namespace TES3MP::OpenMWAdapter
                 first = false;
                 mOutput << "{\"id\":" << player.playerId.value() << ",\"revision\":"
                     << player.combatRevision.value() << ",\"health\":" << player.health
-                    << ",\"fatigue\":" << player.fatigue
+                    << ",\"fatigue\":" << player.fatigue << ",\"magicka\":" << player.magicka
                     << ",\"dead\":" << (player.dead ? "true" : "false") << '}';
             }
             mOutput << "],\"actor_hits\":[";
@@ -761,6 +764,18 @@ namespace TES3MP::OpenMWAdapter
                         << hit.targetActorId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
                         << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat) << ",\"died\":"
                         << (hit.targetDied ? "true" : "false") << '}';
+                }
+            mOutput << "],\"magic_events\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& cast : batch.magicEvents())
+                {
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"caster\":" << cast.casterPlayerId.value() << ",\"source\":"
+                        << cast.sourceId << ",\"success\":" << (cast.castSucceeded ? "true" : "false")
+                        << ",\"health_delta\":" << cast.selfHealthDelta
+                        << ",\"magicka_delta\":" << cast.selfMagickaDelta << '}';
                 }
             mOutput << "]}\n";
             mOutput.flush();

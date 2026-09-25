@@ -99,9 +99,7 @@ namespace TES3MP::OpenMWAdapter
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
-                    authoritativeInstantMagicCapability())
-                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
-                    authoritativeTimedAreaMagicCapability());
+                    authoritativeInstantMagicCapability());
         }
 
         bool dialogueChoicesNegotiated(const ClientSessionRuntime& runtime) noexcept
