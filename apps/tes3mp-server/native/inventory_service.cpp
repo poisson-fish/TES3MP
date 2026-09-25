@@ -355,6 +355,8 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64)
     {
+        if (mBinding.mMeleeDefenseRules && !mBinding.mKnockoutRules)
+            throw std::invalid_argument("Native melee defense requires knockout campaign state");
         if (mBinding.mMeleeContact && !mBinding.mBoundMelee)
             throw std::invalid_argument("Native melee contact requires a bound animation");
         if (mBinding.mCombatState)
@@ -1335,27 +1337,28 @@ namespace TES3MP::Native
             if (mBinding.mMagicProjectile != (magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                     || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic)
+                    || magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic))
                 || (mBinding.mMagicItemUse && magic != EnchantedProjectileActorCampaignMagic
                     && magic != TimedActorCampaignMagic && magic != AreaActorCampaignMagic
                     && magic != PlayerTargetActorCampaignMagic && magic != MultipleProjectileActorCampaignMagic
-                    && magic != KnockoutActorCampaignMagic)
+                    && !hasKnockoutState(magic))
                 || (mBinding.mMagicTimed != (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
                     || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-                    || magic == KnockoutActorCampaignMagic))
+                    || hasKnockoutState(magic)))
                 || (mBinding.mMagicArea != (magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
+                    || magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic)))
                 || (mBinding.mMagicPlayerTarget != (magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
+                    || magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic)))
                 || (mBinding.mMagicProjectileCollection != (magic == MultipleProjectileActorCampaignMagic
-                    || magic == KnockoutActorCampaignMagic))
-                || (mBinding.mKnockoutRules != (magic == KnockoutActorCampaignMagic)))
+                    || hasKnockoutState(magic)))
+                || (mBinding.mKnockoutRules != hasKnockoutState(magic))
+                || (mBinding.mMeleeDefenseRules != (magic == MeleeDefenseActorCampaignMagic)))
                 throw std::invalid_argument("Native projectile campaign version differs from binding");
             if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
                     || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                     || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic
-                    || magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic))
+                    || magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic)))
                 throw std::invalid_argument("Native melee contact campaign version differs from binding");
             PlainEquipmentValues baseline;
             if (decoded.life)
@@ -1449,7 +1452,8 @@ namespace TES3MP::Native
         const size_t meleeSize = melee ? 8 + mBinding.mBoundMelee->mResourceIdentity.size()
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
         const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8
-            + (mBinding.mKnockoutRules ? 3 * 8 : 0) : 0;
+            + (mBinding.mKnockoutRules ? 3 * 8 : 0)
+            + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0) : 0;
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + 3 * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
@@ -1464,7 +1468,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mKnockoutRules ? KnockoutActorCampaignMagic
+        putAreaWord(result, mBinding.mMeleeDefenseRules ? MeleeDefenseActorCampaignMagic
+            : mBinding.mKnockoutRules ? KnockoutActorCampaignMagic
             : mBinding.mMagicProjectileCollection ? MultipleProjectileActorCampaignMagic
             : mBinding.mMagicPlayerTarget ? PlayerTargetActorCampaignMagic
             : mBinding.mMagicArea ? AreaActorCampaignMagic
@@ -1495,6 +1500,8 @@ namespace TES3MP::Native
                     for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
             if (mBinding.mKnockoutRules)
                 for (bool value : combat->knockedDown) putAreaWord(result, value);
+            if (mBinding.mMeleeDefenseRules)
+                for (uint32_t value : combat->hitRecoveryTicks) putAreaWord(result, value);
         }
         if (life)
         {
@@ -1932,6 +1939,8 @@ namespace TES3MP::Native
                         return session.playerId() == mBinding.mPlayers[index];
                     });
                 if (!awake || combat->actors[index][8][2] <= 0) continue;
+                if (mBinding.mMeleeDefenseRules && combat->hitRecoveryTicks[index])
+                    --combat->hitRecoveryTicks[index];
                 auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index]);
                 MWMechanics::restoreCombatFatigue(stats, mRuntime.mStore, seconds);
                 combat->knockedDown[index] = stats.getHealth().getCurrent() > 0
@@ -2051,7 +2060,23 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native melee damage invalid before defense");
             bool blocked = false;
             const auto shield = mRuntime.equippedArmorCondition(defender, MWWorld::InventoryStore::Slot_CarriedLeft);
+            // CharacterController::isReadyToBlock requires carried-left to be
+            // visible. The loaded actor has an animation; a two-handed weapon
+            // hides the shield in OpenMW's NpcAnimation.
+            bool readyToBlock = true;
+            if (mBinding.mMeleeDefenseRules)
+            {
+                const auto* inventory = mRuntime.inventoryStorage(defender);
+                if (!inventory) throw std::invalid_argument("Native block defender has no inventory");
+                const auto right = inventory->getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
+                if (right != inventory->end() && right->getType() == ESM::Weapon::sRecordId)
+                {
+                    const auto& equipped = mRuntime.mStore.get<ESM::Weapon>().find(right->getCellRef().getRefId())->mData;
+                    readyToBlock = carriedLeftVisibleForWeapon(equipped.mType);
+                }
+            }
             if (shield && shield->mCondition > 0 && !victim.getKnockedDown()
+                && readyToBlock && (!mBinding.mMeleeDefenseRules || !combat->hitRecoveryTicks[defender])
                 && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() <= 0)
             {
                 const float dx = attackerPosition[0] - defenderPosition[0];
@@ -2135,6 +2160,17 @@ namespace TES3MP::Native
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             return blocked;
         };
+        const auto startHitRecovery = [&](size_t defender, float damage, bool blocked,
+            Misc::Rng::Generator& rng) {
+            if (!mBinding.mMeleeDefenseRules || blocked || damage <= 0) return;
+            const auto groups = mBinding.mBoundMelee->mAnimation.hitRecoveryGroupCount();
+            // With no hit clip, CharacterController clears recovery on its next
+            // update. Otherwise it selects one of the consecutive hit groups.
+            const auto selected = groups ? Misc::Rng::rollDice(int(groups), rng) : 0;
+            combat->hitRecoveryTicks[defender] = groups
+                ? mBinding.mBoundMelee->mAnimation.hitRecoveryTicks(unsigned(selected)) : 1;
+            combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+        };
         if (dueRespawn)
         {
             if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
@@ -2144,6 +2180,7 @@ namespace TES3MP::Native
             combat->actors[2] = life->spawnStats;
             combat->knockedDown[2] = life->spawnStats[8][2] > 0
                 && life->spawnStats[10][2] < 0;
+            combat->hitRecoveryTicks[2] = 0;
             melee = mBinding.mBoundMelee->mAnimation;
             target = 0; contact = false;
             std::erase_if(projectiles, [](const auto& pending) {
@@ -2236,6 +2273,8 @@ namespace TES3MP::Native
                     damage, rng);
                 MWMechanics::applyHitDamage(victim, {{damagedStat == MeleeDamageStat::Health ? "health" : "fatigue",
                     damage}}, MWWorld::TimeStamp{});
+                if (victim.getHealth().getCurrent() > 0) startHitRecovery(2, damage, blocked, rng);
+                else combat->hitRecoveryTicks[2] = 0;
             }
             if (weapon && weapon->mData.mHealth)
             {
@@ -2638,6 +2677,9 @@ namespace TES3MP::Native
                         MWMechanics::applyHitDamage(victim,
                             {{damagedStat == MeleeDamageStat::Health ? "health" : "fatigue", damage}},
                             MWWorld::TimeStamp{});
+                        if (victim.getHealth().getCurrent() > 0)
+                            startHitRecovery(victimIndex, damage, blocked, rng);
+                        else combat->hitRecoveryTicks[victimIndex] = 0;
                     }
                     if (weapon && weapon->mData.mHealth)
                     {
@@ -2669,6 +2711,9 @@ namespace TES3MP::Native
                         hitDamage, hitStat, contact && hitSuccess, hitBlocked, targetDied};
             }
         }
+        if (combat && mBinding.mMeleeDefenseRules)
+            for (size_t index = 0; index < combat->actors.size(); ++index)
+                if (combat->actors[index][8][2] <= 0) combat->hitRecoveryTicks[index] = 0;
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i) velocity[i]=respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
         if (!wear.empty() || !charges.empty()) wornCore = stagedWeaponCore(wear, command.get(), charges);

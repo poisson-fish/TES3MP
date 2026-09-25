@@ -43,47 +43,35 @@ raw memory, process pointers, rendering objects or live sessions.
 
 ## M4 actor simulation
 
-**Runtime ownership.** Incrementally extract shared OpenMW simulation into an
-app-local actor runtime with owned command/snapshot boundaries and explicit multiplayer
-activity/identity. AI, physics and combat share authoritative actor inventories;
-wear, charge, death and loot cannot have competing stores. Preserve stock callers
-and dependency checks; avoid whole-engine refactoring or a full World/UI wrapper.
+**Runtime ownership.** Extract shared OpenMW simulation into an app-local actor
+runtime with owned commands/snapshots and explicit activity/identity. AI, physics,
+combat, wear, charge, death and loot share authoritative inventories. Preserve
+stock callers and dependency checks; avoid a full World/UI wrapper.
 
-**Gameplay animation.** Retain CPU gameplay timing without graphics. Preserve
-engine movement, hit keys and projectile/spell releases. Clients render commits;
-timing/collision resources enter gameplay identity, and null presentation must
-not suppress mechanics. V22 selects an active player in engine melee reach at
-full wind-up, rechecking server position at the KF hit key. Selection/contact
-persist with the actor. Inherited player movement lacks trusted hulls, so contact
-uses strict center reach until native hulls are bound.
+**Gameplay animation.** Keep CPU movement, hit keys and projectile/spell releases;
+clients render commits. Bind timing/collision resources to gameplay identity;
+null presentation cannot suppress mechanics. V22 selects an active player in
+engine melee reach at full wind-up, rechecks server position at the KF hit key,
+and persists selection/contact. Inherited player movement uses strict center
+reach until native hulls are bound.
 
-**Travel scheduling.** Simulate the union of player areas and bounded traveler
-areas with engine navigation/collision after players leave, once per actor and
-independent of replication interest. Bound cells, actors and tick work; retain
-destinations, completion, inactive state and stock Travel guards across restart.
-No abstract travel/fast-forward. V20 admits neighborhoods atomically and pauses
-both substeps on saturation. Restart may change limits without resetting travel.
-Coalesce visibility by placement ID; suppress authored local NPCs. Offline
-players freeze; client velocity cannot enter legacy simulation.
+**Travel scheduling.** Simulate player/traveler area union once per actor,
+independent of replication. Bound cells, actors and work; persist destinations,
+completion, inactivity and stock Travel guards. No abstract fast-forward. V20
+admits neighborhoods atomically; saturation pauses both substeps. Changed limits
+do not reset travel. Coalesce by placement ID, suppress authored local NPCs,
+freeze offline players and exclude client velocity from legacy simulation.
 
-**Composed ticks.** One native transaction per tick owns ordered intents,
-actor/door simulation, resources, effects, wear, death/loot, RNG and receipts.
-Stage in isolation; persist before installation/publication. Measure commit
-costs and overruns; preserve acknowledgment guarantees.
-For `WhenUsed` launches, the item instance pays charge with the projectile in
-that tick; a later miss keeps the paid charge. The pending source retains the
-item instance and enchantment record identities so contact survives moving the
-item after launch.
-V17 stages ordinary-door proposals against committed NPC hulls before the two NPC
-physics steps; those steps see staged door angles. Inventory, doors and actor state
-install only after the same commit. Door angles have one durable owner in the area
-image; collision transforms are derived, including on recovery. Player contact
-reports supplement server NPC sensing until player movement cutover.
-V18 retains a destination beneath the shared OpenMW door-avoidance state and
-persists its timer, stuck position, direction and private random stream. Rotating
-geometry is a derived navigator cache synchronized before each query, including
-after rejected staging or recovery; it is never another durable door writer.
-Only the selected NPC moves; stock neighbor propagation awaits multiple actors.
+**Composed ticks.** One transaction owns ordered intents, actor/door simulation,
+resources, effects, wear, death/loot, RNG and receipts. Stage in isolation;
+persist before installation/publication and measure overruns. `WhenUsed` pays
+charge at launch even on a later miss; pending source identities survive item
+movement. V17 stages door angles against committed NPC hulls before both physics
+steps, then commits inventory, doors and actor together. Area images own angles;
+collision transforms are derived. Player reports supplement NPC sensing until
+movement cutover. V18 persists destination, door-avoidance timer, stuck position,
+direction and private RNG. Rotating geometry is a synchronized derived cache.
+Only the selected NPC moves; neighbor propagation awaits multiple actors.
 
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding
@@ -93,23 +81,27 @@ V31 resolves projectile/player contact against active server player positions
 with a 32-unit sphere at body center, choosing the earliest hit against NPC/world
 collision. This bounded proxy remains until shared player hull physics is bound.
 
-**Movement smoothness (target).** Cut player movement over last, after smooth
 **V33 fatigue knockout.** The combat image records knockout. Active actors
 recover fatigue at OpenMW's combat rate; inactive actors pause. Negative
 fatigue prevents attacks and redirects unarmed damage to health. Recovery
 occurs at zero fatigue. Animation-specific get-up timing remains pending.
 
-**Movement smoothness (target).** Cut player movement over last, after smooth
-replication and unified engine collision across actors, doors and projectiles.
-Until then retain inherited movement and validate combat positions/contacts on
-the server. Start with stock physics; tune snapshot frequency separately.
-Interpolate timestamped remote snapshots with bounded extrapolation; use
-latest-wins motion and reliable events. Predict locally with shared rules and
-fixed steps, restore physics at acknowledged input, then replay pending input.
-Timestamp dynamic obstacles for contact reconciliation. Separate collision
-correction from visual blending; reset history on teleport, respawn and cell
-transition. Measure latency/jitter/loss, correction frequency/size and tick
-overruns before cutover. Existing smoothing scaffolding does not prove replay.
+**V34 melee defense timing.** The server applies OpenMW's carried-left
+visibility rule before shield rolls, so a two-handed weapon prevents a block.
+Successful unblocked melee damage starts a durable CPU hit-recovery counter
+from the bound KF hit group; inactive actors pause it. A visual-only shield
+sheathing preference does not control server gameplay. The current binding
+uses the selected NPC's hit resource for all three actors; distinct player
+resources require a later binding before general loadout acceptance.
+
+**Movement smoothness (target).** Cut over after smooth replication and unified
+engine collision. Until then validate inherited combat contacts on the server.
+Start with stock physics; tune snapshot frequency separately. Interpolate remote
+snapshots with bounded extrapolation, latest-wins motion and reliable events.
+Predict locally with shared fixed steps; restore acknowledged physics and replay
+pending input. Timestamp obstacles, separate collision correction from visual
+blending, and reset on teleport, respawn or cell change. Measure jitter/loss,
+correction size/frequency and overruns. Existing smoothing does not prove replay.
 
 ## Cooperative progression design
 

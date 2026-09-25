@@ -4607,7 +4607,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << ((knockout || defense) ? "native-inventory-33\nmanifest "
+            std::ofstream out(descriptor); out << (defense ? "native-inventory-34\nmanifest "
+                : knockout ? "native-inventory-33\nmanifest "
                 : collection ? "native-inventory-32\nmanifest "
                 : playerTarget ? "native-inventory-31\nmanifest "
                 : area ? "native-inventory-30\nmanifest "
@@ -4678,6 +4679,7 @@ namespace TES3MP::Native::Testing
                         require(hit.blocked && hit.damage == 0
                             && candidate.combat->actors[0][8][2] == prior.combat->actors[0][8][2]
                             && candidate.combat->actors[0][10][2] < prior.combat->actors[0][10][2]
+                            && candidate.combat->hitRecoveryTicks[0] == 0
                             && condition(*staged, true) < condition(*current, true),
                             "Shield block did not stage fatigue and shield wear without health loss");
                     else
@@ -4696,6 +4698,7 @@ namespace TES3MP::Native::Testing
                                 + (defenseWeapon.mData.mChop[1] - defenseWeapon.mData.mChop[0]) * swing);
                         require(!hit.blocked && hit.damage > 0 && hit.damage < raw
                             && candidate.combat->actors[0][8][2] < prior.combat->actors[0][8][2]
+                            && candidate.combat->hitRecoveryTicks[0] > 0
                             && condition(*staged, false) < condition(*current, false),
                             "Armor hit did not stage reduced health damage and armor wear");
                     }
@@ -4707,8 +4710,55 @@ namespace TES3MP::Native::Testing
                     const auto restored = recovered.projectInventory(authority, id<SessionId>(1),
                         id<ServerTick>(time), id<CanonicalRevision>(time));
                     require(std::ranges::equal(proposed, recovered.inventoryImage()) && restored
-                        && condition(*restored, shield) == condition(*staged, shield),
+                        && condition(*restored, shield) == condition(*staged, shield)
+                        && readActorCampaign({reinterpret_cast<const char*>(recovered.inventoryImage().data()),
+                            recovered.inventoryImage().size()}).combat->hitRecoveryTicks
+                            == candidate.combat->hitRecoveryTicks,
                         "Armor/block restart changed the durable equipment outcome");
+                    if (!shield)
+                    {
+                        auto malformed = proposed;
+                        const size_t recoveryOffset = 56 + 8 + candidate.melee->identity.size() + 7 * 8
+                            + 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8 + 3 * 8;
+                        require(recoveryOffset + 8 <= malformed.size(), "Recovery field outside campaign image");
+                        std::fill(malformed.begin() + recoveryOffset,
+                            malformed.begin() + recoveryOffset + 8, std::byte{0xff});
+                        bool rejectedRecovery = false;
+                        try { (void)readActorCampaign({reinterpret_cast<const char*>(malformed.data()),
+                            malformed.size()}); }
+                        catch (const std::invalid_argument&) { rejectedRecovery = true; }
+                        require(rejectedRecovery && std::ranges::equal(proposed, recovered.inventoryImage()),
+                            "Malformed hit recovery changed the installed campaign");
+                        const auto offline = std::get<CanonicalServerState>(
+                            createCanonicalServerState(authority.players(), {}));
+                        recovered.synchronizeCells(offline);
+                        auto paused = recovered.prepareNativeTick(offline,
+                            id<ServerTick>(time + 1), 1.f/30, {});
+                        std::vector<std::byte> pausedImage;
+                        require(paused && paused->commit([&](auto bytes) {
+                            pausedImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && readActorCampaign({reinterpret_cast<const char*>(pausedImage.data()),
+                                pausedImage.size()}).combat->hitRecoveryTicks[0]
+                                == candidate.combat->hitRecoveryTicks[0],
+                            "Offline hit recovery advanced or escaped a rejected tick");
+                        recovered.synchronizeCells(authority);
+                        auto continued = recovered.prepareNativeTick(authority,
+                            id<ServerTick>(time + 1), 1.f/30, {});
+                        std::vector<std::byte> continuedImage;
+                        require(continued && continued->commit([&](auto bytes) {
+                            continuedImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected,
+                            "Hit recovery continuation did not stage atomically");
+                        const auto next = readActorCampaign({reinterpret_cast<const char*>(continuedImage.data()),
+                            continuedImage.size()});
+                        require(next.combat && next.combat->hitRecoveryTicks[0]
+                                == candidate.combat->hitRecoveryTicks[0] - 1
+                            && std::ranges::equal(proposed, recovered.inventoryImage()),
+                            "Active hit animation did not advance one committed frame");
+                    }
                     resolved = true;
                     defendedTick = time;
                 }
@@ -4733,6 +4783,57 @@ namespace TES3MP::Native::Testing
                         attacker.transform().orientation()), LinearVelocity3(0, 0, 0)));
                 authority = std::get<CanonicalServerState>(createCanonicalServerState(facing, authority.activeSessions()));
                 service.synchronizeCells(authority);
+                // Seed a valid recovered hit clip while the fixture's block
+                // chance remains 100%; the next landed blow must skip the roll.
+                auto recoveringImage = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                const auto bound = readActorCampaign({reinterpret_cast<const char*>(recoveringImage.data()),
+                    recoveringImage.size()});
+                const size_t recoveryOffset = 56 + 8 + bound.melee->identity.size() + 7 * 8
+                    + 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8 + 3 * 8 + 2 * 8;
+                require(recoveryOffset + 8 <= recoveringImage.size(), "NPC recovery field outside image");
+                std::fill(recoveringImage.begin() + recoveryOffset,
+                    recoveringImage.begin() + recoveryOffset + 8, std::byte{0});
+                recoveringImage[recoveryOffset] = std::byte{30};
+                InventoryHost recoveringHost(descriptor, testContentManifest(), *registry, *crypto, recoveringImage);
+                auto& recoveringService = recoveringHost.service(); recoveringService.synchronizeCells(authority);
+                const int shieldBefore = dynamic_cast<InventoryService&>(recoveringService)
+                    .selectedNpcArmorCondition(MWWorld::InventoryStore::Slot_CarriedLeft).value();
+                bool recoverySuppressedBlock = false;
+                const auto* activeAttacker = authority.findPlayer(id<PlayerId>(2));
+                for (uint64_t time = defendedTick + 1; time <= defendedTick + 20 && !recoverySuppressedBlock; ++time)
+                {
+                    const auto view = recoveringService.projectInventory(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(view && view->equipment && view->equipment->motions.size() == 1,
+                        "Recovery block fixture lost NPC target");
+                    ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                        id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                        CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                        EntityPrecondition(activeAttacker->entityId(), activeAttacker->entityRevision(),
+                            activeAttacker->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                    auto request = recoveringService.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                    require(bool(request), "Recovery player attack rejected");
+                    auto pending = recoveringService.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                        std::move(request));
+                    const auto outcome = recoveringService.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    if (outcome && !outcome->events().empty() && outcome->events().front().hit)
+                    {
+                        const auto& hit = outcome->events().front();
+                        require(!hit.blocked && hit.damage > 0,
+                            "Recovering NPC blocked despite a ready 100% shield roll");
+                        recoverySuppressedBlock = true;
+                    }
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Recovery block candidate did not commit");
+                }
+                require(recoverySuppressedBlock
+                    && dynamic_cast<InventoryService&>(recoveringService)
+                        .selectedNpcArmorCondition(MWWorld::InventoryStore::Slot_CarriedLeft) == shieldBefore,
+                    "Recovery failed to suppress shield wear on a landed hit");
             }
             const auto npcArmorCondition = [&](const InventoryService& runtime) {
                 int total = 0;

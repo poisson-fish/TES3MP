@@ -22,6 +22,9 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerTargetActorCampaignMagic = 0x4150434154335354;
     inline constexpr uint64_t MultipleProjectileActorCampaignMagic = 0x4250434154335354;
     inline constexpr uint64_t KnockoutActorCampaignMagic = 0x4350434154335354;
+    inline constexpr uint64_t MeleeDefenseActorCampaignMagic = 0x4450434154335354;
+    inline constexpr bool hasKnockoutState(uint64_t magic)
+    { return magic == KnockoutActorCampaignMagic || magic == MeleeDefenseActorCampaignMagic; }
     inline constexpr size_t MaximumActorProjectiles = 8;
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
@@ -32,6 +35,8 @@ namespace TES3MP::Native
         std::array<std::array<std::array<float, 5>, StatCount>, 3> actors{};
         uint32_t rng = 1;
         std::array<bool, 3> knockedDown{};
+        // Remaining CPU hit animation frames; paused for inactive actors.
+        std::array<uint32_t, 3> hitRecoveryTicks{};
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -97,7 +102,7 @@ namespace TES3MP::Native
             && magic != LifeActorCampaignMagic && magic != ProjectileActorCampaignMagic
             && magic != EnchantedProjectileActorCampaignMagic && magic != TimedActorCampaignMagic
             && magic != AreaActorCampaignMagic && magic != PlayerTargetActorCampaignMagic
-            && magic != MultipleProjectileActorCampaignMagic && magic != KnockoutActorCampaignMagic)
+            && magic != MultipleProjectileActorCampaignMagic && !hasKnockoutState(magic))
             throw std::invalid_argument("Native actor campaign version invalid");
         const auto inventorySize = getAreaWord(bytes, offset), actorSize = getAreaWord(bytes, offset), tick = getAreaWord(bytes, offset);
         std::array<float, 3> velocity;
@@ -114,7 +119,7 @@ namespace TES3MP::Native
             || magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
             || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
             || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-            || magic == KnockoutActorCampaignMagic)
+            || hasKnockoutState(magic))
         {
             const auto length = getAreaWord(bytes, offset);
             if (!length || length > 512 || length > bytes.size() - offset)
@@ -141,7 +146,7 @@ namespace TES3MP::Native
                 || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
                 || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                 || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-                || magic == KnockoutActorCampaignMagic)
+                || hasKnockoutState(magic))
             {
                 value.target = getAreaWord(bytes, offset);
                 const auto contact = getAreaWord(bytes, offset);
@@ -157,7 +162,7 @@ namespace TES3MP::Native
             || magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
             || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
             || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-            || magic == KnockoutActorCampaignMagic)
+            || hasKnockoutState(magic))
         {
             auto& state = combat.emplace();
             const auto rng = getAreaWord(bytes, offset);
@@ -174,7 +179,7 @@ namespace TES3MP::Native
                         if (!std::isfinite(value) || std::abs(value) > 1'000'000)
                             throw std::invalid_argument("Native combat stat invalid");
                     }
-            if (magic == KnockoutActorCampaignMagic)
+            if (hasKnockoutState(magic))
                 for (size_t actor = 0; actor < state.knockedDown.size(); ++actor)
                 {
                     const auto value = getAreaWord(bytes, offset);
@@ -184,12 +189,20 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native knockout state invalid");
                     state.knockedDown[actor] = value != 0;
                 }
+            if (magic == MeleeDefenseActorCampaignMagic)
+                for (size_t actor = 0; actor < state.hitRecoveryTicks.size(); ++actor)
+                {
+                    const auto value = getAreaWord(bytes, offset);
+                    if (value > 1800 || (state.actors[actor][8][2] <= 0 && value))
+                        throw std::invalid_argument("Native hit recovery state invalid");
+                    state.hitRecoveryTicks[actor] = uint32_t(value);
+                }
         }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
             || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
             || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-            || magic == KnockoutActorCampaignMagic)
+            || hasKnockoutState(magic))
         {
             auto& state = life.emplace();
             state.generation = getAreaWord(bytes, offset);
@@ -240,10 +253,10 @@ namespace TES3MP::Native
         if (magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
             || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
             || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-            || magic == KnockoutActorCampaignMagic)
+            || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            if (count > ((magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic)
+            if (count > ((magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic))
                     ? MaximumActorProjectiles : 1))
                 throw std::invalid_argument("Native projectile count invalid");
             projectiles.reserve(size_t(count));
@@ -255,7 +268,7 @@ namespace TES3MP::Native
                 value.expiresTick = getAreaWord(bytes, offset);
                 if (magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
                     || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-                    || magic == KnockoutActorCampaignMagic)
+                    || hasKnockoutState(magic))
                 {
                     value.sourceKind = getAreaWord(bytes, offset);
                     value.effectSource = getAreaWord(bytes, offset);
@@ -265,13 +278,13 @@ namespace TES3MP::Native
                 }
                 else value.effectSource = value.source;
                 if (magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-                    || magic == KnockoutActorCampaignMagic)
+                    || hasKnockoutState(magic))
                 {
                     value.targetKind = getAreaWord(bytes, offset);
                     if (value.targetKind != 1 && value.targetKind != 2)
                         throw std::invalid_argument("Native projectile target kind invalid");
                 }
-                if (magic == MultipleProjectileActorCampaignMagic || magic == KnockoutActorCampaignMagic)
+                if (magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic))
                 {
                     value.commandId = getAreaWord(bytes, offset);
                     if (!value.commandId) throw std::invalid_argument("Native projectile command identity invalid");
@@ -304,13 +317,13 @@ namespace TES3MP::Native
                     })) throw std::invalid_argument("Native duplicate pending cast identity");
                 projectiles.push_back(value);
             }
-            if (magic != MultipleProjectileActorCampaignMagic && magic != KnockoutActorCampaignMagic
+            if (magic != MultipleProjectileActorCampaignMagic && !hasKnockoutState(magic)
                 && !projectiles.empty()) projectile = projectiles.front();
         }
         std::vector<ActorCampaignTimedEffect> timedEffects;
         if (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
             || magic == PlayerTargetActorCampaignMagic || magic == MultipleProjectileActorCampaignMagic
-            || magic == KnockoutActorCampaignMagic)
+            || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
             if (count > MaximumActorTimedEffects || count > (bytes.size() - offset) / 24)

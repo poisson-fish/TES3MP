@@ -219,6 +219,11 @@ namespace
     void scheduling()
     {
         using TES3MP::Native::MeleeAnimation;
+        require(TES3MP::Native::carriedLeftVisibleForWeapon(ESM::Weapon::ShortBladeOneHand)
+            && TES3MP::Native::carriedLeftVisibleForWeapon(ESM::Weapon::None)
+            && !TES3MP::Native::carriedLeftVisibleForWeapon(ESM::Weapon::LongBladeTwoHand)
+            && !TES3MP::Native::carriedLeftVisibleForWeapon(ESM::Weapon::MarksmanBow),
+            "OpenMW carried-left block readiness changed with weapon type");
         using Phase = MeleeAnimation::Phase;
         using namespace MWMechanics;
         near(attackReleaseStartPoint(.5f, .125f, .5f, .625f, .75f), .25f,
@@ -260,7 +265,14 @@ namespace
             if (time < 1.f || key != "weapononehand: chop hit") keys.emplace(time, std::string(key));
         // A different attack key in follow-through must not generate a hit.
         keys.emplace(3.125f, "weapononehand: slash hit");
+        keys.emplace(4.f, "hit1: start");
+        keys.emplace(4.25f, "hit1: stop");
+        keys.emplace(5.f, "hit2: start");
+        keys.emplace(5.5f, "hit2: stop.");
         MeleeAnimation committed(keys, "weapononehand", "chop", 1.f);
+        require(committed.hitRecoveryGroupCount() == 2
+            && committed.hitRecoveryTicks(0) == 8 && committed.hitRecoveryTicks(1) == 15,
+            "Stock hit clip timing did not bind to CPU recovery frames");
         const auto original = committed.snapshot();
         auto rejectedTick = committed;
         require(rejectedTick.release(1.f), "Initial release rejected");

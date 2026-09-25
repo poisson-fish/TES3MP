@@ -6,10 +6,17 @@
 #include <string_view>
 
 #include <apps/openmw/mwmechanics/meleestate.hpp>
+#include <apps/openmw/mwmechanics/weapontype.hpp>
+#include <components/esm3/loadweap.hpp>
 #include <components/sceneutil/animationkeys.hpp>
 
 namespace TES3MP::Native
 {
+    bool carriedLeftVisibleForWeapon(int weaponType)
+    {
+        return !(MWMechanics::getWeaponType(weaponType)->mFlags & ESM::WeaponType::TwoHanded);
+    }
+
     MeleeAnimation::MeleeAnimation(const SceneUtil::TextKeyMap& keys, std::string group,
         std::string attack, float speed)
         : mGroup(std::move(group)), mSpeed(speed)
@@ -38,6 +45,24 @@ namespace TES3MP::Native
             const std::string strength(MWMechanics::attackFollowStrength(static_cast<float>(i) / 2));
             mFollow[i] = range(strength + " follow start", strength + " follow stop");
         }
+        for (unsigned i = 0; i < mHitRecoveryTicks.size(); ++i)
+        {
+            SceneUtil::AnimationKeys found;
+            if (!SceneUtil::findAnimationKeys(keys, "hit" + std::to_string(i + 1),
+                    "start", "stop", found)) break;
+            const float duration = found.mStop->first - found.mStart->first;
+            if (!std::isfinite(duration) || duration < 0 || duration > 60)
+                throw std::invalid_argument("Native hit recovery clip duration invalid");
+            mHitRecoveryTicks[i] = std::max(1u, unsigned(std::ceil(duration * 30.f)));
+            ++mHitRecoveryCount;
+        }
+        if (mHitRecoveryCount == mHitRecoveryTicks.size())
+        {
+            SceneUtil::AnimationKeys extra;
+            if (SceneUtil::findAnimationKeys(keys, "hit" + std::to_string(mHitRecoveryCount + 1),
+                    "start", "stop", extra))
+                throw std::invalid_argument("Native hit recovery group count exceeded");
+        }
         // Use the engine's first prefix match for getTextKeyTime. Reject
         // duplicate/inconsistent timing rather than silently mix two clips.
         auto keyTime = [&](std::string_view suffix) {
@@ -64,6 +89,13 @@ namespace TES3MP::Native
     float MeleeAnimation::windUp() const
     {
         return MWMechanics::attackWindUp(mState.mTime, mMinimumAttack, mWindUp.mStop);
+    }
+
+    unsigned MeleeAnimation::hitRecoveryTicks(unsigned group) const
+    {
+        if (group >= mHitRecoveryCount)
+            throw std::invalid_argument("Native hit recovery group invalid");
+        return mHitRecoveryTicks[group];
     }
 
     void MeleeAnimation::restore(const Snapshot& state)
