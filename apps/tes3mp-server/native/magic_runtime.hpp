@@ -12,8 +12,9 @@ namespace MWMechanics { class CreatureStats; }
 
 namespace TES3MP::Native
 {
-    // Source-neutral effect plan. Spell and enchantment records both carry an
-    // ESM::EffectList; non-self targets require authoritative contact.
+    // Source-neutral bounded effect plan. Spell and enchantment records both
+    // carry an ESM::EffectList; non-self targets require authoritative contact.
+    // Timed Resist Magicka is installed by the composed actor tick.
     struct PreparedInstantEffects
     {
         std::vector<ESM::ENAMstruct> effects;

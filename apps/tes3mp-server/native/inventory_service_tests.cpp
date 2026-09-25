@@ -4125,7 +4125,7 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle, bool spell, bool projectile)
+        bool lifecycle, bool spell, bool projectile, bool timed)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4152,6 +4152,8 @@ namespace TES3MP::Native::Testing
             ESM::Spell mixedRestore;
             ESM::Spell targetRestore;
             ESM::Spell targetDamage;
+            ESM::Spell timedResistance;
+            ESM::Spell targetResistance;
             ESM::Enchantment rangedEnchantment;
             ESM::Enchantment usedEnchantment;
             ESM::Clothing usedItem;
@@ -4181,6 +4183,22 @@ namespace TES3MP::Native::Testing
                 targetRestore.mEffects.populate({
                     {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 7, 7}});
                 npc.mSpells.mList.push_back(targetRestore.mId);
+                if (timed)
+                {
+                    timedResistance.blank();
+                    timedResistance.mId = ESM::RefId::stringRefId("npc_timed_resistance");
+                    timedResistance.mData.mType = ESM::Spell::ST_Spell;
+                    timedResistance.mData.mFlags = ESM::Spell::F_Always;
+                    timedResistance.mData.mCost = 1;
+                    timedResistance.mEffects.populate({
+                        {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 0, 1, 100, 100}});
+                    npc.mSpells.mList.push_back(timedResistance.mId);
+                    targetResistance = timedResistance;
+                    targetResistance.mId = ESM::RefId::stringRefId("npc_target_resistance");
+                    targetResistance.mEffects.populate({
+                        {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Target, 0, 1, 100, 100}});
+                    npc.mSpells.mList.push_back(targetResistance.mId);
+                }
                 if (projectile)
                 {
                     targetDamage.blank();
@@ -4224,6 +4242,13 @@ namespace TES3MP::Native::Testing
                 out.startRecord(ESM::Spell::sRecordId, 0); restore.save(out); out.endRecord(ESM::Spell::sRecordId);
                 out.startRecord(ESM::Spell::sRecordId, 0); mixedRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
                 out.startRecord(ESM::Spell::sRecordId, 0); targetRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                if (timed)
+                {
+                    out.startRecord(ESM::Spell::sRecordId, 0);
+                    timedResistance.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    out.startRecord(ESM::Spell::sRecordId, 0);
+                    targetResistance.save(out); out.endRecord(ESM::Spell::sRecordId);
+                }
                 if (projectile)
                 {
                     out.startRecord(ESM::Spell::sRecordId, 0);
@@ -4274,6 +4299,15 @@ namespace TES3MP::Native::Testing
             if (spell)
             {
                 const auto& content = loadout.store();
+                if (timed)
+                {
+                    const auto& resistance = *content.get<ESM::Spell>().find(
+                        ESM::RefId::stringRefId("npc_timed_resistance"));
+                    require(prepareInstantEffects(resistance.mEffects, content).has_value(),
+                        "Timed resistance record failed effect preparation");
+                    require(prepareInstantSpell(resistance, content).has_value(),
+                        "Timed resistance record failed spell preparation");
+                }
                 const auto& enchantment = *content.get<ESM::Enchantment>().find(
                     ESM::RefId::stringRefId("npc_ranged_enchantment"));
                 const auto& targetSpell = *content.get<ESM::Spell>().find(
@@ -4437,7 +4471,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (projectile ? "native-inventory-28\nmanifest "
+            std::ofstream out(descriptor); out << (timed ? "native-inventory-29\nmanifest "
+                : projectile ? "native-inventory-28\nmanifest "
                 : spell ? "native-inventory-26\nmanifest "
                 : lifecycle ? "native-inventory-25\nmanifest "
                 : combat ? "native-inventory-24\nmanifest "
@@ -4655,6 +4690,63 @@ namespace TES3MP::Native::Testing
                         EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
                         MagicUseCommandProposal(input));
                 };
+                if (timed)
+                {
+                    InventoryHost timedHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                    auto& timedService = timedHost.service(); timedService.synchronizeCells(authority);
+                    auto resistUse = use;
+                    resistUse.sourceId = [] {
+                        uint64_t value = 14695981039346656037ull;
+                        for (unsigned char c : std::string_view("npc_timed_resistance"))
+                            value = (value ^ c) * 1099511628211ull;
+                        return value;
+                    }();
+                    auto prepared = timedService.prepareMagicUse(authority, proposal(resistUse), id<ServerTick>(castTick));
+                    require(bool(prepared), "Known timed Resist Magicka spell rejected");
+                    auto cast = timedService.prepareNativeTick(authority, id<ServerTick>(castTick), 1.f/30,
+                        std::move(prepared));
+                    std::vector<std::byte> timedImage;
+                    require(cast && cast->commit([&](auto bytes) {
+                        timedImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(timedService.inventoryImage(), contactImage),
+                        "Rejected timed cast installed an effect");
+                    auto staged = readActorCampaign({reinterpret_cast<const char*>(timedImage.data()), timedImage.size()});
+                    require(staged.timedEffects.size() == 1 && staged.timedEffects.front().actor == 0
+                        && staged.timedEffects.front().magnitude == 100.f
+                        && staged.timedEffects.front().expiresTick == castTick + 30,
+                        "Timed resistance did not stage with the cast tick");
+                    require(cast->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Timed resistance cast did not commit");
+                    InventoryHost timedRestart(descriptor, testContentManifest(), *registry, *crypto, timedImage);
+                    auto& restored = timedRestart.service(); restored.synchronizeCells(authority);
+                    const auto restoredState = readActorCampaign({reinterpret_cast<const char*>(
+                        restored.inventoryImage().data()), restored.inventoryImage().size()});
+                    require(restoredState.timedEffects == staged.timedEffects,
+                        "Restart lost active Resist Magicka magnitude or deadline");
+                    InventoryHost offlineHost(descriptor, testContentManifest(), *registry, *crypto, timedImage);
+                    const auto offlinePlayers = std::get<CanonicalServerState>(createCanonicalServerState(
+                        std::vector(authority.players().begin(), authority.players().end()), {}));
+                    auto& offlineService = offlineHost.service(); offlineService.synchronizeCells(offlinePlayers);
+                    auto paused = offlineService.prepareNativeTick(offlinePlayers,
+                        id<ServerTick>(castTick + 30), 1.f/30, {});
+                    require(paused && paused->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Offline timed resistance pause did not commit");
+                    const auto pausedState = readActorCampaign({reinterpret_cast<const char*>(
+                        offlineService.inventoryImage().data()), offlineService.inventoryImage().size()});
+                    require(pausedState.timedEffects.size() == 1
+                        && pausedState.timedEffects.front().expiresTick == castTick + 60,
+                        "Offline player resistance advanced instead of freezing");
+                    auto expiry = restored.prepareNativeTick(authority, id<ServerTick>(castTick + 30), 1.f/30, {});
+                    std::vector<std::byte> expiredImage;
+                    require(expiry && expiry->commit([&](auto bytes) {
+                        expiredImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected
+                        && readActorCampaign({reinterpret_cast<const char*>(expiredImage.data()),
+                            expiredImage.size()}).timedEffects.empty()
+                        && expiry->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Timed resistance did not expire atomically on its deadline");
+                }
                 auto invalidUse = use; invalidUse.sourceId ^= 1;
                 require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),
                     "Unknown spell ID entered native combat");
@@ -4803,6 +4895,79 @@ namespace TES3MP::Native::Testing
                     targetUse.targetKind = MagicUseTargetKind::Actor;
                     targetUse.targetId = targetService.projectInventory(targetPlayers, id<SessionId>(1),
                         id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
+                    if (timed)
+                    {
+                        InventoryHost resistanceHost(descriptor, testContentManifest(), *registry, *crypto,
+                            contactImage);
+                        auto& resistanceService = resistanceHost.service();
+                        resistanceService.synchronizeCells(targetPlayers);
+                        auto resistanceUse = targetUse;
+                        resistanceUse.sourceId = [] {
+                            uint64_t value = 14695981039346656037ull;
+                            for (unsigned char c : std::string_view("npc_target_resistance"))
+                                value = (value ^ c) * 1099511628211ull;
+                            return value;
+                        }();
+                        auto resistanceLaunch = resistanceService.prepareMagicUse(targetPlayers,
+                            proposal(resistanceUse), id<ServerTick>(castTick));
+                        require(bool(resistanceLaunch), "Target resistance spell rejected before launch");
+                        auto resistanceTick = resistanceService.prepareNativeTick(targetPlayers,
+                            id<ServerTick>(castTick), 1.f/30, std::move(resistanceLaunch));
+                        require(resistanceTick && resistanceTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Target resistance launch did not commit");
+                        uint64_t contactTick = 0;
+                        for (uint64_t time = castTick + 1; time < castTick + 30 && !contactTick; ++time)
+                        {
+                            auto step = resistanceService.prepareNativeTick(targetPlayers,
+                                id<ServerTick>(time), 1.f/30, {});
+                            require(step && step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Target resistance flight did not commit");
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(
+                                resistanceService.inventoryImage().data()), resistanceService.inventoryImage().size()});
+                            if (!state.projectile && state.timedEffects.size() == 1
+                                && state.timedEffects.front().actor == 2)
+                                contactTick = time;
+                        }
+                        require(contactTick, "Target resistance did not land on the NPC");
+                        const auto resistanceImage = std::vector(resistanceService.inventoryImage().begin(),
+                            resistanceService.inventoryImage().end());
+                        InventoryHost resistantRestart(descriptor, testContentManifest(), *registry, *crypto,
+                            resistanceImage);
+                        auto& resistantService = resistantRestart.service();
+                        resistantService.synchronizeCells(targetPlayers);
+                        const auto savedResistance = readActorCampaign({reinterpret_cast<const char*>(
+                            resistantService.inventoryImage().data()), resistantService.inventoryImage().size()});
+                        require(savedResistance.timedEffects.size() == 1
+                            && savedResistance.timedEffects.front().magnitude == 100.f,
+                            "NPC resistance did not survive restart");
+                        auto resistedUse = targetUse;
+                        resistedUse.sourceServerTick = id<ServerTick>(contactTick + 1);
+                        auto resistedLaunch = resistantService.prepareMagicUse(targetPlayers,
+                            proposal(resistedUse), id<ServerTick>(contactTick + 1));
+                        require(bool(resistedLaunch), "Post-restart damage spell rejected");
+                        auto launchTick = resistantService.prepareNativeTick(targetPlayers,
+                            id<ServerTick>(contactTick + 1), 1.f/30, std::move(resistedLaunch));
+                        require(launchTick && launchTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Post-restart damage launch did not commit");
+                        bool resisted = false;
+                        for (uint64_t time = contactTick + 2;
+                            time < savedResistance.timedEffects.front().expiresTick && !resisted; ++time)
+                        {
+                            auto step = resistantService.prepareNativeTick(targetPlayers,
+                                id<ServerTick>(time), 1.f/30, {});
+                            require(step && step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Post-restart damage flight did not commit");
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(
+                                resistantService.inventoryImage().data()), resistantService.inventoryImage().size()});
+                            if (!state.projectile)
+                            {
+                                require(state.combat->actors[2][8][2] == savedResistance.combat->actors[2][8][2],
+                                    "Restarted Resist Magicka failed to stop Target damage");
+                                resisted = true;
+                            }
+                        }
+                        require(resisted, "Damage projectile did not reach active resistance before expiry");
+                    }
                     auto launch = targetService.prepareMagicUse(targetPlayers, proposal(targetUse), id<ServerTick>(castTick));
                     require(bool(launch), "Known Target Damage Health spell rejected before launch");
                     auto pendingLaunch = targetService.prepareNativeTick(targetPlayers, id<ServerTick>(castTick),
@@ -4823,7 +4988,7 @@ namespace TES3MP::Native::Testing
                         "Target launch did not install its durable projectile");
                     auto unknownSource = launched;
                     const size_t sourceOffset = size_t(launchedState.inventory.data()
-                        - reinterpret_cast<const char*>(launched.data())) - 96;
+                        - reinterpret_cast<const char*>(launched.data())) - (timed ? 104 : 96);
                     unknownSource[sourceOffset] ^= std::byte{1};
                     bool rejectedSource = false;
                     try { InventoryHost invalidFlight(descriptor, testContentManifest(), *registry, *crypto,
@@ -4979,7 +5144,7 @@ namespace TES3MP::Native::Testing
                             "WhenUsed launch did not commit");
                         auto unknownEffect = candidate;
                         const size_t effectOffset = size_t(pending.inventory.data()
-                            - reinterpret_cast<const char*>(candidate.data())) - 56;
+                            - reinterpret_cast<const char*>(candidate.data())) - (timed ? 64 : 56);
                         unknownEffect[effectOffset] ^= std::byte{1};
                         bool rejectedEffect = false;
                         try { InventoryHost invalidItemFlight(descriptor, testContentManifest(), *registry, *crypto,
@@ -5333,7 +5498,7 @@ namespace TES3MP::Native::Testing
                         "NPC death lost its life, deadline or attributed event");
                     auto invalidHistory = deadImage;
                     const auto killerOffset = size_t(deadState.inventory.data()
-                        - reinterpret_cast<const char*>(deadImage.data())) - 8;
+                        - reinterpret_cast<const char*>(deadImage.data())) - (timed ? 16 : 8);
                     std::fill_n(invalidHistory.begin() + killerOffset, 8, std::byte{});
                     bool rejectedHistory = false;
                     try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalidHistory); }

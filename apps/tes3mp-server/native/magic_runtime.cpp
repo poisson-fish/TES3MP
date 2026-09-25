@@ -21,7 +21,8 @@ namespace TES3MP::Native
             return effect.mEffectID == ESM::MagicEffect::RestoreHealth
                 || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
                 || effect.mEffectID == ESM::MagicEffect::RestoreFatigue
-                || effect.mEffectID == ESM::MagicEffect::DamageHealth;
+                || effect.mEffectID == ESM::MagicEffect::DamageHealth
+                || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
         }
 
         void applyInstantEffect(const ESM::ENAMstruct& effect, MWMechanics::CreatureStats& target,
@@ -44,7 +45,8 @@ namespace TES3MP::Native
                 health.setCurrent(health.getCurrent() - magnitude * (1.f - resistance / 100.f));
                 target.setHealth(health);
             }
-            else throw std::invalid_argument("Unsupported native instant effect");
+            else if (effect.mEffectID != ESM::MagicEffect::ResistMagicka)
+                throw std::invalid_argument("Unsupported native effect");
         }
     }
 
@@ -73,9 +75,14 @@ namespace TES3MP::Native
                 || (effect.mEffectID == ESM::MagicEffect::DamageHealth && effect.mRange != ESM::RT_Target)
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
-                || effect.mArea != 0 || effect.mDuration != 0
+                || effect.mArea != 0
                 || effect.mMagnMin <= 0 || effect.mMagnMin != effect.mMagnMax || effect.mMagnMax > 1000
-                || (magic->mData.mFlags & (ESM::MagicEffect::NoDuration | ESM::MagicEffect::AppliedOnce)))
+                || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                    ? effect.mDuration < 1 || effect.mDuration > 3600
+                    : effect.mDuration != 0)
+                || (magic->mData.mFlags & ESM::MagicEffect::NoDuration)
+                || (effect.mEffectID != ESM::MagicEffect::ResistMagicka
+                    && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)))
                 return std::nullopt;
             result.effects.push_back(effect);
         }
