@@ -17,6 +17,8 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V30 adds bounded Target area effects centered on server projectile
+    // contact, with one committed outcome per affected actor. Fresh campaign.
     // V29 retains bounded one-second to one-hour Resist Magicka effects for
     // either caster or selected NPC. Expiry uses composed ticks and pauses for
     // offline players or inactive NPCs. It requires a fresh campaign.

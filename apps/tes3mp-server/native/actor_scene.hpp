@@ -26,6 +26,11 @@ namespace TES3MP::Native
         bool mBlocked = false;
         bool mSelectedActor = false;
     };
+    struct ActorProjectileContact
+    {
+        uint64_t actor = 0; // Zero is world geometry.
+        std::array<float, 3> position{};
+    };
     struct ActorSceneSnapshot
     {
         uint64_t mActor = 0;
@@ -68,9 +73,9 @@ namespace TES3MP::Native
         // or authenticated player input. Invalid input leaves the scene unchanged.
         ActorSceneSnapshot step(const std::array<float, 3>& velocity);
         size_t bodyCount() const;
-        // First server-owned collision along a spell bolt segment. Zero means
-        // world geometry; an absent result means the segment stayed clear.
-        std::optional<uint64_t> projectileContact(const std::array<float, 3>& from,
+        // First server-owned collision and impact point along a spell bolt
+        // segment. Actor zero means world geometry; absence means clear.
+        std::optional<ActorProjectileContact> projectileContact(const std::array<float, 3>& from,
             const std::array<float, 3>& to) const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;

@@ -75,7 +75,7 @@ namespace TES3MP::Native
                 || (effect.mEffectID == ESM::MagicEffect::DamageHealth && effect.mRange != ESM::RT_Target)
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
-                || effect.mArea != 0
+                || effect.mArea < 0 || effect.mArea > 64
                 || effect.mMagnMin <= 0 || effect.mMagnMin != effect.mMagnMax || effect.mMagnMax > 1000
                 || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
                     ? effect.mDuration < 1 || effect.mDuration > 3600

@@ -502,7 +502,7 @@ namespace TES3MP::Native
     }
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
-    std::optional<uint64_t> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
+    std::optional<ActorProjectileContact> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
         const std::array<float, 3>& to) const
     {
         if (!mImpl) throw std::invalid_argument("Projectile scene is unloaded");
@@ -522,8 +522,13 @@ namespace TES3MP::Native
             | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor;
         mImpl->mWorld.convexSweepTest(&sphere, startFrame, endFrame, hit);
         if (!hit.hasHit()) return {};
-        return hit.m_hitCollisionObject == mImpl->mActor->mCollisionObject
-            ? mImpl->mActorId : 0;
+        const auto& point = hit.m_hitPointWorld;
+        for (int axis = 0; axis < 3; ++axis)
+            if (!std::isfinite(point[axis]) || std::abs(point[axis]) > 1e7)
+                throw std::invalid_argument("Projectile impact position invalid");
+        return ActorProjectileContact{
+            hit.m_hitCollisionObject == mImpl->mActor->mCollisionObject ? mImpl->mActorId : 0,
+            {float(point.x()), float(point.y()), float(point.z())}};
     }
     const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
 

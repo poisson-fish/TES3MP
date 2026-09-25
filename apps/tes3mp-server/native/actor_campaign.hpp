@@ -17,6 +17,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t ProjectileActorCampaignMagic = 0x3650434154335354;
     inline constexpr uint64_t EnchantedProjectileActorCampaignMagic = 0x3750434154335354;
     inline constexpr uint64_t TimedActorCampaignMagic = 0x3850434154335354;
+    inline constexpr uint64_t AreaActorCampaignMagic = 0x3950434154335354;
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
     // nested equipment image, committed with this wrapper.
@@ -85,7 +86,8 @@ namespace TES3MP::Native
         if (magic != ActorCampaignMagic && magic != MeleeActorCampaignMagic
             && magic != ContactActorCampaignMagic && magic != CombatActorCampaignMagic
             && magic != LifeActorCampaignMagic && magic != ProjectileActorCampaignMagic
-            && magic != EnchantedProjectileActorCampaignMagic && magic != TimedActorCampaignMagic)
+            && magic != EnchantedProjectileActorCampaignMagic && magic != TimedActorCampaignMagic
+            && magic != AreaActorCampaignMagic)
             throw std::invalid_argument("Native actor campaign version invalid");
         const auto inventorySize = getAreaWord(bytes, offset), actorSize = getAreaWord(bytes, offset), tick = getAreaWord(bytes, offset);
         std::array<float, 3> velocity;
@@ -100,7 +102,7 @@ namespace TES3MP::Native
         if (magic == MeleeActorCampaignMagic || magic == ContactActorCampaignMagic
             || magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic
             || magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
-            || magic == TimedActorCampaignMagic)
+            || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic)
         {
             const auto length = getAreaWord(bytes, offset);
             if (!length || length > 512 || length > bytes.size() - offset)
@@ -125,7 +127,8 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native melee state nonfinite");
             if (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
                 || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
-                || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic)
+                || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
+                || magic == AreaActorCampaignMagic)
             {
                 value.target = getAreaWord(bytes, offset);
                 const auto contact = getAreaWord(bytes, offset);
@@ -139,7 +142,7 @@ namespace TES3MP::Native
         std::optional<ActorCampaignCombat> combat;
         if (magic == CombatActorCampaignMagic || magic == LifeActorCampaignMagic
             || magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
-            || magic == TimedActorCampaignMagic)
+            || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic)
         {
             auto& state = combat.emplace();
             const auto rng = getAreaWord(bytes, offset);
@@ -159,7 +162,8 @@ namespace TES3MP::Native
         }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
-            || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic)
+            || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
+            || magic == AreaActorCampaignMagic)
         {
             auto& state = life.emplace();
             state.generation = getAreaWord(bytes, offset);
@@ -207,7 +211,7 @@ namespace TES3MP::Native
         }
         std::optional<ActorCampaignProjectile> projectile;
         if (magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
-            || magic == TimedActorCampaignMagic)
+            || magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic)
         {
             const auto present = getAreaWord(bytes, offset);
             if (present > 1) throw std::invalid_argument("Native projectile presence invalid");
@@ -217,7 +221,8 @@ namespace TES3MP::Native
                 value.caster = getAreaWord(bytes, offset); value.source = getAreaWord(bytes, offset);
                 value.target = getAreaWord(bytes, offset); value.generation = getAreaWord(bytes, offset);
                 value.expiresTick = getAreaWord(bytes, offset);
-                if (magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic)
+                if (magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
+                    || magic == AreaActorCampaignMagic)
                 {
                     value.sourceKind = getAreaWord(bytes, offset);
                     value.effectSource = getAreaWord(bytes, offset);
@@ -251,7 +256,7 @@ namespace TES3MP::Native
             }
         }
         std::vector<ActorCampaignTimedEffect> timedEffects;
-        if (magic == TimedActorCampaignMagic)
+        if (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic)
         {
             const auto count = getAreaWord(bytes, offset);
             if (count > MaximumActorTimedEffects || count > (bytes.size() - offset) / 24)

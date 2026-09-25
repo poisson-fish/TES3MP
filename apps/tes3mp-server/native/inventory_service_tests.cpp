@@ -4125,7 +4125,7 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle, bool spell, bool projectile, bool timed)
+        bool lifecycle, bool spell, bool projectile, bool timed, bool area)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4207,7 +4207,7 @@ namespace TES3MP::Native::Testing
                     targetDamage.mData.mFlags = ESM::Spell::F_Always;
                     targetDamage.mData.mCost = 1;
                     targetDamage.mEffects.populate({
-                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10}});
+                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, area ? 8 : 0, 0, 10, 10}});
                     npc.mSpells.mList.push_back(targetDamage.mId);
                     usedEnchantment.blank();
                     usedEnchantment.mId = ESM::RefId::stringRefId("npc_used_damage");
@@ -4216,7 +4216,7 @@ namespace TES3MP::Native::Testing
                     usedEnchantment.mData.mCharge = 20;
                     usedEnchantment.mEffects.populate({
                         {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
-                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10}});
+                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, area ? 8 : 0, 0, 10, 10}});
                     usedItem = *base.store().get<ESM::Clothing>().find(
                         ESM::RefId::stringRefId("common_shirt_01"));
                     usedItem.mId = ESM::RefId::stringRefId("npc_used_shirt");
@@ -4471,7 +4471,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (timed ? "native-inventory-29\nmanifest "
+            std::ofstream out(descriptor); out << (area ? "native-inventory-30\nmanifest "
+                : timed ? "native-inventory-29\nmanifest "
                 : projectile ? "native-inventory-28\nmanifest "
                 : spell ? "native-inventory-26\nmanifest "
                 : lifecycle ? "native-inventory-25\nmanifest "
@@ -4873,6 +4874,116 @@ namespace TES3MP::Native::Testing
                 InventoryHost mixedRestart(descriptor, testContentManifest(), *registry, *crypto, mixedImage);
                 require(std::ranges::equal(mixedRestart.service().inventoryImage(), mixedImage),
                     "Mixed instant effect state changed on restart");
+                if (area)
+                {
+                    const auto checkArea = [&](bool enchanted, bool distant) {
+                        auto entities = std::vector(authority.players().begin(), authority.players().end());
+                        const auto move = [&](size_t index, int x, int y) {
+                            const auto original = entities[index];
+                            entities[index] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                original, id<ServerTick>(1), Transform(original.transform().cell(),
+                                    Position3(x * 1024, y * 1024, 1024), original.transform().orientation()),
+                                LinearVelocity3(0, 0, 0)));
+                        };
+                        move(0, 60, -100);
+                        if (distant) move(1, 500, 500);
+                        const auto participants = std::get<CanonicalServerState>(createCanonicalServerState(
+                            entities, authority.activeSessions()));
+                        InventoryHost areaHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& areaService = areaHost.service(); areaService.synchronizeCells(participants);
+                        auto areaUse = use;
+                        areaUse.sourceId = [] {
+                            uint64_t value = 14695981039346656037ull;
+                            for (unsigned char c : std::string_view("npc_target_damage"))
+                                value = (value ^ c) * 1099511628211ull;
+                            return value;
+                        }();
+                        areaUse.targetKind = MagicUseTargetKind::Actor;
+                        areaUse.targetId = areaService.projectInventory(participants, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->equipment->motions.front().placement;
+                        if (enchanted)
+                        {
+                            const auto inventory = areaService.projectInventory(participants, id<SessionId>(1),
+                                id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->playerInventory.front();
+                            const auto item = std::ranges::find(inventory.stacks,
+                                id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                    ESM::RefId::stringRefId("npc_used_shirt"))), &CanonicalItemStack::prototypeId);
+                            require(item != inventory.stacks.end(), "Area WhenUsed source absent");
+                            areaUse.sourceKind = MagicUseSourceKind::EnchantedItem;
+                            areaUse.sourceId = item->stackId.value();
+                            areaUse.expectedInventoryRevision = inventory.revision;
+                        }
+                        auto launch = areaService.prepareMagicUse(participants, proposal(areaUse),
+                            id<ServerTick>(castTick));
+                        require(bool(launch), "Area source rejected before launch");
+                        auto launchTick = areaService.prepareNativeTick(participants, id<ServerTick>(castTick),
+                            1.f/30, std::move(launch));
+                        require(launchTick && launchTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Area source launch did not commit");
+                        const auto launched = readActorCampaign({reinterpret_cast<const char*>(
+                            areaService.inventoryImage().data()), areaService.inventoryImage().size()});
+                        require(launched.projectile && launched.combat, "Area source has no durable flight");
+                        bool resolved = false;
+                        for (uint64_t time = castTick + 1; time < castTick + 90 && !resolved; ++time)
+                        {
+                            const auto prior = std::vector(areaService.inventoryImage().begin(),
+                                areaService.inventoryImage().end());
+                            auto step = areaService.prepareNativeTick(participants, id<ServerTick>(time), 1.f/30, {});
+                            std::vector<std::byte> candidate;
+                            require(step && step->commit([&](auto bytes) {
+                                candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                            }) == CanonicalDurabilityResult::Rejected
+                                && std::ranges::equal(areaService.inventoryImage(), prior),
+                                "Rejected area contact leaked a partial target outcome");
+                            const auto staged = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                                candidate.size()});
+                            if (!staged.projectile)
+                            {
+                                const auto alice = areaService.projectCombatEvents(participants, id<SessionId>(1),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                                const auto bob = areaService.projectCombatEvents(participants, id<SessionId>(2),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                                const size_t expected = distant ? 1 : 2;
+                                require(alice && bob && alice->magicEvents().size() == expected
+                                    && std::ranges::equal(alice->magicEvents(), bob->magicEvents())
+                                    && std::ranges::count_if(alice->magicEvents(), [&](const auto& event) {
+                                        return event.targetKind == MagicUseTargetKind::Actor
+                                            && event.targetId == areaUse.targetId && event.castSucceeded
+                                            && event.targetHealthDelta < 0;
+                                    }) == 1
+                                    && std::ranges::count_if(alice->magicEvents(), [&](const auto& event) {
+                                        return event.targetKind == MagicUseTargetKind::Player
+                                            && event.targetId == id<PlayerId>(2).value() && event.castSucceeded
+                                            && event.targetHealthDelta < 0;
+                                    }) == (distant ? 0 : 1)
+                                    && staged.combat->actors[2][8][2] < launched.combat->actors[2][8][2]
+                                    && (distant ? staged.combat->actors[1][8][2] == launched.combat->actors[1][8][2]
+                                        : staged.combat->actors[1][8][2] < launched.combat->actors[1][8][2])
+                                    && staged.combat->actors[0][8][2] == launched.combat->actors[0][8][2],
+                                    "Impact area did not select each live target exactly once");
+                                resolved = true;
+                            }
+                            require(step->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && std::ranges::equal(areaService.inventoryImage(), candidate),
+                                "Area contact did not install its single durable candidate");
+                            if (resolved)
+                            {
+                                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto,
+                                    candidate);
+                                restarted.service().synchronizeCells(participants);
+                                const auto saved = readActorCampaign({reinterpret_cast<const char*>(
+                                    restarted.service().inventoryImage().data()), restarted.service().inventoryImage().size()});
+                                require(saved.combat == staged.combat && !saved.projectile,
+                                    "Area outcomes changed across restart");
+                            }
+                        }
+                        require(resolved, "Area projectile never reached authoritative contact");
+                    };
+                    checkArea(false, false);
+                    checkArea(true, true);
+                    std::cout << "area cast=spell/WhenUsed targets=bounded impact=contact durable=one-per-target\n";
+                    return;
+                }
                 if (projectile)
                 {
                     auto targetEntities = std::vector(authority.players().begin(), authority.players().end());
