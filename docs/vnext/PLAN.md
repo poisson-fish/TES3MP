@@ -48,8 +48,8 @@ bootstrap; retain small test fixtures.
 
 ## M4 - Fight together using OpenMW mechanics
 
-**Outcome:** two players engage the same actor, see consistent AI, hits, effects,
-death, equipment wear, and loot, with the server deciding gameplay outcomes.
+**Outcome:** players and actors use general OpenMW combat mechanics for the
+declared gameplay loadout, with server-owned AI, hits, effects, wear, death and loot.
 
 Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 
@@ -59,23 +59,26 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 3. Retain bounded simulation around active travelers after both players leave.
    Cover processing range, cell boundaries, unload/restart and preserved
    destinations/completion; never simulate an actor twice.
-4. Add melee with coherent resources, wear, death and loot. Extract OpenMW
-   casting, effects and projectile mechanics for server-owned, content-selected
-   spells; reuse the effect path for enchantments. Validate targets, misses,
-   persistence and retries/reconnect.
+4. Generalize OpenMW melee, casting, effects, projectiles and enchantments.
+   Preserve costs, wear and durability; validate misses, targeting and retries.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.
 
-**Exit:** a recorded two-client encounter and narrow rejection tests establish
-single damage/death/loot consequences, validated player contacts, shared targeting,
-and convergence.
-Prove persisted respawn deadlines, life generations and attributed death events
-for M5; authored corpses and transient summons must not become permanent spawns.
+**Exit:** bounded slices are insufficient. All OpenMW-supported combat paths in
+the gameplay loadout work generically across actors, players, records and targets:
+armed weapon types/attack modes, unarmed fatigue/knockout/health,
+armor/block/resistances, spell ranges, areas, effects and durations,
+projectiles, enchantments, AI, death and loot. No unsupported combat
+path remains for M4. Vary content/effect combinations and prove two-client
+convergence, validated contacts, durable single outcomes and reconnect/restart.
+Meet shared collision and movement smoothness budgets. Persist respawn
+generations, deadlines and attributed deaths for M5; authored corpses and
+summons never become permanent spawns.
 
 **Retire:** replaced independent combat/AI/effect resolvers, hardcoded respawn
-policy, duplicate settings, and client gameplay writers. Keep already shared
-calculations where appropriate. One live authority per migrated subsystem.
+policy, duplicate settings and client gameplay writers. Retain shared
+calculations and one canonical writer.
 
 ## M5 - Complete scripted quests independently and together
 

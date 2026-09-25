@@ -1,33 +1,30 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** V26 adds one native spell slice to
-V25's placed NPC life cycle. An authenticated, base-known OpenMW spell with one
-fixed, zero-duration Self Restore Health effect and the Always Succeeds flag
-spends OpenMW spell cost and restores health in the composed server tick. The
-health, magicka, actor state and reliable event commit together. V26 requires a
-fresh campaign. Other spell effects, target types, spell acquisition and
-projectiles remain unwired.
+**M4 in [PLAN.md](PLAN.md) is active.** V26 adds an authenticated, base-known
+OpenMW spell with one fixed, zero-duration Self Restore Health effect and Always
+Succeeds. Its cost, healing, actor state and event commit in one server tick.
+V26 requires a fresh campaign. Other effects, targets, spell acquisition and
+projectiles remain unwired. Armed melee, unarmed fatigue and this spell are
+bounded proofs; M4 remains open until [PLAN.md](PLAN.md)'s general combat exit.
 
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp): one dry interior
-or nine adjacent exteriors, one traveler, 0–128 doors, two 60 Hz substeps per
-30 Hz tick. Saturation pauses both steps. Travel and NPC respawn deadlines
-persist without players and across restart; offline players freeze.
+or nine exteriors, one traveler, up to 128 doors, two 60 Hz substeps per
+30 Hz tick. Saturation pauses both. Travel/respawn deadlines persist without
+players and across restart; offline players freeze.
 
 Verified 2026-09-24: V25 `npc-life-cycle` in
 `build/logs/m4-npc-life-final-test.log` covers death, loot, respawn and restart.
-The first combat effect, OpenMW hand-to-hand fatigue damage, passed
+OpenMW hand-to-hand fatigue damage passed
 `build/logs/m4-unarmed-effect-test-03.log` and the two-desktop capture at
 `build/logs/m4-unarmed-live-07/result.json`.
 
-Verified 2026-09-24: V26 `npc-instant-spell` in
-`build/logs/m4-instant-spell-test-07.log` covers invalid source/target,
-rejected durability, two projections, reducer routing, duplicate receipt and
-restart/reconnect. The two-desktop capture
-`build/m4-instant-spell-live-04/result.json` uses a synthetic room on a real
-loadout and shows Alice healed from 27.8 to
-35 and spent one magicka; both clients received one event, and Bob's reconnect
-retained the result under 100 ms one-way latency, jitter and 10% loss.
-Production server/client builds:
+Verified 2026-09-24: `npc-instant-spell` in
+`build/logs/m4-instant-spell-test-07.log` covers rejected source/target/write,
+two clients, reducer routing, duplicates and restart. Two-desktop capture
+`build/m4-instant-spell-live-04/result.json` used synthetic placements with a
+real loadout: Alice healed 27.8 to 35 for one magicka; both saw one event and
+Bob retained it after reconnect under 100 ms latency, jitter and 10% loss.
+Server/client builds:
 `build/logs/m4-instant-spell-server-build-02.log`,
 `build/logs/m4-instant-spell-client-build-03.log`.
 
