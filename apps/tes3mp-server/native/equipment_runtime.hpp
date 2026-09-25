@@ -224,6 +224,7 @@ namespace TES3MP::Native
         // Called only after the enclosing actor image has been durably accepted.
         void installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept;
         void installEnchantmentCharge(size_t owner, ESM::RefNum item, float charge) noexcept;
+        void installConsumedMagicItem(size_t owner, ESM::RefNum item) noexcept;
         class PreparedRespawn
         {
             friend class EquipmentRuntime;

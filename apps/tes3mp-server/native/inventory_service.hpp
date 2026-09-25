@@ -137,6 +137,7 @@ namespace TES3MP::Native
             ESM::RefNum item;
             float before;
             float after;
+            bool consume = false;
         };
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};

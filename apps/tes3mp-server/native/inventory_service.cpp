@@ -1197,7 +1197,8 @@ namespace TES3MP::Native
             auto ptr = reference.getPtr();
             const auto enchantId = ptr.getClass().getEnchantment(ptr);
             const auto* enchantment = enchantId.empty() ? nullptr : mRuntime.mStore.get<ESM::Enchantment>().search(enchantId);
-            if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenUsed) return {};
+            if (!enchantment || (enchantment->mData.mType != ESM::Enchantment::WhenUsed
+                    && enchantment->mData.mType != ESM::Enchantment::CastOnce)) return {};
             const uint64_t effectSource = spellRecordId(enchantId);
             if (!effectSource || enchantmentBySource(mRuntime.mStore, effectSource) != enchantment) return {};
             auto effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore);
@@ -1209,6 +1210,16 @@ namespace TES3MP::Native
                 || (use.targetKind == MagicUseTargetKind::Self
                     ? !effects->onlyRange(ESM::RT_Self)
                     : !effects->hasRange(ESM::RT_Target) || effects->hasRange(ESM::RT_Touch))) return {};
+            if (enchantment->mData.mType == ESM::Enchantment::CastOnce)
+            {
+                // Stock CastOnce removes the source at launch. A single item can be
+                // retired atomically without splitting a stack or minting an ID.
+                if (item->mRef.mCount != 1 || !ptr.getClass().getScript(ptr).empty()) return {};
+                PreparedInstantSpell prepared{0, std::move(*effects)};
+                return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(prepared),
+                    ItemCharge{owner, item->mRef.mRefNum, item->mRef.mEnchantmentCharge,
+                        item->mRef.mEnchantmentCharge, true}, effectSource);
+            }
             const auto caster = loadCombatStats(mRuntime.mStore, mCombat->actors[owner]);
             const float baseCost = MWMechanics::getEnchantmentCastCost(*enchantment, mRuntime.mStore);
             if (!std::isfinite(baseCost) || baseCost < 0 || baseCost > 1'000'000) return {};
@@ -1387,7 +1398,8 @@ namespace TES3MP::Native
                 else
                 {
                     const auto* selected = enchantmentBySource(mRuntime.mStore, pending.effectSource);
-                    const auto effects = selected && selected->mData.mType == ESM::Enchantment::WhenUsed
+                    const auto effects = selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
+                        || selected->mData.mType == ESM::Enchantment::CastOnce)
                         ? prepareInstantEffects(selected->mEffects, mRuntime.mStore) : std::nullopt;
                     if (!effects || !effects->hasRange(ESM::RT_Target) || effects->hasRange(ESM::RT_Touch)
                         || (!mBinding.mMagicArea && std::ranges::any_of(effects->effects,
@@ -1649,14 +1661,20 @@ namespace TES3MP::Native
         }
         if (charge)
         {
-            if (charge->owner >= 2 || !std::isfinite(charge->after) || charge->after < 0)
+            if (charge->owner >= 2 || (!charge->consume && (!std::isfinite(charge->after) || charge->after < 0)))
                 throw std::invalid_argument("Native item charge candidate invalid");
             auto& owner = values.mActors[charge->owner];
             const auto item = std::ranges::find(owner.mObjects, charge->item,
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == owner.mObjects.end() || item->mRef.mEnchantmentCharge != charge->before)
                 throw std::invalid_argument("Native item charge source changed");
-            item->mRef.mEnchantmentCharge = charge->after;
+            if (charge->consume)
+            {
+                if (item->mRef.mCount != 1) throw std::invalid_argument("Native consumed item stack changed");
+                item->mRef.mCount = 0;
+                for (auto& slot : owner.mSlots) if (slot == charge->item) slot = {};
+            }
+            else item->mRef.mEnchantmentCharge = charge->after;
         }
         EquipmentBytes core;
         mRuntime.encodeSession(std::move(values), core);
@@ -1737,7 +1755,8 @@ namespace TES3MP::Native
                 {
                     const auto source = service.mWorld.getPtr(charge->item);
                     if (!source.hasLiveReference() || source.mContainerStore != &service.mRuntime.storage(charge->owner)
-                        || source.getCellRef().getEnchantmentCharge() != charge->before)
+                        || source.getCellRef().getEnchantmentCharge() != charge->before
+                        || (charge->consume && source.getCellRef().getCount() != 1))
                         return CanonicalDurabilityResult::Rejected;
                 }
                 EquipmentBytes sealed;
@@ -1762,7 +1781,11 @@ namespace TES3MP::Native
                     {
                         for (const auto& change : wear)
                             service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition);
-                        if (charge) service.mRuntime.installEnchantmentCharge(charge->owner, charge->item, charge->after);
+                        if (charge)
+                        {
+                            if (charge->consume) service.mRuntime.installConsumedMagicItem(charge->owner, charge->item);
+                            else service.mRuntime.installEnchantmentCharge(charge->owner, charge->item, charge->after);
+                        }
                         service.mCoreImage.swap(wornCore);
                         service.mImage.swap(wornInventory);
                     }
@@ -2159,7 +2182,8 @@ namespace TES3MP::Native
                             if (plan) effects = plan->effects;
                         }
                         else if (const auto* selected = enchantmentBySource(mRuntime.mStore, pending.effectSource);
-                            selected && selected->mData.mType == ESM::Enchantment::WhenUsed)
+                            selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
+                                || selected->mData.mType == ESM::Enchantment::CastOnce))
                             effects = prepareInstantEffects(selected->mEffects, mRuntime.mStore);
                         if (!effects || !effects->hasRange(ESM::RT_Target))
                             throw std::invalid_argument("Native projectile effect plan changed");
@@ -2519,7 +2543,14 @@ namespace TES3MP::Native
                     [](const auto& object) { return object.mRef.mRefNum; });
                 if (item == state.mObjects.end() || item->mRef.mEnchantmentCharge != charge->before)
                     throw std::invalid_argument("Native magic projection lost item identity");
-                item->mRef.mEnchantmentCharge = charge->after;
+                if (charge->consume)
+                {
+                    if (item->mRef.mCount != 1)
+                        throw std::invalid_argument("Native magic projection lost consumable count");
+                    item->mRef.mCount = 0;
+                    for (auto& slot : state.mSlots) if (slot == charge->item) slot = {};
+                }
+                else item->mRef.mEnchantmentCharge = charge->after;
             }
             return state;
         };

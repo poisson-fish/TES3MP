@@ -48,6 +48,20 @@ namespace TES3MP::Native
         source.getCellRef().setEnchantmentCharge(charge);
         ++mWorld.mPtrRegistry.mRevision;
     }
+    void EquipmentRuntime::installConsumedMagicItem(size_t owner, ESM::RefNum item) noexcept
+    {
+        Ptr source = mWorld.getPtr(item);
+        if (!source.hasLiveReference() || source.mContainerStore != &storage(owner)
+            || source.getCellRef().getRefNum() != item || source.getCellRef().getCount() != 1)
+            std::terminate();
+        source.getCellRef().setCount(0, mScripts);
+        storage(owner).flagAsModified();
+        if (auto* inventory = inventoryStorage(owner))
+            for (auto& slot : inventory->mSlots)
+                if (slot != inventory->end() && (*slot).getCellRef().getRefNum() == item)
+                    slot = inventory->end();
+        ++mWorld.mPtrRegistry.mRevision;
+    }
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
         std::string runtime, std::array<unsigned char, 32> contentIdentity,
         const std::array<EquipmentActorBinding, 2>& actors,
