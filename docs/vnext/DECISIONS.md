@@ -89,6 +89,9 @@ Only the selected NPC moves; stock neighbor propagation awaits multiple actors.
 gameplay consequences. Start with server-time contacts; measure latency before adding
 bounded historical actor/obstacle queries. Full-world rewind is not selected. Reuse
 timestamped replication, reliable action/life events and latest-wins motion.
+V31 resolves projectile/player contact against active server player positions
+with a 32-unit sphere at body center, choosing the earliest hit against NPC/world
+collision. This bounded proxy remains until shared player hull physics is bound.
 
 **Movement smoothness (target).** Cut player movement over last, after smooth
 replication and unified engine collision across actors, doors and projectiles.

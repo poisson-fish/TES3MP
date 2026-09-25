@@ -17,6 +17,8 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V31 adds direct player targets using server position contact and durable
+    // target kind. It requires a fresh campaign under native-inventory-31.
     // V30 adds bounded Target area effects centered on server projectile
     // contact, with one committed outcome per affected actor. Fresh campaign.
     // V29 retains bounded one-second to one-hour Resist Magicka effects for

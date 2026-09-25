@@ -6610,6 +6610,13 @@ int main(int argc, char** argv)
                 true, true, true, true, true, true, true, true, true);
             std::cout << "PASS npc-area-spell\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "player-target-spell")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true, true, true);
+            std::cout << "PASS player-target-spell\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "npc-door-avoidance")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),std::filesystem::absolute(argv[4]), true);

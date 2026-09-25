@@ -62,8 +62,9 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 4. Generalize OpenMW combat through one cast lifecycle: prepare source/effects,
    pay spell cost or item charge, launch, resolve server contact, apply effects.
    Prove a resistible Target spell with durable projectile/outcome first, then
-   enchantment charge/use on that path, then effect durations and areas. Finish
-   melee targets, knockout, armor, block and resistances. Preserve wear and
+   enchantment charge/use on that path, then effect durations, areas and player
+   targets. Broaden sources and allow concurrent projectiles next. Finish
+   knockout, unarmed health damage, armor, block and remaining melee rules. Preserve wear and
    durability; validate misses, targeting, retries and two-client reconnect.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.

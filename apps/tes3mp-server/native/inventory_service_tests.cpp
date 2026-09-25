@@ -4125,7 +4125,7 @@ namespace TES3MP::Native::Testing
 
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
-        bool lifecycle, bool spell, bool projectile, bool timed, bool area)
+        bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4216,7 +4216,8 @@ namespace TES3MP::Native::Testing
                     usedEnchantment.mData.mCharge = 20;
                     usedEnchantment.mEffects.populate({
                         {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
-                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, area ? 8 : 0, 0, 10, 10}});
+                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target,
+                            area && !playerTarget ? 8 : 0, 0, 10, 10}});
                     usedItem = *base.store().get<ESM::Clothing>().find(
                         ESM::RefId::stringRefId("common_shirt_01"));
                     usedItem.mId = ESM::RefId::stringRefId("npc_used_shirt");
@@ -4471,7 +4472,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (area ? "native-inventory-30\nmanifest "
+            std::ofstream out(descriptor); out << (playerTarget ? "native-inventory-31\nmanifest "
+                : area ? "native-inventory-30\nmanifest "
                 : timed ? "native-inventory-29\nmanifest "
                 : projectile ? "native-inventory-28\nmanifest "
                 : spell ? "native-inventory-26\nmanifest "
@@ -4874,6 +4876,219 @@ namespace TES3MP::Native::Testing
                 InventoryHost mixedRestart(descriptor, testContentManifest(), *registry, *crypto, mixedImage);
                 require(std::ranges::equal(mixedRestart.service().inventoryImage(), mixedImage),
                     "Mixed instant effect state changed on restart");
+                if (playerTarget)
+                {
+                    const auto hash = [](std::string_view name) {
+                        uint64_t value = 14695981039346656037ull;
+                        for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                        return value;
+                    };
+                    auto entities = std::vector(authority.players().begin(), authority.players().end());
+                    const auto relocate = [&](size_t index, int x, int y) {
+                        const auto& original = entities[index];
+                        entities[index] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                            original, id<ServerTick>(1), Transform(original.transform().cell(),
+                                Position3(x * 1024, y * 1024, 1024), original.transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                    };
+                    relocate(0, 60, -100);
+                    relocate(1, 60, -35);
+                    const auto launchPlayers = std::get<CanonicalServerState>(createCanonicalServerState(
+                        entities, authority.activeSessions()));
+                    const auto run = [&](bool enchanted, bool moved) {
+                        InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& service = campaign.service(); service.synchronizeCells(launchPlayers);
+                        auto input = use;
+                        input.sourceId = hash("npc_target_damage");
+                        input.targetKind = MagicUseTargetKind::Player;
+                        input.targetId = id<PlayerId>(2).value();
+                        if (enchanted)
+                        {
+                            const auto inventory = service.projectInventory(launchPlayers, id<SessionId>(1),
+                                id<ServerTick>(castTick), id<CanonicalRevision>(castTick))->playerInventory.front();
+                            const auto item = std::ranges::find(inventory.stacks,
+                                id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                    ESM::RefId::stringRefId("npc_used_shirt"))), &CanonicalItemStack::prototypeId);
+                            require(item != inventory.stacks.end(), "Player Target item source absent");
+                            input.sourceKind = MagicUseSourceKind::EnchantedItem;
+                            input.sourceId = item->stackId.value();
+                            input.expectedInventoryRevision = inventory.revision;
+                        }
+                        auto invalid = input; invalid.targetId = input.targetId + 3;
+                        require(!service.prepareMagicUse(launchPlayers, proposal(invalid), id<ServerTick>(castTick)),
+                            "Unbound player entered native cast path");
+                        invalid = input; invalid.targetId = id<PlayerId>(1).value();
+                        require(!service.prepareMagicUse(launchPlayers, proposal(invalid), id<ServerTick>(castTick)),
+                            "Caster entered direct player target path");
+                        auto prepared = service.prepareMagicUse(launchPlayers, proposal(input), id<ServerTick>(castTick));
+                        require(bool(prepared), "Bound player Target cast rejected");
+                        auto launch = service.prepareNativeTick(launchPlayers, id<ServerTick>(castTick),
+                            1.f/30, std::move(prepared));
+                        std::vector<std::byte> flightImage;
+                        require(launch && launch->commit([&](auto bytes) {
+                            flightImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(service.inventoryImage(), contactImage),
+                            "Rejected player Target launch changed the campaign");
+                        const auto launched = readActorCampaign({reinterpret_cast<const char*>(flightImage.data()),
+                            flightImage.size()});
+                        require(launched.projectile && launched.projectile->targetKind == uint64_t(MagicUseTargetKind::Player)
+                            && launched.projectile->target == input.targetId
+                            && launched.combat->actors[1][8][2] == contacted.combat->actors[1][8][2],
+                            "Player Target launch did not stage durable identity without premature damage");
+                        require(launch->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Player Target launch did not commit");
+                        std::optional<uint32_t> paidCharge;
+                        if (enchanted)
+                        {
+                            const auto inventory = service.projectInventory(launchPlayers, id<SessionId>(1),
+                                id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                            const auto item = std::ranges::find(inventory->playerInventory.front().stacks,
+                                input.sourceId, [](const auto& stack) { return stack.stackId.value(); });
+                            require(item != inventory->playerInventory.front().stacks.end()
+                                && std::bit_cast<float>(item->enchantmentCharge) >= 0.f
+                                && std::bit_cast<float>(item->enchantmentCharge) < 20.f,
+                                "Player Target WhenUsed charge was not paid at launch");
+                            paidCharge = item->enchantmentCharge;
+                        }
+                        require(!service.prepareMagicUse(launchPlayers, proposal(input), id<ServerTick>(castTick + 1)),
+                            "Retry created a second pending player Target cast");
+                        {
+                            auto malformed = flightImage;
+                            const size_t targetKindOffset = size_t(launched.inventory.data()
+                                - reinterpret_cast<const char*>(flightImage.data())) - 64;
+                            malformed[targetKindOffset] = std::byte{3};
+                            bool rejected = false;
+                            try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto,
+                                malformed); }
+                            catch (const std::invalid_argument&) { rejected = true; }
+                            require(rejected, "Invalid saved projectile target kind installed on recovery");
+                        }
+                        InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, flightImage);
+                        auto& flight = restarted.service(); flight.synchronizeCells(launchPlayers);
+                        auto impactEntities = entities;
+                        if (moved)
+                        {
+                            const auto& original = impactEntities[1];
+                            impactEntities[1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                original, id<ServerTick>(2), Transform(original.transform().cell(),
+                                    Position3(500 * 1024, 500 * 1024, 1024), original.transform().orientation()),
+                                LinearVelocity3(0, 0, 0)));
+                        }
+                        const auto impactPlayers = std::get<CanonicalServerState>(createCanonicalServerState(
+                            impactEntities, authority.activeSessions()));
+                        bool resolved = false;
+                        for (uint64_t time = castTick + 1; time < castTick + 90 && !resolved; ++time)
+                        {
+                            const auto prior = std::vector(flight.inventoryImage().begin(), flight.inventoryImage().end());
+                            auto step = flight.prepareNativeTick(impactPlayers, id<ServerTick>(time), 1.f/30, {});
+                            std::vector<std::byte> candidate;
+                            require(step && step->commit([&](auto bytes) {
+                                candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                            }) == CanonicalDurabilityResult::Rejected
+                                && std::ranges::equal(flight.inventoryImage(), prior),
+                                "Rejected player contact changed durable state");
+                            const auto staged = readActorCampaign({reinterpret_cast<const char*>(candidate.data()),
+                                candidate.size()});
+                            if (!staged.projectile)
+                            {
+                                const auto alice = flight.projectCombatEvents(impactPlayers, id<SessionId>(1),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                                const auto bob = flight.projectCombatEvents(impactPlayers, id<SessionId>(2),
+                                    id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                                require(alice && bob && std::ranges::equal(alice->magicEvents(), bob->magicEvents())
+                                    && std::ranges::count_if(alice->magicEvents(), [&](const auto& event) {
+                                        return event.targetKind == MagicUseTargetKind::Player
+                                            && event.targetId == input.targetId && event.castSucceeded
+                                            && event.targetHealthDelta < 0;
+                                    }) == (moved ? 0 : 1)
+                                    && (moved
+                                        ? (alice->magicEvents().size() == 1
+                                            && !alice->magicEvents().front().castSucceeded
+                                            && alice->magicEvents().front().targetKind == MagicUseTargetKind::Player)
+                                        : (std::ranges::count_if(alice->magicEvents(), [&](const auto& event) {
+                                            return event.targetKind == MagicUseTargetKind::Actor
+                                                && event.castSucceeded && event.targetHealthDelta < 0;
+                                        }) == 1
+                                            && staged.combat->actors[2][8][2] < launched.combat->actors[2][8][2]))
+                                    && (staged.combat->actors[1][8][2] < launched.combat->actors[1][8][2]) == !moved,
+                                    "Player Target contact or miss did not produce one durable outcome");
+                                resolved = true;
+                            }
+                            require(step->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && std::ranges::equal(flight.inventoryImage(), candidate),
+                                "Player Target flight did not install its candidate");
+                            if (resolved)
+                            {
+                                InventoryHost outcome(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                                outcome.service().synchronizeCells(impactPlayers);
+                                const auto saved = readActorCampaign({reinterpret_cast<const char*>(
+                                    outcome.service().inventoryImage().data()), outcome.service().inventoryImage().size()});
+                                require(saved.combat == staged.combat && !saved.projectile,
+                                    "Player Target result changed on restart");
+                                if (paidCharge)
+                                {
+                                    const auto inventory = outcome.service().projectInventory(impactPlayers,
+                                        id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                                    const auto item = std::ranges::find(inventory->playerInventory.front().stacks,
+                                        input.sourceId, [](const auto& stack) { return stack.stackId.value(); });
+                                    require(item != inventory->playerInventory.front().stacks.end()
+                                        && item->enchantmentCharge == *paidCharge,
+                                        "Player Target miss refunded paid charge on restart");
+                                }
+                            }
+                        }
+                        require(resolved, "Player Target projectile never resolved");
+                    };
+                    run(false, false);
+                    run(true, true);
+                    {
+                        InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& service = campaign.service(); service.synchronizeCells(launchPlayers);
+                        auto resistance = use;
+                        resistance.sourceId = hash("npc_target_resistance");
+                        resistance.targetKind = MagicUseTargetKind::Player;
+                        resistance.targetId = id<PlayerId>(2).value();
+                        auto prepared = service.prepareMagicUse(launchPlayers, proposal(resistance), id<ServerTick>(castTick));
+                        require(bool(prepared), "Player Target timed resistance rejected");
+                        auto launch = service.prepareNativeTick(launchPlayers, id<ServerTick>(castTick),
+                            1.f/30, std::move(prepared));
+                        require(launch && launch->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Player Target resistance launch failed");
+                        uint64_t contactTick = 0;
+                        for (uint64_t time = castTick + 1; time < castTick + 90 && !contactTick; ++time)
+                        {
+                            auto step = service.prepareNativeTick(launchPlayers, id<ServerTick>(time), 1.f/30, {});
+                            require(step && step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Player Target timed flight failed");
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(
+                                service.inventoryImage().data()), service.inventoryImage().size()});
+                            if (!state.projectile)
+                            {
+                                require(state.timedEffects.size() == 1 && state.timedEffects.front().actor == 1
+                                    && state.timedEffects.front().magnitude == 100.f
+                                    && state.timedEffects.front().expiresTick == time + 30,
+                                    "Player Target timed effect did not land once on its intended player");
+                                contactTick = time;
+                            }
+                        }
+                        require(contactTick, "Player Target timed projectile never contacted");
+                        const auto image = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                        InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, image);
+                        auto& restored = resumed.service(); restored.synchronizeCells(launchPlayers);
+                        const auto saved = readActorCampaign({reinterpret_cast<const char*>(
+                            restored.inventoryImage().data()), restored.inventoryImage().size()});
+                        require(saved.timedEffects.size() == 1 && saved.timedEffects.front().actor == 1,
+                            "Restart lost player Target timed effect");
+                        auto expiry = restored.prepareNativeTick(launchPlayers, id<ServerTick>(contactTick + 30), 1.f/30, {});
+                        require(expiry && expiry->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && readActorCampaign({reinterpret_cast<const char*>(restored.inventoryImage().data()),
+                                restored.inventoryImage().size()}).timedEffects.empty(),
+                            "Player Target timed effect did not expire on its committed deadline");
+                    }
+                    std::cout << "player Target spell hit and WhenUsed miss: durable contact, retry, restart\n";
+                    return;
+                }
                 if (area)
                 {
                     const auto checkArea = [&](bool enchanted, bool distant) {

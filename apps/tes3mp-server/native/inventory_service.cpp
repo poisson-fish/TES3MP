@@ -1152,17 +1152,28 @@ namespace TES3MP::Native
                 && (use.sourceKind != MagicUseSourceKind::EnchantedItem || !mBinding.mMagicItemUse))
             || !use.sourceId || mProjectile
             || (use.targetKind != MagicUseTargetKind::Self
-                && (!mBinding.mMagicProjectile || use.targetKind != MagicUseTargetKind::Actor
-                    || use.targetId != mBinding.mNavigatingActor->actorId()
-                    || !mLife || mLife->respawnTick || mProjectile
-                    || use.sourceServerTick.value() < mLife->bornTick
-                    || use.expectedTargetRevision.value() < mLife->bornTick))
+                && (!mBinding.mMagicProjectile || !mLife || mProjectile
+                    || (use.targetKind == MagicUseTargetKind::Actor
+                        ? (use.targetId != mBinding.mNavigatingActor->actorId()
+                            || mLife->respawnTick || use.sourceServerTick.value() < mLife->bornTick
+                            || use.expectedTargetRevision.value() < mLife->bornTick)
+                        : (use.targetKind != MagicUseTargetKind::Player || !mBinding.mMagicPlayerTarget
+                            || use.targetId == player->playerId().value()
+                            || std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) {
+                                const auto* target = players.findPlayer(id);
+                                return id.value() == use.targetId && target
+                                    && target->transform().cell() == actorCell(mBinding.mNavigatingActor->snapshot())
+                                    && std::ranges::any_of(players.activeSessions(), [&](const auto& active) {
+                                        return active.playerId() == id;
+                                    }) && mCombat->actors[actor(id)][8][2] > 0;
+                            })))))
             || (use.targetKind == MagicUseTargetKind::Self && use.targetId)
             || use.sourceServerTick.value() > tick.value()
             || tick.value() - use.sourceServerTick.value() > 64
             || (use.targetKind == MagicUseTargetKind::Self
                 && use.expectedCasterRevision != use.expectedTargetRevision)
             || use.expectedCasterRevision.value() > tick.value()
+            || use.expectedTargetRevision.value() > tick.value()
             || mCombat->actors[actor(player->playerId())][8][2] <= 0)
             return {};
         if (use.sourceKind == MagicUseSourceKind::EnchantedItem)
@@ -1299,16 +1310,19 @@ namespace TES3MP::Native
             const auto magic = getAreaWord({reinterpret_cast<const char*>(image.data()), image.size()}, headerOffset);
             if (mBinding.mMagicProjectile != (magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
-                    || magic == AreaActorCampaignMagic)
+                    || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic)
                 || (mBinding.mMagicItemUse && magic != EnchantedProjectileActorCampaignMagic
-                    && magic != TimedActorCampaignMagic && magic != AreaActorCampaignMagic)
-                || (mBinding.mMagicTimed != (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic))
-                || (mBinding.mMagicArea != (magic == AreaActorCampaignMagic)))
+                    && magic != TimedActorCampaignMagic && magic != AreaActorCampaignMagic
+                    && magic != PlayerTargetActorCampaignMagic)
+                || (mBinding.mMagicTimed != (magic == TimedActorCampaignMagic || magic == AreaActorCampaignMagic
+                    || magic == PlayerTargetActorCampaignMagic))
+                || (mBinding.mMagicArea != (magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic))
+                || (mBinding.mMagicPlayerTarget != (magic == PlayerTargetActorCampaignMagic)))
                 throw std::invalid_argument("Native projectile campaign version differs from binding");
             if (mBinding.mMeleeContact != (magic == ContactActorCampaignMagic || magic == CombatActorCampaignMagic
                     || magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
                     || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
-                    || magic == AreaActorCampaignMagic))
+                    || magic == AreaActorCampaignMagic || magic == PlayerTargetActorCampaignMagic))
                 throw std::invalid_argument("Native melee contact campaign version differs from binding");
             PlainEquipmentValues baseline;
             if (decoded.life)
@@ -1333,7 +1347,10 @@ namespace TES3MP::Native
                 const auto caster = std::ranges::find_if(mBinding.mPlayers,
                     [&](PlayerId player) { return player.value() == pending.caster; });
                 if (caster == mBinding.mPlayers.end()
-                    || pending.target != mBinding.mNavigatingActor->actorId())
+                    || (pending.targetKind == uint64_t(MagicUseTargetKind::Actor)
+                        ? pending.target != mBinding.mNavigatingActor->actorId()
+                        : (!mBinding.mMagicPlayerTarget || std::ranges::none_of(mBinding.mPlayers,
+                            [&](PlayerId id) { return id.value() == pending.target && id.value() != pending.caster; }))))
                     throw std::invalid_argument("Native projectile identities outside bound actors");
                 if (pending.sourceKind == uint64_t(MagicUseSourceKind::Spell))
                 {
@@ -1402,7 +1419,8 @@ namespace TES3MP::Native
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + 3 * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
-            ? 8 + (projectile ? (mBinding.mMagicItemUse ? 13 : 11) * 8 : 0) : 0;
+            ? 8 + (projectile ? (mBinding.mMagicItemUse ? 13 : 11) * 8
+                + (mBinding.mMagicPlayerTarget ? 8 : 0) : 0) : 0;
         const size_t timedSize = mBinding.mMagicTimed ? 8 + timedEffects.size() * 24 : 0;
         if (core.empty() || actor.empty() || actor.size() > 65536
             || timedEffects.size() > MaximumActorTimedEffects
@@ -1410,7 +1428,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mMagicArea ? AreaActorCampaignMagic
+        putAreaWord(result, mBinding.mMagicPlayerTarget ? PlayerTargetActorCampaignMagic
+            : mBinding.mMagicArea ? AreaActorCampaignMagic
             : mBinding.mMagicTimed ? TimedActorCampaignMagic
             : mBinding.mMagicItemUse ? EnchantedProjectileActorCampaignMagic
             : mBinding.mMagicProjectile ? ProjectileActorCampaignMagic
@@ -1463,6 +1482,7 @@ namespace TES3MP::Native
                     putAreaWord(result, projectile->sourceKind);
                     putAreaWord(result, projectile->effectSource);
                 }
+                if (mBinding.mMagicPlayerTarget) putAreaWord(result, projectile->targetKind);
                 for (float value : projectile->position) putAreaWord(result, std::bit_cast<uint32_t>(value));
                 for (float value : projectile->step) putAreaWord(result, std::bit_cast<uint32_t>(value));
             }
@@ -1866,7 +1886,7 @@ namespace TES3MP::Native
             combat->actors[2] = life->spawnStats;
             melee = mBinding.mBoundMelee->mAnimation;
             target = 0; contact = false;
-            projectile.reset();
+            if (projectile && projectile->targetKind == uint64_t(MagicUseTargetKind::Actor)) projectile.reset();
             std::erase_if(timedEffects, [](const auto& effect) { return effect.actor == 2; });
             ++life->generation;
             life->bornTick = tick.value();
@@ -1980,7 +2000,7 @@ namespace TES3MP::Native
                 playerSpell->targetKind, playerSpell->targetId, CombatRevision::fromValue(tick.value()).value(),
                 CombatRevision::fromValue(tick.value()).value(), true, result.health, result.fatigue,
                 result.magicka, 0.f, 0.f, 0.f, false});
-            if (playerSpell->targetKind == MagicUseTargetKind::Actor)
+            if (playerSpell->targetKind != MagicUseTargetKind::Self)
             {
                 const auto* player = players.findPlayer(spellCaster);
                 if (!player || !life || projectile)
@@ -1988,8 +2008,22 @@ namespace TES3MP::Native
                 const auto position = player->transform().position();
                 std::array<float, 3> origin{float(double(position.x()) / 1024),
                     float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 64.f};
-                std::array<float, 3> direction{before.mPosition[0] - origin[0],
-                    before.mPosition[1] - origin[1], before.mPosition[2] + 55.f - origin[2]};
+                std::array<float, 3> destination{before.mPosition[0], before.mPosition[1],
+                    before.mPosition[2] + 55.f};
+                if (playerSpell->targetKind == MagicUseTargetKind::Player)
+                {
+                    const auto* victim = players.findPlayer(PlayerId::fromValue(playerSpell->targetId).value());
+                    if (!victim || victim->transform().cell() != actorCell(before)
+                        || combat->actors[actor(victim->playerId())][8][2] <= 0
+                        || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
+                            return session.playerId() == victim->playerId();
+                        })) throw std::invalid_argument("Native target player left before launch");
+                    const auto place = victim->transform().position();
+                    destination = {float(double(place.x()) / 1024), float(double(place.y()) / 1024),
+                        float(double(place.z()) / 1024) + 64.f};
+                }
+                std::array<float, 3> direction{destination[0] - origin[0],
+                    destination[1] - origin[1], destination[2] - origin[2]};
                 const float distance = std::sqrt(direction[0]*direction[0]
                     + direction[1]*direction[1] + direction[2]*direction[2]);
                 if (!std::isfinite(distance) || distance < 8.f || distance > 2048.f)
@@ -2007,7 +2041,7 @@ namespace TES3MP::Native
                 projectile = ActorCampaignProjectile{spellCaster.value(), playerSpell->sourceId,
                     playerSpell->targetId, life->generation, tick.value() + 90,
                     uint64_t(playerSpell->sourceKind), spellCharge ? spellEffectSource : playerSpell->sourceId,
-                    origin, direction};
+                    origin, direction, uint64_t(playerSpell->targetKind)};
             }
         }
         if (mProjectile && projectile && combat)
@@ -2015,19 +2049,69 @@ namespace TES3MP::Native
             const auto pending = *projectile;
             std::array<float, 3> endpoint;
             for (size_t i = 0; i < 3; ++i) endpoint[i] = pending.position[i] + pending.step[i];
-            const auto hit = mBinding.mNavigatingActor->projectileContact(pending.position, endpoint);
+            auto hit = mBinding.mNavigatingActor->projectileContact(pending.position, endpoint);
+            size_t hitIndex = hit && hit->actor ? 2 : 3; // Three denotes world geometry.
+            if (mBinding.mMagicPlayerTarget)
+            {
+                const float length2 = pending.step[0] * pending.step[0]
+                    + pending.step[1] * pending.step[1] + pending.step[2] * pending.step[2];
+                float first = 1.f;
+                if (hit)
+                {
+                    float projection = 0.f;
+                    for (size_t axis = 0; axis < 3; ++axis)
+                        projection += (hit->position[axis] - pending.position[axis]) * pending.step[axis];
+                    first = std::clamp(projection / length2, 0.f, 1.f);
+                }
+                for (size_t index = 0; index < mBinding.mPlayers.size(); ++index)
+                {
+                    const auto id = mBinding.mPlayers[index];
+                    const auto* player = players.findPlayer(id);
+                    if (id.value() == pending.caster || !player
+                        || player->transform().cell() != actorCell(before)
+                        || combat->actors[index][8][2] <= 0
+                        || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
+                            return session.playerId() == id;
+                        })) continue;
+                    const auto place = player->transform().position();
+                    const std::array<float, 3> center{float(double(place.x()) / 1024),
+                        float(double(place.y()) / 1024), float(double(place.z()) / 1024) + 64.f};
+                    float offset = 0.f, origin2 = 0.f;
+                    for (size_t axis = 0; axis < 3; ++axis)
+                    {
+                        const float delta = pending.position[axis] - center[axis];
+                        offset += delta * pending.step[axis]; origin2 += delta * delta;
+                    }
+                    constexpr float radius = 32.f;
+                    const float discriminant = offset * offset - length2 * (origin2 - radius * radius);
+                    if (discriminant < 0.f) continue;
+                    const float fraction = origin2 <= radius * radius ? 0.f
+                        : (-offset - std::sqrt(discriminant)) / length2;
+                    if (fraction < 0.f || fraction > first) continue;
+                    first = fraction;
+                    std::array<float, 3> point;
+                    for (size_t axis = 0; axis < 3; ++axis)
+                        point[axis] = pending.position[axis] + fraction * pending.step[axis];
+                    hit = ActorProjectileContact{id.value(), point};
+                    hitIndex = index;
+                }
+            }
             const bool timedOut = tick.value() >= pending.expiresTick;
             const auto casterIndex = actor(PlayerId::fromValue(pending.caster).value());
-            const bool validLife = life && life->generation == pending.generation
-                && !life->respawnTick && combat->actors[2][8][2] > 0
-                && combat->actors[casterIndex][8][2] > 0;
-            if (!hit && !timedOut && validLife)
+            const bool validCast = life && combat->actors[casterIndex][8][2] > 0
+                && (pending.targetKind == uint64_t(MagicUseTargetKind::Player)
+                    || (life->generation == pending.generation && !life->respawnTick
+                        && combat->actors[2][8][2] > 0));
+            if (!hit && !timedOut && validCast)
                 projectile->position = endpoint;
             else
             {
                 projectile.reset();
-                const bool directHit = hit && hit->actor == pending.target && validLife;
-                if (hit && validLife && (directHit || mBinding.mMagicArea))
+                const bool directHit = hit && validCast
+                    && (pending.targetKind == uint64_t(MagicUseTargetKind::Actor)
+                        ? hitIndex == 2 && hit->actor == pending.target
+                        : hitIndex < 2 && mBinding.mPlayers[hitIndex].value() == pending.target);
+                if (hit && validCast && (directHit || mBinding.mMagicArea))
                 {
                     const auto& known = mRuntime.mStore.get<ESM::NPC>()
                         .find(mBinding.mActors[casterIndex].mBase)->mSpells.mList;
@@ -2054,8 +2138,7 @@ namespace TES3MP::Native
                     for (const auto& effect : effects->effects)
                     {
                         if (effect.mRange != ESM::RT_Target) continue;
-                        if (directHit)
-                            selected[2].effects.push_back(effect);
+                        if (directHit) selected[hitIndex].effects.push_back(effect);
                         if (!mBinding.mMagicArea || !effect.mArea) continue;
                         const float radius = float(effect.mArea) * 22.f;
                         const auto nearby = [&](const std::array<float, 3>& position) {
@@ -2070,7 +2153,7 @@ namespace TES3MP::Native
                         {
                             const auto playerId = mBinding.mPlayers[index];
                             const auto* player = players.findPlayer(playerId);
-                            if (playerId.value() == pending.caster || !player
+                            if (playerId.value() == pending.caster || (directHit && index == hitIndex) || !player
                                 || player->transform().cell() != actorCell(before)
                                 || combat->actors[index][8][2] <= 0
                                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
@@ -2081,7 +2164,8 @@ namespace TES3MP::Native
                                     float(double(position.y()) / 1024), float(double(position.z()) / 1024)}))
                                 selected[index].effects.push_back(effect);
                         }
-                        if (!directHit && nearby(before.mPosition)) selected[2].effects.push_back(effect);
+                        if (!(directHit && hitIndex == 2) && combat->actors[2][8][2] > 0
+                            && nearby(before.mPosition)) selected[2].effects.push_back(effect);
                     }
                     Misc::Rng::Generator rng;
                     Misc::Rng::deserialize(std::to_string(combat->rng), rng);
@@ -2107,7 +2191,7 @@ namespace TES3MP::Native
                         spellCasts.push_back(MagicUseCombatEvent{PlayerId::fromValue(pending.caster).value(),
                             MagicUseSourceKind(pending.sourceKind), pending.source,
                             index == 2 ? MagicUseTargetKind::Actor : MagicUseTargetKind::Player,
-                            index == 2 ? pending.target : mBinding.mPlayers[index].value(),
+                            index == 2 ? mBinding.mNavigatingActor->actorId() : mBinding.mPlayers[index].value(),
                             CombatRevision::fromValue(tick.value()).value(),
                             CombatRevision::fromValue(tick.value()).value(), true,
                             0.f, 0.f, 0.f, result.health, result.fatigue, result.magicka, died});
@@ -2117,7 +2201,7 @@ namespace TES3MP::Native
                 if (spellCasts.empty())
                     spellCasts.push_back(MagicUseCombatEvent{PlayerId::fromValue(pending.caster).value(),
                         MagicUseSourceKind(pending.sourceKind), pending.source,
-                        MagicUseTargetKind::Actor, pending.target,
+                        MagicUseTargetKind(pending.targetKind), pending.target,
                         CombatRevision::fromValue(tick.value()).value(),
                         CombatRevision::fromValue(tick.value()).value(), false,
                         0.f, 0.f, 0.f, 0.f, 0.f, 0.f, false});
