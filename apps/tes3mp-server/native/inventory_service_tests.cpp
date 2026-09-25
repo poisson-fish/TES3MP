@@ -4245,7 +4245,7 @@ namespace TES3MP::Native::Testing
                         onceItem = usedItem;
                         onceItem.mId = ESM::RefId::stringRefId("npc_once_shirt");
                         onceItem.mEnchant = onceEnchantment.mId;
-                        npc.mInventory.mList.push_back({1, onceItem.mId});
+                        npc.mInventory.mList.push_back({2, onceItem.mId});
                     }
                 }
                 rangedEnchantment.blank();
@@ -4791,8 +4791,8 @@ namespace TES3MP::Native::Testing
                             id<ItemPrototypeId>(MWWorld::inventoryRecordId(
                                 ESM::RefId::stringRefId("npc_once_shirt"))),
                             &CanonicalItemStack::prototypeId);
-                        require(source != stacks.end() && source->count == 1,
-                            "CastOnce source was not a single owned item");
+                        require(source != stacks.end() && source->count == 2,
+                            "CastOnce stacked source was not owned");
                         auto onceUse = input;
                         onceUse.sourceKind = MagicUseSourceKind::EnchantedItem;
                         onceUse.sourceId = source->stackId.value();
@@ -4818,29 +4818,51 @@ namespace TES3MP::Native::Testing
                             id<ServerTick>(castTick), id<CanonicalRevision>(castTick), launch.get());
                         require(projected && !projected->playerInventory.empty(),
                             "CastOnce candidate inventory was not projected");
-                        require(std::ranges::none_of(projected->playerInventory.front().stacks,
-                            [&](const auto& stack) { return stack.stackId == source->stackId; }),
-                            "CastOnce candidate still presented its consumed item");
+                        const auto stagedStack = std::ranges::find(projected->playerInventory.front().stacks,
+                            source->stackId, &CanonicalItemStack::stackId);
+                        require(stagedStack != projected->playerInventory.front().stacks.end()
+                            && stagedStack->count == 1,
+                            "CastOnce candidate did not consume exactly one item");
                         require(launch->commit(accepted) == CanonicalDurabilityResult::Committed,
                             "CastOnce launch failed to commit");
                         const auto installed = once.projectInventory(playersAtLaunch, id<SessionId>(1),
                             id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
                         require(installed && !installed->playerInventory.empty(),
                             "CastOnce installed inventory was not projected");
-                        require(std::ranges::none_of(installed->playerInventory.front().stacks,
-                            [&](const auto& stack) { return stack.stackId == source->stackId; })
-                            && !once.prepareMagicUse(playersAtLaunch, proposal(onceUse), id<ServerTick>(castTick + 1)),
-                            "Consumed CastOnce source remained usable");
+                        const auto installedStack = std::ranges::find(installed->playerInventory.front().stacks,
+                            source->stackId, &CanonicalItemStack::stackId);
+                        require(installedStack != installed->playerInventory.front().stacks.end()
+                            && installedStack->count == 1,
+                            "CastOnce installed inventory lost its remaining item");
                         InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, candidate);
                         auto& flight = resumed.service(); flight.synchronizeCells(playersAtLaunch);
                         const auto restoredInventory = flight.projectInventory(playersAtLaunch, id<SessionId>(1),
                             id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
-                        require(restoredInventory && !restoredInventory->playerInventory.empty()
-                            && std::ranges::none_of(restoredInventory->playerInventory.front().stacks,
+                        require(restoredInventory && !restoredInventory->playerInventory.empty(),
+                            "CastOnce restart lost its inventory");
+                        const auto restoredStack = std::ranges::find(restoredInventory->playerInventory.front().stacks,
+                            source->stackId, &CanonicalItemStack::stackId);
+                        require(restoredStack != restoredInventory->playerInventory.front().stacks.end()
+                            && restoredStack->count == 1,
+                            "CastOnce restart did not retain the remaining item");
+                        onceUse.commandId = id<CommandId>(castTick + 1);
+                        onceUse.expectedInventoryRevision = restoredInventory->playerInventory.front().revision;
+                        auto second = flight.prepareMagicUse(playersAtLaunch, proposal(onceUse), id<ServerTick>(castTick + 1));
+                        require(bool(second), "Remaining CastOnce item could not launch");
+                        auto secondLaunch = flight.prepareNativeTick(playersAtLaunch, id<ServerTick>(castTick + 1),
+                            1.f/30, std::move(second));
+                        const auto secondProjection = flight.projectInventory(playersAtLaunch, id<SessionId>(1),
+                            id<ServerTick>(castTick + 1), id<CanonicalRevision>(castTick + 1), secondLaunch.get());
+                        require(secondProjection && !secondProjection->playerInventory.empty()
+                            && std::ranges::none_of(secondProjection->playerInventory.front().stacks,
                                 [&](const auto& stack) { return stack.stackId == source->stackId; }),
-                            "CastOnce restart restored its consumed source");
+                            "Second CastOnce candidate retained its exhausted source");
+                        require(secondLaunch->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && !flight.prepareMagicUse(playersAtLaunch, proposal(onceUse), id<ServerTick>(castTick + 2)),
+                            "Second CastOnce launch did not exhaust its source");
                         bool resolved = false;
-                        for (uint64_t time = castTick + 1; time < castTick + 90 && !resolved; ++time)
+                        size_t contacts = 0;
+                        for (uint64_t time = castTick + 2; time < castTick + 90 && !resolved; ++time)
                         {
                             auto step = flight.prepareNativeTick(playersAtLaunch, id<ServerTick>(time), 1.f/30, {});
                             const auto event = flight.projectCombatEvents(playersAtLaunch, id<SessionId>(1),
@@ -4850,13 +4872,14 @@ namespace TES3MP::Native::Testing
                             const auto image = flight.inventoryImage();
                             const auto state = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
                             resolved = state.projectiles.empty();
-                            if (resolved) require(event && event->magicEvents().size() == 1
-                                && event->magicEvents().front().castSucceeded
-                                && state.combat->actors[2][8][2] < contacted.combat->actors[2][8][2],
-                                "CastOnce contact lost its effect after source consumption and restart");
+                            if (event) for (const auto& magic : event->magicEvents())
+                                if (magic.castSucceeded && magic.targetHealthDelta < 0) ++contacts;
+                            if (resolved) require(contacts == 2 && state.combat->actors[2][8][2]
+                                    < contacted.combat->actors[2][8][2],
+                                "Stacked CastOnce contacts lost effects after source consumption and restart");
                         }
-                        require(resolved, "CastOnce projectile never reached contact");
-                        std::cout << "CastOnce source=consumed launch=rejected/committed restart=contact\n";
+                        require(resolved, "Stacked CastOnce projectiles never reached contact");
+                        std::cout << "CastOnce stack=2 launch=rejected/twice restart=remaining contact=twice\n";
                     }
                     auto firstIntent = flight.prepareMagicUse(playersAtLaunch, proposal(input), id<ServerTick>(castTick));
                     require(bool(firstIntent), "First concurrent Target cast rejected");

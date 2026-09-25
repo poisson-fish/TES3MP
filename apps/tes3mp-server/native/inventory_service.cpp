@@ -1212,9 +1212,9 @@ namespace TES3MP::Native
                     : !effects->hasRange(ESM::RT_Target) || effects->hasRange(ESM::RT_Touch))) return {};
             if (enchantment->mData.mType == ESM::Enchantment::CastOnce)
             {
-                // Stock CastOnce removes the source at launch. A single item can be
-                // retired atomically without splitting a stack or minting an ID.
-                if (item->mRef.mCount != 1 || !ptr.getClass().getScript(ptr).empty()) return {};
+                // Consume one item at launch. The remaining stack keeps its identity;
+                // the pending effect retains the enchantment record independently.
+                if (!ptr.getClass().getScript(ptr).empty()) return {};
                 PreparedInstantSpell prepared{0, std::move(*effects)};
                 return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(prepared),
                     ItemCharge{owner, item->mRef.mRefNum, item->mRef.mEnchantmentCharge,
@@ -1670,9 +1670,10 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native item charge source changed");
             if (charge->consume)
             {
-                if (item->mRef.mCount != 1) throw std::invalid_argument("Native consumed item stack changed");
-                item->mRef.mCount = 0;
-                for (auto& slot : owner.mSlots) if (slot == charge->item) slot = {};
+                if (item->mRef.mCount <= 0) throw std::invalid_argument("Native consumed item stack changed");
+                --item->mRef.mCount;
+                if (item->mRef.mCount == 0)
+                    for (auto& slot : owner.mSlots) if (slot == charge->item) slot = {};
             }
             else item->mRef.mEnchantmentCharge = charge->after;
         }
@@ -1756,7 +1757,7 @@ namespace TES3MP::Native
                     const auto source = service.mWorld.getPtr(charge->item);
                     if (!source.hasLiveReference() || source.mContainerStore != &service.mRuntime.storage(charge->owner)
                         || source.getCellRef().getEnchantmentCharge() != charge->before
-                        || (charge->consume && source.getCellRef().getCount() != 1))
+                        || (charge->consume && source.getCellRef().getCount() <= 0))
                         return CanonicalDurabilityResult::Rejected;
                 }
                 EquipmentBytes sealed;
@@ -2545,10 +2546,11 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native magic projection lost item identity");
                 if (charge->consume)
                 {
-                    if (item->mRef.mCount != 1)
+                    if (item->mRef.mCount <= 0)
                         throw std::invalid_argument("Native magic projection lost consumable count");
-                    item->mRef.mCount = 0;
-                    for (auto& slot : state.mSlots) if (slot == charge->item) slot = {};
+                    --item->mRef.mCount;
+                    if (item->mRef.mCount == 0)
+                        for (auto& slot : state.mSlots) if (slot == charge->item) slot = {};
                 }
                 else item->mRef.mEnchantmentCharge = charge->after;
             }

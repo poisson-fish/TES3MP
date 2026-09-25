@@ -52,14 +52,18 @@ namespace TES3MP::Native
     {
         Ptr source = mWorld.getPtr(item);
         if (!source.hasLiveReference() || source.mContainerStore != &storage(owner)
-            || source.getCellRef().getRefNum() != item || source.getCellRef().getCount() != 1)
+            || source.getCellRef().getRefNum() != item || source.getCellRef().getCount() <= 0)
             std::terminate();
-        source.getCellRef().setCount(0, mScripts);
+        const int remaining = source.getCellRef().getCount() - 1;
+        source.getCellRef().setCount(remaining, mScripts);
         storage(owner).flagAsModified();
-        if (auto* inventory = inventoryStorage(owner))
-            for (auto& slot : inventory->mSlots)
-                if (slot != inventory->end() && (*slot).getCellRef().getRefNum() == item)
-                    slot = inventory->end();
+        if (remaining == 0)
+        {
+            if (auto* inventory = inventoryStorage(owner))
+                for (auto& slot : inventory->mSlots)
+                    if (slot != inventory->end() && (*slot).getCellRef().getRefNum() == item)
+                        slot = inventory->end();
+        }
         ++mWorld.mPtrRegistry.mRevision;
     }
     EquipmentRuntime::EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,

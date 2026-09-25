@@ -20,22 +20,22 @@ casts (`build/m4-instant-spell-live-04/result.json`), `WhenUsed`
 V31 player contact, splash and recovery passed
 `build/logs/m4-player-target-test-final.log`.
 
-Ordinary cast rolls, rollback and restart passed
+Cast rolls, rollback and restart passed
 `build/logs/m4-ordinary-cast-test-06.log` and
 `build/logs/m4-ordinary-target-test-01.log`.
 
-Synthetic concurrent flights passed
-`build/logs/m4-projectile-collection-test-final.log`: two same-tick contacts,
-rejected write/retry, malformed bound and restart. The V31 player target
-regression passed `build/logs/m4-projectile-collection-legacy-02.log`.
+Concurrent flights passed `build/logs/m4-projectile-collection-test-final.log`:
+paired contacts, rejected write/retry, bounds and restart. V31 regression passed
+`build/logs/m4-projectile-collection-legacy-02.log`.
 
-Synthetic cast-once enchanted item launch passed
-`build/logs/m4-castonce-test-verify.log`: a rejected launch retained the item;
-a committed launch consumed its single unscripted instance and retained the
-projectile through restart and contact. Multi-count and scripted cast-once
-items remain unsupported.
+Cast-once launch passed `build/logs/m4-castonce-test-verify.log`: rejection
+retained the item; commit consumed it and retained flight through restart/contact.
+Two-count unscripted stacks consume one per launch and resolve both contacts
+after restart (`build/logs/m4-cast-stack-test-02.log`, `concurrent-projectiles`).
+Scripted cast-once items remain unsupported.
 
 Background actors freeze. Projectiles may target NPC/player; player contact
 uses a server-position proxy sphere. Bolt visuals are absent. Next: remaining
-cast sources, then knockout, unarmed health damage, armor, block and melee.
+cast sources (including scripted item effects and strike triggers), then durable
+knockout/recovery, unarmed health damage, armor, block and melee.
 Player movement stays last after collision/smoothness checks.
