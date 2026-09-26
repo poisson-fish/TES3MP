@@ -23,28 +23,39 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
                 || effect.mEffectID == ESM::MagicEffect::RestoreFatigue
                 || effect.mEffectID == ESM::MagicEffect::DamageHealth
+                || effect.mEffectID == ESM::MagicEffect::DamageMagicka
+                || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
         }
 
         void applyInstantEffect(const ESM::ENAMstruct& effect, MWMechanics::CreatureStats& target,
-            Misc::Rng::Generator* rng, const MWWorld::ESMStore* content)
+            Misc::Rng::Generator* rng, const MWWorld::ESMStore* content, bool uncappedDamageFatigue)
         {
-            const float magnitude = float(effect.mMagnMin);
+            if (effect.mMagnMin != effect.mMagnMax && !rng)
+                throw std::invalid_argument("Variable native effect requires composed RNG");
+            const float magnitude = float(effect.mMagnMin + (effect.mMagnMin == effect.mMagnMax ? 0
+                : Misc::Rng::rollDice(effect.mMagnMax - effect.mMagnMin + 1, *rng)));
             if (effect.mEffectID == ESM::MagicEffect::RestoreHealth)
                 MWMechanics::restoreHealth(target, magnitude);
             else if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka)
                 MWMechanics::restoreDynamicStat(target, 1, magnitude);
             else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
                 MWMechanics::restoreDynamicStat(target, 2, magnitude);
-            else if (effect.mEffectID == ESM::MagicEffect::DamageHealth)
+            else if (effect.mEffectID == ESM::MagicEffect::DamageHealth
+                || effect.mEffectID == ESM::MagicEffect::DamageMagicka
+                || effect.mEffectID == ESM::MagicEffect::DamageFatigue)
             {
                 if (!rng || !content)
                     throw std::invalid_argument("Resistible native effect requires composed RNG and content");
                 const float resistance = MWMechanics::getEffectResistance(effect.mEffectID,
                     target, 100.f, target.getFatigueTerm(*content), false, *rng);
-                auto health = target.getHealth();
-                health.setCurrent(health.getCurrent() - magnitude * (1.f - resistance / 100.f));
-                target.setHealth(health);
+                const float loss = magnitude * (1.f - resistance / 100.f);
+                if (effect.mEffectID == ESM::MagicEffect::DamageHealth)
+                    MWMechanics::adjustDynamicStatValue(target, 0, -loss);
+                else if (effect.mEffectID == ESM::MagicEffect::DamageMagicka)
+                    MWMechanics::adjustDynamicStatValue(target, 1, -loss);
+                else
+                    MWMechanics::adjustDynamicStatValue(target, 2, -loss, uncappedDamageFatigue);
             }
             else if (effect.mEffectID != ESM::MagicEffect::ResistMagicka)
                 throw std::invalid_argument("Unsupported native effect");
@@ -73,11 +84,12 @@ namespace TES3MP::Native
             const auto& effect = entry.mData;
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
             if (!magic || !supportedInstantEffect(effect)
-                || (effect.mEffectID == ESM::MagicEffect::DamageHealth && effect.mRange != ESM::RT_Target)
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
                 || effect.mArea < 0 || effect.mArea > 64
-                || effect.mMagnMin <= 0 || effect.mMagnMin != effect.mMagnMax || effect.mMagnMax > 1000
+                || effect.mMagnMin <= 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                    && effect.mMagnMin != effect.mMagnMax)
                 || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
                     ? effect.mDuration < 1 || effect.mDuration > 3600
                     : effect.mDuration != 0)
@@ -105,22 +117,34 @@ namespace TES3MP::Native
     }
 
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
-        MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng, const MWWorld::ESMStore* content)
+        MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng, const MWWorld::ESMStore* content,
+        bool uncappedDamageFatigue)
     {
         if (range != ESM::RT_Self && range != ESM::RT_Touch && range != ESM::RT_Target)
             throw std::invalid_argument("Native instant effect range invalid");
+        for (const auto& effect : effects.effects)
+        {
+            if (effect.mRange != range) continue;
+            if (effect.mMagnMin != effect.mMagnMax && !rng)
+                throw std::invalid_argument("Variable native effect requires composed RNG");
+            if ((effect.mEffectID == ESM::MagicEffect::DamageHealth
+                    || effect.mEffectID == ESM::MagicEffect::DamageMagicka
+                    || effect.mEffectID == ESM::MagicEffect::DamageFatigue) && (!rng || !content))
+                throw std::invalid_argument("Resistible native effect requires composed RNG and content");
+        }
         const float beforeHealth = target.getHealth().getCurrent();
         const float beforeMagicka = target.getMagicka().getCurrent();
         const float beforeFatigue = target.getFatigue().getCurrent();
         for (const auto& effect : effects.effects)
-            if (effect.mRange == range) applyInstantEffect(effect, target, rng, content);
+            if (effect.mRange == range) applyInstantEffect(effect, target, rng, content, uncappedDamageFatigue);
         return {target.getHealth().getCurrent() - beforeHealth,
             target.getMagicka().getCurrent() - beforeMagicka,
             target.getFatigue().getCurrent() - beforeFatigue};
     }
 
     InstantSpellLaunch launchInstantSpell(const PreparedInstantSpell& spell,
-        MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng)
+        MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng,
+        bool uncappedDamageFatigue)
     {
         if (!spell.source || caster.getHealth().getCurrent() <= 0
             || caster.getMagicka().getCurrent() < spell.cost)
@@ -130,7 +154,8 @@ namespace TES3MP::Native
         auto magicka = caster.getMagicka();
         magicka.setCurrent(magicka.getCurrent() - spell.cost);
         caster.setMagicka(magicka);
-        auto result = succeeded ? applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng, &content)
+        auto result = succeeded ? applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng, &content,
+            uncappedDamageFatigue)
             : InstantSpellResult{};
         result.magicka -= float(spell.cost);
         return {succeeded, result};

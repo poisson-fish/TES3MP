@@ -2005,9 +2005,12 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native strike enchantment charge invalid");
             if (available < cost) return;
             charges.push_back(ItemCharge{owner, held.mItem, beforeCharge, available - cost});
-            applyInstantEffects(*plan, ESM::RT_Self, attacker, &rng, &mRuntime.mStore);
-            applyInstantEffects(*plan, ESM::RT_Touch, victim, &rng, &mRuntime.mStore);
-            applyInstantEffects(*plan, ESM::RT_Target, victim, &rng, &mRuntime.mStore);
+            applyInstantEffects(*plan, ESM::RT_Self, attacker, &rng, &mRuntime.mStore,
+                mBinding.mUncappedDamageFatigue);
+            applyInstantEffects(*plan, ESM::RT_Touch, victim, &rng, &mRuntime.mStore,
+                mBinding.mUncappedDamageFatigue);
+            applyInstantEffects(*plan, ESM::RT_Target, victim, &rng, &mRuntime.mStore,
+                mBinding.mUncappedDamageFatigue);
             stageTimedResistance(*plan, ESM::RT_Self, owner, tick.value(), timedEffects);
             stageTimedResistance(*plan, ESM::RT_Touch, victimIndex, tick.value(), timedEffects);
             stageTimedResistance(*plan, ESM::RT_Target, victimIndex, tick.value(), timedEffects);
@@ -2058,6 +2061,10 @@ namespace TES3MP::Native
             float& damage, Misc::Rng::Generator& rng) {
             if (!std::isfinite(damage) || damage < 0 || damage > 1'000'000)
                 throw std::invalid_argument("Native melee damage invalid before defense");
+            if (MWMechanics::isNormalWeapon(weapon, mBinding.mEnchantedWeaponsAreMagical))
+                damage = MWMechanics::applyNormalWeaponResistance(victim, damage);
+            if (!std::isfinite(damage) || damage < 0 || damage > 1'000'000)
+                throw std::invalid_argument("Native resisted melee damage invalid");
             bool blocked = false;
             const auto shield = mRuntime.equippedArmorCondition(defender, MWWorld::InventoryStore::Slot_CarriedLeft);
             // CharacterController::isReadyToBlock requires carried-left to be
@@ -2259,6 +2266,10 @@ namespace TES3MP::Native
             const float weaponDamage = damage;
             if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
                 throw std::invalid_argument("Native player melee damage invalid");
+            if (success && mBinding.mKnockoutRules)
+                damage = MWMechanics::applyKnockoutDamageMultiplier(mRuntime.mStore, victim, damage);
+            if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
+                throw std::invalid_argument("Native player knockout damage invalid");
             if (success && damage > 0)
             {
                 const auto* player = players.findPlayer(playerAttacker);
@@ -2330,8 +2341,9 @@ namespace TES3MP::Native
             Misc::Rng::deserialize(std::to_string(combat->rng), rng);
             const auto launch = spellCharge
                 ? InstantSpellLaunch{true, applyInstantEffects(spellRecord->effects,
-                    ESM::RT_Self, caster, &rng, &mRuntime.mStore)}
-                : launchInstantSpell(*spellRecord, caster, mRuntime.mStore, rng);
+                    ESM::RT_Self, caster, &rng, &mRuntime.mStore, mBinding.mUncappedDamageFatigue)}
+                : launchInstantSpell(*spellRecord, caster, mRuntime.mStore, rng,
+                    mBinding.mUncappedDamageFatigue);
             if (launch.succeeded)
                 stageTimedResistance(spellRecord->effects, ESM::RT_Self, owner, tick.value(), timedEffects);
             if (spellCharge) charges.push_back(*spellCharge);
@@ -2528,7 +2540,7 @@ namespace TES3MP::Native
                             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[index]);
                             addTimedResistance(victim, timedEffects, index);
                             const auto result = applyInstantEffects(selected[index], ESM::RT_Target,
-                                victim, &rng, &mRuntime.mStore);
+                                victim, &rng, &mRuntime.mStore, mBinding.mUncappedDamageFatigue);
                             stageTimedResistance(selected[index], ESM::RT_Target, index, tick.value(), timedEffects);
                             saveCombatStats(combat->actors[index], victim);
                             if (mBinding.mKnockoutRules)
@@ -2660,6 +2672,10 @@ namespace TES3MP::Native
                     const float weaponDamage = damage;
                     if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
                         throw std::invalid_argument("Native NPC melee damage invalid");
+                    if (success && mBinding.mKnockoutRules)
+                        damage = MWMechanics::applyKnockoutDamageMultiplier(mRuntime.mStore, victim, damage);
+                    if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
+                        throw std::invalid_argument("Native NPC knockout damage invalid");
                     if (success && damage > 0)
                     {
                         const auto* player = players.findPlayer(mBinding.mPlayers[victimIndex]);

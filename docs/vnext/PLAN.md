@@ -1,7 +1,7 @@
 # Implementation plan
 
-This is the sole roadmap; CURRENT.md holds status and next action. Implement one
-bounded slice of the active milestone per session. Preserve outcomes without
+This is the sole roadmap; CURRENT.md holds status and next action. Advance the
+active milestone through connected behavior and verification. Preserve outcomes without
 adding phase plans or diaries.
 
 ## M1 - Prove the native loadout and runtime seam

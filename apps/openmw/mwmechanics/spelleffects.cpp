@@ -68,10 +68,8 @@ namespace
     void adjustDynamicStat(const MWWorld::Ptr& target, int index, float magnitude, bool allowDecreaseBelowZero = false,
         bool allowIncreaseAboveModified = false)
     {
-        auto& creatureStats = target.getClass().getCreatureStats(target);
-        auto stat = creatureStats.getDynamic(index);
-        stat.setCurrent(stat.getCurrent() + magnitude, allowDecreaseBelowZero, allowIncreaseAboveModified);
-        creatureStats.setDynamic(index, stat);
+        MWMechanics::adjustDynamicStatValue(target.getClass().getCreatureStats(target), index,
+            magnitude, allowDecreaseBelowZero, allowIncreaseAboveModified);
     }
 
     void modDynamicStat(const MWWorld::Ptr& target, int index, float magnitude)
@@ -431,10 +429,16 @@ namespace MWMechanics
 
     void restoreDynamicStat(CreatureStats& stats, int index, float magnitude)
     {
+        adjustDynamicStatValue(stats, index, magnitude);
+    }
+
+    void adjustDynamicStatValue(CreatureStats& stats, int index, float magnitude,
+        bool allowDecreaseBelowZero, bool allowIncreaseAboveModified)
+    {
         if (index < Stats::Health || index > Stats::Fatigue)
-            throw std::invalid_argument("Restore dynamic stat index invalid");
+            throw std::invalid_argument("Dynamic stat index invalid");
         auto value = stats.getDynamic(index);
-        value.setCurrent(value.getCurrent() + magnitude);
+        value.setCurrent(value.getCurrent() + magnitude, allowDecreaseBelowZero, allowIncreaseAboveModified);
         stats.setDynamic(index, value);
     }
 

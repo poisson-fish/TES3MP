@@ -8,8 +8,9 @@
 2. Inspect owning source/tests and `git status`. Code/tests establish implemented
    behavior; product decisions establish the target. Do not reconstruct retired
    roadmaps or search history without a specific unanswered question.
-3. Implement one observable slice. Preserve the working migration base and one
-   canonical writer. Resolve routine details without another implementation plan.
+3. Advance connected behavior across the active milestone. Preserve the working
+   migration base and one canonical writer. Resolve routine details without
+   another implementation plan.
 4. Run the smallest affected check individually, stopping on failure. Fix its
    cause and rerun before proceeding. Do not broaden testing just to end a session.
 5. Review the diff and retire superseded callers/code only after replacement

@@ -4264,8 +4264,14 @@ namespace TES3MP::Native::Testing
                     targetDamage.mData.mType = ESM::Spell::ST_Spell;
                     targetDamage.mData.mFlags = ESM::Spell::F_Always;
                     targetDamage.mData.mCost = 1;
-                    targetDamage.mEffects.populate({
-                        {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, area ? 8 : 0, 0, 10, 10}});
+                    if (area)
+                        targetDamage.mEffects.populate({
+                            {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 8, 0, 10, 10}});
+                    else
+                        targetDamage.mEffects.populate({
+                            {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 10, 10},
+                            {ESM::MagicEffect::DamageMagicka, {}, {}, ESM::RT_Target, 0, 0, 3, 8},
+                            {ESM::MagicEffect::DamageFatigue, {}, {}, ESM::RT_Target, 0, 0, 4, 9}});
                     npc.mSpells.mList.push_back(targetDamage.mId);
                     usedEnchantment.blank();
                     usedEnchantment.mId = ESM::RefId::stringRefId("npc_used_damage");
@@ -4463,6 +4469,57 @@ namespace TES3MP::Native::Testing
                 require(unresistedHit.health < 0 && unresistedHit.health >= -10
                     && resistedHit.health == 0 && first == second,
                     "Target damage did not consume the shared resistance roll or honor resistance");
+                auto resourceEffects = targetSpell.mEffects;
+                resourceEffects.populate({
+                    {ESM::MagicEffect::DamageMagicka, {}, {}, ESM::RT_Touch, 0, 0, 3, 8},
+                    {ESM::MagicEffect::DamageFatigue, {}, {}, ESM::RT_Target, 0, 0, 4, 9}});
+                const auto resourcePlan = prepareInstantEffects(resourceEffects, content);
+                require(resourcePlan && resourcePlan->hasRange(ESM::RT_Touch)
+                    && resourcePlan->hasRange(ESM::RT_Target),
+                    "Variable resource damage did not prepare across ranges");
+                auto resourceVictim = unresisted;
+                Misc::Rng::Generator resourceRng(311), replayRng(311);
+                const auto touchDamage = applyInstantEffects(*resourcePlan, ESM::RT_Touch,
+                    resourceVictim, &resourceRng, &content);
+                const auto targetDamage = applyInstantEffects(*resourcePlan, ESM::RT_Target,
+                    resourceVictim, &resourceRng, &content);
+                auto replayVictim = unresisted;
+                const auto replayTouch = applyInstantEffects(*resourcePlan, ESM::RT_Touch,
+                    replayVictim, &replayRng, &content);
+                const auto replayTarget = applyInstantEffects(*resourcePlan, ESM::RT_Target,
+                    replayVictim, &replayRng, &content);
+                require(touchDamage.magicka < 0 && targetDamage.fatigue < 0
+                    && touchDamage.magicka == replayTouch.magicka
+                    && targetDamage.fatigue == replayTarget.fatigue
+                    && resourceRng == replayRng,
+                    "Variable damage failed deterministic composed RNG or resource routing");
+                auto cappedFatigue = unresisted;
+                auto lowFatigue = cappedFatigue.getFatigue();
+                lowFatigue.setCurrent(2.f);
+                cappedFatigue.setFatigue(lowFatigue);
+                auto uncappedFatigue = cappedFatigue;
+                Misc::Rng::Generator cappedRoll(814), uncappedRoll(814);
+                applyInstantEffects(*resourcePlan, ESM::RT_Target, cappedFatigue,
+                    &cappedRoll, &content, false);
+                applyInstantEffects(*resourcePlan, ESM::RT_Target, uncappedFatigue,
+                    &uncappedRoll, &content, true);
+                require(cappedFatigue.getFatigue().getCurrent() == 0.f
+                    && uncappedFatigue.getFatigue().getCurrent() < 0.f
+                    && cappedRoll == uncappedRoll,
+                    "Magic fatigue damage ignored bound OpenMW capping rule");
+                auto mixedWithoutRng = targetSpell.mEffects;
+                mixedWithoutRng.populate({
+                    {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
+                    {ESM::MagicEffect::DamageFatigue, {}, {}, ESM::RT_Self, 0, 0, 3, 8}});
+                const auto mixedPlan = prepareInstantEffects(mixedWithoutRng, content);
+                require(bool(mixedPlan), "Mixed source-neutral effects failed preparation");
+                auto noRngVictim = unresisted;
+                const float noRngHealth = noRngVictim.getHealth().getCurrent();
+                bool rejectedMissingRng = false;
+                try { applyInstantEffects(*mixedPlan, ESM::RT_Self, noRngVictim); }
+                catch (const std::invalid_argument&) { rejectedMissingRng = true; }
+                require(rejectedMissingRng && noRngVictim.getHealth().getCurrent() == noRngHealth,
+                    "Missing composed RNG partially applied a mixed effect plan");
                 auto effects = prepareInstantEffects(enchantment.mEffects, content);
                 require(effects && effects->hasRange(ESM::RT_Self) && effects->hasRange(ESM::RT_Target)
                     && !effects->onlyRange(ESM::RT_Self),
@@ -6095,8 +6152,10 @@ namespace TES3MP::Native::Testing
                                 && std::ranges::equal(aliceOutcome->magicEvents(), bobOutcome->magicEvents())
                                 && aliceOutcome->magicEvents().front().castSucceeded
                                 && aliceOutcome->magicEvents().front().targetHealthDelta < 0
+                                && aliceOutcome->magicEvents().front().targetMagickaDelta < 0
+                                && aliceOutcome->magicEvents().front().targetFatigueDelta < 0
                                 && candidateState.combat->actors[2][8][2] < launchedState.combat->actors[2][8][2],
-                                "Authoritative contact failed to apply resisted Target damage for both clients");
+                                "Authoritative contact failed to compose three Target resources for both clients");
                             resolved = true;
                         }
                         require(nextTick->commit(accepted) == CanonicalDurabilityResult::Committed,

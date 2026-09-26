@@ -31,6 +31,10 @@ namespace MWMechanics
         float handToHandSkill, float attackStrength);
     float getUnarmedHealthDamage(const MWWorld::ESMStore& store, const CreatureStats& attacker,
         float handToHandSkill, float attackStrength);
+    float applyKnockoutDamageMultiplier(const MWWorld::ESMStore& store,
+        const CreatureStats& victim, float damage);
+    bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical);
+    float applyNormalWeaponResistance(const CreatureStats& victim, float damage);
     void restoreCombatFatigue(CreatureStats& actor, const MWWorld::ESMStore& store, float seconds);
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier);
     float getMeleeWeaponReach(const MWWorld::ESMStore& store, const ESM::Weapon* weapon, bool npc);

@@ -185,12 +185,8 @@ namespace MWMechanics
         if (weapon.isEmpty())
             return false;
 
-        const int flags = weapon.get<ESM::Weapon>()->mBase->mData.mFlags;
-        bool isSilver = flags & ESM::Weapon::Silver;
-        bool isMagical = flags & ESM::Weapon::Magical;
-        bool isEnchanted = !weapon.getClass().getEnchantment(weapon).empty();
-
-        return !isSilver && !isMagical && (!isEnchanted || !Settings::game().mEnchantedWeaponsAreMagical);
+        return isNormalWeapon(weapon.get<ESM::Weapon>()->mBase,
+            Settings::game().mEnchantedWeaponsAreMagical);
     }
 
     void resistNormalWeapon(
@@ -203,7 +199,7 @@ namespace MWMechanics
         const float resistance = effects.getOrDefault(ESM::MagicEffect::ResistNormalWeapons).getMagnitude() / 100.f;
         const float weakness = effects.getOrDefault(ESM::MagicEffect::WeaknessToNormalWeapons).getMagnitude() / 100.f;
 
-        damage *= 1.f - std::min(1.f, resistance - weakness);
+        damage = applyNormalWeaponResistance(actor.getClass().getCreatureStats(actor), damage);
 
         if (resistance - weakness >= 1.f && attacker == getPlayer())
             MWBase::Environment::get().getWindowManager()->messageBox("#{sMagicTargetResistsWeapons}");

@@ -147,6 +147,8 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> mDoors;
         bool mAvoidanceEnabled = false;
         bool mSmoothMovement = false;
+        bool mEnchantedWeaponsAreMagical = false;
+        bool mUncappedDamageFatigue = false;
         struct Travel
         {
             osg::Vec3f destination;
@@ -531,6 +533,16 @@ namespace TES3MP::Native
             {float(point.x()), float(point.y()), float(point.z())}};
     }
     const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
+    bool InteriorActorScene::enchantedWeaponsAreMagical() const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        return mImpl->mEnchantedWeaponsAreMagical;
+    }
+    bool InteriorActorScene::uncappedDamageFatigue() const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        return mImpl->mUncappedDamageFatigue;
+    }
 
     BoundMeleeAnimation InteriorActorScene::bindMeleeAnimation(
         std::string group, std::string attack, float speed)
@@ -598,6 +610,8 @@ namespace TES3MP::Native
         } restore;
         Settings::SettingsFileParser().loadSettingsFile(settingsFile, Settings::Manager::mDefaultSettings);
         mImpl->mSmoothMovement = Settings::Manager::getBool("smooth movement", "Game");
+        mImpl->mEnchantedWeaponsAreMagical = Settings::Manager::getBool("enchanted weapons are magical", "Game");
+        mImpl->mUncappedDamageFatigue = Settings::Manager::getBool("uncapped damage fatigue", "Game");
         Settings::Index index;
         Settings::NavigatorCategory category(index);
         auto settings = DetourNavigator::makeSettings(category, Debug::Error);

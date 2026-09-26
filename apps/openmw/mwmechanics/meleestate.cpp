@@ -13,6 +13,28 @@
 
 namespace MWMechanics
 {
+    bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical)
+    {
+        return weapon && !(weapon->mData.mFlags & (ESM::Weapon::Silver | ESM::Weapon::Magical))
+            && (weapon->mEnchant.empty() || !enchantedWeaponsAreMagical);
+    }
+
+    float applyNormalWeaponResistance(const CreatureStats& victim, float damage)
+    {
+        const auto& effects = victim.getMagicEffects();
+        const float resistance = effects.getOrDefault(ESM::MagicEffect::ResistNormalWeapons).getMagnitude();
+        const float weakness = effects.getOrDefault(ESM::MagicEffect::WeaknessToNormalWeapons).getMagnitude();
+        return damage * (1.f - std::min(1.f, (resistance - weakness) / 100.f));
+    }
+
+    float applyKnockoutDamageMultiplier(const MWWorld::ESMStore& store,
+        const CreatureStats& victim, float damage)
+    {
+        return victim.getKnockedDown()
+            ? damage * store.get<ESM::GameSetting>().find("fCombatKODamageMult")->mValue.getFloat()
+            : damage;
+    }
+
     float getHitChance(const MWWorld::ESMStore& store, const CreatureStats& attacker,
         const CreatureStats& victim, int skillValue, bool unaware, bool paralyzed)
     {

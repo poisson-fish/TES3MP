@@ -20,6 +20,8 @@ namespace MWMechanics
     // Shared Restore Health/Magicka/Fatigue mutation for detached server stats
     // and the stock actor effect path. Index follows CreatureStats dynamic stats.
     void restoreDynamicStat(CreatureStats& stats, int index, float magnitude);
+    void adjustDynamicStatValue(CreatureStats& stats, int index, float magnitude,
+        bool allowDecreaseBelowZero = false, bool allowIncreaseAboveModified = false);
     // Shared attribute mutation; explicit stats also permit isolated preparation.
     void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase = false);
     struct MagicApplicationResult

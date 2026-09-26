@@ -87,6 +87,8 @@ namespace TES3MP::Native
         bool mMagicProjectileCollection = false;
         bool mKnockoutRules = false;
         bool mMeleeDefenseRules = false;
+        bool mEnchantedWeaponsAreMagical = false;
+        bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
         float mNavigationSpeed = 120;
         // V19: one traveler pins its bounded interior independently of clients.

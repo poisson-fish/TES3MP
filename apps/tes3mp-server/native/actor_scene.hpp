@@ -79,6 +79,8 @@ namespace TES3MP::Native
             const std::array<float, 3>& to) const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
+        bool enchantedWeaponsAreMagical() const;
+        bool uncappedDamageFatigue() const;
         // Resolve the selected NPC's third-person animation source using stock
         // source priority. The returned identity must join a combat campaign's
         // content binding before a swing can become authoritative.

@@ -50,6 +50,7 @@ namespace
         setting(store, "fCombatInvisoMult", 1.f);
         setting(store, "fCombatDistance", 100.f);
         setting(store, "fHandToHandReach", .75f);
+        setting(store, "fCombatKODamageMult", 2.f);
     }
     void initialize(MWMechanics::CreatureStats& actor, float health = 20.f)
     {
@@ -79,6 +80,30 @@ namespace
         near(first.getFatigueTerm(otherStore), 2.f, "Content context reused another store's static settings");
         near(MWMechanics::getHitChance(store, first, target, 40, false, false), 50.f,
             "Explicit full-fatigue hit chance differs from stock arithmetic");
+        near(MWMechanics::applyKnockoutDamageMultiplier(store, target, 7.f), 7.f,
+            "Standing target received knockout damage multiplier");
+        target.setKnockedDown(true);
+        near(MWMechanics::applyKnockoutDamageMultiplier(store, target, 7.f), 14.f,
+            "Knocked target missed stock damage multiplier");
+        target.setKnockedDown(false);
+        ESM::Weapon ordinary;
+        ordinary.blank();
+        require(MWMechanics::isNormalWeapon(&ordinary, false), "Ordinary weapon lost resistance classification");
+        ordinary.mData.mFlags = ESM::Weapon::Silver;
+        require(!MWMechanics::isNormalWeapon(&ordinary, false), "Silver weapon used normal resistance");
+        ordinary.mData.mFlags = ESM::Weapon::Magical;
+        require(!MWMechanics::isNormalWeapon(&ordinary, false), "Magical weapon used normal resistance");
+        ordinary.mData.mFlags = 0;
+        ordinary.mEnchant = ESM::RefId::stringRefId("bound-test");
+        require(MWMechanics::isNormalWeapon(&ordinary, false)
+            && !MWMechanics::isNormalWeapon(&ordinary, true),
+            "Enchanted weapon ignored bound gameplay setting");
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::ResistNormalWeapons),
+            MWMechanics::EffectParam(80.f));
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::WeaknessToNormalWeapons),
+            MWMechanics::EffectParam(30.f));
+        near(MWMechanics::applyNormalWeaponResistance(target, 10.f), 5.f,
+            "Normal weapon resistance and weakness did not compose");
         near(MWMechanics::getHitChance(store, first, target, 40, true, false), 65.f,
             "Unaware target retained ordinary evasion");
         near(MWMechanics::getHitChance(store, first, target, 40, false, true), 65.f,

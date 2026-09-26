@@ -536,6 +536,8 @@ namespace TES3MP::Native
                     return scene;
                 };
                 auto scene = createScene();
+                start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
+                start.binding.mUncappedDamageFatigue = scene->uncappedDamageFatigue();
                 if (!start.navigation->meleeGroup.empty())
                 {
                     auto bound = scene->bindMeleeAnimation(start.navigation->meleeGroup,

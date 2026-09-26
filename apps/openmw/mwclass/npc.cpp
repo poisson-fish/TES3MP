@@ -494,8 +494,8 @@ namespace MWClass
             }
         }
 
-        if (othercls.getCreatureStats(victim).getKnockedDown())
-            damage *= store.find("fCombatKODamageMult")->mValue.getFloat();
+        damage = MWMechanics::applyKnockoutDamageMultiplier(
+            *MWBase::Environment::get().getESMStore(), othercls.getCreatureStats(victim), damage);
 
         // Apply "On hit" enchanted weapons
         MWMechanics::applyOnStrikeEnchantment(ptr, victim, weapon, hitPosition);
