@@ -17,6 +17,11 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V39 enables automatic known-spell selection for the unarmed selected NPC.
+    // Nearest active living player, stock spell ratings, eight-tick admission,
+    // one NPC flight at a time. Shared immediate launch; animation timing,
+    // weapon competition and equipped WhenUsed scheduling remain pending.
+    // Keeps V38 image layout; descriptor identity requires a fresh campaign.
     // V38 persists caster kind and life through projectiles, timed/constant
     // effects and NPC death history. Players retain life 1 across reconnect;
     // NPC placement/life attribution survives respawn on other targets.

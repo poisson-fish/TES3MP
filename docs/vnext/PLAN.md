@@ -59,17 +59,20 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 3. Retain bounded simulation around active travelers after both players leave.
    Cover processing range, cell boundaries, unload/restart and preserved
    destinations/completion; never simulate an actor twice.
-4. Generalize OpenMW combat through one cast lifecycle: prepare source/effects,
-   pay spell cost or item charge, launch, resolve server contact, apply effects.
-   Next, unify player and server-AI caster context for spells and enchanted items,
-   sharing cost/charge, cast, contact, resistance and ordered effects. Then carry
-   attribute/skill arguments through timed effects and broaden equipment constants
-   using the same OpenMW rules. Preserve source, caster/life, RNG, expiry and death
-   attribution across restart; retire replaced new-campaign instant-effect and
-   Resist Magicka paths while retaining legacy recovery. Prove varied real mod
-   records with two clients under loss, reconnect and restart, including concurrent
-   casts and failed persistence. Advance one verified slice at a time. Then finish
-   knockout, unarmed health damage, armor, block and remaining melee rules.
+4. Advance autonomous NPC combat through the shared casting lifecycle in verified
+   slices. Connect selection/execution with OpenMW priorities, weapon competition
+   and equipped WhenUsed. Require server-side line-of-sight targeting in a follow-up
+   slice; test occluded and newly visible players. Implement wind-up, animation
+   release, recovery and interruption; revalidate target visibility, source and
+   life before payment/launch. Persist preparation, wind-up and flight; rejected
+   writes must leak no charge, RNG, effects or successful events. Broaden timed
+   attribute/skill arguments and effect/range combinations; retire replaced special
+   cases while retaining legacy recovery. Prove varied vanilla/TR encounters with
+   two desktop clients casting concurrently with the NPC under loss, disconnect,
+   reconnect and restart. Endpoint: independent NPC actions against both players,
+   durable outcomes and matching presentation. Then finish knockout, unarmed health
+   damage, armor, block and remaining melee. Preserve source, caster/life, RNG,
+   expiry and death attribution.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.

@@ -7,17 +7,17 @@ script-scoping proposals remain labeled. Replace superseded rules; append no his
 
 **OpenMW gameplay is the foundation.** Reuse engine content, mechanics, world and
 scripting, including TR; no independent formulas, catalogs or quest language.
-Keep baseline 0.51.0 until explicitly upgraded. TES3MP 0.8 compatibility is
-unnecessary. Reuse and mod support, including MWSE behavior, require evidence.
+Keep baseline 0.51.0. TES3MP 0.8 compatibility is unnecessary; mod support requires
+evidence.
 
 **Independent networking; native runtime.** Keep components/tes3mp portable and
 engine-independent. An app-local runtime may extract gameplay shared with stock
 OpenMW callers. Preserve dependency checks.
 
 **One gameplay loadout.** OpenMW resolves configuration, encoding, load order,
-overrides/deletions and references. Bind plugins, scripts, settings and gameplay
-resources to server/client/save identity. Python may package/hash/cache, not
-reinterpret ESM. Unsupported behavior rejects visibly.
+overrides/deletions and references. Bind plugins/scripts/settings/resources to
+server/client/save identity. Python may package/hash/cache, not reinterpret ESM.
+Unsupported behavior rejects visibly.
 
 **One server authority.** The server owns actors, objects, player resources,
 time/weather and outcomes in every story scope. Clients submit authenticated intent
@@ -80,6 +80,12 @@ legacy recovery never invents missing life metadata.
 **Actor casts.** Trusted placement/life/source input composes with player commands;
 clients cannot submit it. NPC death cancels flights; installed effects retain
 attribution. V38 retains its layout. T3C2 events require capability 20 at admission.
+
+**V39 automatic admission.** Unarmed NPC known-spell selection uses eight-tick
+boundaries (stock reaction interval rounded to 30 Hz ticks), anchored by committed
+tick for restart/retry. Nearest active living player wins; player ID breaks ties.
+Selection feeds trusted cast input. This is not animation timing. A fresh
+descriptor-bound campaign retains the V38 image layout.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays
@@ -178,12 +184,10 @@ player. Stock single-player uses one default context. Scope rules apply to engin
 | Script Disable/Delete, relocation, non-player inventory/AI edits, persistent spawns | Scoped reference changes; never destroy another character's access. Materialize a coherent scene variant when physics diverges. |
 | Unsupported or ambiguous mixed effects | Reject atomically with script/API/context diagnostics; never silently run globally. |
 
-Shared simulation runs once. Personal scripts execute per eligible character;
-their spawns remain scoped. Saved locals and cursors survive NPC respawn. Personal
-locals key by character, script and stable reference, independently of life
-generation; lifecycle fields reset separately. Script-generated combat intents
-must explicitly enter the shared action path. API coverage, rather than per-quest
-rewrites, establishes which mods can use these rules.
+Shared simulation runs once; personal scripts/spawns are scoped per character.
+Locals key by character/script/stable reference and survive respawn with cursors;
+lifecycle fields reset separately. Scripted combat enters the shared action path.
+API coverage establishes mod support without quest rewrites.
 
 **Death and temporary unavailability:** replace the consumable shared OnDeath flag
 with per-character/script event cursors and attributed death history. Record events
@@ -222,9 +226,8 @@ catching an exception or staging only engine calls is insufficient.
 All direct Environment accesses and Lua equivalents must respect the boundary.
 Preserve engine execution/serialization; no substitute quest language.
 
-M5 must prove these unimplemented contracts. Ordinary shared loot still requires
-renewable access/transfer rules; no automatic quest-item classifier is assumed.
-Preserve v8 campaigns until explicit versioning/migration.
+M5 must prove these contracts. Shared loot requires renewable access/transfer
+rules, not an assumed quest-item classifier. Preserve v8 until explicit migration.
 
 ## Integrity and migration
 
@@ -236,10 +239,10 @@ precedes installation, which precedes publication. Restore the complete content/
 version-bound world/player relationship off to the side. No checkpoint-only
 acknowledgment, silent resets or parallel canonical files.
 
-**Borrowed lifetime.** Ptr copies retain weak destruction witnesses. Reference
-copy/move construction starts a new lifetime; assignment preserves the destination.
-Check witnesses before dereferencing, then registry/script ownership. Addresses and
-serialized checks cannot establish lifetime or authorize installation.
+**Borrowed lifetime.** Ptr copies retain weak destruction witnesses. Construction
+starts a new lifetime; assignment preserves the destination. Check witnesses
+before dereferencing, then registry/script ownership. Addresses/serialized checks
+cannot establish lifetime or authorize installation.
 
 **Native inventory cutover.** Session image and dispositions share one file transaction,
 never CanonicalInventoryWorld. One player inventory intent composes with the native
@@ -259,15 +262,13 @@ or auto-equips.
 timers and transitions with content/settings/seed binding. No wall-clock catch-up,
 client writers or legacy scripts.
 
-**Player-area streaming (v14).** OpenMW discovers 1–256 cells. Canonical state stays
-resident; occupied interiors and player 3×3 exterior neighborhoods retain scenes.
-Unloading freezes doors without losing inventories. Positions select adjacent
-bound exteriors; teleports commit destination/epoch. Neighborhood baselines carry
-loot, doors, player visibility and equipment. Ordinary doors share inventory
-durability. References, payloads and persistence remain bounded. A new capability
-excludes older clients. Fixture-free bootstrap requires established identities and
-uses engine environment with inherited client movement; physics remains M4.
-It does not authorize unsupported scripts. CURRENT.md records milestone acceptance.
+**Player-area streaming (v14).** OpenMW discovers 1–256 cells; canonical state
+stays resident. Occupied interiors and player 3×3 exterior neighborhoods retain
+scenes; unloading freezes doors. Positions select adjacent bound exteriors;
+teleports commit destination/epoch. Bounded baselines carry loot/doors/players/
+equipment. Doors share inventory durability. Capability excludes older clients.
+Bootstrap requires established identities and engine environment, retaining
+inherited movement; unsupported scripts remain unauthorized.
 
 **Initial leveled actors (v15).** A separate campaign-seeded OpenMW RNG stream and
 loot level select NPC/creature records in stable cell/reference order. Persist
@@ -292,7 +293,3 @@ authentication/session separation, stable identities, stale/retry rejection,
 reliable/latest-state traffic, bounded queues, backpressure and secret-free evidence.
 Existing direct-IP encryption does not authenticate server endpoint identity.
 Protocol/save changes may be deliberate without maintaining competing authorities.
-
-**Retire after cutover.** Preserve working paths until replacements cover production
-callers and failure cases, then remove obsolete code/configuration/tests. Keep useful
-behavioral evidence without retaining the abandoned independent gameplay design.

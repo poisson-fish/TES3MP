@@ -3,6 +3,8 @@
 #include "actor_inventory.hpp"
 #include "actor_campaign.hpp"
 #include "magic_runtime.hpp"
+#include "ai_magic.hpp"
+#include <apps/openmw/mwmechanics/aitimer.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
@@ -21,6 +23,7 @@
 #include <components/esm3/loadspel.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadmgef.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <components/esm3/statstate.hpp>
 #include <components/misc/rng.hpp>
 #include <tes3mp/melee_combat.hpp>
@@ -601,6 +604,10 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64, mBinding.mConstantEffects)
     {
+        if (mBinding.mAutomaticNpcSpells && (!mBinding.mDurableCasters || !mBinding.mMagicUse
+                || !mBinding.mMagicPlayerTarget || !mBinding.mMagicProjectileCollection
+                || !mBinding.mActorEffectLifecycle))
+            throw std::invalid_argument("Automatic NPC spells require the shared durable cast lifecycle");
         if (mBinding.mDurableCasters && (!mBinding.mGeneralConstants || !mBinding.mNpcLifecycle))
             throw std::invalid_argument("Native durable casters require general constants and NPC lives");
         if (mBinding.mConstantEffects && (!mBinding.mActorEffectLifecycle || !mBinding.mCombatState))
@@ -2818,6 +2825,85 @@ namespace TES3MP::Native
             casts.push_back({magicCaster(actor(spellCaster)), playerSpell->sourceKind, playerSpell->sourceId,
                 playerSpell->targetKind, playerSpell->targetId, playerSpell->commandId.value(),
                 *spellRecord, spellCharge, spellEffectSource});
+        // First automatic slice: unarmed NPCs, known spells, dry bound interior.
+        // Admission uses the stock AI reaction interval rounded up to server ticks;
+        // this is not cast animation timing. The committed tick anchors the cadence
+        // across restart and rejected writes, without a second mutable clock.
+        constexpr uint64_t reactionTicks = uint64_t(MWMechanics::AI_REACTION_TIME * 30.f + .999f);
+        bool automaticCast = false;
+        if (mBinding.mAutomaticNpcSpells && !actorCast && step && active && !respawn && combat && life
+            && !life->respawnTick && combat->actors[2][8][2] > 0
+            && !combat->knockedDown[2] && !combat->hitRecoveryTicks[2]
+            && tick.value() / reactionTicks != mActorTick / reactionTicks
+            && !mRuntime.equippedWeaponCondition(mCombatNpcOwner)
+            && (!melee || !melee->snapshot().mReleased || melee->snapshot().mPhase == MeleeAnimation::Phase::Complete)
+            && std::ranges::none_of(projectiles, [](const auto& flight) { return flight.casterKind == 2; }))
+        {
+            const CanonicalPlayerEntityState* enemy = nullptr;
+            float nearest = std::numeric_limits<float>::infinity();
+            for (const auto& playerId : mBinding.mPlayers)
+            {
+                const auto* player = players.findPlayer(playerId);
+                if (!player || player->transform().cell() != actorCell(before)
+                    || combat->actors[actor(playerId)][8][2] <= 0
+                    || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
+                        return session.playerId() == playerId;
+                    })) continue;
+                const auto place = player->transform().position();
+                const float dx = float(double(place.x()) / 1024) - before.mPosition[0];
+                const float dy = float(double(place.y()) / 1024) - before.mPosition[1];
+                const float dz = float(double(place.z()) / 1024) + 64.f - (before.mPosition[2] + 55.f);
+                const float distance = dx*dx + dy*dy + dz*dz;
+                if (distance < 8.f*8.f || distance > 2048.f*2048.f) continue;
+                if (distance < nearest || (distance == nearest && enemy && playerId < enemy->playerId()))
+                { enemy = player; nearest = distance; }
+            }
+            if (enemy)
+            {
+                auto caster = loadCombatStats(mRuntime.mStore, combat->actors[2], timedEffects, 2);
+                auto victim = loadCombatStats(mRuntime.mStore, combat->actors[actor(enemy->playerId())],
+                    timedEffects, actor(enemy->playerId()));
+                addTimedResistance(caster, timedEffects, 2);
+                addTimedResistance(victim, timedEffects, actor(enemy->playerId()));
+                const auto& base = *mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::NPC>()->mBase;
+                if (base.mSpells.mList.size() > MaximumAiMagicSources)
+                    throw std::invalid_argument("Automatic NPC spell budget exceeded");
+                const auto* race = mRuntime.mStore.get<ESM::Race>().find(base.mRace);
+                std::vector<AiMagicSpell> sources;
+                sources.reserve(base.mSpells.mList.size());
+                for (const auto& id : base.mSpells.mList)
+                {
+                    const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id);
+                    if (!spell) continue;
+                    const auto plan = prepareInstantSpell(*spell, mRuntime.mStore, true);
+                    // Filter whole sources before rating: an unsupported winner
+                    // must not hide a lower-ranked executable spell.
+                    if (!plan || plan->effects.hasRange(ESM::RT_Touch)
+                        || std::ranges::any_of(plan->effects.effects, [&](const auto& effect) {
+                            return (effect.mArea && (!mBinding.mMagicArea || effect.mRange != ESM::RT_Target))
+                                || (effect.mDuration && !mBinding.mMagicTimed);
+                        }) || (plan->effects.hasRange(ESM::RT_Target)
+                            && projectiles.size() + casts.size() >= MaximumActorProjectiles)) continue;
+                    const auto activeOn = [&](size_t index) {
+                        return std::ranges::any_of(timedEffects, [&](const auto& effect) {
+                            return effect.actor == index && effect.sourceKind == uint64_t(MagicUseSourceKind::Spell)
+                                && effect.source == spellRecordId(id) && effect.casterKind == 2
+                                && effect.caster == before.mActor && effect.casterLife == life->generation;
+                        });
+                    };
+                    sources.push_back({spell, race->mPowers.exists(id), activeOn(2), activeOn(actor(enemy->playerId()))});
+                }
+                if (const auto selected = prepareAiMagicCast({caster, &victim}, sources, {}, mRuntime.mStore))
+                {
+                    const bool self = selected->spell.effects.onlyRange(ESM::RT_Self);
+                    actorCast = ActorMagicCast{before.mActor, life->generation, tick.value(),
+                        MagicUseSourceKind::Spell, spellRecordId(selected->effectSource),
+                        self ? MagicUseTargetKind::Self : MagicUseTargetKind::Player,
+                        self ? 0 : enemy->playerId().value()};
+                    automaticCast = true;
+                }
+            }
+        }
         if (actorCast)
         {
             const auto& use = *actorCast;
@@ -3181,7 +3267,7 @@ namespace TES3MP::Native
             remaining.insert(remaining.end(), projectiles.begin() + flyingCount, projectiles.end());
             projectiles = std::move(remaining);
         }
-        if (step && !respawn && melee && (!combat || (combat->actors[2][8][2] > 0
+        if (step && !respawn && !automaticCast && melee && (!combat || (combat->actors[2][8][2] > 0
                 && (!mBinding.mKnockoutRules || !combat->knockedDown[2]))))
         {
             if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->windUp() >= 1.f)
