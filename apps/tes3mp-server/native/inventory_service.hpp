@@ -102,6 +102,7 @@ namespace TES3MP::Native
         bool mGeneralConstants = false;
         bool mDurableCasters = false;
         bool mAutomaticNpcSpells = false;
+        bool mNpcWeaponCompetition = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;

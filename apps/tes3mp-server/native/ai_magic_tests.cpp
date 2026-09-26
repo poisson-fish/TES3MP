@@ -1,5 +1,7 @@
 #include "ai_magic.hpp"
 #include "loadout.hpp"
+#include <apps/openmw/mwmechanics/weaponpriority.hpp>
+#include <components/esm3/loadweap.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/spellpriority.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
@@ -83,6 +85,82 @@ namespace
         result.mEffects.mList.push_back(entry);
         return result;
     }
+    void weapons()
+    {
+        MWWorld::ESMStore store; content(store);
+        setting(store, "fDamageStrengthBase", .5f); setting(store, "fDamageStrengthMult", .01f);
+        setting(store, "fAIMeleeWeaponMult", 1.f); setting(store, "fCombatInvisoMult", 1.f);
+        MWMechanics::NpcStats caster(store), enemy(store); initialize(caster); initialize(enemy);
+        ESM::Weapon weapon; weapon.blank(); weapon.mId = id("synthetic sword");
+        weapon.mData.mType = ESM::Weapon::ShortBladeOneHand;
+        weapon.mData.mHealth = 100; weapon.mData.mSpeed = 1.f;
+        for (auto* range : {&weapon.mData.mChop, &weapon.mData.mSlash, &weapon.mData.mThrust})
+            (*range)[0] = (*range)[1] = 10;
+        near(MWMechanics::weaponRatingBaseDamage(weapon), 10.f, "Shared melee rating arithmetic changed");
+        near(MWMechanics::weaponRatingScore(weapon, 10.f, 50.f, 2.f), 10.f, "Shared hit/speed scaling changed");
+        AiMagicContext context{caster, &enemy};
+        const auto healthy = rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store);
+        require(healthy && *healthy > 0.f, "Equipped weapon not rated");
+        const auto worn = rateAiMeleeWeapon(context, weapon, 50, -1.f, true, store);
+        require(worn && *worn < *healthy, "AI ignored weapon condition");
+        near(*rateAiMeleeWeapon(context, weapon, 0, -1.f, true, store), 0.f, "Broken weapon competed");
+        enemy.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::ResistNormalWeapons), MWMechanics::EffectParam(100.f));
+        near(*rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store), 0.f, "AI ignored normal resistance");
+        enemy.getMagicEffects() = {};
+        caster.getSkill(ESM::Skill::ShortBlade).setBase(0.f);
+        near(*rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store), 0.f, "Zero-skill weapon competed");
+        caster.getSkill(ESM::Skill::ShortBlade).setBase(100.f);
+        auto fire = spell("competing fire", ESM::MagicEffect::FireDamage, ESM::RT_Target);
+        std::array<AiMagicSpell, 1> sources{{{&fire}}};
+        const auto cast = prepareAiMagicCast(context, sources, {}, store);
+        require(bool(cast), "Competition fixture has no cast");
+        context.weaponRating = cast->rating;
+        require(!prepareAiMagicCast(context, sources, {}, store), "Spell won a weapon tie");
+        context.weaponRating -= .01f;
+        require(bool(prepareAiMagicCast(context, sources, {}, store)), "Stronger spell lost to weapon");
+        context.weaponRating = cast->rating + .01f;
+        require(!prepareAiMagicCast(context, sources, {}, store), "Stronger weapon lost to spell");
+        ESM::Enchantment enchantment; enchantment.blank(); enchantment.mId = id("competing item");
+        enchantment.mData.mType = ESM::Enchantment::WhenUsed;
+        enchantment.mData.mCost = 10; enchantment.mData.mCharge = 100; enchantment.mEffects = fire.mEffects;
+        store.insertStatic(enchantment);
+        std::array<AiMagicItem, 1> items{{{{41, -1}, enchantment.mId, -1.f, true}}};
+        context.weaponRating = 0.f;
+        const auto item = prepareAiMagicCast(context, sources, items, store);
+        require(item && item->payment, "Item did not compete");
+        context.weaponRating = item->rating;
+        require(prepareAiMagicCast(context, sources, items, store)->payment.has_value(), "Weapon won an item tie");
+        context.weaponRating += .01f;
+        require(!prepareAiMagicCast(context, sources, items, store), "Weaker item beat weapon");
+        enchantment.mData.mType = ESM::Enchantment::WhenStrikes; store.overrideRecord(enchantment);
+        weapon.mEnchant = enchantment.mId;
+        const auto charged = rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store);
+        const auto depleted = rateAiMeleeWeapon(context, weapon, 100, 0.f, true, store);
+        require(charged && depleted && *charged > *depleted, "AI ignored usable strike charge");
+        enchantment.mEffects.mList.back().mData.mEffectID = ESM::MagicEffect::Levitate;
+        store.overrideRecord(enchantment);
+        require(!rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store), "Unsupported strike rated partially");
+        weapon.mEnchant = {};
+        weapon.mData.mType = ESM::Weapon::MarksmanBow;
+        require(!rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store), "Ranged weapon silently treated as melee");
+        weapon.mData.mType = ESM::Weapon::ShortBladeOneHand;
+        for (auto* range : {&weapon.mData.mChop, &weapon.mData.mSlash, &weapon.mData.mThrust}) (*range)[0] = (*range)[1] = 0;
+        near(MWMechanics::weaponRatingBaseDamage(weapon), 0.f, "Zero-damage weapon rating is not finite");
+        setting(store, "fAIMeleeWeaponMult", 2.f);
+        for (auto* range : {&weapon.mData.mChop, &weapon.mData.mSlash, &weapon.mData.mThrust}) (*range)[0] = (*range)[1] = 10;
+        near(*rateAiMeleeWeapon(context, weapon, 100, -1.f, true, store), *healthy * 2.f, "AI cached another content rating");
+        for (float invalid : {-1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+        {
+            context.weaponRating = invalid;
+            bool rejected = false;
+            try { prepareAiMagicCast(context, sources, items, store); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "Malformed competition rating accepted");
+        }
+        near(caster.getMagicka().getCurrent(), 100.f, "Competition spent magicka");
+        near(items[0].charge, -1.f, "Competition spent charge");
+    }
+
     void selection()
     {
         MWWorld::ESMStore store; content(store);
@@ -328,9 +406,10 @@ int main(int argc, char** argv)
     {
         if (argc == 3 && std::string_view(argv[1]) == "records")
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
-        if (argc != 2) throw std::invalid_argument("Select selection, rejection, launch, items or records <config>");
+        if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "selection") selection();
+        if (filter == "weapons") weapons();
+        else if (filter == "selection") selection();
         else if (filter == "rejection") rejection();
         else if (filter == "launch") launch();
         else if (filter == "items") items();

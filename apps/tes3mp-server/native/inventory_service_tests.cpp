@@ -4127,7 +4127,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4273,6 +4273,7 @@ namespace TES3MP::Native::Testing
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
                 if (shield) npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Block)] = 100;
+                if (weaponCompetition) npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 if (!automaticCasts) npc.mInventory.mList.push_back({1, strike ? strikeWeapon.mId
                     : ESM::RefId::stringRefId("iron shortsword")});
             }
@@ -4656,6 +4657,7 @@ namespace TES3MP::Native::Testing
                     binding.mKnockoutRules = binding.mMeleeDefenseRules = binding.mActorEffectLifecycle = true;
                     binding.mDurableCasters = durableCasters;
                     binding.mAutomaticNpcSpells = automaticCasts;
+                    binding.mNpcWeaponCompetition = weaponCompetition;
                     binding.mConstantEffects = binding.mGeneralConstants = durableCasters;
                     if (durableCasters) binding.mNpcRespawnDelayTicks = 3;
                     binding.mStreamExteriors = true;
@@ -4682,6 +4684,40 @@ namespace TES3MP::Native::Testing
                     }
                     authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
                     service.synchronizeCells(authority);
+                    if (weaponCompetition)
+                    {
+                        const auto view = service.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(view && view->equipment && std::ranges::any_of(view->equipment->actors,
+                            [&](const auto& actor) { return actor.actor.value() == npc.mIdentity
+                                && actor.slots[MWWorld::InventoryStore::Slot_CarriedRight]
+                                    == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron shortsword"))); }),
+                            "Weapon competition fixture did not equip its sword");
+                        // Exercise both decisions with independent simulations and
+                        // explicit synthetic GMSTs; content stays fixed during each run.
+                        auto multiplier = *content.get<ESM::GameSetting>().find("fAIMeleeWeaponMult");
+                        multiplier.mValue.setFloat(1000.f); loadout.store().overrideRecord(multiplier);
+                        {
+                            InventoryService weaponFirst(loadout.store(), loadout.readers(), bindCaster());
+                            weaponFirst.synchronizeCells(authority);
+                            const auto startImage = bytes(weaponFirst);
+                            const auto start = readActorCampaign({reinterpret_cast<const char*>(startImage.data()), startImage.size()});
+                            for (uint64_t tick = 1; tick <= 8; ++tick)
+                            {
+                                const auto before = bytes(weaponFirst);
+                                auto action = weaponFirst.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                                require(action && action->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(weaponFirst) == before,
+                                    "Rejected weapon decision changed state");
+                                require(action->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                    "Weapon decision commit failed");
+                            }
+                            const auto endImage = bytes(weaponFirst);
+                            const auto end = readActorCampaign({reinterpret_cast<const char*>(endImage.data()), endImage.size()});
+                            require(end.projectiles.empty() && end.combat->actors[2][9][2] == start.combat->actors[2][9][2],
+                                "Weaker spell beat equipped weapon or spent magicka");
+                        }
+                        multiplier.mValue.setFloat(.001f); loadout.store().overrideRecord(multiplier);
+                    }
                     const auto initial = bytes(service);
                     const auto initialState = readActorCampaign({reinterpret_cast<const char*>(initial.data()), initial.size()});
                     const auto source = [](std::string_view text) {

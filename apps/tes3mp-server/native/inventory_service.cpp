@@ -604,6 +604,8 @@ namespace TES3MP::Native
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
               {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64, mBinding.mConstantEffects)
     {
+        if (mBinding.mNpcWeaponCompetition && !mBinding.mAutomaticNpcSpells)
+            throw std::invalid_argument("NPC weapon competition requires automatic casting");
         if (mBinding.mAutomaticNpcSpells && (!mBinding.mDurableCasters || !mBinding.mMagicUse
                 || !mBinding.mMagicPlayerTarget || !mBinding.mMagicProjectileCollection
                 || !mBinding.mActorEffectLifecycle))
@@ -2825,7 +2827,7 @@ namespace TES3MP::Native
             casts.push_back({magicCaster(actor(spellCaster)), playerSpell->sourceKind, playerSpell->sourceId,
                 playerSpell->targetKind, playerSpell->targetId, playerSpell->commandId.value(),
                 *spellRecord, spellCharge, spellEffectSource});
-        // First automatic slice: unarmed NPCs, known spells, dry bound interior.
+        // Known spells compete with the equipped melee weapon in V40.
         // Admission uses the stock AI reaction interval rounded up to server ticks;
         // this is not cast animation timing. The committed tick anchors the cadence
         // across restart and rejected writes, without a second mutable clock.
@@ -2835,7 +2837,7 @@ namespace TES3MP::Native
             && !life->respawnTick && combat->actors[2][8][2] > 0
             && !combat->knockedDown[2] && !combat->hitRecoveryTicks[2]
             && tick.value() / reactionTicks != mActorTick / reactionTicks
-            && !mRuntime.equippedWeaponCondition(mCombatNpcOwner)
+            && (mBinding.mNpcWeaponCompetition || !mRuntime.equippedWeaponCondition(mCombatNpcOwner))
             && (!melee || !melee->snapshot().mReleased || melee->snapshot().mPhase == MeleeAnimation::Phase::Complete)
             && std::ranges::none_of(projectiles, [](const auto& flight) { return flight.casterKind == 2; }))
         {
@@ -2865,6 +2867,24 @@ namespace TES3MP::Native
                     timedEffects, actor(enemy->playerId()));
                 addTimedResistance(caster, timedEffects, 2);
                 addTimedResistance(victim, timedEffects, actor(enemy->playerId()));
+                if (mBinding.mKnockoutRules) victim.setKnockedDown(combat->knockedDown[actor(enemy->playerId())]);
+                AiMagicContext selection{caster, &victim};
+                selection.enemyWerewolf = victim.isWerewolf();
+                std::optional<float> weaponRating = 0.f;
+                if (const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner))
+                {
+                    const auto values = mRuntime.installedValues(mCombatNpcOwner);
+                    const auto item = std::ranges::find(values.mObjects, held->mItem,
+                        [](const auto& object) { return object.mRef.mRefNum; });
+                    if (item == values.mObjects.end())
+                        throw std::invalid_argument("Automatic NPC weapon identity missing");
+                    const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+                    weaponRating = rateAiMeleeWeapon(selection, *weapon, held->mCondition,
+                        item->mRef.mEnchantmentCharge, mBinding.mEnchantedWeaponsAreMagical, mRuntime.mStore);
+                }
+                // An unsupported weapon retains the existing combat path.
+                // Do not pretend it has zero value and favor magic accidentally.
+                selection.weaponRating = weaponRating.value_or(0.f);
                 const auto& base = *mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::NPC>()->mBase;
                 if (base.mSpells.mList.size() > MaximumAiMagicSources)
                     throw std::invalid_argument("Automatic NPC spell budget exceeded");
@@ -2893,7 +2913,8 @@ namespace TES3MP::Native
                     };
                     sources.push_back({spell, race->mPowers.exists(id), activeOn(2), activeOn(actor(enemy->playerId()))});
                 }
-                if (const auto selected = prepareAiMagicCast({caster, &victim}, sources, {}, mRuntime.mStore))
+                if (const auto selected = weaponRating
+                    ? prepareAiMagicCast(selection, sources, {}, mRuntime.mStore) : std::nullopt)
                 {
                     const bool self = selected->spell.effects.onlyRange(ESM::RT_Self);
                     actorCast = ActorMagicCast{before.mActor, life->generation, tick.value(),

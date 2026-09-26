@@ -17,6 +17,10 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V40 adds equipped melee weapon competition to automatic spell selection.
+    // Shares stock damage/condition/hit/speed rating arithmetic; equipped
+    // WhenUsed scheduling and ranged weapon selection remain pending.
+    // Keeps V38 image layout; descriptor identity requires a fresh campaign.
     // V39 enables automatic known-spell selection for the unarmed selected NPC.
     // Nearest active living player, stock spell ratings, eight-tick admission,
     // one NPC flight at a time. Shared immediate launch; animation timing,

@@ -81,11 +81,12 @@ legacy recovery never invents missing life metadata.
 clients cannot submit it. NPC death cancels flights; installed effects retain
 attribution. V38 retains its layout. T3C2 events require capability 20 at admission.
 
-**V39 automatic admission.** Unarmed NPC known-spell selection uses eight-tick
-boundaries (stock reaction interval rounded to 30 Hz ticks), anchored by committed
-tick for restart/retry. Nearest active living player wins; player ID breaks ties.
-Selection feeds trusted cast input. This is not animation timing. A fresh
-descriptor-bound campaign retains the V38 image layout.
+**Automatic admission (V39/V40).** Committed eight-tick boundaries anchor restart/
+retry; nearest active living player wins, with player-ID ties. V39 admits unarmed
+known spells. V40 compares equipped melee weapons through shared OpenMW ratings;
+items win weapon ties, weapons win spell ties. Unsupported weapon/strike plans do
+not become zero-rated weapons. Fresh descriptor-bound campaigns retain V38 images.
+Animation timing, carried/ranged selection and equipped WhenUsed admission remain.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays

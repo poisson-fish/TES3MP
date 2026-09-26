@@ -3,6 +3,7 @@
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadgmst.hpp>
+#include <tes3mp/melee_combat.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -13,12 +14,58 @@
 
 #include "aicombataction.hpp"
 #include "combat.hpp"
+#include "creaturestats.hpp"
 #include "spellpriority.hpp"
 #include "spellutil.hpp"
 #include "weapontype.hpp"
 
 namespace MWMechanics
 {
+    float weaponRatingBaseDamage(const ESM::Weapon& weapon)
+    {
+        const auto weapclass = getWeaponType(weapon.mData.mType)->mWeaponClass;
+        float rating = 0.f;
+        const float chop = (weapon.mData.mChop[0] + weapon.mData.mChop[1]) / 2.f;
+        // We need to account for the fact that thrown weapons have 2x real damage applied to the target
+        // as they're both the weapon and the ammo of the hit
+        if (weapclass == ESM::WeaponType::Thrown)
+        {
+            rating = chop * 2;
+        }
+        else if (weapclass != ESM::WeaponType::Melee)
+        {
+            rating = chop;
+        }
+        else
+        {
+            const float slash = (weapon.mData.mSlash[0] + weapon.mData.mSlash[1]) / 2.f;
+            const float thrust = (weapon.mData.mThrust[0] + weapon.mData.mThrust[1]) / 2.f;
+            const float total = slash + thrust + chop;
+            rating = total > 0.f ? (slash * slash + thrust * thrust + chop * chop) / total : 0.f;
+        }
+
+        return rating;
+    }
+
+    float weaponRatingScore(const ESM::Weapon& weapon, float adjustedDamage, float hitChance, float multiplier)
+    {
+        adjustedDamage *= std::clamp(hitChance / 100.f, 0.01f, 1.f);
+        if (getWeaponType(weapon.mData.mType)->mWeaponClass != ESM::WeaponType::Ammo)
+            adjustedDamage *= weapon.mData.mSpeed;
+        return adjustedDamage * multiplier;
+    }
+
+    float weaponRatingAdjustedDamage(const ESM::Weapon& weapon, float strength, float normalizedHealth,
+        bool hasHealth, const MWWorld::ESMStore& content)
+    {
+        const auto& gmst = content.get<ESM::GameSetting>();
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.damageStrengthBase = gmst.find("fDamageStrengthBase")->mValue.getFloat();
+        settings.damageStrengthMultiplier = gmst.find("fDamageStrengthMult")->mValue.getFloat();
+        return TES3MP::openMwAdjustedWeaponDamage(settings, strength, normalizedHealth, hasHealth,
+            weaponRatingBaseDamage(weapon));
+    }
+
     float rateWeapon(const MWWorld::Ptr& item, const MWWorld::Ptr& actor, const MWWorld::Ptr& enemy, int type,
         float arrowRating, float boltRating)
     {
@@ -59,25 +106,10 @@ namespace MWMechanics
             }
         }
 
-        const float chop = (weapon->mData.mChop[0] + weapon->mData.mChop[1]) / 2.f;
-        // We need to account for the fact that thrown weapons have 2x real damage applied to the target
-        // as they're both the weapon and the ammo of the hit
-        if (weapclass == ESM::WeaponType::Thrown)
-        {
-            rating = chop * 2;
-        }
-        else if (weapclass != ESM::WeaponType::Melee)
-        {
-            rating = chop;
-        }
-        else
-        {
-            const float slash = (weapon->mData.mSlash[0] + weapon->mData.mSlash[1]) / 2.f;
-            const float thrust = (weapon->mData.mThrust[0] + weapon->mData.mThrust[1]) / 2.f;
-            rating = (slash * slash + thrust * thrust + chop * chop) / (slash + thrust + chop);
-        }
-
-        adjustWeaponDamage(rating, item, actor);
+        const bool hasHealth = item.getClass().hasItemHealth(item);
+        rating = weaponRatingAdjustedDamage(*weapon,
+            actor.getClass().getCreatureStats(actor).getAttribute(ESM::Attribute::Strength).getModified(),
+            hasHealth ? item.getClass().getItemNormalizedHealth(item) : 1.f, hasHealth, world->getStore());
 
         if (weapclass != ESM::WeaponType::Ranged)
         {
@@ -134,13 +166,7 @@ namespace MWMechanics
             value = ref->mBase->mData.mCombat;
         }
 
-        // Take hit chance in account, but do not allow rating become negative.
-        rating *= std::clamp(getHitChance(actor, enemy, value) / 100.f, 0.01f, 1.f);
-
-        if (weapclass != ESM::WeaponType::Ammo)
-            rating *= weapon->mData.mSpeed;
-
-        return rating * ratingMult;
+        return weaponRatingScore(*weapon, rating, getHitChance(actor, enemy, value), ratingMult);
     }
 
     float rateAmmo(const MWWorld::Ptr& actor, const MWWorld::Ptr& enemy, MWWorld::Ptr& bestAmmo, int ammoType)
