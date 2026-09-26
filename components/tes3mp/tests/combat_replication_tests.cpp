@@ -187,6 +187,35 @@ namespace
             value<TES3MP::CanonicalRevision>(1), {}, {}, invalid));
     }
 
+    bool cast_stages_round_trip_and_reject_invalid_timing()
+    {
+        std::array actors{TES3MP::ActorCombatSnapshot{value<TES3MP::ActorId>(2),
+            value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 50, 50, false, 8, 3, 2, 9, 20, 30}};
+        const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+            value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 50, 50, false, actors, skills()); };
+        for (std::uint8_t phase = 1; phase <= 5; ++phase)
+        {
+            actors[0].castPhase = phase;
+            actors[0].castElapsed = phase <= 2 ? 0 : phase == 3 ? 9 : 20;
+            const auto value = create();
+            if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(value)) return false;
+            const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(value);
+            auto bytes = TES3MP::encodeLatestWinsCombatSnapshot(snapshot);
+            const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(bytes);
+            if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+                || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
+            bytes[11] = std::byte('S');
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(TES3MP::decodeLatestWinsCombatSnapshot(bytes))) return false;
+        }
+        actors[0].castElapsed = 30;
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        actors[0].castElapsed = 20; actors[0].castRange = 3;
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        actors[0].castRange = 2; actors[0].castId = 0;
+        return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create());
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -204,7 +233,7 @@ int main()
 {
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
-            && actor_casts_reject_malformed_wire_identity() && frame_classes_are_pinned()
+            && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing() && frame_classes_are_pinned()
         ? 0
         : 1;
 }

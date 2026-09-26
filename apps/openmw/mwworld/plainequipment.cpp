@@ -204,7 +204,7 @@ namespace MWWorld
                 validateEquipmentItemSlots(record, ref.mRefNum, ref.mCount, input.mSlots, input.mNpcStats.has_value());
                 if (!base->mScript.empty() && !input.mNpcStats)
                     throw std::invalid_argument("Inventory script services or equipment type unsupported");
-                const auto effect = input.mNpcStats && ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt]
+                const auto effect = input.mNpcStats && !base->mWhenUsed && ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt]
                     ? MWMechanics::constantFortifyLuckMagnitude(content, base->mEnchant) : 0.f;
                 if (ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt])
                     magnitude = effect;
@@ -619,7 +619,7 @@ namespace MWWorld
                 if (std::abs(static_cast<int64_t>(node.mRef.getCount(false))) > 1 || record.mEnchant.empty())
                     throw std::invalid_argument("Scripted equipment requires single constant shirts");
             }
-            if (context.mNpcStats && record.mSlots.contains(InventoryStore::Slot_Shirt))
+            if (context.mNpcStats && !record.mWhenUsed && record.mSlots.contains(InventoryStore::Slot_Shirt))
                 MWMechanics::constantFortifyLuckMagnitude(context.mStore, record.mEnchant);
         }
 
@@ -743,7 +743,7 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment item is stale, dormant or slot is invalid");
             const auto record = inventoryItemRecord(mContext.mStore, item->getCellRef().getRefId());
             if (!record.mSlots.contains(slot)
-                || (!record.mStrikeOnly && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
+                || (!record.mStrikeOnly && !record.mWhenUsed && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
                     && slot != InventoryStore::Slot_Shirt)
                 || (!record.mScript.empty()
                     && (slot != InventoryStore::Slot_Shirt || !mContext.mNpcStats)))

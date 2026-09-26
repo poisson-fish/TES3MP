@@ -86,6 +86,7 @@ namespace MWRender
         ReplicatedActorResult advanceReplicatedActor(const MWWorld::Ptr& ptr, const ESM::Position& position,
             ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         ReplicatedActorResult setReplicatedActorDead(const MWWorld::Ptr& ptr, bool dead) noexcept;
+        ReplicatedActorResult setReplicatedActorCast(const MWWorld::Ptr& ptr, bool active, unsigned range, float completion) noexcept;
         ReplicatedActorResult playReplicatedActorAction(
             const MWWorld::Ptr& ptr, ReplicatedActorAction action) noexcept;
         bool removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept;

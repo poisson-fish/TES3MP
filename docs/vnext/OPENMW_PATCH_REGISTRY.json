@@ -6,10 +6,12 @@
       "id": "M4-007",
       "slice": "explicit AI magic ratings and bounded source preparation",
       "owner": "OpenMW mechanics and native actor runtime",
-      "purpose": "Share common combat-effect priorities, restoration, resistance, effect cost, range settings, spell eligibility and enchanted-item preference through explicit actor/content/activity inputs. Stock Ptr callers retain world-specific effects and queries. The native selector prepares known spells and equipped WhenUsed items with existing player cost/charge helpers, preserving source identity and ordered effects without mutation or RNG consumption. Unsupported plans are skipped whole. Durable actor identity and trusted actor-cast execution/replication are wired through the composed native tick. V39 schedules known spells. V40 compares equipped melee weapons through shared damage, condition and hit/speed rating arithmetic; WhenUsed scheduling, carried/ranged weapon selection and potion competition remain pending.",
+      "purpose": "Share common combat-effect priorities, restoration, resistance, effect cost, range settings, spell eligibility and enchanted-item preference through explicit actor/content/activity inputs. Stock Ptr callers retain world-specific effects and queries. The native selector prepares known spells and equipped WhenUsed items with existing player cost/charge helpers, preserving source identity and ordered effects without mutation or RNG consumption. Unsupported plans are skipped whole. Durable actor identity and trusted actor-cast execution/replication are wired through the composed native tick. V39 schedules known spells. V40 compares equipped melee weapons through shared damage, condition and hit/speed rating arithmetic. V41 compares carried/equipped melee, bow/crossbow ammunition and thrown weapons, admits equipped WhenUsed and uses authoritative visibility. V42 persists source selection, animation-key preparation/release/recovery and flight, with shared timed argument/range resolution and two independent player casts in the same atomic tick. Potion competition remains pending.",
       "paths": [
         "apps/openmw/mwmechanics/spellpriority.cpp",
         "apps/openmw/mwmechanics/spellpriority.hpp",
+        "apps/openmw/mwmechanics/spellresistance.cpp",
+        "apps/openmw/mwmechanics/spellresistance.hpp",
         "apps/openmw/mwmechanics/weaponpriority.cpp",
         "apps/openmw/mwmechanics/weaponpriority.hpp"
       ],
@@ -20,9 +22,12 @@
         "tes3mp_native_ai_magic_tests rejection",
         "tes3mp_native_ai_magic_tests items",
         "tes3mp_native_ai_magic_tests launch",
-        "tes3mp_native_ai_magic_tests records"
+        "tes3mp_native_ai_magic_tests records",
+        "tes3mp_native_loadout_tests npc-full-selection",
+        "tes3mp_native_loadout_tests npc-cast-lifecycle",
+        "scripts/native_cast_encounter.py"
       ],
-      "disposition": "shared engine extraction; bounded automatic spell and equipped melee competition verified",
+      "disposition": "shared engine extraction; bounded automatic casting lifecycle and atomic concurrent outcomes",
       "removal_condition": "OpenMW supplies equivalent explicit AI rating and source selection interfaces"
     },
     {
@@ -217,7 +222,7 @@
       "id": "M3-005",
       "slice": "placed actor inventories and corpse looting",
       "owner": "OpenMW server runtime",
-      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Retire unselected ordinary empty stacks during staged transfers and replace registry membership atomically. Project corpse stacks and living public equipment without local selection or script execution; validate complete appearance records/slots before replacement and keep presentation items outside transferable identity maps. Explicit cleanup services avoid borrowing a global world. Bulk Take All uses the same detached stock transfer preparation for every source stack, validates aggregate bounds, and commits both stores once. Ordinary world pickup/drop stages stock inventory add/remove with owned ObjectState fields under the same durability boundary. V14 adds an explicitly supplied bounded world-reference validation capacity while preserving per-inventory defaults; automatic multi-area storage remains app-owned. Dropped gold shares stock pile selection before placement bounds; placement resolves on detached state before coherent image encoding.",
+      "purpose": "Bind winning NPC/creature inventories to the coherent writer, reuse stock creature skill selection and equipment removal, and retain separate owner/initiator contexts. Retire unselected ordinary empty stacks during staged transfers and replace registry membership atomically. Project corpse stacks and living public equipment without local selection or script execution; validate complete appearance records/slots before replacement and keep presentation items outside transferable identity maps. Explicit cleanup services avoid borrowing a global world. Bulk Take All uses the same detached stock transfer preparation for every source stack, validates aggregate bounds, and commits both stores once. Ordinary world pickup/drop stages stock inventory add/remove with owned ObjectState fields under the same durability boundary. V14 adds an explicitly supplied bounded world-reference validation capacity while preserving per-inventory defaults; automatic multi-area storage remains app-owned. Dropped gold shares stock pile selection before placement bounds; placement resolves on detached state before coherent image encoding. Unscripted WhenUsed shirts use ordinary detached slot staging; the cast owner resolves their effects at release. Presentation equipment admits unscripted WhenUsed only with explicit content validation and performs no local activation.",
       "paths": [
         "apps/openmw/mwclass/creature.cpp",
         "apps/openmw/mwclass/creature.hpp",
@@ -268,7 +273,7 @@
       "id": "M3-003",
       "slice": "authoritative equipment slots",
       "owner": "OpenMW server runtime",
-      "purpose": "Share allocation-free stock clothing/armor/weapon slot rules and explicit actor/content clothing/armor eligibility. Preserve all 19 slots and complete activation flags through detached staging and recovery. Native equipment commands use coherent durability, private/public projection and full-slot equipment format 7; unavailable effects still reject. V37 admits unscripted constant equipment through an explicit external-effect context; the composed owner validates complete effect plans and commits their instances with inventory, while structural codecs retain all slots.",
+      "purpose": "Share allocation-free stock clothing/armor/weapon slot rules and explicit actor/content clothing/armor eligibility. Preserve all 19 slots and complete activation flags through detached staging and recovery. Native equipment commands use coherent durability, private/public projection and full-slot equipment format 7; unavailable effects still reject. V37 admits unscripted constant equipment through an explicit external-effect context; the composed owner validates complete effect plans and commits their instances with inventory, while structural codecs retain all slots. V41 also admits unscripted equipped WhenUsed without equip-time activation; charge payment belongs to cast release.",
       "paths": [
         "apps/openmw/mwworld/equipmentslots.hpp",
         "apps/openmw/mwworld/inventoryitem.hpp",
@@ -283,7 +288,8 @@
         "tes3mp_native_loadout_tests player-inventory-host",
         "tes3mp_native_loadout_tests inventory-equipment-scripted",
         "tes3mp_native_loadout_tests inventory-equipment-codec-guards",
-        "tes3mp_native_loadout_tests npc-general-constants"
+        "tes3mp_native_loadout_tests npc-general-constants",
+        "tes3mp_native_loadout_tests npc-full-selection"
       ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit actor equipment checks and transactional slot-state interfaces"
@@ -535,7 +541,7 @@
       "id": "P8-004",
       "slice": "8.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body. Rendering queries share their masks, intersection traversal and camera ray calculation with the headless placement scene. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. M4 Animation::reset delegates section selection to components/sceneutil/animationkeys.hpp, shared with detached native directional melee scheduling; reverse group selection, loop-start fallback and stop suffix tolerance are preserved.",
+      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration. Share stock upright actor root rotation with replicated actor creation and motion so look pitch does not tilt the body. Rendering queries share their masks, intersection traversal and camera ray calculation with the headless placement scene. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. M4 Animation::reset delegates section selection to components/sceneutil/animationkeys.hpp, shared with detached native directional melee scheduling; reverse group selection, loop-start fallback and stop suffix tolerance are preserved. V42 projects committed spellcast range and elapsed animation stage onto both native placements and replicated actors without client gameplay execution.",
       "paths": [
         "apps/openmw/mwrender/actorutil.cpp",
         "apps/openmw/mwrender/actorutil.hpp",
@@ -567,7 +573,8 @@
         "tes3mp_native_loadout_tests player-area-discovery",
         "tes3mp_inventory_replication_tests neighborhoods",
         "openmw-m3-v15.exe RelWithDebInfo link",
-        "tes3mp_native_melee_tests melee-scheduling"
+        "tes3mp_native_melee_tests melee-scheduling",
+        "scripts/native_cast_encounter.py"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"

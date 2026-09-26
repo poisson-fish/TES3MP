@@ -16,31 +16,45 @@
 
 namespace TES3MP::Native
 {
-    std::optional<float> rateAiMeleeWeapon(const AiMagicContext& context, const ESM::Weapon& weapon,
-        int condition, float charge, bool enchantedWeaponsAreMagical, const MWWorld::ESMStore& content)
+    std::optional<float> rateAiWeapon(const AiMagicContext& context, const ESM::Weapon& weapon,
+        int condition, float charge, bool enchantedWeaponsAreMagical, const MWWorld::ESMStore& content,
+        float arrowRating, float boltRating)
     {
-        if (condition < 0 || !std::isfinite(charge) || (charge < 0.f && charge != -1.f))
+        if (condition < 0 || !std::isfinite(charge) || (charge < 0.f && charge != -1.f)
+            || !std::isfinite(arrowRating) || arrowRating < 0.f || !std::isfinite(boltRating) || boltRating < 0.f)
             throw std::invalid_argument("Native AI weapon state invalid");
         const auto* type = MWMechanics::getWeaponType(weapon.mData.mType);
-        if (type->mWeaponClass != ESM::WeaponType::Melee) return std::nullopt;
-        if (!context.enemy || !condition) return 0.f;
+        const auto weaponClass = type->mWeaponClass;
+        const bool hasHealth = weaponClass == ESM::WeaponType::Melee || weaponClass == ESM::WeaponType::Ranged;
+        if (!context.enemy || (hasHealth && !condition)) return 0.f;
+        if (weaponClass != ESM::WeaponType::Melee && (context.casterUnderwater || context.enemyUnderwater)) return 0.f;
         const int skill = int(context.caster.getSkill(type->mSkill).getModified());
         if (skill <= 0) return 0.f;
         float damage = MWMechanics::weaponRatingAdjustedDamage(weapon,
             context.caster.getAttribute(ESM::Attribute::Strength).getModified(),
-            weapon.mData.mHealth ? float(condition) / weapon.mData.mHealth : 1.f,
-            weapon.mData.mHealth != 0, content);
-        if (MWMechanics::isNormalWeapon(&weapon, enchantedWeaponsAreMagical))
-            damage = MWMechanics::applyNormalWeaponResistance(*context.enemy, damage);
-        if (context.enemyWerewolf && (weapon.mData.mFlags & ESM::Weapon::Silver))
-            damage *= content.get<ESM::GameSetting>().find("fWereWolfSilverWeaponDamageMult")->mValue.getFloat();
+            hasHealth && weapon.mData.mHealth ? float(condition) / weapon.mData.mHealth : 1.f,
+            hasHealth && weapon.mData.mHealth != 0, content);
+        if (weaponClass == ESM::WeaponType::Ranged)
+        {
+            const float ammo = type->mAmmoType == ESM::Weapon::Arrow ? arrowRating : boltRating;
+            damage = ammo > 0.f ? damage + ammo : 0.f;
+        }
+        else
+        {
+            if (MWMechanics::isNormalWeapon(&weapon, enchantedWeaponsAreMagical))
+                damage = MWMechanics::applyNormalWeaponResistance(*context.enemy, damage);
+            if (context.enemyWerewolf && (weapon.mData.mFlags & ESM::Weapon::Silver))
+                damage *= content.get<ESM::GameSetting>().find("fWereWolfSilverWeaponDamageMult")->mValue.getFloat();
+        }
         if (!weapon.mEnchant.empty())
         {
             const auto* enchantment = content.get<ESM::Enchantment>().search(weapon.mEnchant);
             if (!enchantment) return std::nullopt;
             if (enchantment->mData.mType == ESM::Enchantment::WhenStrikes)
             {
-                const auto plan = prepareEnchantmentCast(*enchantment, context.caster, charge, content, true);
+                const auto plan = prepareEnchantmentCast(*enchantment, context.caster,
+                    weaponClass == ESM::WeaponType::Thrown || weaponClass == ESM::WeaponType::Ammo ? -1.f : charge,
+                    content, true);
                 if (!plan) return std::nullopt;
                 if (plan->affordable) for (const auto& effect : plan->effects.effects)
                 {
@@ -58,7 +72,8 @@ namespace TES3MP::Native
         const float chance = MWMechanics::getHitChance(content, context.caster, *context.enemy, skill, false,
             context.enemy->getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0.f);
         const float rating = MWMechanics::weaponRatingScore(weapon, damage, chance,
-            content.get<ESM::GameSetting>().find("fAIMeleeWeaponMult")->mValue.getFloat());
+            content.get<ESM::GameSetting>().find(weaponClass != ESM::WeaponType::Melee && context.outsideEnemyReach
+                ? "fAIRangeMeleeWeaponMult" : "fAIMeleeWeaponMult")->mValue.getFloat());
         if (!std::isfinite(rating) || rating < 0.f) return std::nullopt;
         return rating;
     }

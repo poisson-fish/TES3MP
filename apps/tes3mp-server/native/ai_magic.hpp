@@ -38,6 +38,7 @@ namespace TES3MP::Native
         bool enemyUnderwater = false;
         float weaponRating = 0.f;
         bool enemyWerewolf = false;
+        bool outsideEnemyReach = false;
     };
 
     struct AiMagicPayment
@@ -57,10 +58,11 @@ namespace TES3MP::Native
 
     inline constexpr size_t MaximumAiMagicSources = 1024;
 
-    // Equipped melee competition, using stock rating and combat arithmetic.
+    // Carried/equipped weapon competition, using stock rating and combat arithmetic.
     // Unsupported weapon/strike effects return no rating, never a partial one.
-    std::optional<float> rateAiMeleeWeapon(const AiMagicContext& context, const ESM::Weapon& weapon,
-        int condition, float charge, bool enchantedWeaponsAreMagical, const MWWorld::ESMStore& content);
+    std::optional<float> rateAiWeapon(const AiMagicContext& context, const ESM::Weapon& weapon,
+        int condition, float charge, bool enchantedWeaponsAreMagical, const MWWorld::ESMStore& content,
+        float arrowRating = 0.f, float boltRating = 0.f);
 
     // Read-only selection: no cost, charge, RNG, effects or presentation changes.
     // Enumerate equipped WhenUsed items first, then known spells, as stock AI

@@ -232,7 +232,7 @@ namespace TES3MP::Native
                 valid(base->mType == type
                     && (base->mScript.empty() || (version == ScriptedEquipmentFormatVersion && !base->mEnchant.empty())));
                 const auto magnitude = version != EquipmentFormatVersion && id == result.mSlots[InventoryStore::Slot_Shirt]
-                    ? MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant) : 0.f;
+                    ? (base->mWhenUsed ? 0.f : MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant)) : 0.f;
                 if (id == result.mSlots[InventoryStore::Slot_Shirt])
                     luckMagnitude = magnitude;
                 const auto optionalId = [&](uint32_t tag) {

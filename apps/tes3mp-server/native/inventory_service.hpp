@@ -103,6 +103,9 @@ namespace TES3MP::Native
         bool mDurableCasters = false;
         bool mAutomaticNpcSpells = false;
         bool mNpcWeaponCompetition = false;
+        bool mNpcFullSelection = false;
+        bool mNpcCastLifecycle = false;
+        std::optional<BoundCastAnimations> mBoundCasts;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
@@ -178,6 +181,7 @@ namespace TES3MP::Native
         std::optional<ActorCampaignLife> mLife;
         std::vector<ActorCampaignProjectile> mProjectiles;
         std::vector<ActorCampaignTimedEffect> mTimedEffects;
+        std::optional<ActorCampaignCast> mNpcCast;
         PlainEquipmentValues mRespawnInventory;
         size_t mCombatNpcOwner = 0;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
@@ -186,7 +190,8 @@ namespace TES3MP::Native
             const std::optional<ActorCampaignCombat>& combat,
             const std::optional<ActorCampaignLife>& life,
             std::span<const ActorCampaignProjectile> projectiles,
-            std::span<const ActorCampaignTimedEffect> timedEffects) const;
+            std::span<const ActorCampaignTimedEffect> timedEffects,
+            const std::optional<ActorCampaignCast>& casting = {}) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         float meleeReach() const;
@@ -217,7 +222,8 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
         void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
-            std::span<const char> actor = {});
+            std::span<const char> actor = {},
+            const std::function<void(const EquipmentSessionValues&)>& validate = {});
         std::array<std::optional<ClientDoorObstruction>, 2> mDoorReports;
         float mDoorStepSeconds = 1.f / 30.f;
         std::array<bool, 2> mActiveCells{};
@@ -261,6 +267,8 @@ namespace TES3MP::Native
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
         std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
+        bool appendMagicUse(const CanonicalServerState& players, const ServerCommandProposal& command,
+            ServerTick tick, PreparedNativeInventory& candidate) override;
         std::span<const std::byte> inventoryImage() const noexcept override;
         void synchronizeCells(const CanonicalServerState& players) override;
         std::array<bool, 2> activeCells() const noexcept { return mActiveCells; }

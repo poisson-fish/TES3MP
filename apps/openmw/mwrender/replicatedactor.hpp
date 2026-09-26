@@ -93,6 +93,7 @@ namespace MWRender
             const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         ReplicatedActorResult setDead(bool dead) noexcept;
         ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept;
+        ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept;
         const MWWorld::Ptr& ptr() const noexcept;
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,

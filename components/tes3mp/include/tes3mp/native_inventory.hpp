@@ -36,6 +36,10 @@ namespace TES3MP
             const CanonicalServerState&, const ServerCommandProposal&, ServerTick) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
             const CanonicalServerState&, const ServerCommandProposal&, ServerTick) { return {}; }
+        // Append a bounded independent caster to an existing detached candidate.
+        // False leaves the candidate unchanged; neither result publishes state.
+        virtual bool appendMagicUse(const CanonicalServerState&, const ServerCommandProposal&,
+            ServerTick, PreparedNativeInventory&) { return false; }
         virtual std::span<const std::byte> inventoryImage() const noexcept = 0;
         virtual bool hasNativeDoor() const noexcept { return false; }
         virtual bool ownsNativeDoor(InteractiveObjectId) const noexcept { return false; }

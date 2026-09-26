@@ -122,6 +122,13 @@ namespace TES3MP
                 || actors[i].maximumHealth < 0.f || actors[i].maximumFatigue < 0.f || actors[i].maximumMagicka < 0.f
                 || actors[i].magicka < 0.f || actors[i].magicka > actors[i].maximumMagicka)
                 return error(Code::InvalidFloat, 0, 0, i);
+            const auto& cast = actors[i];
+            if (cast.castId == 0 ? (cast.castPhase || cast.castRange || cast.castElapsed || cast.castRelease || cast.castStop)
+                : (cast.dead || cast.castPhase < 1 || cast.castPhase > 5 || cast.castRange > 2
+                    || !cast.castRelease || cast.castRelease >= cast.castStop || cast.castStop > 1800
+                    || cast.castElapsed >= cast.castStop || (cast.castPhase <= 2 && cast.castElapsed)
+                    || (cast.castPhase < 4 ? cast.castElapsed >= cast.castRelease : cast.castElapsed < cast.castRelease)))
+                return error(Code::InvalidFloat, 0, 0, i);
             if (i && actors[i - 1].actorId >= actors[i].actorId)
                 return error(
                     Code::EntriesNotStrictlySorted, actors[i].actorId.value(), actors[i - 1].actorId.value(), i);
@@ -257,7 +264,8 @@ namespace TES3MP
         actors.reserve(input.actors().size());
         for (const auto& actor : input.actors())
             actors.emplace_back(actor.actorId.value(), actor.combatRevision.value(), actor.health, actor.maximumHealth,
-                actor.fatigue, actor.maximumFatigue, actor.magicka, actor.maximumMagicka, actor.dead);
+                actor.fatigue, actor.maximumFatigue, actor.magicka, actor.maximumMagicka, actor.dead,
+                actor.castId, actor.castPhase, actor.castRange, actor.castElapsed, actor.castRelease, actor.castStop);
         std::vector<Snapshot::CombatSkillSnapshot> skills;
         skills.reserve(input.selfSkills().size());
         for (const auto& skill : input.selfSkills())
@@ -424,7 +432,8 @@ namespace TES3MP
                 return *failure;
             actors.push_back(
                 { *value(actor), *value(revision), current.health(), current.maximum_health(), current.fatigue(),
-                    current.maximum_fatigue(), current.magicka(), current.maximum_magicka(), current.dead() });
+                    current.maximum_fatigue(), current.magicka(), current.maximum_magicka(), current.dead(),
+                    current.cast_id(), current.cast_phase(), current.cast_range(), current.cast_elapsed(), current.cast_release(), current.cast_stop() });
         }
         const auto* encodedSkills = root->self_skills();
         const std::size_t skillCount = encodedSkills ? encodedSkills->size() : 0;

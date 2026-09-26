@@ -35,7 +35,7 @@ tes3mp_verify_target_includes(tes3mp_native_placement_scene
 
 # Detached M4 navigation/physics candidates; the host owns durable installation.
 add_library(tes3mp_native_actor_runtime STATIC actor_scene.cpp actor_scene.hpp melee_animation.cpp melee_animation.hpp
-    magic_runtime.cpp magic_runtime.hpp ai_magic.cpp ai_magic.hpp)
+    magic_runtime.cpp magic_runtime.hpp ai_magic.cpp ai_magic.hpp cast_animation.cpp cast_animation.hpp)
 target_compile_features(tes3mp_native_actor_runtime PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_actor_runtime PRIVATE tes3mp_native_loadout openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_actor_runtime ALLOWED tes3mp_native_loadout openmw-lib)

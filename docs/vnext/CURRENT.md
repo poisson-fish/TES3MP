@@ -1,56 +1,52 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** The [host](../../apps/tes3mp-server/native/inventory_host.hpp)
-simulates one traveler and doors at 60 Hz; neighbors freeze. Player contact uses
-a proxy sphere.
+**M4 in [PLAN.md](PLAN.md) is active.** The
+[host](../../apps/tes3mp-server/native/inventory_host.hpp) simulates one native NPC
+and doors at 60 Hz, committing at 30 Hz. Neighbors freeze; players use contact
+proxies until movement cutover.
 
-V34 owns melee defense/recovery, knockout and RNG. Player hit resources remain
-unbound (`build/logs/m4-melee-defense-recovery-gate-final.log`).
-V35 owns spell/enchantment payment, eight projectiles, areas and attributed timed
-effects; inactive expiry pauses. Loss/reconnect:
-`build/m4-actor-effects-live-03/result.json`; healing restart:
-`build/m4-actor-effects-restart-live-02/result.json`.
+V42 owns autonomous casting from selection through durable recovery. It compares
+carried/equipped melee, bows/crossbows with compatible ammo, thrown weapons,
+known spells and equipped unscripted WhenUsed. Server visibility filters targets.
+Bound KF keys drive preparation, wind-up, release and recovery. Source, target,
+life, interruption and visibility checks precede payment; inactive areas pause.
+Two distinct players can cast in the same transaction as the NPC.
 
-V37 constants support Fortify Attribute/Skill and Resist Magicka/Normal Weapons/
-Fire/Frost/Shock/Poison across slots, eight effects/item and 512 instances.
-Persisted sources/rolls and atomic replacement/respawn preserve base stats.
-Other constants reject; all-slot presentation remains unproved.
-`npc-general-constants`: `build/logs/m4-general-constants-test-final.log`.
+Selection/preparation/wind-up/release/flight/recovery persist with RNG, resources,
+effects and identities. Recovery validates sources/targets before installation.
+Shared effects support timed Fortify Attribute/Skill arguments, original effect
+ordinals, mixed Self/Touch/Target and areas. Base stats do not accumulate modifiers.
+T3C3 snapshots require capability 21 and drive native NPC casting animation.
+Old campaign layouts remain distinct; V42 requires a fresh descriptor-bound campaign.
 
-V38 persists caster identity/life; players remain life 1, effects survive caster
-respawn. `npc-caster-identity` passes restart/death/rejection
-(`build/logs/m4-caster-identity-test-08.log`) and legacy recovery
-(`build/logs/m4-caster-identity-legacy.log`).
+Verified narrow evidence:
 
-`tes3mp_native_ai_magic_tests records`: 284 spells/100 WhenUsed enchantments,
-including 106/30 TR sources (`build/logs/m4-ai-magic-records.log`); synthetic contexts.
+- `tes3mp_native_ai_magic_tests weapons`: carried weapon classes/ammo, condition,
+  range, resistance and ties (`build/logs/m4-ai-selection-weapons.log`).
+- `npc-full-selection`: equipped WhenUsed, spell competition and observer outcomes
+  (`build/logs/m4-full-selection-test-03.log`).
+- `npc-cast-lifecycle`: every stage/flight restart, rejected-write identity,
+  uncertain-write closure and recovery,
+  two player casts, disconnect/occlusion interruption, inactive restart, malformed
+  recovery, typed effects/expiry and mixed areas (`build/logs/m4-cast-lifecycle-final.log`).
+- Legacy `npc-actor-casts` recovery: `build/logs/m4-cast-legacy-final.log`.
+- Combat wire/handshake: `build/logs/m4-cast-protocol-test-02.log` and
+  `build/logs/m4-cast-handshake-test.log`.
+- Four two-desktop encounters passed concurrent casting, target switching,
+  reconnect and process restart during wind-up, with 10% loss/100 ms delay/jitter:
+  `build/m4-cast-vanilla-live-10/result.json` (`Fireball_large`) and
+  `build/m4-cast-tr-live-02/result.json` (`T_Ayl_Des_DWelkynd_FIR`), plus equipped
+  `cruel flamebolt ring` in `build/m4-cast-vanilla-item-live-03/result.json` and
+  `T_De_Ep_Ring_Chill` in `build/m4-cast-tr-item-live-04/result.json` (both wind-up images).
+  Gameplay records are unchanged; actor stats/room placements are synthetic.
+  TR Lua packages are disabled; native Lua services remain M5 work.
 
-V38 executes concurrent NPC/player casts through shared launch/contact/effects.
-NPC flights exclude their caster hull and cancel on death. Recovery validates
-source/life. T3C2 requires capability 20.
-`tes3mp_native_loadout_tests npc-actor-casts`: observer projections, concurrent
-contact, timed effects, item charge/capacity, session replacement, restart,
-death/respawn and rejected persistence/recovery (`build/logs/m4-actor-casts-final.log`).
-Equipped WhenUsed remains restricted; this check uses a carried item.
-Wire/handshake: `build/logs/m4-actor-cast-{protocol,handshake}.log`.
+V34 retains melee defense/recovery and knockout; distinct player hit resources
+remain unbound. V37 supports multi-slot constant fortification/resistance;
+other constant effects reject. V38 retains caster life through respawn and effects.
+These are bounded migration domains, not complete M4 combat compatibility.
 
-V39 schedules unarmed known spells every eight committed ticks against the nearest
-active living player, with one NPC flight. Launch is immediate; line of sight is
-unchecked. Restart/rejection/disconnect coverage:
-`npc-auto-spells` (`build/logs/m4-auto-spells-test-03.log`).
-
-V40 compares equipped melee weapons against spells using shared OpenMW ratings:
-damage, condition, hit chance, speed, resistance and supported strike effects.
-Weapon ties beat spells; detached item ties beat weapons. Unsupported weapon/strike
-plans retain the existing combat path; carried/ranged weapon selection and equipped
-WhenUsed scheduling remain pending. Fresh descriptor-bound campaign; V38 image layout.
-`tes3mp_native_ai_magic_tests weapons` passes
-(`build/logs/m4-ai-magic-weapons.log`). `npc-weapon-selection` proves both weapon/spell
-winners, armed NPC/player concurrent casting, two observer projections, disconnect,
-rejoin, restart and identical rejected-write retries
-(`build/logs/m4-weapon-selection-test.log`). Synthetic content/GMSTs, real KF;
-no live-client or TR encounter acceptance.
-
-Next: finish carried/ranged weapon competition and equipped WhenUsed, then server
-line-of-sight targeting before animation timing/interruption and durable preparation.
-Timed effect arguments, encounter proof and player movement follow in [PLAN.md](PLAN.md).
+The autonomous casting block has durable encounter evidence. Remaining M4 work
+includes weapon execution, knockout and the other unsupported combat/effect paths;
+weapon competition here does not implement ranged weapon firing. Next: finish the
+remaining melee/knockout work; player movement remains last.

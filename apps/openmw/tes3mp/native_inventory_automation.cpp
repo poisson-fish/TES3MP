@@ -353,7 +353,7 @@ namespace TES3MP::OpenMWAdapter
                 || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
                 throw std::runtime_error("Traversal setup pose invalid");
         }
-        else if (action == "activate" || action == "put" || action == "cast")
+        else if (action == "activate" || action == "put" || action == "cast" || action == "castactor")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
@@ -386,10 +386,25 @@ namespace TES3MP::OpenMWAdapter
                 && (!mNativeContainerCount || *mNativeContainerCount == 0))
                 throw std::runtime_error("Traversal attack has no live native actor target");
         }
-        else if (action == "cast")
+        else if (action == "cast" || action == "castactor")
         {
-            if (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(
-                    true, ESM::RefId::stringRefId(record), {}, {}))
+            MWWorld::Ptr target;
+            if (action == "castactor")
+            {
+                std::vector<MWWorld::Ptr> targets;
+                mPresentation.appendMeleeTargets(targets);
+                if (targets.size() != 1 || targets.front().isEmpty())
+                    throw std::runtime_error("Traversal cast has no unique native actor target");
+                target = targets.front();
+            }
+            // Joining/scene presentation may still be installing the normal
+            // input hook. Keep this command pending until the desktop can act;
+            // the external capture deadline bounds readiness retries.
+            if (action == "castactor" && (wm->isGuiMode()
+                    || !world->getPlayer().interceptMagicCast(true, ESM::RefId::stringRefId(record), {}, target)))
+                return;
+            if (action == "cast" && (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(
+                    true, ESM::RefId::stringRefId(record), {}, target)))
                 throw std::runtime_error("Traversal cast has no mapped spell release");
         }
         else if (action == "open")
@@ -430,9 +445,10 @@ namespace TES3MP::OpenMWAdapter
             if (wm->containsMode(MWGui::GM_Container)) wm->removeGuiMode(MWGui::GM_Container);
             if (wm->containsMode(MWGui::GM_Inventory)) wm->removeGuiMode(MWGui::GM_Inventory);
         }
-        else if (action == "reconnect" || action == "disconnect")
+        else if (action == "reconnect" || action == "disconnect" || action == "disconnectbrief")
         {
-            mTraversalDisconnectOnly = action == "disconnect";
+            mTraversalReconnectDelay = action == "disconnect" ? 60'000'000'000ull
+                : action == "disconnectbrief" ? 8'000'000'000ull : 0;
             mReadyToDisconnect = true;
             mNextDisconnect = now;
         }

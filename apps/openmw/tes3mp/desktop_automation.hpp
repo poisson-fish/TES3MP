@@ -122,7 +122,7 @@ namespace TES3MP::OpenMWAdapter
         DesktopSemanticInput* mDesktopInput = nullptr;
         std::filesystem::path mTraversalControl;
         std::uint64_t mTraversalSequence = 0;
-        bool mTraversalDisconnectOnly = false;
+        std::uint64_t mTraversalReconnectDelay = 0;
         std::optional<ReliableGroundItemBaseline> mTraversalGround;
         std::vector<NativeDoorSnapshot> mPresentedNativeDoors;
         std::optional<std::uint32_t> mNativePlayerCount;

@@ -703,6 +703,7 @@ int main(int argc, char** argv)
     if (std::ranges::find(optionalCapabilities, TES3MP::combatReplicationCapability()) != optionalCapabilities.end()
         || std::ranges::find(requiredCapabilities, TES3MP::combatReplicationCapability()) != requiredCapabilities.end())
         requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
+        requiredCapabilities.push_back(TES3MP::actorCastLifecycleCapability());
     std::ranges::sort(requiredCapabilities);
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,
         requiredCapabilities, config.contentManifest.id());

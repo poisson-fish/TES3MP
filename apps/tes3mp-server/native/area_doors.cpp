@@ -94,7 +94,7 @@ namespace TES3MP::Native
     }
 
     void InventoryService::recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
-        std::span<const char> actor)
+        std::span<const char> actor, const std::function<void(const EquipmentSessionValues&)>& validate)
     {
         const std::span bytes(reinterpret_cast<const char*>(image.data()), image.size());
         size_t offset = 0;
@@ -131,7 +131,7 @@ namespace TES3MP::Native
         }
         EquipmentBytes accepted(core.begin(), core.end()), restored;
         std::unique_ptr<const EquipmentSessionValues> values;
-        mRuntime.restoreSession(std::move(accepted), references, values, restored);
+        mRuntime.restoreSession(std::move(accepted), references, values, restored, validate);
         for (size_t i = 0; i < count; ++i) mAreaDoors[i].state.swap(states[i]);
         mCoreImage.swap(restored);
         mImage.swap(sealed);

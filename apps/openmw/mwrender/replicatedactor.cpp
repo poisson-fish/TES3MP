@@ -338,6 +338,19 @@ namespace MWRender
                     setLocomotion(ReplicatedActorLocomotion::Idle);
             }
 
+            bool setCast(bool active, unsigned range, float completion)
+            {
+                if (range > 2 || !std::isfinite(completion) || completion < 0.f || completion >= 1.f)
+                    return false;
+                disable("spellcast");
+                if (!active || mDead) return true;
+                if (mAnimationFallback || !hasAnimation("spellcast")) return false;
+                const std::array<std::string, 3> names{"self", "touch", "target"};
+                play("spellcast", 2, BlendMask_All, true, 1.f, names[range] + " start", names[range] + " stop",
+                    completion, 0, false);
+                return true;
+            }
+
             bool playAction(ReplicatedActorAction action)
             {
                 if (mAnimationFallback || mDead)
@@ -654,6 +667,19 @@ namespace MWRender
         }
     }
 
+    ReplicatedActorResult Objects::setReplicatedActorCast(const MWWorld::Ptr& ptr, bool active, unsigned range, float completion) noexcept
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
+            return ReplicatedActorResult::LifecycleViolation;
+        try
+        {
+            return static_cast<ReplicatedActorAnimation*>(found->second.get())->setCast(active, range, completion)
+                ? ReplicatedActorResult::Accepted : ReplicatedActorResult::AnimationFallback;
+        }
+        catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
+    }
+
     ReplicatedActorResult Objects::playReplicatedActorAction(
         const MWWorld::Ptr& ptr, ReplicatedActorAction action) noexcept
     {
@@ -722,6 +748,9 @@ namespace MWRender
             return mRendering.getObjects().setReplicatedActorDead(mPtr, dead);
         }
 
+        ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept
+        { return mRendering.getObjects().setReplicatedActorCast(mPtr, active, range, completion); }
+
         ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept
         {
             return mRendering.getObjects().playReplicatedActorAction(mPtr, action);
@@ -757,6 +786,12 @@ namespace MWRender
         if (!mImpl)
             return ReplicatedActorResult::LifecycleViolation;
         return mImpl->setDead(dead);
+    }
+
+    ReplicatedActorResult ReplicatedActor::setCast(bool active, unsigned range, float completion) noexcept
+    {
+        if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
+        return mImpl->setCast(active, range, completion);
     }
 
     ReplicatedActorResult ReplicatedActor::playAction(ReplicatedActorAction action) noexcept

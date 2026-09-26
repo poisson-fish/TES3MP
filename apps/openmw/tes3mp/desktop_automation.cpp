@@ -712,8 +712,7 @@ namespace TES3MP::OpenMWAdapter
         if (applied != ProviderResult::Accepted)
             return applied;
         if (mRole == DesktopAutomationRole::NativeTraversal && mOutput
-            && mEvidenceEvents < MaximumEvidenceEvents
-            && (snapshot.serverTick().value() % 5 == 0 || !events.empty()))
+            && mEvidenceEvents < MaximumEvidenceEvents)
         {
             mOutput << "{\"event\":\"native_combat_sample\",\"tick\":" << snapshot.serverTick().value()
                 << ",\"generation\":" << snapshot.targetSessionGeneration().value()
@@ -728,8 +727,11 @@ namespace TES3MP::OpenMWAdapter
                 first = false;
                 mOutput << "{\"id\":" << actor.actorId.value() << ",\"revision\":"
                     << actor.combatRevision.value() << ",\"health\":" << actor.health
-                    << ",\"fatigue\":" << actor.fatigue
-                    << ",\"dead\":" << (actor.dead ? "true" : "false") << '}';
+                    << ",\"fatigue\":" << actor.fatigue << ",\"magicka\":" << actor.magicka
+                    << ",\"dead\":" << (actor.dead ? "true" : "false")
+                    << ",\"cast_id\":" << actor.castId << ",\"cast_phase\":" << unsigned(actor.castPhase)
+                    << ",\"cast_range\":" << unsigned(actor.castRange) << ",\"cast_elapsed\":" << actor.castElapsed
+                    << ",\"cast_release\":" << actor.castRelease << ",\"cast_stop\":" << actor.castStop << '}';
             }
             mOutput << "],\"players\":[";
             first = true;
@@ -774,9 +776,14 @@ namespace TES3MP::OpenMWAdapter
                     first = false;
                     mOutput << "{\"caster\":" << cast.casterId() << ",\"caster_kind\":"
                         << (cast.actorCaster() ? 2 : 1) << ",\"caster_life\":" << cast.casterLife << ",\"source\":"
-                        << cast.sourceId << ",\"success\":" << (cast.castSucceeded ? "true" : "false")
+                        << cast.sourceId << ",\"source_kind\":" << unsigned(cast.sourceKind)
+                        << ",\"caster_revision\":" << cast.casterCombatRevision.value()
+                        << ",\"target_revision\":" << cast.targetCombatRevision.value()
+                        << ",\"success\":" << (cast.castSucceeded ? "true" : "false")
                         << ",\"health_delta\":" << cast.selfHealthDelta
-                        << ",\"magicka_delta\":" << cast.selfMagickaDelta << '}';
+                        << ",\"magicka_delta\":" << cast.selfMagickaDelta
+                        << ",\"target\":" << cast.targetId << ",\"target_kind\":" << unsigned(cast.targetKind)
+                        << ",\"target_health_delta\":" << cast.targetHealthDelta << '}';
                 }
             mOutput << "]}\n";
             mOutput.flush();
@@ -1087,8 +1094,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::uint64_t DesktopAutomation::reconnectDelayNanoseconds() noexcept
     {
-        if (mRole == DesktopAutomationRole::NativeTraversal && mTraversalDisconnectOnly)
-            return 60'000'000'000ull;
+        if (mRole == DesktopAutomationRole::NativeTraversal && mTraversalReconnectDelay)
+            return mTraversalReconnectDelay;
         if (mRole == DesktopAutomationRole::WaitReconnect)
             return 8'000'000'000ull;
         return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull : 0;

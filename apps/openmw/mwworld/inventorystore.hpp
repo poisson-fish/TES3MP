@@ -177,7 +177,7 @@ namespace MWWorld
         bool unequipRemovedItem(const Ptr& item, const InventoryStoreEquipmentContext& context);
         // Apply committed ordinary equipment to presentation storage. No splits,
         // restacking, item scripts or gameplay selection; notify the model once.
-        void applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment);
+        void applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment, const ESMStore* content = nullptr);
         // Public actor appearance has one local presentation item per occupied
         // slot, no private inventory or authoritative item identity/count.
         // Validate the complete record/slot set before replacing local contents.

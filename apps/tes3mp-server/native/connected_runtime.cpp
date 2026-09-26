@@ -499,7 +499,8 @@ namespace TES3MP::Native
     }
 
     void EquipmentRuntime::restoreSession(EquipmentBytes accepted, std::span<const ESM::RefId> referenceIds,
-        std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes)
+        std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes,
+        const std::function<void(const EquipmentSessionValues&)>& validate)
     {
         using namespace Allocations;
         InPhase phase(Phase::Validation);
@@ -529,6 +530,7 @@ namespace TES3MP::Native
         encodeEquipmentSession(values, bindings, canonical, containerBindings, mWorldItems ? &worldBinding : nullptr,
             mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value(), mCellCount);
         if (canonical != accepted) throw std::invalid_argument("Noncanonical equipment session image");
+        if (validate) validate(values); // Cross-subsystem invariants precede all installation.
         fresh.mSavedCounter = values.mActors[0].mLastGenerated;
         std::array<std::unique_ptr<RestartInstallation>, 2> staged;
         std::array<InventoryStore*, 2> candidates;

@@ -26,6 +26,12 @@ struct ActorCombatSnapshot {
   magicka:float;
   maximum_magicka:float;
   dead:bool;
+  cast_id:ulong;
+  cast_phase:ubyte;
+  cast_range:ubyte;
+  cast_elapsed:ushort;
+  cast_release:ushort;
+  cast_stop:ushort;
 }
 
 struct PlayerCombatSnapshot {
@@ -79,5 +85,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3CS";
+file_identifier "T3C3";
 file_extension "t3cs";

@@ -5,6 +5,7 @@
 #include "inventory_transfer_command.hpp"
 #include "equipment_file.hpp"
 #include "session_commit.hpp"
+#include <functional>
 #include <apps/openmw/mwworld/inventorystore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
@@ -358,7 +359,8 @@ namespace TES3MP::Native
         FileReadResult restartSession(const std::filesystem::path& path, std::span<const ESM::RefId> referenceIds,
             std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes, FileFaults& faults);
         void restoreSession(EquipmentBytes image, std::span<const ESM::RefId> referenceIds,
-            std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes);
+            std::unique_ptr<const EquipmentSessionValues>& output, EquipmentBytes& bytes,
+            const std::function<void(const EquipmentSessionValues&)>& validate = {});
         FileReadResult restart(size_t actor, const std::filesystem::path& path,
             std::span<const ESM::RefId> referenceIds, std::unique_ptr<const PlainEquipmentValues>& output,
             EquipmentBytes& bytes, FileFaults& faults);

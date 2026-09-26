@@ -17,6 +17,13 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V42 persists Selected/Prepared/WindUp/Released/Recovery against bound KF
+    // release keys, with immutable source/life/target and inactive-area pause.
+    // Revalidation precedes payment; two distinct player casts compose with
+    // the NPC in one tick. Timed attribute/skill arguments and mixed ranges
+    // share the contact/effect path. T3C3 snapshots require capability 21.
+    // V41 compares all carried/equipped weapon classes and compatible ammo,
+    // admits equipped WhenUsed, and filters targets through server visibility.
     // V40 adds equipped melee weapon competition to automatic spell selection.
     // Shares stock damage/condition/hit/speed rating arithmetic; equipped
     // WhenUsed scheduling and ranged weapon selection remain pending.
@@ -31,7 +38,7 @@ namespace TES3MP::Native
     // NPC placement/life attribution survives respawn on other targets.
     // Requires a fresh campaign; V37 and older retain their recovery layouts.
     // Trusted NPC spells/WhenUsed share player launch/contact/effect execution.
-    // Automatic AI scheduling remains pending; T3C2 publishes typed cast events.
+    // T3C2 publishes typed cast events; V39 adds automatic known-spell selection.
     // V37 adds constant effect arguments/ordinals, variable rolls, multiple sources
     // and all equipment slots. Attribute/skill fortification and six resistances
     // are supported; other constant behaviors reject. Maximum 512 instances.

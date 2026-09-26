@@ -102,6 +102,9 @@ namespace TES3MP
         float magicka = 0.f;
         float maximumMagicka = 0.f;
         bool dead = false;
+        std::uint64_t castId = 0;
+        std::uint8_t castPhase = 0, castRange = 0;
+        std::uint16_t castElapsed = 0, castRelease = 0, castStop = 0;
         friend constexpr bool operator==(ActorCombatSnapshot, ActorCombatSnapshot) noexcept = default;
         friend constexpr auto operator<=>(const ActorCombatSnapshot& lhs, const ActorCombatSnapshot& rhs) noexcept
         {

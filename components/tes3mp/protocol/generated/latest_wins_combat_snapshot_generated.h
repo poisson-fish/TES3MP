@@ -107,6 +107,12 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   float maximum_magicka_;
   uint8_t dead_;
   int8_t padding0__;  int16_t padding1__;  int32_t padding2__;
+  uint64_t cast_id_;
+  uint8_t cast_phase_;
+  uint8_t cast_range_;
+  uint16_t cast_elapsed_;
+  uint16_t cast_release_;
+  uint16_t cast_stop_;
 
  public:
   ActorCombatSnapshot()
@@ -121,12 +127,18 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
         dead_(0),
         padding0__(0),
         padding1__(0),
-        padding2__(0) {
+        padding2__(0),
+        cast_id_(0),
+        cast_phase_(0),
+        cast_range_(0),
+        cast_elapsed_(0),
+        cast_release_(0),
+        cast_stop_(0) {
     (void)padding0__;
     (void)padding1__;
     (void)padding2__;
   }
-  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead)
+  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead, uint64_t _cast_id, uint8_t _cast_phase, uint8_t _cast_range, uint16_t _cast_elapsed, uint16_t _cast_release, uint16_t _cast_stop)
       : actor_id_(::flatbuffers::EndianScalar(_actor_id)),
         combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
         health_(::flatbuffers::EndianScalar(_health)),
@@ -138,7 +150,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
         dead_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_dead))),
         padding0__(0),
         padding1__(0),
-        padding2__(0) {
+        padding2__(0),
+        cast_id_(::flatbuffers::EndianScalar(_cast_id)),
+        cast_phase_(::flatbuffers::EndianScalar(_cast_phase)),
+        cast_range_(::flatbuffers::EndianScalar(_cast_range)),
+        cast_elapsed_(::flatbuffers::EndianScalar(_cast_elapsed)),
+        cast_release_(::flatbuffers::EndianScalar(_cast_release)),
+        cast_stop_(::flatbuffers::EndianScalar(_cast_stop)) {
     (void)padding0__;
     (void)padding1__;
     (void)padding2__;
@@ -170,8 +188,26 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   bool dead() const {
     return ::flatbuffers::EndianScalar(dead_) != 0;
   }
+  uint64_t cast_id() const {
+    return ::flatbuffers::EndianScalar(cast_id_);
+  }
+  uint8_t cast_phase() const {
+    return ::flatbuffers::EndianScalar(cast_phase_);
+  }
+  uint8_t cast_range() const {
+    return ::flatbuffers::EndianScalar(cast_range_);
+  }
+  uint16_t cast_elapsed() const {
+    return ::flatbuffers::EndianScalar(cast_elapsed_);
+  }
+  uint16_t cast_release() const {
+    return ::flatbuffers::EndianScalar(cast_release_);
+  }
+  uint16_t cast_stop() const {
+    return ::flatbuffers::EndianScalar(cast_stop_);
+  }
 };
-FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 48);
+FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 64);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CLASS {
  private:
@@ -643,7 +679,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3CS";
+  return "T3C3";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

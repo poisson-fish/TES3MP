@@ -28,7 +28,9 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DamageMagicka
                 || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
-            return prior || (actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FireDamage
+            return prior || (actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FortifyAttribute
+                || effect.mEffectID == ESM::MagicEffect::FortifySkill
+                || effect.mEffectID == ESM::MagicEffect::FireDamage
                 || effect.mEffectID == ESM::MagicEffect::ShockDamage
                 || effect.mEffectID == ESM::MagicEffect::FrostDamage
                 || effect.mEffectID == ESM::MagicEffect::Poison
@@ -134,7 +136,11 @@ namespace TES3MP::Native
         {
             const auto& effect = entry.mData;
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
+            const bool attribute = actorLifecycle && effect.mEffectID == ESM::MagicEffect::FortifyAttribute;
+            const bool skill = actorLifecycle && effect.mEffectID == ESM::MagicEffect::FortifySkill;
             if (!magic || !supportedInstantEffect(effect, actorLifecycle)
+                || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
+                || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty())
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
                 || effect.mArea < 0 || effect.mArea > 64

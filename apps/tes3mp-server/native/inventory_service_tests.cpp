@@ -4127,7 +4127,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4456,6 +4456,77 @@ namespace TES3MP::Native::Testing
                     {ESM::MagicEffect::FireDamage, {}, {}, ESM::RT_Touch, 0, 2, 100, 100}});
                 npc.mSpells.mList = {targetDamage.mId, elementalDamage.mId};
             }
+            if (fullSelection)
+            {
+                npc.mNpdt.mHealth = 400;
+                usedItem.mData.mType = ESM::Clothing::Ring;
+                usedItem.mData.mValue = 1000;
+                usedEnchantment.mEffects = elementalDamage.mEffects;
+                usedEnchantment.mData.mCharge = 2;
+                if (castLifecycle)
+                {
+                    usedEnchantment.mEffects.mList.push_back({{ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength,
+                        ESM::RT_Self, 32, 2, 4, 8}, 1});
+                    usedEnchantment.mEffects.mList.push_back({{ESM::MagicEffect::FortifySkill, ESM::Skill::Destruction, {},
+                        ESM::RT_Target, 0, 2, 3, 7}, 2});
+                    usedEnchantment.mEffects.mList.push_back({{ESM::MagicEffect::RestoreFatigue, {}, {},
+                        ESM::RT_Touch, 0, 1, 3, 3}, 3});
+                }
+                std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
+            }
+            if (!encounterProfile.empty())
+            {
+                const bool tr = encounterProfile.starts_with("tr-");
+                const bool itemProfile = encounterProfile.ends_with("item");
+                require(encounterProfile == "vanilla-spell" || encounterProfile == "tr-spell"
+                    || encounterProfile == "vanilla-item" || encounterProfile == "tr-item", "Unknown encounter profile");
+                auto eligible = [&](const ESM::EffectList& effects) {
+                    const auto plan = prepareInstantEffects(effects, base.store(), true);
+                    return plan && plan->hasRange(ESM::RT_Target)
+                        && std::ranges::any_of(plan->effects, [](const auto& effect) {
+                            return effect.mRange == ESM::RT_Target && (effect.mEffectID == ESM::MagicEffect::FireDamage
+                                || effect.mEffectID == ESM::MagicEffect::FrostDamage
+                                || effect.mEffectID == ESM::MagicEffect::ShockDamage
+                                || effect.mEffectID == ESM::MagicEffect::Poison);
+                        }) && std::ranges::all_of(plan->effects, [](const auto& effect) {
+                            return effect.mMagnMax <= 40 && effect.mDuration <= 30;
+                        });
+                };
+                auto origin = [&](const ESM::RefId& id) {
+                    return id.is<ESM::StringRefId>() && id.getRefIdString().starts_with("T_") == tr;
+                };
+                std::vector<const ESM::Spell*> spells;
+                for (const auto& source : base.store().get<ESM::Spell>())
+                    if (origin(source.mId) && source.mData.mType == ESM::Spell::ST_Spell
+                        && eligible(source.mEffects) && MWMechanics::calcSpellCost(source, base.store()) <= 40)
+                        spells.push_back(&source);
+                std::ranges::sort(spells, {}, [](const auto* source) { return source->mId.getRefIdString(); });
+                require(!spells.empty(), "Real loadout has no eligible encounter spell");
+                // Copy only the actor/placement fixture. Spell, enchantment and item
+                // records remain unchanged in the selected external loadout.
+                npc.mSpells.mList = {spells.front()->mId};
+                npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
+                npc.mNpdt.mHealth = 10000; npc.mNpdt.mMana = 10000; npc.mNpdt.mFatigue = 1000;
+                for (auto& skill : npc.mNpdt.mSkills) skill = 100;
+                std::ofstream metadata(scratch / "encounter.txt");
+                metadata << "profile " << encounterProfile << "\nspell " << spells.front()->mId.getRefIdString() << '\n';
+                if (itemProfile)
+                {
+                    std::vector<const ESM::Clothing*> items;
+                    for (const auto& source : base.store().get<ESM::Clothing>())
+                    {
+                        const auto* enchantment = base.store().get<ESM::Enchantment>().search(source.mEnchant);
+                        if (origin(source.mId) && source.mScript.empty() && enchantment
+                            && enchantment->mData.mType == ESM::Enchantment::WhenUsed
+                            && eligible(enchantment->mEffects)) items.push_back(&source);
+                    }
+                    std::ranges::sort(items, {}, [](const auto* source) { return source->mId.getRefIdString(); });
+                    require(!items.empty(), "Real loadout has no eligible encounter WhenUsed item");
+                    npc.mInventory.mList.push_back({1, items.front()->mId});
+                    metadata << "item " << items.front()->mId.getRefIdString() << "\nenchantment "
+                        << items.front()->mEnchant.getRefIdString() << '\n';
+                }
+            }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
@@ -4559,6 +4630,8 @@ namespace TES3MP::Native::Testing
                 earlierOwner.save(out); out.endRecord(ESM::Container::sRecordId);
             }
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
+            if (!encounterProfile.empty())
+                cell.mAmbi.mAmbient = cell.mAmbi.mSunlight = 0x00b0b0b0;
             cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
             uint32_t index = 0;
@@ -4588,6 +4661,7 @@ namespace TES3MP::Native::Testing
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
+        if (!encounterProfile.empty()) return;
         {
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
@@ -4658,6 +4732,9 @@ namespace TES3MP::Native::Testing
                     binding.mDurableCasters = durableCasters;
                     binding.mAutomaticNpcSpells = automaticCasts;
                     binding.mNpcWeaponCompetition = weaponCompetition;
+                    binding.mNpcFullSelection = fullSelection;
+                    binding.mNpcCastLifecycle = castLifecycle;
+                    if (castLifecycle) binding.mBoundCasts = binding.mNavigatingActor->bindCastAnimations();
                     binding.mConstantEffects = binding.mGeneralConstants = durableCasters;
                     if (durableCasters) binding.mNpcRespawnDelayTicks = 3;
                     binding.mStreamExteriors = true;
@@ -4684,6 +4761,202 @@ namespace TES3MP::Native::Testing
                     }
                     authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
                     service.synchronizeCells(authority);
+                    if (castLifecycle)
+                    {
+                        auto multiplier = *content.get<ESM::GameSetting>().find("fAIMeleeWeaponMult");
+                        multiplier.mValue.setFloat(.001f); loadout.store().overrideRecord(multiplier);
+                        const auto initialImage = bytes(service);
+                        const auto initial = readActorCampaign({reinterpret_cast<const char*>(initialImage.data()), initialImage.size()});
+                        const auto timing = bindCaster().mBoundCasts->ranges[ESM::RT_Target];
+                        std::vector<ESM::RefId> refs{npc.mRef.mRefID, chest.mRef.mRefID};
+                        for (const auto& [id, record] : MWWorld::inventoryRecords(content)) refs.push_back(record);
+                        for (const auto& [id, record] : MWWorld::inventorySoulRecords(content)) refs.push_back(record);
+                        const auto sessionSpan = authority.activeSessions();
+                        const std::vector<CanonicalSessionProgress> sessions(sessionSpan.begin(), sessionSpan.end());
+                        std::unique_ptr<InventoryService> restored;
+                        std::array<bool, 6> stages{};
+                        bool flightRestart = false, interrupted = false, targetA = false, targetB = false, occludedInterruption = false;
+                        bool selfAttribute = false, targetSkill = false, attributesExpired = false, selfArea = false, touchContact = false;
+                        size_t launches = 0;
+                        bool inactiveRestart = false;
+                        for (uint64_t tick = 1; tick <= 400; ++tick)
+                        {
+                            const auto before = bytes(service);
+                            const auto prior = readActorCampaign({reinterpret_cast<const char*>(before.data()), before.size()});
+                            auto visibleEntities = entities;
+                            const bool occlude = interrupted && !occludedInterruption && prior.casting
+                                && prior.casting->phase == ActorCampaignCast::WindUp
+                                && prior.casting->elapsed + 1 == timing.releaseTicks;
+                            if (occlude)
+                            {
+                                const auto index = size_t(prior.casting->target - 1);
+                                const auto old = visibleEntities[index];
+                                visibleEntities[index] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(old,
+                                    id<ServerTick>(tick), Transform(old.transform().cell(), Position3(60*1024, 400*1024, 1024),
+                                        old.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                            }
+                            if (tick >= 280)
+                            {
+                                const auto old = visibleEntities[0];
+                                visibleEntities[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(old,
+                                    id<ServerTick>(tick), Transform(old.transform().cell(), Position3(60*1024, -100*1024, 1024),
+                                        old.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                            }
+                            auto activeSessions = sessions;
+                            if (tick == 11 || (tick >= 120 && tick < 200)) activeSessions.erase(activeSessions.begin());
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(visibleEntities, activeSessions));
+                            service.synchronizeCells(authority);
+                            if (restored) restored->synchronizeCells(authority);
+                            const auto concurrentPlayers = [&](InventoryService& owner) -> std::unique_ptr<PreparedNativeInventory> {
+                                if (tick != 60) return {};
+                                uint64_t source = 14695981039346656037ull;
+                                for (unsigned char c : std::string_view("npc_elemental_damage")) source = (source ^ c) * 1099511628211ull;
+                                const auto proposal = [&](uint64_t playerId) {
+                                    ClientMagicUseCommand use{id<SessionId>(playerId), SessionGeneration::initial(),
+                                        CommandSequence::initial(), id<CommandId>(playerId), id<CanonicalRevision>(1),
+                                        MagicUseSourceKind::Spell, source, MagicUseTargetKind::Actor, npc.mIdentity,
+                                        id<ServerTick>(tick), id<CombatRevision>(tick), id<CombatRevision>(tick), InventoryRevision::initial()};
+                                    const auto* player = authority.findPlayer(id<PlayerId>(playerId));
+                                    return ServerCommandProposal(id<SessionId>(playerId), SessionGeneration::initial(),
+                                        use.commandSequence, use.commandId, use.observedCanonicalRevision,
+                                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+                                };
+                                auto result = owner.prepareMagicUse(authority, proposal(1), id<ServerTick>(tick));
+                                require(result && !owner.appendMagicUse(authority, proposal(1), id<ServerTick>(tick), *result),
+                                    "Same caster appended twice in one tick");
+                                require(owner.appendMagicUse(authority, proposal(2), id<ServerTick>(tick), *result)
+                                    && !owner.appendMagicUse(authority, proposal(2), id<ServerTick>(tick), *result),
+                                    "Concurrent independent caster not bounded");
+                                return result;
+                            };
+                            auto step = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, concurrentPlayers(service));
+                            require(bool(step), "Cast lifecycle tick missing");
+                            if (tick == 60)
+                            {
+                                auto a = service.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick), step.get());
+                                auto b = service.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(tick), id<CanonicalRevision>(tick), step.get());
+                                require(a && b && std::ranges::equal(a->magicEvents(), b->magicEvents())
+                                    && std::ranges::count_if(a->magicEvents(), [](const auto& event) {
+                                        return !event.actorCaster() && event.castSucceeded && event.selfMagickaDelta < 0;
+                                    }) == 2, "Concurrent player casts did not share durable observer events");
+                            }
+                            std::vector<std::byte> rejected;
+                            require(step->commit([&](auto image) { rejected.assign(image.begin(), image.end());
+                                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                                && bytes(service) == before, "Rejected cast stage leaked state");
+                            auto retry = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, concurrentPlayers(service));
+                            require(retry && retry->commit([&](auto image) {
+                                require(std::ranges::equal(image, rejected), "Cast stage retry changed payment/RNG/state");
+                                return CanonicalDurabilityResult::Rejected;
+                            }) == CanonicalDurabilityResult::Rejected, "Cast stage retry committed");
+                            auto replay = restored ? restored->prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, concurrentPlayers(*restored)) : nullptr;
+                            require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "Cast stage commit failed");
+                            if (restored) require(replay && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && bytes(service) == bytes(*restored), "Cast stage restart diverged");
+                            const auto image = bytes(service);
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+                            if (tick == 11)
+                            {
+                                require(prior.casting && !state.casting && state.projectiles.empty()
+                                    && state.combat->rng == prior.combat->rng
+                                    && state.combat->actors[2][9][2] == initial.combat->actors[2][9][2],
+                                    ("Disconnected wind-up did not cancel before payment; prior=" + std::to_string(prior.casting ? prior.casting->phase : 0)
+                                    + " after=" + std::to_string(state.casting ? state.casting->phase : 0)).c_str());
+                                interrupted = true;
+                            }
+                            if (occlude)
+                            {
+                                require(!state.casting && state.projectiles.empty() && state.combat->rng == prior.combat->rng
+                                    && std::ranges::equal(state.inventory, prior.inventory),
+                                    "Occlusion at release leaked charge, RNG or launch");
+                                occludedInterruption = true;
+                            }
+                            bool restart = false;
+                            for (const auto& effect : state.timedEffects)
+                            {
+                                if (effect.actor < 2 && effect.argument == 1) selfArea = true;
+                                if (tick >= 280 && effect.actor == 0 && effect.magnitude == 100.f) touchContact = true;
+                                if (effect.actor == 2 && effect.argument == 1)
+                                { selfAttribute = true; require(effect.ordinal == 1, "Self attribute lost record ordinal"); }
+                                if (effect.actor < 2 && effect.argument == uint64_t(ESM::Skill::refIdToIndex(ESM::Skill::Destruction) + 9))
+                                { if (!targetSkill) restart = true; targetSkill = true; require(effect.ordinal == 2, "Target skill lost record ordinal"); }
+                            }
+                            if (tick > 180 && selfAttribute && targetSkill)
+                                attributesExpired |= std::ranges::none_of(state.timedEffects, [](const auto& effect) { return effect.argument != 0; });
+                            require(state.combat->actors[2][0][0] == initial.combat->actors[2][0][0]
+                                && state.combat->actors[2][0][1] == initial.combat->actors[2][0][1], "Timed attribute accumulated in base stats");
+                            if (state.casting)
+                            {
+                                const auto& cast = *state.casting;
+                                if (!stages[cast.phase]) { stages[cast.phase] = true; restart = true; }
+                                if (cast.phase == ActorCampaignCast::Released)
+                                {
+                                    require(cast.elapsed == bindCaster().mBoundCasts->ranges[cast.range].releaseTicks, "Cast missed its animation release key");
+                                    ++launches; targetA |= cast.target == 1; targetB |= cast.target == 2;
+                                }
+                                if (cast.phase < ActorCampaignCast::Released)
+                                    require(std::ranges::none_of(state.projectiles, [&](const auto& flight) {
+                                        return flight.casterKind == 2 && flight.commandId == cast.cast;
+                                    }), "Pending cast launched before animation key");
+                            }
+                            if (!state.projectiles.empty() && !flightRestart) { restart = true; flightRestart = true; }
+                            if (restart)
+                            {
+                                restored = std::make_unique<InventoryService>(loadout.store(), loadout.readers(), bindCaster(), true);
+                                restored->recover(image, refs); restored->synchronizeCells(authority);
+                                require(bytes(*restored) == image, "Restoring cast stage changed its image");
+                                InventoryService failedWrite(loadout.store(), loadout.readers(), bindCaster(), true);
+                                failedWrite.recover(image, refs); failedWrite.synchronizeCells(authority);
+                                auto failedCandidate = failedWrite.prepareNativeTick(authority, id<ServerTick>(tick + 1), 1.f/30, {});
+                                require(failedCandidate && failedCandidate->commit([](auto) {
+                                    return CanonicalDurabilityResult::Failed;
+                                }) == CanonicalDurabilityResult::Failed && failedWrite.inventoryImage().empty()
+                                    && !failedWrite.prepareNativeTick(authority, id<ServerTick>(tick + 2), 1.f/30, {}),
+                                    "Uncertain cast-stage write did not fail closed");
+                                InventoryService failedRecovered(loadout.store(), loadout.readers(), bindCaster(), true);
+                                failedRecovered.recover(image, refs);
+                                require(bytes(failedRecovered) == image,
+                                    "Failed cast-stage recovery changed payment/RNG/effects");
+                                if (state.casting && !inactiveRestart && state.casting->phase == ActorCampaignCast::WindUp)
+                                {
+                                    const auto nobody = std::get<CanonicalServerState>(createCanonicalServerState(visibleEntities, {}));
+                                    restored->synchronizeCells(nobody);
+                                    auto paused = restored->prepareNativeTick(nobody, id<ServerTick>(tick + 1), 1.f/30, {});
+                                    require(paused && paused->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                        "Inactive restart did not stage");
+                                    const auto pausedBytes = bytes(*restored);
+                                    const auto pausedState = readActorCampaign({reinterpret_cast<const char*>(pausedBytes.data()), pausedBytes.size()});
+                                    require(pausedState.casting && pausedState.casting->elapsed == state.casting->elapsed
+                                        && pausedState.casting->phase == state.casting->phase
+                                        && pausedState.combat->rng == state.combat->rng
+                                        && std::ranges::equal(pausedState.inventory, state.inventory), "Inactive restart changed pending cast/payment");
+                                    for (size_t field : {size_t(4), size_t(6)})
+                                    {
+                                        auto invalid = image;
+                                        const size_t at = invalid.size() - state.inventory.size() - state.actor.size() - 80 + field * 8;
+                                        for (size_t byte = 0; byte < 8; ++byte) invalid[at + byte] = std::byte((uint64_t(999) >> (8 * byte)) & 255);
+                                        InventoryService clean(loadout.store(), loadout.readers(), bindCaster(), true);
+                                        const auto untouched = bytes(clean);
+                                        bool rejected = false;
+                                        try { clean.recover(invalid, refs); }
+                                        catch (const std::invalid_argument&) { rejected = true; }
+                                        require(rejected && bytes(clean) == untouched, "Malformed pending cast partially installed recovery");
+                                        clean.recover(image, refs);
+                                        require(bytes(clean) == image, "Rejected recovery prevented valid retry");
+                                    }
+                                    restored = std::make_unique<InventoryService>(loadout.store(), loadout.readers(), bindCaster(), true);
+                                    restored->recover(image, refs); restored->synchronizeCells(authority);
+                                    inactiveRestart = true;
+                                }
+                            }
+                        }
+                        require(std::all_of(stages.begin() + 1, stages.end(), [](bool value) { return value; })
+                            && inactiveRestart && interrupted && occludedInterruption && flightRestart && targetA && targetB && launches >= 3
+                            && selfAttribute && targetSkill && attributesExpired && selfArea && touchContact,
+                            "Cast lifecycle did not cover every stage, interruption and both targets");
+                        std::cout << "casting lifecycle: animation-key release, durable stages/flight/recovery, disconnect/occlusion interruption, timed arguments/ordinals/expiry, exact restart and rejected retries\n";
+                        return;
+                    }
                     if (weaponCompetition)
                     {
                         const auto view = service.project(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
@@ -4776,7 +5049,8 @@ namespace TES3MP::Native::Testing
                         if (event) for (const auto& cast : event->magicEvents())
                             if (cast.actorCaster())
                             {
-                                require(cast.castSucceeded && cast.sourceId == source("npc_elemental_damage")
+                                require(cast.castSucceeded && (cast.sourceId == source("npc_elemental_damage")
+                                    || (fullSelection && cast.sourceKind == MagicUseSourceKind::EnchantedItem))
                                     && cast.casterId() == npc.mIdentity && cast.casterLife == 1,
                                     "Automatic cast lost source, success or placement/life");
                                 ++contacts;
@@ -4817,7 +5091,7 @@ namespace TES3MP::Native::Testing
                         if (tick == 8)
                         {
                             require(state.projectiles.size() == 2 && firstTarget
-                                && state.combat->actors[2][9][2] == initialState.combat->actors[2][9][2] - 1,
+                                && state.combat->actors[2][9][2] == initialState.combat->actors[2][9][2] - (fullSelection ? 0 : 1),
                                 "Autonomous spell failed to choose nearest player or pay exactly once");
                         }
                         if (tick == 7 || tick == 8)
@@ -4902,7 +5176,7 @@ namespace TES3MP::Native::Testing
                     require(state.projectiles.size() == 2 && state.projectiles[0].casterKind == 1 && state.projectiles[1].casterKind == 2
                         && state.projectiles[1].casterLife == 1 && state.projectiles[1].generation == 1
                         && state.combat->actors[0][9][2] == initialState.combat->actors[0][9][2] - 1
-                        && state.combat->actors[2][9][2] == initialState.combat->actors[2][9][2] - 1,
+                        && state.combat->actors[2][9][2] == initialState.combat->actors[2][9][2] - (fullSelection ? 0 : 1),
                         "Concurrent launch lost a flight or charged the wrong combat owner");
                     bool duplicate = false;
                     try { (void)service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {}, npcCast); }

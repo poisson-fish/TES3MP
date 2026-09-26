@@ -27,8 +27,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t ConstantActorCampaignMagic = 0x4650434154335354;
     inline constexpr uint64_t GeneralConstantActorCampaignMagic = 0x4750434154335354;
     inline constexpr uint64_t CasterActorCampaignMagic = 0x4850434154335354;
+    inline constexpr uint64_t CastLifecycleCampaignMagic = 0x4950434154335354;
+    inline constexpr bool hasCasterState(uint64_t magic)
+    { return magic == CasterActorCampaignMagic || magic == CastLifecycleCampaignMagic; }
     inline constexpr bool hasGeneralConstantState(uint64_t magic)
-    { return magic == GeneralConstantActorCampaignMagic || magic == CasterActorCampaignMagic; }
+    { return magic == GeneralConstantActorCampaignMagic || hasCasterState(magic); }
     inline constexpr bool hasConstantState(uint64_t magic)
     { return magic == ConstantActorCampaignMagic || hasGeneralConstantState(magic); }
     inline constexpr bool hasKnockoutState(uint64_t magic)
@@ -113,6 +116,13 @@ namespace TES3MP::Native
         bool operator==(const ActorCampaignTimedEffect&) const = default;
     };
     inline constexpr size_t MaximumActorTimedEffects = 512;
+    struct ActorCampaignCast
+    {
+        enum Phase : uint64_t { Selected = 1, Prepared, WindUp, Released, Recovery };
+        uint64_t actor = 0, life = 0, cast = 0, sourceKind = 0, source = 0;
+        uint64_t targetKind = 0, target = 0, range = 0, elapsed = 0, phase = Selected;
+        bool operator==(const ActorCampaignCast&) const = default;
+    };
     struct ActorCampaign
     {
         std::span<const char> inventory, actor;
@@ -124,6 +134,8 @@ namespace TES3MP::Native
         std::optional<ActorCampaignProjectile> projectile;
         std::vector<ActorCampaignProjectile> projectiles;
         std::vector<ActorCampaignTimedEffect> timedEffects;
+        std::string castResource;
+        std::optional<ActorCampaignCast> casting;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes)
     {
@@ -263,13 +275,13 @@ namespace TES3MP::Native
             offset += size_t(inventoryLength);
             const auto count = getAreaWord(bytes, offset);
             if (count > ActorCampaignLife::MaximumDeaths
-                || count > (bytes.size() - offset) / (magic == CasterActorCampaignMagic ? 40 : 24))
+                || count > (bytes.size() - offset) / (hasCasterState(magic) ? 40 : 24))
                 throw std::invalid_argument("Native NPC death history bound invalid");
             state.deaths.reserve(size_t(count));
             for (size_t i = 0; i < count; ++i)
             {
                 ActorDeathEvent event{getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
-                if (magic == CasterActorCampaignMagic)
+                if (hasCasterState(magic))
                 {
                     event.killerKind = getAreaWord(bytes, offset);
                     event.killerLife = getAreaWord(bytes, offset);
@@ -283,7 +295,7 @@ namespace TES3MP::Native
             }
             if ((state.respawnTick != 0) != (state.deaths.size() == state.generation))
                 throw std::invalid_argument("Native NPC life/death deadline inconsistent");
-            if (magic == CasterActorCampaignMagic
+            if (hasCasterState(magic)
                 && state.deaths.size() != state.generation - (state.respawnTick ? 0 : 1))
                 throw std::invalid_argument("Native caster life history incomplete");
             if (!state.deaths.empty() && (state.respawnTick
@@ -350,7 +362,7 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native projectile step invalid");
                     length2 += component * component;
                 }
-                if (magic == CasterActorCampaignMagic)
+                if (hasCasterState(magic))
                 {
                     value.casterKind = getAreaWord(bytes, offset);
                     value.casterLife = getAreaWord(bytes, offset);
@@ -376,7 +388,7 @@ namespace TES3MP::Native
             || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            const size_t effectBytes = magic == CasterActorCampaignMagic ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
+            const size_t effectBytes = hasCasterState(magic) ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
             if (count > (hasGeneralConstantState(magic) ? MaximumActorTimedEffects : 16) || count > (bytes.size() - offset) / effectBytes)
                 throw std::invalid_argument("Native timed effect count invalid");
             timedEffects.reserve(size_t(count));
@@ -405,11 +417,11 @@ namespace TES3MP::Native
                         effect.argument = getAreaWord(bytes, offset);
                         effect.ordinal = getAreaWord(bytes, offset);
                         if (effect.argument > 35 || effect.ordinal >= 8
-                            || (effect.sourceKind != 3 && (effect.argument || effect.ordinal)))
+                            || (magic != CastLifecycleCampaignMagic && effect.sourceKind != 3 && (effect.argument || effect.ordinal)))
                             throw std::invalid_argument("Native effect argument or ordinal invalid");
                     }
                     else if (effect.sourceKind == 3) effect.argument = 8; // V36 Luck.
-                    if (magic == CasterActorCampaignMagic)
+                    if (hasCasterState(magic))
                     {
                         effect.casterKind = getAreaWord(bytes, offset);
                         effect.casterLife = getAreaWord(bytes, offset);
@@ -434,10 +446,36 @@ namespace TES3MP::Native
                 timedEffects.push_back(effect);
             }
         }
+        std::string castResource;
+        std::optional<ActorCampaignCast> casting;
+        if (magic == CastLifecycleCampaignMagic)
+        {
+            const auto size = getAreaWord(bytes, offset);
+            if (!size || size > 1024 || size > bytes.size() - offset)
+                throw std::invalid_argument("Native cast resource identity invalid");
+            castResource.assign(bytes.data() + offset, size_t(size)); offset += size_t(size);
+            const auto count = getAreaWord(bytes, offset);
+            if (count > 1) throw std::invalid_argument("Native pending cast count invalid");
+            if (count)
+            {
+                ActorCampaignCast value;
+                for (auto* field : {&value.actor, &value.life, &value.cast, &value.sourceKind, &value.source,
+                        &value.targetKind, &value.target, &value.range, &value.elapsed, &value.phase})
+                    *field = getAreaWord(bytes, offset);
+                if (!value.actor || !life || value.life != life->generation || !value.cast || value.cast > tick
+                    || !value.source || value.sourceKind > 1
+                    || value.targetKind > 1
+                    || ((value.targetKind == 0) != (value.target == 0))
+                    || value.range > 2 || value.elapsed > 1800 || value.phase < 1 || value.phase > 5
+                    || (value.phase <= ActorCampaignCast::Prepared && value.elapsed))
+                    throw std::invalid_argument("Native pending cast state invalid");
+                casting = value;
+            }
+        }
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset
             || actorSize != bytes.size()-offset-inventorySize)
             throw std::invalid_argument("Native actor campaign lengths invalid");
-        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life), std::move(projectile), std::move(projectiles), std::move(timedEffects)};
+        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life), std::move(projectile), std::move(projectiles), std::move(timedEffects), std::move(castResource), casting};
     }
 }
 #endif

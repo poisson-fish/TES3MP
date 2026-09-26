@@ -1196,7 +1196,9 @@ namespace TES3MP
                                         if (mNativeInventory && mNativeInventory->hasNativeMagicUse())
                                         {
                                             if (prepared.mNativeInventory)
-                                                disposition = CommandDisposition::CombatRejected;
+                                                disposition = mNativeInventory->appendMagicUse(*prepared.mState,
+                                                    proposal, tick, *prepared.mNativeInventory)
+                                                    ? CommandDisposition::Applied : CommandDisposition::CombatRejected;
                                             else
                                             {
                                                 prepared.mNativeInventory = mNativeInventory->prepareMagicUse(

@@ -504,6 +504,20 @@ namespace TES3MP::Native
     }
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
+    bool InteriorActorScene::lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const
+    {
+        if (!mImpl) throw std::invalid_argument("Visibility scene is unloaded");
+        for (const auto& point : {from, to}) for (float value : point)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Visibility endpoint invalid");
+        const btVector3 start(from[0], from[1], from[2]), end(to[0], to[1], to[2]);
+        btCollisionWorld::ClosestRayResultCallback hit(start, end);
+        hit.m_collisionFilterGroup = MWPhysics::CollisionType_AnyPhysical;
+        hit.m_collisionFilterMask = MWPhysics::CollisionType_World
+            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Door;
+        mImpl->mWorld.rayTest(start, end, hit);
+        return !hit.hasHit();
+    }
     std::optional<ActorProjectileContact> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
         const std::array<float, 3>& to, uint64_t casterActor) const
     {
@@ -574,6 +588,27 @@ namespace TES3MP::Native
             return {std::move(animation), identity.str()};
         }
         throw std::invalid_argument("Selected NPC lacks the requested melee animation group");
+    }
+
+    BoundCastAnimations InteriorActorScene::bindCastAnimations()
+    {
+        if (!mImpl || mImpl->mCustomMeleeModel)
+            throw std::invalid_argument("Selected NPC has no supported cast animation source");
+        for (auto source = mImpl->mMeleeSources.rbegin(); source != mImpl->mMeleeSources.rend(); ++source)
+        {
+            auto kf = *source;
+            kf.changeExtension(VFS::Path::ExtensionView("kf"));
+            if (!mImpl->mVfs.exists(kf)) continue;
+            const auto holder = mImpl->mResources.getKeyframeManager()->get(kf);
+            if (!holder || holder->mKeyframeControllers.empty() || !holder->mTextKeys.hasGroupStart("spellcast")) continue;
+            const auto ranges = readCastAnimations(holder->mTextKeys);
+            auto stream = mImpl->mVfs.get(kf);
+            const auto hash = Files::getHash(kf.value(), *stream);
+            std::ostringstream identity;
+            identity << "native-cast-resource-1\n" << kf.value() << ':' << hash[0] << ':' << hash[1] << '\n';
+            return {ranges, identity.str()};
+        }
+        throw std::invalid_argument("Selected NPC lacks spellcast animation keys");
     }
 
     void InteriorActorScene::unload()

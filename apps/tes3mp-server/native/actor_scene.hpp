@@ -10,6 +10,7 @@
 #include <span>
 #include <components/esm/refid.hpp>
 #include "melee_animation.hpp"
+#include "cast_animation.hpp"
 
 namespace TES3MP::Native
 {
@@ -77,6 +78,9 @@ namespace TES3MP::Native
         // segment. Actor zero means world geometry; absence means clear.
         std::optional<ActorProjectileContact> projectileContact(const std::array<float, 3>& from,
             const std::array<float, 3>& to, uint64_t casterActor = 0) const;
+        // Stock LOS collision mask. Player eye positions use the server proxy
+        // until native player hulls are bound.
+        bool lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
         bool enchantedWeaponsAreMagical() const;
@@ -85,6 +89,7 @@ namespace TES3MP::Native
         // source priority. The returned identity must join a combat campaign's
         // content binding before a swing can become authoritative.
         BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
+        BoundCastAnimations bindCastAnimations();
         bool loaded() const noexcept { return bool(mImpl); }
         // Release collision/navigation resources, retaining the exact committed
         // image. Reload validates a freshly bound scene before swapping it in.

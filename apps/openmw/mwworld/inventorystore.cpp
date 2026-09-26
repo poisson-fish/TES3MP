@@ -17,6 +17,7 @@
 #include "class.hpp"
 #include "esmstore.hpp"
 #include "manualref.hpp"
+#include "inventoryitem.hpp"
 
 void MWWorld::InventoryStore::copySlots(const InventoryStore& store)
 {
@@ -671,7 +672,8 @@ void MWWorld::InventoryStore::applyAuthoritativeAppearance(std::span<const std::
         const auto item = items.emplace_back(content, record).getPtr();
         const auto allowed = item.getClass().getEquipmentSlots(item);
         if (std::ranges::find(allowed.first, slot) == allowed.first.end()
-            || !item.getClass().getScript(item).empty() || !item.getClass().getEnchantment(item).empty())
+            || !item.getClass().getScript(item).empty()
+            || (!item.getClass().getEnchantment(item).empty() && !inventoryItemRecord(content, record).mWhenUsed))
             throw std::invalid_argument("Remote appearance has an unsupported record or slot");
         const auto current = getSlot(slot);
         if (current == end() || current->getCellRef().getRefId() != record || current->getCellRef().getCount() != 1)
@@ -686,10 +688,11 @@ void MWWorld::InventoryStore::applyAuthoritativeAppearance(std::span<const std::
     clearAuthoritative(scripts);
     for (size_t i = 0; i < equipment.size(); ++i)
         slots.emplace_back(equipment[i].first, *addAuthoritative(items[i].getPtr(), 1, world));
-    applyAuthoritativeEquipment(slots);
+    applyAuthoritativeEquipment(slots, &content);
 }
 
-void MWWorld::InventoryStore::applyAuthoritativeEquipment(std::span<const std::pair<int, Ptr>> equipment)
+void MWWorld::InventoryStore::applyAuthoritativeEquipment(
+    std::span<const std::pair<int, Ptr>> equipment, const ESMStore* content)
 {
     if (equipment.size() > Slots) throw std::invalid_argument("Remote equipment exceeds slot budget");
     TSlots slots;
@@ -697,7 +700,9 @@ void MWWorld::InventoryStore::applyAuthoritativeEquipment(std::span<const std::p
     for (const auto& [slot, item] : equipment)
     {
         if (slot < 0 || slot >= Slots || !item.hasLiveReference() || item.getContainerStore() != this
-            || slots[slot] != end() || !item.getClass().getScript(item).empty() || !item.getClass().getEnchantment(item).empty())
+            || slots[slot] != end() || !item.getClass().getScript(item).empty()
+            || (!item.getClass().getEnchantment(item).empty()
+                && (!content || !inventoryItemRecord(*content, item.getCellRef().getRefId()).mWhenUsed)))
             throw std::invalid_argument("Remote equipment has invalid ownership, slot or unsupported effects");
         const auto allowed = item.getClass().getEquipmentSlots(item);
         if (std::ranges::find(allowed.first, slot) == allowed.first.end() || item.getCellRef().getCount() < 1

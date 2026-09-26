@@ -176,10 +176,10 @@ namespace
 
     bool actor_cast_layout_requires_capability()
     {
-        const auto required = TES3MP::actorCastReplicationCapability().value();
+        const auto required = TES3MP::actorCastLifecycleCapability().value();
         const auto server = offer(versionRange(1, 10, 10), {}, {required});
-        const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19}, {}));
-        const auto current = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required}, {}));
+        const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, 20}, {}));
+        const auto current = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, 20, required}, {}));
         return std::holds_alternative<SessionRejected>(TES3MP::negotiateClientHello(old, server))
             && std::holds_alternative<ServerHello>(TES3MP::negotiateClientHello(current, server));
     }

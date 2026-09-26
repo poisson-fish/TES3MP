@@ -6679,14 +6679,24 @@ int main(int argc, char** argv)
                 false, false, false, false, false, false, false, true, true);
             std::cout << "PASS npc-constant-effects\n"; return 0;
         }
-        if (argc == 5 && (std::string_view(argv[1]) == "npc-auto-spells"
-            || std::string_view(argv[1]) == "npc-weapon-selection"))
+        if (argc == 6 && std::string_view(argv[1]) == "npc-cast-fixture")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true,
                 false, false, false, true, false, false, false, true, false, false, true, false, true,
-                std::string_view(argv[1]) == "npc-weapon-selection");
+                true, true, true, argv[5]);
+            std::cout << "PASS real-record fixture " << argv[5] << " (synthetic actor/placements)\n"; return 0;
+        }
+        if (argc == 5 && (std::string_view(argv[1]) == "npc-auto-spells"
+            || std::string_view(argv[1]) == "npc-weapon-selection" || std::string_view(argv[1]) == "npc-full-selection" || std::string_view(argv[1]) == "npc-cast-lifecycle"))
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true,
+                false, false, false, true, false, false, false, true, false, false, true, false, true,
+                std::string_view(argv[1]) != "npc-auto-spells", std::string_view(argv[1]) == "npc-full-selection" || std::string_view(argv[1]) == "npc-cast-lifecycle",
+                std::string_view(argv[1]) == "npc-cast-lifecycle");
             std::cout << "PASS " << argv[1] << "\n"; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "npc-actor-casts")

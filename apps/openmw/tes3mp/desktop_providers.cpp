@@ -1019,13 +1019,23 @@ namespace TES3MP::OpenMWAdapter
 
         bool equipmentRecords(const LatestWinsEquipmentSnapshot& snapshot, PlayerId player,
             std::vector<ESM::RefId>& records,
-            std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)>& slots) const
+            std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)>& slots)
         {
             slots = {};
             const auto member = std::ranges::lower_bound(snapshot.members, player, {}, &PublicEquipmentMember::player);
             if (member == snapshot.members.end() || member->player != player)
                 return true;
             slots = member->slots;
+            // Public equipment can arrive before the private inventory baseline.
+            // Resolve native record identities from the manifest-bound loadout
+            // on either path, rather than requiring their arrival order.
+            if (nativeItemRecords.empty() && std::ranges::any_of(slots,
+                    [&](const auto& item) { return item && !itemMapping(*item); }))
+            {
+                const auto& store = *MWBase::Environment::get().getESMStore();
+                nativeItemRecords = MWWorld::inventoryRecords(store);
+                nativeSoulRecords = MWWorld::inventorySoulRecords(store);
+            }
             for (std::size_t index = 0; index < slots.size(); ++index)
             {
                 const auto& prototype = slots[index];
@@ -1495,9 +1505,18 @@ namespace TES3MP::OpenMWAdapter
 
             const auto actor = std::ranges::find_if(actorRemotes,
                 [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == target; });
+            std::optional<ActorId> actorId;
             if (actor != actorRemotes.end() && actor->second.lastObserved)
+                actorId = actor->second.lastObserved->actorId();
+            else
             {
-                const auto id = actor->second.lastObserved->actorId();
+                const auto native = std::ranges::find_if(nativeRemotes,
+                    [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == target; });
+                if (native != nativeRemotes.end()) actorId = ActorId::fromValue(native->first);
+            }
+            if (actorId)
+            {
+                const auto id = *actorId;
                 const auto state
                     = std::ranges::lower_bound(combatSnapshot->actors(), id, {}, &ActorCombatSnapshot::actorId);
                 if (state == combatSnapshot->actors().end() || state->actorId != id || state->dead)
@@ -1782,6 +1801,9 @@ namespace TES3MP::OpenMWAdapter
                 actorMagicka.setBase(combat->maximumMagicka);
                 actorMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(actorMagicka);
+                if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
+                        combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
+                    return ProviderResult::PresentationFailed;
                 const auto deathResult = remote.actor->setDead(combat->dead);
                 if (!replicatedActorResultAccepted(deathResult))
                 {
@@ -1813,6 +1835,9 @@ namespace TES3MP::OpenMWAdapter
                 magicka.setBase(combat->maximumMagicka);
                 magicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(magicka);
+                if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
+                        combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
+                    return ProviderResult::PresentationFailed;
                 if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
                     return ProviderResult::PresentationFailed;
             }
@@ -2335,7 +2360,7 @@ namespace TES3MP::OpenMWAdapter
                     inventory.equip(static_cast<int>(binding.slot), iter);
                 }
                 if (native)
-                    inventory.applyAuthoritativeEquipment(slots);
+                    inventory.applyAuthoritativeEquipment(slots, MWBase::Environment::get().getESMStore());
                 // An empty baseline has no add/equip callbacks to refresh the
                 // GUI. Notify once the complete committed inventory is installed.
                 MWBase::Environment::get().getWindowManager()->inventoryUpdated(playerPtr);
@@ -2439,7 +2464,7 @@ namespace TES3MP::OpenMWAdapter
                             return ProviderResult::ContentMappingFailed;
                         slots.emplace_back(static_cast<int>(binding.slot), stored->second.ptr);
                     }
-                    inventory.applyAuthoritativeEquipment(slots);
+                    inventory.applyAuthoritativeEquipment(slots, MWBase::Environment::get().getESMStore());
                 }
                 // Authoritative store installation bypasses stock mutation
                 // callbacks; an already-open loot window still needs a refresh.

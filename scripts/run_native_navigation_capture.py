@@ -723,10 +723,12 @@ def run(args):
     binary = args.build.resolve()
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
-    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart
+    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting
+    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting else {}
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
+    if args.npc_casting: spell_name = encounter["spell"]
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     destination = "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
@@ -750,6 +752,8 @@ def run(args):
         common["spawn_positions"] = "-563200:-307200:394240"
     if spell_capture:
         common["spawn_positions"] = "61440:-32768:1024"
+    if args.npc_casting:
+        common["spawn_positions"] = "61440:-409600:1024"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
                                  join_password_file="join-password.txt", player_identity_file="players.txt")
@@ -772,6 +776,8 @@ def run(args):
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         if spell_capture:
             tokens[10:13] = [str((60 + 25 * index) * 1024), "-32768", "1024"]
+        if args.npc_casting:
+            tokens[10:13] = [str((60 - 220 * index) * 1024), "-409600", "1024"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
         identities.append(" ".join(tokens))
@@ -824,11 +830,17 @@ def run(args):
                        "--tes3mp-content-appearance-record=player"]
             if spell_capture:
                 spell_id = 14695981039346656037
-                for byte in spell_name.encode("ascii"):
+                for byte in spell_name.lower().encode("ascii"):
                     spell_id = ((spell_id ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
                 command.append(f"--tes3mp-content-spell-map={spell_id}={spell_name}")
             start(role, command)
             client_commands[role] = command
+        if args.npc_casting:
+            from native_cast_encounter import verify_cast_encounter
+            verify_cast_encounter(output, evidence, processes, relay, manifest, encounter,
+                                  lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
+                                  lambda selected: start(selected, client_commands[selected]))
+            return
         if args.unarmed_effect:
             verify_unarmed_effect(output, evidence, processes, relay, manifest, args.attack_limit)
             return
@@ -961,13 +973,14 @@ if __name__ == "__main__":
     parser.add_argument("--actor-effects", action="store_true", help="V35 timed Restore Health on two desktops and reconnect")
     parser.add_argument("--actor-effects-restart", action="store_true",
                         help="V35 active timed effect through server restart and two returning desktops")
+    parser.add_argument("--npc-casting", action="store_true", help="V42 concurrent real-record NPC/player casting, disconnect and restart")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
-            args.instant_spell, args.actor_effects, args.actor_effects_restart)) > 1:
+            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.leave:
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)
