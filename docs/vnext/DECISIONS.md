@@ -5,20 +5,19 @@ script-scoping proposals remain labeled. Replace superseded rules; append no his
 
 ## Product, authority and reuse
 
-**OpenMW gameplay is the foundation.** Reuse/refactor content, mechanics, world and
-scripting for the authoritative server, including TR. No independent formulas,
-manual catalogs or custom quest language. Keep baseline 0.51.0 until explicitly
-upgraded. TES3MP 0.8 wire/API/save compatibility is unnecessary; reuse requires
-inspection/tests. Mod support, including MWSE/native-engine behavior, requires evidence.
+**OpenMW gameplay is the foundation.** Reuse engine content, mechanics, world and
+scripting, including TR; no independent formulas, catalogs or quest language.
+Keep baseline 0.51.0 until explicitly upgraded. TES3MP 0.8 compatibility is
+unnecessary. Reuse and mod support, including MWSE behavior, require evidence.
 
-**Independent networking; native runtime.** Keep components/tes3mp portable with owned
-values. An app-local runtime leaf may use OpenMW internally and extract gameplay
-shared with stock callers. Preserve dependency checks; avoid prerequisite engine-wide cleanup.
+**Independent networking; native runtime.** Keep components/tes3mp portable and
+engine-independent. An app-local runtime may extract gameplay shared with stock
+OpenMW callers. Preserve dependency checks.
 
 **One gameplay loadout.** OpenMW resolves configuration, encoding, load order,
-overrides/deletions and references. Bind plugins, scripts, settings and relevant
-resources to server/client/save identity. Python may package/hash/cache, not reinterpret
-ESM. Unsupported behavior fails visibly; never silently grant client authority.
+overrides/deletions and references. Bind plugins, scripts, settings and gameplay
+resources to server/client/save identity. Python may package/hash/cache, not
+reinterpret ESM. Unsupported behavior rejects visibly.
 
 **One server authority.** The server owns actors, objects, player resources,
 time/weather and outcomes in every story scope. Clients submit authenticated intent
@@ -43,10 +42,10 @@ raw memory, process pointers, rendering objects or live sessions.
 
 ## M4 actor simulation
 
-**Runtime ownership.** Extract shared OpenMW simulation into an app-local actor
-runtime with owned commands/snapshots and explicit activity/identity. AI, physics,
-combat, wear, charge, death and loot share authoritative inventories. Preserve
-stock callers and dependency checks; avoid a full World/UI wrapper.
+**Runtime ownership.** An app-local OpenMW actor runtime exposes owned commands/
+snapshots and explicit activity/identity. AI, physics, combat, wear, charge, death
+and loot share authoritative inventories. Preserve stock callers and dependency
+checks; avoid World/UI wrappers.
 
 **Gameplay animation.** Keep CPU movement, hit keys and projectile/spell releases;
 clients render commits. Bind timing/collision resources to gameplay identity;
@@ -72,6 +71,11 @@ collision transforms are derived. Player reports supplement NPC sensing until
 movement cutover. V18 persists destination, door-avoidance timer, stuck position,
 direction and private RNG. Rotating geometry is a synchronized derived cache.
 Only the selected NPC moves; neighbor propagation awaits multiple actors.
+
+**V38 caster identity.** Persist caster kind, player/placement ID and launch life.
+Players retain life 1 across reconnect. NPC respawn clears effects on its body;
+effects on others retain the old caster life. V38 requires a fresh campaign;
+legacy recovery never invents missing life metadata.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays
@@ -112,19 +116,16 @@ correction size/frequency and overruns. Existing smoothing does not prove replay
 
 ## Cooperative progression design
 
-**Requirement:** each character can complete supported campaigns independently,
-including after joining late. Another's actions, absence or possessions cannot
-permanently remove their opportunities. Their own mutually exclusive choices still
-have consequences. Support arbitrary content within supported OpenMW APIs through
-engine rules, not a mandatory quest-adaptation catalog. This is a design target.
+**Requirement:** characters, including late joiners, can complete campaigns
+independently. Others cannot permanently block opportunities; one's own mutually
+exclusive choices retain consequences. Support content through OpenMW APIs and
+engine rules, without mandatory quest adaptations. This remains a design target.
 
 ### Shared world, personal progression
 
-**Direction:** NPCs normally inhabit one shared world: anyone can fight/kill them,
-and they return for later players. Temporary unavailability is acceptable; permanent
-loss of another character's progression is not. Personal campaign state primarily
-owns journals, choices, relationships, faction progress, rewards and script history.
-Whole private campaigns are not the default response to an NPC death.
+**Direction:** NPCs share one world and return after death. Temporary unavailability
+is acceptable. Personal state owns journals, choices, relationships, faction
+progress, rewards and script history. NPC death does not default to private campaigns.
 
 **Lifecycle contract (M4).** Stable placement/life generations, attributed death
 events, corpse inventories and deadlines survive unload/restart. Old requests
@@ -132,11 +133,10 @@ cannot affect new lives. OpenMW supplies reconstruction data; authored corpses,
 summons, scripted spawns and deleted placements are not permanent spawn points.
 M4 records causal events; M5 owns personal quest credit.
 
-**V25 deadline rule:** one initially living content-placed NPC respawns after a
-descriptor-bound delay in authoritative 30 Hz ticks (the capture uses 27,000,
-or 15 minutes while the server runs). Game-time skips and downtime do not advance it. Actor and
-inventory restore together with fresh item identities. Wider spawn and tuning
-policy awaits evidence.
+**V25 deadline rule:** one initially living content placement respawns after a
+descriptor-bound delay of authoritative 30 Hz ticks (capture: 27,000). Game-time
+skips and downtime do not count. Restore actor/inventory together with fresh item
+identities. Wider spawn policy awaits evidence.
 
 Separate three kinds of state:
 
@@ -232,10 +232,10 @@ precedes installation, which precedes publication. Restore the complete content/
 version-bound world/player relationship off to the side. No checkpoint-only
 acknowledgment, silent resets or parallel canonical files.
 
-**Borrowed lifetime.** Ptr copies preserve a weak witness, invalidated on destruction.
-Reference copy/move construction creates a new lifetime; assignment preserves the
-destination lifetime. Check witnesses before dereferencing, then registry/script ownership.
-Address equality is insufficient. Serialized checks neither pin nor authorize installation.
+**Borrowed lifetime.** Ptr copies retain weak destruction witnesses. Reference
+copy/move construction starts a new lifetime; assignment preserves the destination.
+Check witnesses before dereferencing, then registry/script ownership. Addresses and
+serialized checks cannot establish lifetime or authorize installation.
 
 **Native inventory cutover.** Session image and dispositions share one file transaction,
 never CanonicalInventoryWorld. One player inventory intent composes with the native
@@ -250,10 +250,10 @@ reloads/rerolls/auto-equips. Identities preserve raw condition/light-time/charge
 require fresh campaigns or explicit migration; recovery never resets, rerolls loot
 or auto-equips.
 
-**Native time/weather (v12+).** OpenMW calendar, REGN and fallbacks advance up to
-4,096 regions at 30 Hz regardless of occupancy/menus. RNG, clock, timers and queued
-transitions share durability and content/settings/seed binding. No wall-clock
-catch-up, client writers or legacy script modules.
+**Native time/weather (v12+).** OpenMW calendar, REGN and fallbacks advance
+4,096 regions maximum at 30 Hz regardless of occupancy/menus. Persist RNG, clock,
+timers and transitions with content/settings/seed binding. No wall-clock catch-up,
+client writers or legacy scripts.
 
 **Player-area streaming (v14).** OpenMW discovers 1–256 cells. Canonical state stays
 resident; occupied interiors and player 3×3 exterior neighborhoods retain scenes.
@@ -266,12 +266,11 @@ uses engine environment with inherited client movement; physics remains M4.
 It does not authorize unsupported scripts. CURRENT.md records milestone acceptance.
 
 **Initial leveled actors (v15).** A separate campaign-seeded OpenMW RNG stream and
-explicit loot level select initial NPC/creature records in stable cell/reference
-order. Persist every marker's selected record or chance-none outcome in the same
-inventory/door image. Recovery reads choices without rolling. Marker identity owns
-the selected actor; clients suppress local spawning and render the committed
-selection. This supports initially living unscripted actors, not respawn, AI or
-leveled authored corpses. V15 requires fresh campaigns and the leveled-actor capability.
+loot level select NPC/creature records in stable cell/reference order. Persist
+marker selections, including chance-none, with inventory/doors; recovery never
+rerolls. Marker identity owns the actor; clients suppress local spawning.
+Only initially living unscripted actors are supported. Fresh campaigns and the
+leveled-actor capability are required.
 
 **Transfers and equipment.** Take All binds a witnessed source stack and both
 revisions, uses stock order/stacking and corpse slot removal on detached stores,

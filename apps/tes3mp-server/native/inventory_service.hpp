@@ -90,6 +90,7 @@ namespace TES3MP::Native
         bool mActorEffectLifecycle = false;
         bool mConstantEffects = false;
         bool mGeneralConstants = false;
+        bool mDurableCasters = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
@@ -138,7 +139,7 @@ namespace TES3MP::Native
         {
             size_t combatIndex;
             size_t inventoryOwner;
-            uint64_t identity;
+            ActorCasterIdentity identity;
         };
         MagicCasterContext magicCaster(size_t combatIndex) const;
         struct WeaponWear

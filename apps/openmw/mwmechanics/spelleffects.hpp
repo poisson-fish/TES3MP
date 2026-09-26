@@ -11,6 +11,7 @@
 namespace MWWorld
 {
     class Ptr;
+    class TimeStamp;
 }
 
 namespace MWMechanics
@@ -26,7 +27,8 @@ namespace MWMechanics
     // and the stock actor effect path. Index follows CreatureStats dynamic stats.
     void restoreDynamicStat(CreatureStats& stats, int index, float magnitude);
     void adjustDynamicStatValue(CreatureStats& stats, int index, float magnitude,
-        bool allowDecreaseBelowZero = false, bool allowIncreaseAboveModified = false);
+        bool allowDecreaseBelowZero = false, bool allowIncreaseAboveModified = false,
+        const MWWorld::TimeStamp* deathTime = nullptr);
     // Shared attribute mutation; explicit stats also permit isolated preparation.
     void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase = false,
         std::optional<float> baseMagickaMultiplier = {});

@@ -17,6 +17,11 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V38 persists caster kind and life through projectiles, timed/constant
+    // effects and NPC death history. Players retain life 1 across reconnect;
+    // NPC placement/life attribution survives respawn on other targets.
+    // Requires a fresh campaign; V37 and older retain their recovery layouts.
+    // NPC projectile execution/publication and automatic casting remain pending.
     // V37 adds constant effect arguments/ordinals, variable rolls, multiple sources
     // and all equipment slots. Attribute/skill fortification and six resistances
     // are supported; other constant behaviors reject. Maximum 512 instances.

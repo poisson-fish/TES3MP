@@ -68,8 +68,9 @@ namespace TES3MP::Native
                 const float resistance = MWMechanics::getEffectResistance(effect.mEffectID,
                     target, 100.f, target.getFatigueTerm(*content), false, *rng);
                 const float loss = magnitude * (1.f - resistance / 100.f);
+                const MWWorld::TimeStamp deathTime{}; // Composed campaign records the death tick.
                 if (effect.mEffectID == ESM::MagicEffect::DamageHealth)
-                    MWMechanics::adjustDynamicStatValue(target, 0, -loss);
+                    MWMechanics::adjustDynamicStatValue(target, 0, -loss, false, false, &deathTime);
                 else if (effect.mEffectID == ESM::MagicEffect::DamageMagicka)
                     MWMechanics::adjustDynamicStatValue(target, 1, -loss);
                 else

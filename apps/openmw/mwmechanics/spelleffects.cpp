@@ -431,13 +431,14 @@ namespace MWMechanics
     }
 
     void adjustDynamicStatValue(CreatureStats& stats, int index, float magnitude,
-        bool allowDecreaseBelowZero, bool allowIncreaseAboveModified)
+        bool allowDecreaseBelowZero, bool allowIncreaseAboveModified, const MWWorld::TimeStamp* deathTime)
     {
         if (index < Stats::Health || index > Stats::Fatigue)
             throw std::invalid_argument("Dynamic stat index invalid");
         auto value = stats.getDynamic(index);
         value.setCurrent(value.getCurrent() + magnitude, allowDecreaseBelowZero, allowIncreaseAboveModified);
-        stats.setDynamic(index, value);
+        if (deathTime) stats.setDynamic(index, value, *deathTime);
+        else stats.setDynamic(index, value);
     }
 
     float rollEffectMagnitude(float minimum, float maximum, Misc::Rng::Generator& rng)

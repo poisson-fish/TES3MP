@@ -26,12 +26,28 @@ namespace TES3MP::Native
     inline constexpr uint64_t EffectActorCampaignMagic = 0x4550434154335354;
     inline constexpr uint64_t ConstantActorCampaignMagic = 0x4650434154335354;
     inline constexpr uint64_t GeneralConstantActorCampaignMagic = 0x4750434154335354;
+    inline constexpr uint64_t CasterActorCampaignMagic = 0x4850434154335354;
+    inline constexpr bool hasGeneralConstantState(uint64_t magic)
+    { return magic == GeneralConstantActorCampaignMagic || magic == CasterActorCampaignMagic; }
     inline constexpr bool hasConstantState(uint64_t magic)
-    { return magic == ConstantActorCampaignMagic || magic == GeneralConstantActorCampaignMagic; }
+    { return magic == ConstantActorCampaignMagic || hasGeneralConstantState(magic); }
     inline constexpr bool hasKnockoutState(uint64_t magic)
     { return magic == KnockoutActorCampaignMagic || magic == MeleeDefenseActorCampaignMagic
         || magic == EffectActorCampaignMagic || hasConstantState(magic); }
     inline constexpr size_t MaximumActorProjectiles = 8;
+    // Kind 1 is a durable player identity (one life until player respawn exists),
+    // kind 2 is a content placement/life. Zero metadata belongs only to legacy images.
+    struct ActorCasterIdentity
+    {
+        uint64_t id = 0, kind = 0, life = 0;
+        bool operator==(const ActorCasterIdentity&) const = default;
+    };
+    inline void validateActorCaster(ActorCasterIdentity caster, uint64_t generation)
+    {
+        if (!caster.id || (caster.kind != 1 && caster.kind != 2) || !caster.life
+            || (caster.kind == 1 ? caster.life != 1 : caster.life > generation))
+            throw std::invalid_argument("Native caster kind or life invalid");
+    }
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
     // nested equipment image, committed with this wrapper.
@@ -57,6 +73,7 @@ namespace TES3MP::Native
         uint64_t life = 0;
         uint64_t tick = 0;
         uint64_t killer = 0;
+        uint64_t killerKind = 0, killerLife = 0;
         bool operator==(const ActorDeathEvent&) const = default;
     };
     struct ActorCampaignLife
@@ -77,6 +94,7 @@ namespace TES3MP::Native
         std::array<float, 3> position{}, step{};
         uint64_t targetKind = 2; // Older campaign images target the selected actor.
         uint64_t commandId = 0; // V32 identifies a pending cast across retries.
+        uint64_t casterKind = 0, casterLife = 0;
         bool operator==(const ActorCampaignProjectile&) const = default;
     };
     struct ActorCampaignTimedEffect
@@ -91,6 +109,7 @@ namespace TES3MP::Native
         uint64_t startTick = 0, durationTicks = 0;
         // 0: no argument; 1..8: attribute; 9..35: skill. Ordinal preserves duplicate effects.
         uint64_t argument = 0, ordinal = 0;
+        uint64_t casterKind = 0, casterLife = 0;
         bool operator==(const ActorCampaignTimedEffect&) const = default;
     };
     inline constexpr size_t MaximumActorTimedEffects = 512;
@@ -243,12 +262,19 @@ namespace TES3MP::Native
             state.spawnInventory.assign(bytes.data() + offset, bytes.data() + offset + inventoryLength);
             offset += size_t(inventoryLength);
             const auto count = getAreaWord(bytes, offset);
-            if (count > ActorCampaignLife::MaximumDeaths || count > (bytes.size() - offset) / 24)
+            if (count > ActorCampaignLife::MaximumDeaths
+                || count > (bytes.size() - offset) / (magic == CasterActorCampaignMagic ? 40 : 24))
                 throw std::invalid_argument("Native NPC death history bound invalid");
             state.deaths.reserve(size_t(count));
             for (size_t i = 0; i < count; ++i)
             {
                 ActorDeathEvent event{getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (magic == CasterActorCampaignMagic)
+                {
+                    event.killerKind = getAreaWord(bytes, offset);
+                    event.killerLife = getAreaWord(bytes, offset);
+                    validateActorCaster({event.killer, event.killerKind, event.killerLife}, event.life);
+                }
                 if (event.life != state.deaths.size() + 1 || event.life > state.generation || !event.tick || !event.killer
                     || event.tick > tick || !state.deaths.empty() && (event.life <= state.deaths.back().life
                         || event.tick <= state.deaths.back().tick))
@@ -257,6 +283,9 @@ namespace TES3MP::Native
             }
             if ((state.respawnTick != 0) != (state.deaths.size() == state.generation))
                 throw std::invalid_argument("Native NPC life/death deadline inconsistent");
+            if (magic == CasterActorCampaignMagic
+                && state.deaths.size() != state.generation - (state.respawnTick ? 0 : 1))
+                throw std::invalid_argument("Native caster life history incomplete");
             if (!state.deaths.empty() && (state.respawnTick
                     ? state.respawnTick <= state.deaths.back().tick
                     : state.bornTick <= state.deaths.back().tick))
@@ -321,13 +350,20 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native projectile step invalid");
                     length2 += component * component;
                 }
+                if (magic == CasterActorCampaignMagic)
+                {
+                    value.casterKind = getAreaWord(bytes, offset);
+                    value.casterLife = getAreaWord(bytes, offset);
+                    validateActorCaster({value.caster, value.casterKind, value.casterLife}, life->generation);
+                }
                 if (!value.caster || !value.source || !value.target || !value.generation
                     || (value.targetKind == 2 && value.generation != life->generation)
                     || value.expiresTick <= tick
                     || value.expiresTick - tick > 90 || length2 < 1.f || length2 > 1e6f)
                     throw std::invalid_argument("Native projectile identity or lifetime invalid");
                 if (value.commandId && std::ranges::any_of(projectiles, [&](const auto& previous) {
-                        return previous.commandId == value.commandId && previous.caster == value.caster;
+                        return previous.commandId == value.commandId && previous.caster == value.caster
+                            && previous.casterKind == value.casterKind && previous.casterLife == value.casterLife;
                     })) throw std::invalid_argument("Native duplicate pending cast identity");
                 projectiles.push_back(value);
             }
@@ -340,8 +376,8 @@ namespace TES3MP::Native
             || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            const size_t effectBytes = magic == GeneralConstantActorCampaignMagic ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
-            if (count > (magic == GeneralConstantActorCampaignMagic ? MaximumActorTimedEffects : 16) || count > (bytes.size() - offset) / effectBytes)
+            const size_t effectBytes = magic == CasterActorCampaignMagic ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
+            if (count > (hasGeneralConstantState(magic) ? MaximumActorTimedEffects : 16) || count > (bytes.size() - offset) / effectBytes)
                 throw std::invalid_argument("Native timed effect count invalid");
             timedEffects.reserve(size_t(count));
             for (size_t i = 0; i < count; ++i)
@@ -364,7 +400,7 @@ namespace TES3MP::Native
                     effect.resistance = std::bit_cast<float>(uint32_t(resistanceBits));
                     effect.startTick = getAreaWord(bytes, offset);
                     effect.durationTicks = getAreaWord(bytes, offset);
-                    if (magic == GeneralConstantActorCampaignMagic)
+                    if (hasGeneralConstantState(magic))
                     {
                         effect.argument = getAreaWord(bytes, offset);
                         effect.ordinal = getAreaWord(bytes, offset);
@@ -373,6 +409,12 @@ namespace TES3MP::Native
                             throw std::invalid_argument("Native effect argument or ordinal invalid");
                     }
                     else if (effect.sourceKind == 3) effect.argument = 8; // V36 Luck.
+                    if (magic == CasterActorCampaignMagic)
+                    {
+                        effect.casterKind = getAreaWord(bytes, offset);
+                        effect.casterLife = getAreaWord(bytes, offset);
+                        validateActorCaster({effect.caster, effect.casterKind, effect.casterLife}, life->generation);
+                    }
                     if (!effect.effectIndex || effect.effectIndex > 255 || !effect.caster || !effect.source
                         || effect.sourceKind > (hasConstantState(magic) ? 3u : 2u)
                         || !std::isfinite(effect.resistance)

@@ -23,26 +23,31 @@ Other constants reject. Fresh campaign required; V36 Luck-shirt/V35 recovery rem
 `tes3mp_native_loadout_tests npc-general-constants`:
 `build/logs/m4-general-constants-test-final.log`. All-slot presentation remains unproved.
 
-Shared caster preparation separates combat/inventory indices. Synthetic
-`npc-actor-effect-strike` proves slot 2/owner 3, attribution and atomic restart
-(`build/logs/m4-caster-context-test-05.log`); player regression:
-`build/logs/m4-caster-player-test-01.log`.
+V38 persists caster kind/identity/life in player projectiles, timed/constant
+instances and NPC deaths. Player life is 1 across reconnect (player respawn is
+not implemented); NPC effects on other actors retain their launch life after
+respawn. Recovery rejects invalid kinds, identities, future lives and launch/life
+mismatches before installation. Fresh campaign required; older layouts remain.
+Lethal native magic now passes an explicit death-time context into the shared
+OpenMW stat helper; the composed image owns the death tick.
+`tes3mp_native_loadout_tests npc-caster-identity` proves player projectile contact,
+session replacement/restart, NPC strike/death/respawn, old-life retention and
+rejected durability/recovery (`build/logs/m4-caster-identity-test-08.log`).
+Synthetic actors/records, real KF; no new live-client proof. Legacy strike/restart:
+`build/logs/m4-caster-identity-legacy.log`.
 
 Detached AI selection/preparation shares OpenMW ratings, resistance, restoration,
 range settings, eligibility and rechargeable-item preference with stock callers.
 Bounded sources preserve ordered effects, identity and proposed charge without
 mutation or RNG consumption. `tes3mp_native_ai_magic_tests` filters `selection`,
 `rejection`, `items`, `launch` pass individually
-(`build/logs/m4-ai-magic-{selection,rejection,items,launch}.log`). Spell launch
-shares player cost/failure/RNG behavior and defers Target effects.
-Build: `build/logs/m4-ai-magic-build-final.log`.
+(`build/logs/m4-ai-magic-{selection,rejection,items,launch}.log`).
 The `records` filter selects 284 spells/100 WhenUsed enchantments, including
 106/30 TR sources and 85 mixed records (`build/logs/m4-ai-magic-records.log`).
 Real records use synthetic caster/equipment/activity; live TR outcomes remain
-unproved. Selection is not scheduled by the authoritative tick; weapon/potion
-competition, timing and automatic AI launch remain pending.
+unproved. Automatic selection/launch remains pending.
 
-Next: wire prepared AI sources into shared tick/launch after durable caster
-kind/life and actor-cast projection; preserve concurrent player use. Then timed
-arguments/constants, retirement with legacy recovery, and two-client real-mod
-proof under loss, reconnect/restart and failed persistence; then finish melee.
+Next: actor-cast projection and NPC projectile execution (V38 rejects NPC flights),
+then authoritative AI scheduling with competition, timing, interruption and target
+revalidation. Preserve concurrent player casts. Follow PLAN.md for remaining
+effects, retirement, real-mod durability/network proof and melee.
