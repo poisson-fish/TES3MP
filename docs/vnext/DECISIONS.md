@@ -73,9 +73,12 @@ movement cutover. V18 persists destination, door-avoidance timer, stuck position
 direction and private RNG. Rotating geometry is a synchronized derived cache.
 Only the selected NPC moves; neighbor propagation awaits multiple actors.
 
-**V36 passive source.** Candidate equipment selects a constant effect by item
-instance before combat. It commits without an expiry; recovery checks membership.
-Only fixed Fortify Luck shirts are supported so far.
+**Equipped passive sources.** Candidate equipment selects constant effects by item
+instance and effect ordinal before combat. Rolls persist while that instance stays
+equipped; replacement and respawn install new sources in the same transaction.
+Recovery checks arguments, source membership and magnitude bounds without rolling.
+Modifiers overlay detached combat stats and never accumulate in saved base state.
+V37 adds arguments and multiple sources; V36 retains fixed Luck-shirt recovery.
 
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding

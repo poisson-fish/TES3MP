@@ -30,6 +30,7 @@ namespace MWWorld
         ESM::RefId mScript, mEnchant;
         EquipmentSlots mSlots;
         bool mStrikeOnly = false;
+        bool mConstant = false;
     };
     inline InventoryItemRecord inventoryItemRecord(const ESMStore& store, ESM::RefId id)
     {
@@ -44,6 +45,11 @@ namespace MWWorld
             const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
             result.mStrikeOnly = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes;
         }
+        if (result.mScript.empty() && !result.mEnchant.empty())
+        {
+            const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
+            result.mConstant = enchantment && enchantment->mData.mType == ESM::Enchantment::ConstantEffect;
+        }
         return result;
     }
 
@@ -55,7 +61,7 @@ namespace MWWorld
             if (identity == slots[slot])
             {
                 if (found || !record.mSlots.contains(slot) || count == 0 || (!record.mSlots.mStack && std::abs(count) != 1)
-                    || (!record.mStrikeOnly && !record.mEnchant.empty()
+                    || (!record.mStrikeOnly && !record.mConstant && !record.mEnchant.empty()
                         && slot != InventoryStore::Slot_Shirt)
                     || (!record.mScript.empty()
                         && (slot != InventoryStore::Slot_Shirt || !npcStats)))

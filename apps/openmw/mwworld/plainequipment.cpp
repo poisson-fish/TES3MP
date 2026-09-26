@@ -204,7 +204,7 @@ namespace MWWorld
                 validateEquipmentItemSlots(record, ref.mRefNum, ref.mCount, input.mSlots, input.mNpcStats.has_value());
                 if (!base->mScript.empty() && !input.mNpcStats)
                     throw std::invalid_argument("Inventory script services or equipment type unsupported");
-                const auto effect = ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt]
+                const auto effect = input.mNpcStats && ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt]
                     ? MWMechanics::constantFortifyLuckMagnitude(content, base->mEnchant) : 0.f;
                 if (ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt])
                     magnitude = effect;
@@ -689,6 +689,7 @@ namespace MWWorld
             if (mScriptsLifetime.expired() || &context.mStore != &mContext.mStore
                 || &context.mWorldModel != &mContext.mWorldModel || &context.mLocalScripts != &mContext.mLocalScripts
                 || context.mScriptLocals != mContext.mScriptLocals
+                || context.mExternalEquipmentEffects != mContext.mExternalEquipmentEffects
                 || context.mNpcStats != mContext.mNpcStats
                 || (context.mNpcStats && context.mNpcStats->values() != mBeforeStats)
                 || !sameReference(context.mActor, mContext.mActor) || !sameReference(context.mPlayer, mContext.mPlayer))
@@ -742,7 +743,7 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment item is stale, dormant or slot is invalid");
             const auto record = inventoryItemRecord(mContext.mStore, item->getCellRef().getRefId());
             if (!record.mSlots.contains(slot)
-                || (!record.mStrikeOnly && !record.mEnchant.empty()
+                || (!record.mStrikeOnly && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
                     && slot != InventoryStore::Slot_Shirt)
                 || (!record.mScript.empty()
                     && (slot != InventoryStore::Slot_Shirt || !mContext.mNpcStats)))

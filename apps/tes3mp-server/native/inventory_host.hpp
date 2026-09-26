@@ -17,6 +17,11 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V37 adds constant effect arguments/ordinals, variable rolls, multiple sources
+    // and all equipment slots. Attribute/skill fortification and six resistances
+    // are supported; other constant behaviors reject. Maximum 512 instances.
+    // Unchanged item instances retain rolls; respawn rolls fresh identities.
+    // Requires a fresh campaign; V36 and older descriptors retain recovery.
     // V36 derives fixed Fortify Luck shirt instances from candidate equipment.
     // Item identity and caster survive restart; indefinite effects leave with
     // unequip/replacement. V36 requires a fresh campaign.

@@ -4127,7 +4127,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4149,6 +4149,8 @@ namespace TES3MP::Native::Testing
         std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw" / "openmw.cfg");
         ESM::Weapon defenseWeapon;
         float defenseStrengthBase = 0, defenseStrengthMultiplier = 0;
+        TES3MP::OpenMwMeleeSettings passiveSettings;
+        float passiveMagickaMultiplier = 0;
         // Synthetic room/placements on the retained real loadout. NPC hull and
         // inventory mechanics come from OpenMW; this is not a published-mod proof.
         {
@@ -4158,8 +4160,8 @@ namespace TES3MP::Native::Testing
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
-            std::array<ESM::Enchantment, 2> passiveEnchantments;
-            std::array<ESM::Clothing, 2> passiveShirts;
+            std::array<ESM::Enchantment, 4> passiveEnchantments;
+            std::array<ESM::Clothing, 4> passiveShirts;
             if (constantEffects)
             {
                 for (int i = 0; i < 2; ++i)
@@ -4170,6 +4172,13 @@ namespace TES3MP::Native::Testing
                     enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
                     enchantment.mEffects.populate({{ESM::MagicEffect::FortifyAttribute, {},
                         ESM::Attribute::Luck, ESM::RT_Self, 0, 0, i ? 11 : 7, i ? 11 : 7}});
+                    if (generalConstants)
+                        enchantment.mEffects.populate({
+                            {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Luck, ESM::RT_Self, 0, 0, i ? 11 : 7, i ? 11 : 7},
+                            {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 0, 0, 0, 15},
+                            {ESM::MagicEffect::FortifySkill, ESM::Skill::Axe, {}, ESM::RT_Self, 0, 0, 4, 9},
+                            {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 0, 0, 1, 3},
+                            {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Intelligence, ESM::RT_Self, 0, 0, 9, 9}});
                     auto& shirt = passiveShirts[size_t(i)];
                     shirt = *base.store().get<ESM::Clothing>().find(ESM::RefId::stringRefId("common_shirt_01"));
                     shirt.mId = ESM::RefId::stringRefId(i ? "npc_passive_shirt_b" : "npc_passive_shirt_a");
@@ -4178,6 +4187,36 @@ namespace TES3MP::Native::Testing
                     shirt.mData.mValue = i ? 50 : 100;
                 }
                 npc.mInventory.mList = {{1, passiveShirts[0].mId}, {1, passiveShirts[1].mId}};
+                if (generalConstants)
+                {
+                    const auto& settings = base.store().get<ESM::GameSetting>();
+                    passiveMagickaMultiplier = settings.find("fNPCbaseMagickaMult")->mValue.getFloat();
+                    passiveSettings.damageStrengthBase = settings.find("fDamageStrengthBase")->mValue.getFloat();
+                    passiveSettings.damageStrengthMultiplier = settings.find("fDamageStrengthMult")->mValue.getFloat();
+                    passiveSettings.unarmoredBase1 = settings.find("fUnarmoredBase1")->mValue.getFloat();
+                    passiveSettings.unarmoredBase2 = settings.find("fUnarmoredBase2")->mValue.getFloat();
+                    passiveSettings.combatArmorMinimumMultiplier = settings.find("fCombatArmorMinMult")->mValue.getFloat();
+                    defenseWeapon = *base.store().get<ESM::Weapon>().find(ESM::RefId::stringRefId("iron shortsword"));
+                    auto& enchantment = passiveEnchantments[2]; enchantment.blank();
+                    enchantment.mId = ESM::RefId::stringRefId("npc_passive_ring_enchantment");
+                    enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+                    enchantment.mEffects.populate({
+                        {ESM::MagicEffect::ResistFire, {}, {}, ESM::RT_Self, 0, 0, 1, 13},
+                        {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Agility, ESM::RT_Self, 0, 0, 0, 0}});
+                    auto& ring = passiveShirts[2]; ring = passiveShirts[0];
+                    ring.mId = ESM::RefId::stringRefId("npc_passive_ring");
+                    ring.mData.mType = ESM::Clothing::Ring; ring.mParts.mParts.clear();
+                    ring.mEnchant = enchantment.mId;
+                    npc.mInventory.mList.push_back({1, ring.mId});
+                    auto& unsupported = passiveEnchantments[3]; unsupported = passiveEnchantments[0];
+                    unsupported.mId = ESM::RefId::stringRefId("npc_passive_unsupported");
+                    unsupported.mEffects.mList.back().mData.mEffectID = ESM::MagicEffect::RestoreHealth;
+                    unsupported.mEffects.mList.back().mData.mAttribute = {};
+                    auto& invalidShirt = passiveShirts[3]; invalidShirt = passiveShirts[0];
+                    invalidShirt.mId = ESM::RefId::stringRefId("npc_passive_invalid_shirt");
+                    invalidShirt.mData.mValue = 1; invalidShirt.mEnchant = unsupported.mId;
+                    npc.mInventory.mList.push_back({1, invalidShirt.mId});
+                }
             }
             ESM::Enchantment strikeEnchantment;
             ESM::Weapon strikeWeapon;
@@ -4406,7 +4445,7 @@ namespace TES3MP::Native::Testing
             out.addMaster("Morrowind.esm", 0); out.save(stream);
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             if (constantEffects)
-                for (size_t i = 0; i < passiveShirts.size(); ++i)
+                for (size_t i = 0; i < (generalConstants ? 4u : 2u); ++i)
                 {
                     out.startRecord(ESM::Enchantment::sRecordId, 0);
                     passiveEnchantments[i].save(out); out.endRecord(ESM::Enchantment::sRecordId);
@@ -4787,7 +4826,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -4829,9 +4868,9 @@ namespace TES3MP::Native::Testing
                 "Constant-effect tick failed to commit");
             const auto started = image();
             const auto state = read(started);
-            require(state.timedEffects.size() == 3
-                && std::ranges::all_of(state.timedEffects, [](const auto& effect) {
-                    return effect.sourceKind == 3 && effect.magnitude == 7
+            require(state.timedEffects.size() == (generalConstants ? 21 : 3)
+                && std::ranges::all_of(state.timedEffects, [&](const auto& effect) {
+                    return effect.sourceKind == 3 && (generalConstants || effect.magnitude == 7)
                         && effect.expiresTick == UINT64_MAX && effect.durationTicks == 0;
                 }), "Equipped constant shirts did not install three durable sources");
             InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, started);
@@ -4839,7 +4878,7 @@ namespace TES3MP::Native::Testing
                 "Constant effects changed during recovery");
             auto corrupted = started;
             const size_t effectStart = size_t(state.inventory.data()
-                - reinterpret_cast<const char*>(started.data())) - state.timedEffects.size() * 80;
+                - reinterpret_cast<const char*>(started.data())) - state.timedEffects.size() * (generalConstants ? 96 : 80);
             corrupted[effectStart + 40] ^= std::byte{1}; // First constant's item source word.
             bool invalidSource = false;
             try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, corrupted); }
@@ -4876,10 +4915,28 @@ namespace TES3MP::Native::Testing
                 "Constant shirt unequip did not commit");
             const auto unequipped = read(image());
             require(std::ranges::none_of(unequipped.timedEffects, [](const auto& effect) {
-                return effect.actor == 0 && effect.sourceKind == 3;
+                return effect.actor == 0 && effect.sourceKind == 3 && effect.argument == 8;
             }) && unequipped.combat->actors[0][ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)][1]
                 == state.combat->actors[0][ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)][1],
                 "Unequip retained the passive source or persisted its combat modifier");
+            if (generalConstants)
+            {
+                const auto baseline = read(original);
+                const auto attribute = [&](ESM::RefId id) {
+                    const auto& value = baseline.combat->actors[0][ESM::Attribute::refIdToIndex(id)];
+                    return std::max(0.f, value[0] + value[1] - value[3]);
+                };
+                const float expectedMagicka = passiveMagickaMultiplier * attribute(ESM::Attribute::Intelligence);
+                const float expectedFatigue = attribute(ESM::Attribute::Strength) + attribute(ESM::Attribute::Willpower)
+                    + attribute(ESM::Attribute::Agility) + attribute(ESM::Attribute::Endurance);
+                // Stock attribute changes derive maxima from attributes even when
+                // authored NPDT resource values initially differ from those sums.
+                require(state.combat->actors[0][9][0] > expectedMagicka
+                    && state.combat->actors[0][10][0] > expectedFatigue
+                    && std::abs(unequipped.combat->actors[0][9][0] - expectedMagicka) < .0001f
+                    && std::abs(unequipped.combat->actors[0][10][0] - expectedFatigue) < .0001f,
+                    "Attribute equipment did not restore derived magicka/fatigue maxima on removal");
+            }
             const auto afterUnequip = service.projectInventory(authority, id<SessionId>(1),
                 id<ServerTick>(2), id<CanonicalRevision>(2));
             auto equip = service.prepareInventory(authority, bind(authority,
@@ -4895,7 +4952,7 @@ namespace TES3MP::Native::Testing
             const auto replaced = image();
             const auto after = read(replaced);
             require(std::ranges::count_if(after.timedEffects, [](const auto& effect) {
-                return effect.actor == 0 && effect.sourceKind == 3 && effect.magnitude == 11;
+                return effect.actor == 0 && effect.sourceKind == 3 && effect.argument == 8 && effect.magnitude == 11;
             }) == 1, "Replacement did not atomically install its own passive effect");
             InventoryHost replacementRestart(descriptor, testContentManifest(), *registry, *crypto, replaced);
             require(std::ranges::equal(replacementRestart.service().inventoryImage(), replaced),
@@ -4912,11 +4969,104 @@ namespace TES3MP::Native::Testing
                 "Direct constant shirt replacement failed to commit");
             const auto direct = read(image());
             require(std::ranges::count_if(direct.timedEffects, [&](const auto& effect) {
-                return effect.actor == 0 && effect.sourceKind == 3 && effect.magnitude == 7
+                return effect.actor == 0 && effect.sourceKind == 3 && effect.argument == 8 && effect.magnitude == 7
                     && effect.source == current->stackId.value();
             }) == 1 && std::ranges::none_of(direct.timedEffects, [](const auto& effect) {
-                return effect.actor == 0 && effect.sourceKind == 3 && effect.magnitude == 11;
+                return effect.actor == 0 && effect.sourceKind == 3 && effect.argument == 8 && effect.magnitude == 11;
             }), "Direct replacement retained the previous item effect");
+            if (generalConstants)
+            {
+                // Every unmodified source retains its original roll/start tick even
+                // while another slot is removed and replaced repeatedly.
+                for (const auto& effect : state.timedEffects)
+                    if (effect.actor != 0 || (effect.argument != 8 && effect.argument != 1 && effect.argument != 2
+                            && effect.argument != uint64_t(ESM::Skill::refIdToIndex(ESM::Skill::Axe) + 9)))
+                        require(std::ranges::find(direct.timedEffects, effect) != direct.timedEffects.end(),
+                            "Unchanged equipment rerolled or changed identity during replacement");
+                for (size_t offset : {size_t(80), size_t(88), size_t(8)})
+                {
+                    auto bad = started;
+                    bad[effectStart + offset] = std::byte{127};
+                    bool rejectedImage = false;
+                    try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, bad); }
+                    catch (const std::invalid_argument&) { rejectedImage = true; }
+                    require(rejectedImage, "Forged constant argument, ordinal or magnitude recovered");
+                }
+                const auto beforeIdle = image();
+                InventoryHost idleRestart(descriptor, testContentManifest(), *registry, *crypto, beforeIdle);
+                idleRestart.service().synchronizeCells(authority);
+                auto idle = service.prepareNativeTick(authority, id<ServerTick>(5), 1.f/30, {});
+                auto recoveredIdle = idleRestart.service().prepareNativeTick(authority, id<ServerTick>(5), 1.f/30, {});
+                require(idle && recoveredIdle && idle->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && recoveredIdle->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Unchanged constant continuation failed");
+                const auto continued = read(image());
+                require(continued.timedEffects == direct.timedEffects
+                    && continued.combat->actors[0][9][0] == direct.combat->actors[0][9][0]
+                    && continued.combat->actors[0][10][0] == direct.combat->actors[0][10][0]
+                    && continued.combat->rng == direct.combat->rng
+                    && std::ranges::equal(service.inventoryImage(), idleRestart.service().inventoryImage()),
+                    "Idle equipment or restart consumed RNG or changed rolled effects");
+                const auto invalidView = service.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(5), id<CanonicalRevision>(5));
+                const auto& inventory = invalidView->playerInventory.front();
+                const auto invalidItem = std::ranges::find(inventory.stacks,
+                    id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("npc_passive_invalid_shirt"))),
+                    &CanonicalItemStack::prototypeId);
+                require(invalidItem != inventory.stacks.end(), "Unsupported constant fixture item missing");
+                const auto priorInvalid = image();
+                auto invalidEquip = service.prepareInventory(authority, bind(authority,
+                    command(InventoryTransactionKind::EquipItem, invalidItem->stackId,
+                        invalidItem->prototypeId, inventory.revision, 6)).proposal());
+                require(bool(invalidEquip), "Unsupported effect fixture did not reach composed validation");
+                bool invalidPlan = false;
+                try { (void)service.prepareNativeTick(authority, id<ServerTick>(6), 1.f/30, std::move(invalidEquip)); }
+                catch (const std::invalid_argument&) { invalidPlan = true; }
+                require(invalidPlan && image() == priorInvalid,
+                    "Unsupported mixed constant plan mutated equipment, effects or RNG");
+                bool hitVerified = false;
+                for (uint64_t time = 6; time < 90 && !hitVerified; ++time)
+                {
+                    const auto prior = read(image());
+                    const auto condition = dynamic_cast<InventoryService&>(service).selectedNpcWeaponCondition().value();
+                    auto step = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                    require(bool(step), "Constant combat tick missing");
+                    const auto events = service.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                    std::vector<std::byte> staged;
+                    require(step->commit([&](auto bytes) {
+                        staged.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected, "Constant combat rejection failed");
+                    const auto candidate = read(staged);
+                    if (events && !events->actorEvents().empty() && events->actorEvents()[0].hit)
+                    {
+                        const auto& hit = events->actorEvents()[0];
+                        const auto& strength = prior.combat->actors[2][0];
+                        float bonus = 0;
+                        for (const auto& effect : prior.timedEffects)
+                            if (effect.actor == 2 && effect.sourceKind == 3 && effect.argument == 1)
+                                bonus += effect.magnitude;
+                        const float modified = std::max(0.f, strength[0] - strength[3] + strength[1] + bonus);
+                        const float raw = TES3MP::openMwAdjustedWeaponDamage(passiveSettings, modified,
+                            float(condition) / defenseWeapon.mData.mHealth, true,
+                            defenseWeapon.mData.mChop[0] + (defenseWeapon.mData.mChop[1]
+                                - defenseWeapon.mData.mChop[0]) * candidate.melee->state.mStrength);
+                        const auto& skill = prior.combat->actors[0][11 + ESM::Skill::refIdToIndex(ESM::Skill::Unarmored)];
+                        const float armor = TES3MP::openMwUnarmoredRating(passiveSettings,
+                            std::max(0.f, skill[0] - skill[3] + skill[1]));
+                        const float expected = std::max(1.f, TES3MP::openMwArmorAdjustedDamage(passiveSettings, raw, armor));
+                        require(bonus > 0 && std::abs(hit.damage - expected) < .0001f,
+                            "Equipped Strength effects did not feed shared weapon damage");
+                        require(candidate.combat->actors[2][0][1] == prior.combat->actors[2][0][1],
+                            "Constant combat overlay accumulated in durable stats");
+                        hitVerified = true;
+                    }
+                    require(step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Constant combat retry failed");
+                }
+                require(hitVerified, "No constant-modified melee hit was verified");
+                std::cout << "general constants: arguments, duplicate effects, zero/variable rolls, shirt/ring, preserved instances, forged images and restart continuation verified\n";
+            }
             std::cout << "constant effects=equipped shirt source=durable unequip/replacement=atomic restart=exact\n";
             return;
         }

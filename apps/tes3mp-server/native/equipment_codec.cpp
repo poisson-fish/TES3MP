@@ -231,7 +231,7 @@ namespace TES3MP::Native
                 const auto* base = &record;
                 valid(base->mType == type
                     && (base->mScript.empty() || (version == ScriptedEquipmentFormatVersion && !base->mEnchant.empty())));
-                const auto magnitude = id == result.mSlots[InventoryStore::Slot_Shirt]
+                const auto magnitude = version != EquipmentFormatVersion && id == result.mSlots[InventoryStore::Slot_Shirt]
                     ? MWMechanics::constantFortifyLuckMagnitude(bindings.mContent, base->mEnchant) : 0.f;
                 if (id == result.mSlots[InventoryStore::Slot_Shirt])
                     luckMagnitude = magnitude;

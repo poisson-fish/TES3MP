@@ -333,10 +333,7 @@ namespace TES3MP::Native
                     if (slot != inventory.end())
                     {
                         const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
-                        const bool supportedConstant = mConstantEffects
-                            && slot == inventory.mSlots[InventoryStore::Slot_Shirt]
-                            && record.mType == ESM::Clothing::sRecordId && record.mScript.empty()
-                            && MWMechanics::constantFortifyLuckMagnitude(mStore, record.mEnchant) > 0;
+                        const bool supportedConstant = mConstantEffects && record.mConstant;
                         if (!record.mStrikeOnly && !supportedConstant
                             && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
@@ -871,7 +868,7 @@ namespace TES3MP::Native
     {
         const auto player = mActors.at(actor < 2 ? actor : initiator)->getPtr();
         return { mStore, mWorld, mScripts, actor >= 2 && actorInventory(ownerPtr(actor)) ? ownerPtr(actor) : player,
-            player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals };
+            player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals, mConstantEffects };
     }
 
     auto EquipmentRuntime::cellValues(const ESM::CellRef& ref)

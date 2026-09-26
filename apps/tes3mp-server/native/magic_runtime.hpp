@@ -45,6 +45,8 @@ namespace TES3MP::Native
         InstantSpellResult result;
     };
 
+    std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
+        const MWWorld::ESMStore& content);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,

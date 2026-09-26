@@ -4,55 +4,47 @@
 simulates one traveler, doors and frozen actors with two 60 Hz steps.
 Player contact uses a proxy sphere.
 
-V34 composes armor, shield, block, wear, hit recovery, knockout, RNG and death.
-Recovery uses bound animation keys and pauses offline. Player hit resources
-still need binding; V34 needs a fresh campaign. Checks:
-`build/logs/m4-melee-defense-scheduling-final.log`,
+V34 composes armor/block/wear, hit recovery, knockout, RNG and death.
+Recovery uses animation keys and pauses offline; player hit resources remain
+unbound. Both attack directions share OpenMW normal-weapon resistance and
+knockout damage. Evidence: `build/logs/m4-melee-defense-scheduling-final.log`,
 `build/logs/m4-melee-defense-recovery-gate-final.log`,
-`build/logs/m4-armor-block-test-final.log` and
-`build/logs/m4-knockout-test-final-03.log`.
+`build/logs/m4-armor-block-test-final.log`, `build/logs/m4-general-knockout-final.log`.
 
-Both attack directions use shared OpenMW normal-weapon resistance and
-knockout damage. Checks:
-`build/logs/m4-normal-resistance-melee.log`,
-`build/logs/m4-normal-resistance-armor.log` and
-`build/logs/m4-general-knockout-final.log`.
+V35 composes spell/enchantment cost/charge, eight projectiles, areas and actor
+effects: source/caster, rolled magnitude, resistance, duration, expiry and RNG.
+Timed damage/restoration and statuses feed shared combat; inactive expiry pauses
+and NPC effect deaths retain attribution. Spells, `WhenUsed` and `WhenStrikes`
+install instances. Older image paths remain.
 
-Spells and enchantments carry Self, Touch and Target effects, costs,
-charge, eight projectiles, areas and durable RNG. V35 adds
-actor effect instances for players and NPC: effect/source/caster identity,
-rolled magnitude, OpenMW resistance, duration and expiry share the
-composed image. Timed elemental/resource damage and restoration accrue while
-active; status effects feed shared magic and melee calculations. Inactive
-actors pause expiry; NPC effect deaths are attributed. V35 needs a fresh
-campaign. `WhenStrikes`, spells and `WhenUsed` install instances;
-old image paths remain.
-
-Synthetic checks cover ordered effects, resisted weapon hits, timed Fire Damage
-and restoration, `WhenUsed` charge, strike source, rollback, source rejection, expiry and restart
+Synthetic ordered effects, charge, rollback, source rejection and restart pass
 (`build/logs/m4-actor-effects-ordered-test-02.log`,
-`build/logs/m4-actor-effect-strike-ordered.log`). A vanilla loadout plus synthetic
-effect records ran two clients under loss; both saw one timed cast,
-healing and Bob's reconnect (`build/m4-actor-effects-live-03/result.json`).
-A slow active effect survived server restart and continued healing on two
-returning clients (`build/m4-actor-effects-restart-live-02/result.json`).
-The TR stack prepares 130 added `T_` spells and 98 `T_` use/strike
-enchantments (`build/logs/m4-actor-effects-mod-records-final.log`).
-Live mod-record outcomes remain unproved.
+`build/logs/m4-actor-effect-strike-ordered.log`). Vanilla plus synthetic effects
+ran two clients under loss and reconnect (`build/m4-actor-effects-live-03/result.json`);
+a slow healing effect survived restart (`build/m4-actor-effects-restart-live-02/result.json`).
+The TR stack prepares 130 added spells and 98 use/strike enchantments
+(`build/logs/m4-actor-effects-mod-records-final.log`); live outcomes remain unproved.
 
-V36 begins equipped constant effects in the composed tick. For the currently
-supported fixed Fortify Luck shirt, the candidate equipment determines a
-durable item source, caster, magnitude and indefinite instance. Equip,
-unequip and replacement commit with the effect; detached combat stats overlay
-Luck without accumulating a saved modifier. Respawn derives a fresh source.
-V35 images still recover. The synthetic gate covers rollback, replacement,
-forged-source rejection and restart
-(`build/logs/m4-constant-test-final-02.log`); the V35 actor-effect and stock
-enchantment regressions pass (`build/logs/m4-actor-effects-legacy-verify-01.log`,
-`build/logs/m4-constant-equipment-regression-01.log`). V36 requires a fresh
-campaign. This does not establish other constant-effect types or live mod
-records.
+V37 generalizes equipped constants to Fortify Attribute, Fortify Skill and
+Resist Magicka/Normal Weapons/Fire/Frost/Shock/Poison across equipment slots.
+Up to eight effects per item and 512 actor instances carry arguments, ordinals,
+source/caster, rolled magnitudes and indefinite expiry. Unchanged equipped
+instances retain rolls, including zero results; replacement and respawn derive
+new sources atomically. Detached attribute/skill overlays use shared OpenMW
+mutations and are removed before saving combat stats. Other constant behaviors
+still reject. V37 requires a fresh campaign; V36 fixed Luck-shirt and V35 actor
+effect images retain their original descriptor/recovery paths.
 
-Next: broaden equipped constants through OpenMW's effect rules, then route
-server AI spells and enchanted items through the cast lifecycle. Prove varied
-real mod records and two-client convergence; then finish knockdown and melee.
+`tes3mp_native_loadout_tests npc-general-constants` proves synthetic mixed
+Strength/Intelligence/Luck/Axe/Resist Fire records on shirts and rings, duplicate effects,
+zero/variable rolls, rejected replacement and unsupported mixed records,
+forged argument/ordinal/source/magnitude rejection, exact restart continuation,
+stable RNG, derived resources and Strength-modified damage
+(`build/logs/m4-general-constants-test-final.log`). The individual target builds
+(`build/logs/m4-general-constants-build-final.log`). V36 regression:
+`build/logs/m4-general-constants-legacy.log`. V35 actor effects and stock
+constant equipment also pass (`build/logs/m4-general-constants-v35.log`,
+`build/logs/m4-general-constants-stock.log`). Live mod outcomes, all-slot presentation and AI casting remain unproved.
+
+Next: unify AI spell/item casts, broaden constants, and prove real mod outcomes
+on two clients under loss, reconnect and restart. Then finish knockdown/melee.

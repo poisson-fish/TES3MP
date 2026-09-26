@@ -2,6 +2,8 @@
 #define GAME_MWMECHANICS_SPELLEFFECTS_H
 
 #include "activespells.hpp"
+#include <components/misc/rng.hpp>
+#include <optional>
 
 // These functions should probably be split up into separate Lua functions for each magic effect when magic is
 // dehardcoded. That way ESM::MGEF could point to two Lua scripts for each effect. Needs discussion.
@@ -14,6 +16,9 @@ namespace MWWorld
 namespace MWMechanics
 {
     class CreatureStats;
+    class NpcStats;
+    float rollEffectMagnitude(float minimum, float maximum, Misc::Rng::Generator& rng);
+    void modifyFortifySkill(NpcStats& stats, ESM::RefId skill, float magnitude);
     // The stat mutation used by Restore Health. Explicit stats let a server
     // stage the same OpenMW effect before publishing it to a live actor.
     void restoreHealth(CreatureStats& stats, float magnitude);
@@ -23,7 +28,8 @@ namespace MWMechanics
     void adjustDynamicStatValue(CreatureStats& stats, int index, float magnitude,
         bool allowDecreaseBelowZero = false, bool allowIncreaseAboveModified = false);
     // Shared attribute mutation; explicit stats also permit isolated preparation.
-    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase = false);
+    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase = false,
+        std::optional<float> baseMagickaMultiplier = {});
     struct MagicApplicationResult
     {
         enum class Type

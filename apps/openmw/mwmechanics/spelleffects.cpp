@@ -49,8 +49,7 @@ namespace
         if (effect.mMinMagnitude == effect.mMaxMagnitude)
             return effect.mMinMagnitude;
         auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-        return effect.mMinMagnitude
-            + Misc::Rng::rollDice(static_cast<int>(effect.mMaxMagnitude - effect.mMinMagnitude + 1), prng);
+        return MWMechanics::rollEffectMagnitude(effect.mMinMagnitude, effect.mMaxMagnitude, prng);
     }
 
     ESM::ActiveEffect::Flags modifyAiSetting(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect,
@@ -126,8 +125,7 @@ namespace
     void fortifySkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
     {
         auto& npcStats = target.getClass().getNpcStats(target);
-        auto& skill = npcStats.getSkill(effect.getSkillOrAttribute());
-        skill.setModifier(skill.getModifier() + magnitude);
+        MWMechanics::modifyFortifySkill(npcStats, effect.getSkillOrAttribute(), magnitude);
     }
 
     bool disintegrateSlot(const MWWorld::Ptr& ptr, int slot, float disintegrate)
@@ -442,14 +440,28 @@ namespace MWMechanics
         stats.setDynamic(index, value);
     }
 
-    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase)
+    float rollEffectMagnitude(float minimum, float maximum, Misc::Rng::Generator& rng)
+    {
+        return minimum == maximum ? minimum
+            : minimum + Misc::Rng::rollDice(static_cast<int>(maximum - minimum + 1), rng);
+    }
+
+    void modifyFortifySkill(NpcStats& stats, ESM::RefId skill, float magnitude)
+    {
+        auto& value = stats.getSkill(skill);
+        value.setModifier(value.getModifier() + magnitude);
+    }
+
+    void modifyFortifyAttribute(CreatureStats& stats, ESM::RefId attribute, float magnitude, bool affectsBase,
+        std::optional<float> baseMagickaMultiplier)
     {
         auto value = stats.getAttribute(attribute);
         if (affectsBase)
             value.setBase(value.getBase() + magnitude);
         else
             value.setModifier(value.getModifier() + magnitude);
-        stats.setAttribute(attribute, value);
+        if (baseMagickaMultiplier) stats.setAttribute(attribute, value, *baseMagickaMultiplier);
+        else stats.setAttribute(attribute, value);
     }
 
     namespace

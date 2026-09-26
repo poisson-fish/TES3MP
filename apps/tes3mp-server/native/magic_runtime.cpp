@@ -7,6 +7,7 @@
 #include <apps/openmw/mwmechanics/spellresistance.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadmgef.hpp>
+#include <components/esm3/loadench.hpp>
 #include <components/esm3/loadspel.hpp>
 #include <components/misc/rng.hpp>
 #include <algorithm>
@@ -88,6 +89,38 @@ namespace TES3MP::Native
     {
         return std::any_of(effects.begin(), effects.end(),
             [range](const auto& effect) { return effect.mRange == range; });
+    }
+
+    std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId id,
+        const MWWorld::ESMStore& content)
+    {
+        const auto* enchantment = content.get<ESM::Enchantment>().search(id);
+        if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
+            || enchantment->mEffects.mList.empty() || enchantment->mEffects.mList.size() > 8)
+            return std::nullopt;
+        PreparedInstantEffects result;
+        for (const auto& entry : enchantment->mEffects.mList)
+        {
+            const auto& effect = entry.mData;
+            const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
+            const bool attribute = effect.mEffectID == ESM::MagicEffect::FortifyAttribute;
+            const bool skill = effect.mEffectID == ESM::MagicEffect::FortifySkill;
+            const bool resistance = effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
+                || effect.mEffectID == ESM::MagicEffect::ResistFire
+                || effect.mEffectID == ESM::MagicEffect::ResistFrost
+                || effect.mEffectID == ESM::MagicEffect::ResistShock
+                || effect.mEffectID == ESM::MagicEffect::ResistPoison;
+            if (!magic || (!attribute && !skill && !resistance)
+                || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude))
+                || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
+                || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
+                || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty()))
+                return std::nullopt;
+            result.effects.push_back(effect);
+        }
+        return result;
     }
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
