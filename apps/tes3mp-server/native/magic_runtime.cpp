@@ -17,20 +17,36 @@ namespace TES3MP::Native
 {
     namespace
     {
-        bool supportedInstantEffect(const ESM::ENAMstruct& effect)
+        bool supportedInstantEffect(const ESM::ENAMstruct& effect, bool actorLifecycle)
         {
-            return effect.mEffectID == ESM::MagicEffect::RestoreHealth
+            const bool prior = effect.mEffectID == ESM::MagicEffect::RestoreHealth
                 || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
                 || effect.mEffectID == ESM::MagicEffect::RestoreFatigue
                 || effect.mEffectID == ESM::MagicEffect::DamageHealth
                 || effect.mEffectID == ESM::MagicEffect::DamageMagicka
                 || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
+            return prior || (actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FireDamage
+                || effect.mEffectID == ESM::MagicEffect::ShockDamage
+                || effect.mEffectID == ESM::MagicEffect::FrostDamage
+                || effect.mEffectID == ESM::MagicEffect::Poison
+                || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToNormalWeapons
+                || effect.mEffectID == ESM::MagicEffect::ResistFire
+                || effect.mEffectID == ESM::MagicEffect::ResistFrost
+                || effect.mEffectID == ESM::MagicEffect::ResistShock
+                || effect.mEffectID == ESM::MagicEffect::ResistPoison
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToFire
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToFrost
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToShock
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToPoison
+                || effect.mEffectID == ESM::MagicEffect::WeaknessToMagicka));
         }
 
         void applyInstantEffect(const ESM::ENAMstruct& effect, MWMechanics::CreatureStats& target,
             Misc::Rng::Generator* rng, const MWWorld::ESMStore* content, bool uncappedDamageFatigue)
         {
+            if (effect.mDuration) return; // Composed actor lifecycle owns every timed mutation.
             if (effect.mMagnMin != effect.mMagnMax && !rng)
                 throw std::invalid_argument("Variable native effect requires composed RNG");
             const float magnitude = float(effect.mMagnMin + (effect.mMagnMin == effect.mMagnMax ? 0
@@ -75,7 +91,7 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
-        const MWWorld::ESMStore& content)
+        const MWWorld::ESMStore& content, bool actorLifecycle)
     {
         if (effects.mList.empty() || effects.mList.size() > 8) return std::nullopt;
         PreparedInstantEffects result;
@@ -83,18 +99,20 @@ namespace TES3MP::Native
         {
             const auto& effect = entry.mData;
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
-            if (!magic || !supportedInstantEffect(effect)
+            if (!magic || !supportedInstantEffect(effect, actorLifecycle)
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
                 || effect.mArea < 0 || effect.mArea > 64
                 || effect.mMagnMin <= 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
-                || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                || (!actorLifecycle && effect.mEffectID == ESM::MagicEffect::ResistMagicka
                     && effect.mMagnMin != effect.mMagnMax)
-                || (effect.mEffectID == ESM::MagicEffect::ResistMagicka
-                    ? effect.mDuration < 1 || effect.mDuration > 3600
-                    : effect.mDuration != 0)
+                || (actorLifecycle ? (effect.mDuration < 0 || effect.mDuration > 3600
+                        || (effect.mDuration == 0 && (!supportedInstantEffect(effect, false)
+                            || effect.mEffectID == ESM::MagicEffect::ResistMagicka)))
+                    : (effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                        ? effect.mDuration < 1 || effect.mDuration > 3600 : effect.mDuration != 0))
                 || (magic->mData.mFlags & ESM::MagicEffect::NoDuration)
-                || (effect.mEffectID != ESM::MagicEffect::ResistMagicka
+                || (!actorLifecycle && effect.mEffectID != ESM::MagicEffect::ResistMagicka
                     && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)))
                 return std::nullopt;
             result.effects.push_back(effect);
@@ -103,10 +121,10 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content)
+        const MWWorld::ESMStore& content, bool actorLifecycle)
     {
         if (spell.mData.mType != ESM::Spell::ST_Spell) return std::nullopt;
-        auto effects = prepareInstantEffects(spell.mEffects, content);
+        auto effects = prepareInstantEffects(spell.mEffects, content, actorLifecycle);
         if (!effects) return std::nullopt;
         PreparedInstantSpell result;
         result.effects = std::move(*effects);
@@ -144,7 +162,7 @@ namespace TES3MP::Native
 
     InstantSpellLaunch launchInstantSpell(const PreparedInstantSpell& spell,
         MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng,
-        bool uncappedDamageFatigue)
+        bool uncappedDamageFatigue, bool resolveSelf)
     {
         if (!spell.source || caster.getHealth().getCurrent() <= 0
             || caster.getMagicka().getCurrent() < spell.cost)
@@ -154,7 +172,7 @@ namespace TES3MP::Native
         auto magicka = caster.getMagicka();
         magicka.setCurrent(magicka.getCurrent() - spell.cost);
         caster.setMagicka(magicka);
-        auto result = succeeded ? applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng, &content,
+        auto result = succeeded && resolveSelf ? applyInstantEffects(spell.effects, ESM::RT_Self, caster, &rng, &content,
             uncappedDamageFatigue)
             : InstantSpellResult{};
         result.magicka -= float(spell.cost);

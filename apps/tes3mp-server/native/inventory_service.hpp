@@ -87,6 +87,7 @@ namespace TES3MP::Native
         bool mMagicProjectileCollection = false;
         bool mKnockoutRules = false;
         bool mMeleeDefenseRules = false;
+        bool mActorEffectLifecycle = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;

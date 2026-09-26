@@ -345,7 +345,8 @@ def verify_unarmed_effect(output, evidence, processes, relay, manifest, maximum_
     print(json.dumps(report, indent=2), flush=True)
 
 
-def verify_instant_spell(output, evidence, processes, relay, manifest):
+def verify_instant_spell(output, evidence, processes, relay, manifest, spell="npc_instant_restore",
+                         timed=False, restart_server=None, restart_clients=None):
     """Observe one native Restore Health cast on two desktops, then reconnect Bob."""
     sequence = dict.fromkeys(evidence, 0)
     finished = set()
@@ -382,11 +383,68 @@ def verify_instant_spell(output, evidence, processes, relay, manifest):
     wait_for(lambda: samples("Alice")[-1]["health"] < 35,
              "NPC injures the caster", 20)
     injured = {role: samples(role)[-1] for role in evidence}
-    command("Alice", 'cast "npc_instant_restore"')
+    command("Alice", f'cast "{spell}"')
     def casts(role):
         return [event for sample in samples(role) for event in sample["magic_events"]
                 if event["caster"] == initial["Alice"]["self"] and event["success"]]
     wait_for(lambda: all(casts(role) for role in evidence), "both clients receive spell event", 12)
+    if restart_server:
+        cast_events = {role: casts(role) for role in evidence}
+        departed = {role: samples(role)[-1] for role in evidence}
+        if departed["Alice"]["health"] >= 34.5:
+            raise RuntimeError("Slow restoration filled health before server restart")
+        for role in evidence:
+            command(role, "quit")
+            processes[role].wait(timeout=15)
+            if processes[role].returncode:
+                raise RuntimeError(f"{role} did not leave cleanly")
+            finished.add(role)
+        wait_for(lambda: "active_sessions=0" in output.joinpath("server.stderr.log").read_text(
+            encoding="utf-8", errors="replace"), "both sessions leave durably")
+        processes["server"].terminate()
+        processes["server"].wait(timeout=15)
+        finished.add("server")
+        restart_server()
+        wait_for(lambda: processes["server-restarted"].poll() is None,
+                 "restarted server is running")
+        for role, path in evidence.items():
+            path.rename(output / (role + "-before.ndjson"))
+            path.with_suffix(".ndjson.control").unlink(missing_ok=True)
+            sequence[role] = 0
+        restart_clients()
+        finished.difference_update(evidence)
+        wait_for(lambda: all(len(samples(role)) >= 3 for role in evidence),
+                 "both returned clients receive combat snapshots", 60)
+        returned = {role: samples(role)[-1] for role in evidence}
+        if returned["Alice"]["health"] + .01 < departed["Alice"]["health"]:
+            raise RuntimeError("Restart rolled back committed healing")
+        wait_for(lambda: samples("Alice")[-1]["health"] > returned["Alice"]["health"] + .5
+                 and any(p["id"] == initial["Alice"]["self"]
+                         and abs(p["health"] - samples("Alice")[-1]["health"]) < .01
+                         for p in samples("Bob")[-1]["players"]),
+                 "restored effect continues and both clients converge", 12)
+        continued = {role: samples(role)[-1] for role in evidence}
+        for role in evidence:
+            command(role, "screenshot")
+            command(role, "quit")
+            processes[role].wait(timeout=15)
+            if processes[role].returncode:
+                raise RuntimeError(f"{role} did not finish cleanly")
+            finished.add(role)
+        report = dict(success=True, scenario="V35 active actor effect through server restart",
+                      spell=spell, synthetic_placements=True, real_loadout=True,
+                      initial=initial, injured=injured, departed=departed,
+                      returned=returned, continued=continued,
+                      spell_events=cast_events,
+                      relay=asdict(relay.stop()), manifest=manifest,
+                      screenshots=[p.name for p in output.glob("*.png")])
+        output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2), flush=True)
+        return
+    if timed:
+        cast_tick = next(sample["tick"] for sample in samples("Alice") if sample["magic_events"])
+        wait_for(lambda: samples("Alice")[-1]["tick"] >= cast_tick + 70,
+                 "timed effect reaches expiry", 12)
     wait_for(lambda: samples("Alice")[-1]["health"] > injured["Alice"]["health"]
              and any(p["id"] == initial["Alice"]["self"]
                      and p["health"] == samples("Alice")[-1]["health"]
@@ -412,7 +470,8 @@ def verify_instant_spell(output, evidence, processes, relay, manifest):
         if processes[role].returncode:
             raise RuntimeError(f"{role} did not finish cleanly")
         finished.add(role)
-    report = dict(success=True, scenario="V26 native OpenMW instant Restore Health",
+    report = dict(success=True, scenario="V35 native timed Restore Health" if timed
+                  else "V26 native OpenMW instant Restore Health",
                   synthetic_placements=True, real_loadout=True,
                   initial=initial, injured=injured, before=before, after=after,
                   spell_events={role: casts(role) for role in evidence},
@@ -664,10 +723,12 @@ def run(args):
     binary = args.build.resolve()
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
-    cell = "NPC Door Contact Test" if args.instant_spell else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
-    npc = "npc_door_actor" if args.instant_spell else "hlavora sadas" if args.doors else "raflod the braggart"
-    destination = "60 -32 1 120" if args.instant_spell else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
+    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart
+    spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
+    cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
+    version = 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
+    destination = "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
@@ -675,11 +736,11 @@ def run(args):
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
-        f'actors "{npc if args.life_encounter or args.instant_spell else "player"}" "{npc if args.life_encounter or args.instant_spell else "player"}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
+        f'actors "{npc if args.life_encounter or spell_capture else "player"}" "{npc if args.life_encounter or spell_capture else "player"}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
-        + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or args.instant_spell else '')
-        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or args.instant_spell else '')
-        + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect or args.instant_spell else ''), encoding="utf-8")
+        + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
+        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
+        + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect or spell_capture else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
@@ -687,7 +748,7 @@ def run(args):
         common["spawn_positions"] = "-563200:71680:394240"
     if args.life_encounter or args.unarmed_effect:
         common["spawn_positions"] = "-563200:-307200:394240"
-    if args.instant_spell:
+    if spell_capture:
         common["spawn_positions"] = "61440:-32768:1024"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
@@ -709,7 +770,7 @@ def run(args):
             tokens[10:13] = ["-563200", str((70 + 40 * index) * 1024), "394240"]
         if args.life_encounter or args.unarmed_effect:
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
-        if args.instant_spell:
+        if spell_capture:
             tokens[10:13] = [str((60 + 25 * index) * 1024), "-32768", "1024"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
@@ -761,18 +822,23 @@ def run(args):
                        "--tes3mp-content-cell-spaces=interior:1", "--tes3mp-content-allowed-cells=interior:1",
                        f"--tes3mp-content-cell-space-map=1={cell}", "--tes3mp-content-appearance-id=2",
                        "--tes3mp-content-appearance-record=player"]
-            if args.instant_spell:
+            if spell_capture:
                 spell_id = 14695981039346656037
-                for byte in b"npc_instant_restore":
+                for byte in spell_name.encode("ascii"):
                     spell_id = ((spell_id ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
-                command.append(f"--tes3mp-content-spell-map={spell_id}=npc_instant_restore")
+                command.append(f"--tes3mp-content-spell-map={spell_id}={spell_name}")
             start(role, command)
             client_commands[role] = command
         if args.unarmed_effect:
             verify_unarmed_effect(output, evidence, processes, relay, manifest, args.attack_limit)
             return
-        if args.instant_spell:
-            verify_instant_spell(output, evidence, processes, relay, manifest)
+        if spell_capture:
+            verify_instant_spell(output, evidence, processes, relay, manifest,
+                                 spell=spell_name, timed=args.actor_effects,
+                                 restart_server=(lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"),
+                                                        str(output / "server.cfg")])) if args.actor_effects_restart else None,
+                                 restart_clients=(lambda: [start(role, command) for role, command in client_commands.items()])
+                                 if args.actor_effects_restart else None)
             return
         if args.life_encounter:
             verify_life_encounter(output, evidence, processes, relay, manifest, args.attack_limit)
@@ -892,12 +958,16 @@ if __name__ == "__main__":
     parser.add_argument("--life-encounter", action="store_true", help="V25 live NPC kill, corpse loot and immediate reconnect")
     parser.add_argument("--unarmed-effect", action="store_true", help="Live OpenMW unarmed fatigue effect on two desktops and reconnect")
     parser.add_argument("--instant-spell", action="store_true", help="V26 native instant Restore Health on two desktops and reconnect")
+    parser.add_argument("--actor-effects", action="store_true", help="V35 timed Restore Health on two desktops and reconnect")
+    parser.add_argument("--actor-effects-restart", action="store_true",
+                        help="V35 active timed effect through server restart and two returning desktops")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
-    if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect, args.instant_spell)) > 1:
+    if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
+            args.instant_spell, args.actor_effects, args.actor_effects_restart)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.leave:
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

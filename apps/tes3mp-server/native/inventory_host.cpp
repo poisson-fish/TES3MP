@@ -77,9 +77,9 @@ namespace TES3MP::Native
             std::string version; in >> version;
             if (version != "native-inventory-3" && version != "native-inventory-4" && version != "native-inventory-5"
                 && version != "native-inventory-6" && version != "native-inventory-7" && version != "native-inventory-8"
-                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21" && version != "native-inventory-22" && version != "native-inventory-23" && version != "native-inventory-24" && version != "native-inventory-25" && version != "native-inventory-26" && version != "native-inventory-27" && version != "native-inventory-28" && version != "native-inventory-29" && version != "native-inventory-30" && version != "native-inventory-31" && version != "native-inventory-32" && version != "native-inventory-33" && version != "native-inventory-34")
+                && version != "native-inventory-9" && version != "native-inventory-10" && version != "native-inventory-11" && version != "native-inventory-12" && version != "native-inventory-13" && version != "native-inventory-14" && version != "native-inventory-15" && version != "native-inventory-16" && version != "native-inventory-17" && version != "native-inventory-18" && version != "native-inventory-19" && version != "native-inventory-20" && version != "native-inventory-21" && version != "native-inventory-22" && version != "native-inventory-23" && version != "native-inventory-24" && version != "native-inventory-25" && version != "native-inventory-26" && version != "native-inventory-27" && version != "native-inventory-28" && version != "native-inventory-29" && version != "native-inventory-30" && version != "native-inventory-31" && version != "native-inventory-32" && version != "native-inventory-33" && version != "native-inventory-34" && version != "native-inventory-35")
                 throw std::invalid_argument("Native inventory descriptor version incompatible");
-            const bool meleeCampaign = version == "native-inventory-21" || version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27" || version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34";
+            const bool meleeCampaign = version == "native-inventory-21" || version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27" || version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
             const bool neighborhood = meleeCampaign || version == "native-inventory-20";
             const bool traveler = neighborhood || version == "native-inventory-19";
             const bool movingActor = traveler || version == "native-inventory-16" || version == "native-inventory-17" || version == "native-inventory-18";
@@ -229,7 +229,7 @@ namespace TES3MP::Native
                         || !std::isfinite(nav.meleeSpeed) || nav.meleeSpeed <= 0 || nav.meleeSpeed > 100)
                         throw std::invalid_argument("Native melee descriptor invalid");
                 }
-                if (version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27" || version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34")
+                if (version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27" || version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35")
                 {
                     key("respawn"); in >> respawnDelayTicks;
                     if (!in || !respawnDelayTicks || respawnDelayTicks > 30ull * 60 * 60 * 24)
@@ -264,16 +264,17 @@ namespace TES3MP::Native
             binding.mNpcLifecycle = version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
             binding.mMagicUse = version == "native-inventory-26" || version == "native-inventory-27";
             binding.mMagicProjectile = version == "native-inventory-27";
-            if (version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34")
+            if (version == "native-inventory-28" || version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35")
             {
                 binding.mMeleeContact = binding.mCombatState = binding.mCombatResolution = true;
                 binding.mNpcLifecycle = binding.mMagicUse = binding.mMagicProjectile = binding.mMagicItemUse = true;
-                binding.mMagicTimed = version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34";
-                binding.mMagicArea = version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34";
-                binding.mMagicPlayerTarget = version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34";
-                binding.mMagicProjectileCollection = version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34";
-                binding.mKnockoutRules = version == "native-inventory-33" || version == "native-inventory-34";
-                binding.mMeleeDefenseRules = version == "native-inventory-34";
+                binding.mMagicTimed = version == "native-inventory-29" || version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mMagicArea = version == "native-inventory-30" || version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mMagicPlayerTarget = version == "native-inventory-31" || version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mMagicProjectileCollection = version == "native-inventory-32" || version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mKnockoutRules = version == "native-inventory-33" || version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mMeleeDefenseRules = version == "native-inventory-34" || version == "native-inventory-35";
+                binding.mActorEffectLifecycle = version == "native-inventory-35";
             }
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }

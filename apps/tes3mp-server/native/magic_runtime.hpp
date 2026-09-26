@@ -14,7 +14,7 @@ namespace TES3MP::Native
 {
     // Source-neutral bounded effect plan. Spell and enchantment records both
     // carry an ESM::EffectList; non-self targets require authoritative contact.
-    // Timed Resist Magicka is installed by the composed actor tick.
+    // In V35 the composed actor tick installs timed effect instances separately.
     struct PreparedInstantEffects
     {
         std::vector<ESM::ENAMstruct> effects;
@@ -46,9 +46,9 @@ namespace TES3MP::Native
     };
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
-        const MWWorld::ESMStore& content);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);
@@ -56,7 +56,7 @@ namespace TES3MP::Native
     // in the prepared plan until the authoritative contact step supplies a target.
     InstantSpellLaunch launchInstantSpell(const PreparedInstantSpell& spell,
         MWMechanics::NpcStats& caster, const MWWorld::ESMStore& content, Misc::Rng::Generator& rng,
-        bool uncappedDamageFatigue = false);
+        bool uncappedDamageFatigue = false, bool resolveSelf = true);
 }
 
 #endif

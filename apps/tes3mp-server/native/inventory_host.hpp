@@ -17,6 +17,10 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V35 carries bounded actor effect instances with source/caster identity,
+    // rolled magnitude, resistance and active duration in the composed image.
+    // Timed elemental/resource effects accrue on active ticks; timed resistance
+    // feeds shared OpenMW melee/magic rules. Fresh campaign required.
     // V33 saves fatigue knockout for both players and the selected NPC. Active
     // actors recover fatigue at the stock combat rate; knocked actors cannot
     // attack, and unarmed hits then damage health. Fresh campaign required.

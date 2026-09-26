@@ -4127,11 +4127,24 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
         writeDoorFixtureModel(scratch);
+        auto actorSettings = settings;
+        if (effectLifecycle && strike)
+        {
+            std::ifstream source(settings);
+            const std::string text(std::istreambuf_iterator<char>{source}, {});
+            auto altered = text;
+            const std::string prior = "enchanted weapons are magical = true";
+            const auto at = altered.find(prior);
+            require(at != std::string::npos, "Normal weapon setting absent from strike fixture");
+            altered.replace(at, prior.size(), "enchanted weapons are magical = false");
+            actorSettings = scratch / "normal-weapons.cfg";
+            std::ofstream(actorSettings) << altered;
+        }
         std::filesystem::create_directory(scratch / "openmw");
         std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw" / "openmw.cfg");
         ESM::Weapon defenseWeapon;
@@ -4180,6 +4193,11 @@ namespace TES3MP::Native::Testing
                 strikeEnchantment.mEffects.populate({
                     {ESM::MagicEffect::RestoreFatigue, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
                     {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 5, 5}});
+                if (effectLifecycle)
+                    strikeEnchantment.mEffects.populate({
+                        {ESM::MagicEffect::RestoreFatigue, {}, {}, ESM::RT_Self, 0, 0, 5, 5},
+                        {ESM::MagicEffect::ResistNormalWeapons, {}, {}, ESM::RT_Self, 0, 2, 60, 60},
+                        {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Target, 0, 0, 5, 5}});
                 strikeWeapon = *base.store().get<ESM::Weapon>().find(
                     ESM::RefId::stringRefId("iron shortsword"));
                 strikeWeapon.mId = ESM::RefId::stringRefId("npc_strike_sword");
@@ -4202,9 +4220,17 @@ namespace TES3MP::Native::Testing
             ESM::Spell targetDamage;
             ESM::Spell timedResistance;
             ESM::Spell targetResistance;
+            ESM::Spell normalResistance;
+            ESM::Spell elementalDamage;
+            ESM::Spell timedRestore;
+            ESM::Spell slowRestore;
+            ESM::Spell wardBeforeDamage;
+            ESM::Spell damageBeforeWard;
             ESM::Enchantment rangedEnchantment;
             ESM::Enchantment usedEnchantment;
             ESM::Clothing usedItem;
+            ESM::Enchantment usedWardEnchantment;
+            ESM::Clothing usedWardItem;
             ESM::Enchantment onceEnchantment;
             ESM::Clothing onceItem;
             if (spell)
@@ -4256,6 +4282,41 @@ namespace TES3MP::Native::Testing
                     targetResistance.mEffects.populate({
                         {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Target, 0, 1, 100, 100}});
                     npc.mSpells.mList.push_back(targetResistance.mId);
+                    if (effectLifecycle)
+                    {
+                        normalResistance = timedResistance;
+                        normalResistance.mId = ESM::RefId::stringRefId("npc_normal_resistance");
+                        normalResistance.mEffects.populate({
+                            {ESM::MagicEffect::ResistNormalWeapons, {}, {}, ESM::RT_Self, 0, 2, 60, 60}});
+                        npc.mSpells.mList.push_back(normalResistance.mId);
+                        elementalDamage = targetResistance;
+                        elementalDamage.mId = ESM::RefId::stringRefId("npc_elemental_damage");
+                        elementalDamage.mEffects.populate({
+                            {ESM::MagicEffect::FireDamage, {}, {}, ESM::RT_Target, 0, 2, 6, 6}});
+                        npc.mSpells.mList.push_back(elementalDamage.mId);
+                        timedRestore = timedResistance;
+                        timedRestore.mId = ESM::RefId::stringRefId("npc_timed_restore");
+                        timedRestore.mEffects.populate({
+                            {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 2, 6, 6}});
+                        npc.mSpells.mList.push_back(timedRestore.mId);
+                        slowRestore = timedRestore;
+                        slowRestore.mId = ESM::RefId::stringRefId("npc_slow_restore");
+                        slowRestore.mEffects.populate({
+                            {ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 20, 1, 1}});
+                        npc.mSpells.mList.push_back(slowRestore.mId);
+                        wardBeforeDamage = timedResistance;
+                        wardBeforeDamage.mId = ESM::RefId::stringRefId("npc_ward_before_damage");
+                        wardBeforeDamage.mEffects.populate({
+                            {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 0, 2, 100, 100},
+                            {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Self, 0, 0, 8, 8}});
+                        npc.mSpells.mList.push_back(wardBeforeDamage.mId);
+                        damageBeforeWard = wardBeforeDamage;
+                        damageBeforeWard.mId = ESM::RefId::stringRefId("npc_damage_before_ward");
+                        damageBeforeWard.mEffects.populate({
+                            {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Self, 0, 0, 8, 8},
+                            {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 0, 2, 100, 100}});
+                        npc.mSpells.mList.push_back(damageBeforeWard.mId);
+                    }
                 }
                 if (projectile)
                 {
@@ -4288,6 +4349,17 @@ namespace TES3MP::Native::Testing
                     usedItem.mEnchant = usedEnchantment.mId;
                     usedItem.mScript = {};
                     npc.mInventory.mList.push_back({1, usedItem.mId});
+                    if (effectLifecycle)
+                    {
+                        usedWardEnchantment = usedEnchantment;
+                        usedWardEnchantment.mId = ESM::RefId::stringRefId("npc_used_ward");
+                        usedWardEnchantment.mEffects.populate({
+                            {ESM::MagicEffect::ResistNormalWeapons, {}, {}, ESM::RT_Self, 0, 2, 60, 60}});
+                        usedWardItem = usedItem;
+                        usedWardItem.mId = ESM::RefId::stringRefId("npc_used_ward_shirt");
+                        usedWardItem.mEnchant = usedWardEnchantment.mId;
+                        npc.mInventory.mList.push_back({1, usedWardItem.mId});
+                    }
                     if (collection)
                     {
                         onceEnchantment = usedEnchantment;
@@ -4345,6 +4417,21 @@ namespace TES3MP::Native::Testing
                     timedResistance.save(out); out.endRecord(ESM::Spell::sRecordId);
                     out.startRecord(ESM::Spell::sRecordId, 0);
                     targetResistance.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    if (effectLifecycle)
+                    {
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        normalResistance.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        elementalDamage.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        timedRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        slowRestore.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        wardBeforeDamage.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        out.startRecord(ESM::Spell::sRecordId, 0);
+                        damageBeforeWard.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    }
                 }
                 if (projectile)
                 {
@@ -4359,6 +4446,13 @@ namespace TES3MP::Native::Testing
                     usedEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
                     out.startRecord(ESM::Clothing::sRecordId, 0);
                     usedItem.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                    if (effectLifecycle)
+                    {
+                        out.startRecord(ESM::Enchantment::sRecordId, 0);
+                        usedWardEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                        out.startRecord(ESM::Clothing::sRecordId, 0);
+                        usedWardItem.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                    }
                     if (collection)
                     {
                         out.startRecord(ESM::Enchantment::sRecordId, 0);
@@ -4664,7 +4758,8 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (defense ? "native-inventory-34\nmanifest "
+            std::ofstream out(descriptor); out << (effectLifecycle ? "native-inventory-35\nmanifest "
+                : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
                 : collection ? "native-inventory-32\nmanifest "
                 : playerTarget ? "native-inventory-31\nmanifest "
@@ -4680,7 +4775,7 @@ namespace TES3MP::Native::Testing
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
-                << "npc \"npc_door_actor\" " << std::quoted(settings.string())
+                << "npc \"npc_door_actor\" " << std::quoted(actorSettings.string())
                 << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
@@ -5152,6 +5247,17 @@ namespace TES3MP::Native::Testing
                             previousHealth - hitPhysicalDamage + 5.f);
                         require(std::abs(candidate.combat->actors[0][8][2] - expectedHealth) < 0.01f,
                             "Confirmed strike did not compose Target effect with physical damage");
+                        if (effectLifecycle)
+                            require(candidate.timedEffects.size() == 1
+                                && candidate.timedEffects.front().effectIndex == uint64_t(
+                                    ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::ResistNormalWeapons))
+                                && candidate.timedEffects.front().actor == 2
+                                && candidate.timedEffects.front().caster == service.projectInventory(
+                                    authority, id<SessionId>(1), id<ServerTick>(time),
+                                    id<CanonicalRevision>(time))->equipment->motions.front().placement
+                                && candidate.timedEffects.front().sourceKind == 2
+                                && candidate.timedEffects.front().source != 0,
+                                "Confirmed strike did not retain its timed source and caster");
                     }
                     InventoryHost hitRestart(descriptor, testContentManifest(), *registry, *crypto, durable);
                     require(std::ranges::equal(durable, hitRestart.service().inventoryImage())
@@ -5167,6 +5273,63 @@ namespace TES3MP::Native::Testing
             require(hit && (!combat || composedHit) && contacted.melee && contacted.melee->contact && contacted.melee->target == 1,
                 "Server contact was not recorded at the bound KF hit key");
             require(releaseTick && !releaseImage.empty(), "Server attack did not retain a release-before-hit state");
+            if (effectLifecycle && strike)
+            {
+                require(contacted.timedEffects.size() == 1, "Strike ward missing before melee comparison");
+                auto bareImage = contactImage;
+                const size_t countOffset = size_t(contacted.inventory.data()
+                    - reinterpret_cast<const char*>(contactImage.data())) - 88;
+                std::fill_n(bareImage.begin() + countOffset, 8, std::byte{});
+                bareImage.erase(bareImage.begin() + countOffset + 8,
+                    bareImage.begin() + countOffset + 88);
+                InventoryHost wardedHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                InventoryHost bareHost(descriptor, testContentManifest(), *registry, *crypto, bareImage);
+                auto& warded = wardedHost.service(); auto& bare = bareHost.service();
+                warded.synchronizeCells(authority); bare.synchronizeCells(authority);
+                const auto* attacker = authority.findPlayer(id<PlayerId>(2));
+                bool compared = false;
+                for (uint64_t time = contacted.tick + 1;
+                    time < contacted.timedEffects.front().expiresTick && !compared; ++time)
+                {
+                    const auto view = warded.projectInventory(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(view && view->equipment && view->equipment->motions.size() == 1,
+                        "Ward melee target missing");
+                    ClientMeleeAttackCommand attack{id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                        id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(time),
+                        CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    const ServerCommandProposal proposal(id<SessionId>(2), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(time), id<CanonicalRevision>(time),
+                        EntityPrecondition(attacker->entityId(), attacker->entityRevision(),
+                            attacker->authorityEpoch()), MeleeAttackCommandProposal(attack));
+                    auto wardIntent = warded.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                    auto bareIntent = bare.prepareMeleeAttack(authority, proposal, id<ServerTick>(time));
+                    require(bool(wardIntent) && bool(bareIntent), "Paired normal weapon attack rejected");
+                    auto wardTick = warded.prepareNativeTick(authority, id<ServerTick>(time),
+                        1.f/30, std::move(wardIntent));
+                    auto bareTick = bare.prepareNativeTick(authority, id<ServerTick>(time),
+                        1.f/30, std::move(bareIntent));
+                    const auto wardEvent = warded.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), wardTick.get());
+                    const auto bareEvent = bare.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), bareTick.get());
+                    require(wardTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bareTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Paired normal weapon attacks failed to commit");
+                    if (wardEvent && bareEvent && !wardEvent->events().empty()
+                        && !bareEvent->events().empty() && wardEvent->events().front().hit)
+                    {
+                        require(bareEvent->events().front().hit
+                            && wardEvent->events().front().damage > 0
+                            && wardEvent->events().front().damage < bareEvent->events().front().damage,
+                            "Durable Resist Normal Weapons did not reduce native melee damage");
+                        compared = true;
+                    }
+                }
+                require(compared, "No paired normal weapon hit resolved before ward expiry");
+                std::cout << "normal weapon ward=melee damage reduced source=strike\n";
+            }
             if (spell)
             {
                 require(contacted.combat && contacted.combat->actors[0][8][2] < contacted.combat->actors[0][8][0],
@@ -5511,6 +5674,240 @@ namespace TES3MP::Native::Testing
                             expiredImage.size()}).timedEffects.empty()
                         && expiry->commit(accepted) == CanonicalDurabilityResult::Committed,
                         "Timed resistance did not expire atomically on its deadline");
+                    if (effectLifecycle)
+                    {
+                        const auto hash = [](std::string_view name) {
+                            uint64_t value = 14695981039346656037ull;
+                            for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                            return value;
+                        };
+                        const auto orderedCast = [&](std::string_view source) {
+                            InventoryHost host(descriptor, testContentManifest(), *registry, *crypto,
+                                contactImage);
+                            auto& service = host.service(); service.synchronizeCells(authority);
+                            auto orderedUse = use; orderedUse.sourceId = hash(source);
+                            auto intent = service.prepareMagicUse(authority, proposal(orderedUse),
+                                id<ServerTick>(castTick));
+                            require(bool(intent), "Ordered mixed spell rejected");
+                            auto step = service.prepareNativeTick(authority, id<ServerTick>(castTick),
+                                1.f/30, std::move(intent));
+                            std::vector<std::byte> image;
+                            require(step && step->commit([&](auto bytes) {
+                                image.assign(bytes.begin(), bytes.end());
+                                return CanonicalDurabilityResult::Rejected;
+                            }) == CanonicalDurabilityResult::Rejected
+                                && std::ranges::equal(service.inventoryImage(), contactImage),
+                                "Rejected mixed effect leaked");
+                            const auto parts = readActorCampaign({reinterpret_cast<const char*>(image.data()),
+                                image.size()});
+                            require(bool(parts.combat), "Mixed effect lost actor combat state");
+                            return std::pair{parts.timedEffects.size(), parts.combat->actors[0][8][2]};
+                        };
+                        const auto wardFirst = orderedCast("npc_ward_before_damage");
+                        const auto damageFirst = orderedCast("npc_damage_before_ward");
+                        require(wardFirst.first == 1 && damageFirst.first == 1
+                            && wardFirst.second > damageFirst.second,
+                            "Mixed record effects did not resolve in record order");
+                        InventoryHost effectHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& effects = effectHost.service(); effects.synchronizeCells(authority);
+                        auto normalUse = use; normalUse.sourceId = hash("npc_normal_resistance");
+                        auto normalIntent = effects.prepareMagicUse(authority, proposal(normalUse),
+                            id<ServerTick>(castTick));
+                        require(bool(normalIntent), "Normal weapon resistance spell rejected");
+                        auto normalTick = effects.prepareNativeTick(authority, id<ServerTick>(castTick),
+                            1.f/30, std::move(normalIntent));
+                        std::vector<std::byte> normalImage;
+                        require(normalTick && normalTick->commit([&](auto bytes) {
+                            normalImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(effects.inventoryImage(), contactImage),
+                            "Rejected normal resistance leaked from the composed tick");
+                        const auto normal = readActorCampaign({reinterpret_cast<const char*>(
+                            normalImage.data()), normalImage.size()});
+                        require(normal.timedEffects.size() == 1
+                            && normal.timedEffects.front().effectIndex == uint64_t(
+                                ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::ResistNormalWeapons))
+                            && normal.timedEffects.front().actor == 0
+                            && normal.timedEffects.front().caster == 1
+                            && normal.timedEffects.front().source == normalUse.sourceId
+                            && normal.timedEffects.front().sourceKind == 0
+                            && normal.timedEffects.front().magnitude > 0
+                            && normal.timedEffects.front().durationTicks == 60
+                            && normal.timedEffects.front().expiresTick == castTick + 60,
+                            "Normal resistance lost its OpenMW effect identity or lifetime");
+                        require(normalTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Normal resistance did not commit");
+                        InventoryHost normalRestart(descriptor, testContentManifest(), *registry, *crypto,
+                            normalImage);
+                        require(std::ranges::equal(normalRestart.service().inventoryImage(), normalImage),
+                            "Normal resistance changed on restart");
+                        auto corrupt = normalImage;
+                        const size_t countOffset = size_t(normal.inventory.data()
+                            - reinterpret_cast<const char*>(normalImage.data())) - 88;
+                        corrupt[countOffset + 8 + 40] ^= std::byte{1};
+                        bool rejectedSource = false;
+                        try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, corrupt); }
+                        catch (const std::invalid_argument&) { rejectedSource = true; }
+                        require(rejectedSource, "Altered saved effect source installed on recovery");
+
+                        InventoryHost wardHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& ward = wardHost.service(); ward.synchronizeCells(authority);
+                        const auto wardrobe = ward.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                        require(wardrobe && !wardrobe->playerInventory.empty(),
+                            "WhenUsed ward source inventory missing");
+                        const auto& stacks = wardrobe->playerInventory.front().stacks;
+                        const auto wardItem = std::ranges::find(stacks,
+                            id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                ESM::RefId::stringRefId("npc_used_ward_shirt"))),
+                            &CanonicalItemStack::prototypeId);
+                        require(wardItem != stacks.end(), "WhenUsed ward item missing");
+                        auto wardUse = use;
+                        wardUse.sourceKind = MagicUseSourceKind::EnchantedItem;
+                        wardUse.sourceId = wardItem->stackId.value();
+                        wardUse.expectedInventoryRevision = wardrobe->playerInventory.front().revision;
+                        auto wardIntent = ward.prepareMagicUse(authority, proposal(wardUse),
+                            id<ServerTick>(castTick));
+                        require(bool(wardIntent), "WhenUsed timed ward rejected");
+                        auto wardTick = ward.prepareNativeTick(authority, id<ServerTick>(castTick),
+                            1.f/30, std::move(wardIntent));
+                        std::vector<std::byte> wardImage;
+                        require(wardTick && wardTick->commit([&](auto bytes) {
+                            wardImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(ward.inventoryImage(), contactImage),
+                            "Rejected ward launch spent charge or installed an effect");
+                        const auto wardState = readActorCampaign({reinterpret_cast<const char*>(
+                            wardImage.data()), wardImage.size()});
+                        require(wardState.timedEffects.size() == 1
+                            && wardState.timedEffects.front().actor == 0
+                            && wardState.timedEffects.front().caster == 1
+                            && wardState.timedEffects.front().sourceKind == 1
+                            && wardState.timedEffects.front().source == hash("npc_used_ward"),
+                            "WhenUsed ward lost its caster or enchantment source");
+                        require(wardTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "WhenUsed ward did not commit");
+                        const auto charged = ward.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick));
+                        const auto spentWard = std::ranges::find(charged->playerInventory.front().stacks,
+                            wardItem->stackId, &CanonicalItemStack::stackId);
+                        require(spentWard != charged->playerInventory.front().stacks.end()
+                            && std::bit_cast<float>(spentWard->enchantmentCharge) >= 0
+                            && std::bit_cast<float>(spentWard->enchantmentCharge) < 20,
+                            "WhenUsed ward charge did not commit with its effect");
+                        InventoryHost wardRestart(descriptor, testContentManifest(), *registry, *crypto,
+                            wardImage);
+                        require(std::ranges::equal(wardRestart.service().inventoryImage(), wardImage),
+                            "WhenUsed ward charge or effect changed on restart");
+
+                        InventoryHost healingHost(descriptor, testContentManifest(), *registry, *crypto,
+                            contactImage);
+                        auto& healing = healingHost.service(); healing.synchronizeCells(authority);
+                        auto healUse = use; healUse.sourceId = hash("npc_timed_restore");
+                        auto healIntent = healing.prepareMagicUse(authority, proposal(healUse),
+                            id<ServerTick>(castTick));
+                        require(bool(healIntent), "Timed Restore Health spell rejected");
+                        auto healCast = healing.prepareNativeTick(authority, id<ServerTick>(castTick),
+                            1.f/30, std::move(healIntent));
+                        require(healCast && healCast->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Timed Restore Health launch failed");
+                        const auto healImage = std::vector(healing.inventoryImage().begin(),
+                            healing.inventoryImage().end());
+                        const auto healContact = readActorCampaign({reinterpret_cast<const char*>(
+                            healImage.data()), healImage.size()});
+                        require(healContact.timedEffects.size() == 1
+                            && healContact.combat->actors[0][8][2] == contacted.combat->actors[0][8][2],
+                            "Timed restoration applied before its first active tick");
+                        InventoryHost healingRestart(descriptor, testContentManifest(), *registry, *crypto,
+                            healImage);
+                        auto& resumedHealing = healingRestart.service();
+                        resumedHealing.synchronizeCells(authority);
+                        auto healStep = resumedHealing.prepareNativeTick(authority,
+                            id<ServerTick>(castTick + 30), 1.f/30, {});
+                        require(healStep && healStep->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Restarted timed restoration failed");
+                        const auto healed = readActorCampaign({reinterpret_cast<const char*>(
+                            resumedHealing.inventoryImage().data()), resumedHealing.inventoryImage().size()});
+                        require(healed.combat->actors[0][8][2] > healContact.combat->actors[0][8][2]
+                            && healed.timedEffects == healContact.timedEffects,
+                            "Restarted Restore Health did not accrue one second of healing");
+
+                        auto moved = std::vector(authority.players().begin(), authority.players().end());
+                        const auto& original = moved.front();
+                        moved.front() = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                            original, id<ServerTick>(1), Transform(original.transform().cell(),
+                                Position3(60 * 1024, -100 * 1024, 1024), original.transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                        const auto participants = std::get<CanonicalServerState>(createCanonicalServerState(
+                            moved, authority.activeSessions()));
+                        InventoryHost fireHost(descriptor, testContentManifest(), *registry, *crypto, contactImage);
+                        auto& fire = fireHost.service(); fire.synchronizeCells(participants);
+                        auto fireUse = use; fireUse.sourceId = hash("npc_elemental_damage");
+                        fireUse.targetKind = MagicUseTargetKind::Actor;
+                        fireUse.targetId = fire.projectInventory(participants, id<SessionId>(1),
+                            id<ServerTick>(castTick), id<CanonicalRevision>(castTick))
+                            ->equipment->motions.front().placement;
+                        auto launch = fire.prepareMagicUse(participants, proposal(fireUse), id<ServerTick>(castTick));
+                        require(bool(launch), "Timed elemental Target spell rejected");
+                        auto launchTick = fire.prepareNativeTick(participants, id<ServerTick>(castTick),
+                            1.f/30, std::move(launch));
+                        require(launchTick && launchTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Timed elemental launch did not commit");
+                        bool landed = false;
+                        uint64_t impactTick = 0;
+                        for (uint64_t time = castTick + 1; time < castTick + 90 && !landed; ++time)
+                        {
+                            auto step = fire.prepareNativeTick(participants, id<ServerTick>(time), 1.f/30, {});
+                            require(step && step->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Timed elemental flight failed");
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(
+                                fire.inventoryImage().data()), fire.inventoryImage().size()});
+                            landed = !state.projectile && state.timedEffects.size() == 1;
+                            if (landed) impactTick = time;
+                        }
+                        require(landed, "Timed elemental projectile never installed an effect");
+                        const auto contactImage2 = std::vector(fire.inventoryImage().begin(),
+                            fire.inventoryImage().end());
+                        const auto contact = readActorCampaign({reinterpret_cast<const char*>(
+                            contactImage2.data()), contactImage2.size()});
+                        const auto& instance = contact.timedEffects.front();
+                        require(instance.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(
+                                ESM::MagicEffect::FireDamage)) && instance.actor == 2
+                            && instance.caster == 1 && instance.source == fireUse.sourceId
+                            && instance.durationTicks == 60 && instance.expiresTick == impactTick + 60
+                            && instance.magnitude > 0 && instance.resistance <= 100,
+                            "Elemental contact lost source, resistance, magnitude or expiry");
+                        InventoryHost fireRestart(descriptor, testContentManifest(), *registry, *crypto,
+                            contactImage2);
+                        auto& resumed = fireRestart.service(); resumed.synchronizeCells(participants);
+                        auto advance = resumed.prepareNativeTick(participants,
+                            id<ServerTick>(impactTick + 30), 1.f/30, {});
+                        std::vector<std::byte> damagedImage;
+                        require(advance && advance->commit([&](auto bytes) {
+                            damagedImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(resumed.inventoryImage(), contactImage2),
+                            "Rejected elemental damage changed committed health");
+                        const auto damaged = readActorCampaign({reinterpret_cast<const char*>(
+                            damagedImage.data()), damagedImage.size()});
+                        require(damaged.combat->actors[2][8][2] < contact.combat->actors[2][8][2]
+                            && damaged.timedEffects == contact.timedEffects,
+                            "Restarted elemental effect did not deal one second of damage");
+                        require(advance->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Elemental damage did not commit");
+                        const auto alice = resumed.projectCombat(participants, id<SessionId>(1),
+                            id<ServerTick>(impactTick + 30), id<CanonicalRevision>(impactTick + 30));
+                        const auto bob = resumed.projectCombat(participants, id<SessionId>(2),
+                            id<ServerTick>(impactTick + 30), id<CanonicalRevision>(impactTick + 30));
+                        require(alice && bob && alice->actors().front().health == bob->actors().front().health
+                            && alice->actors().front().health == damaged.combat->actors[2][8][2],
+                            "Two sessions diverged on restarted elemental damage");
+                        std::cout << "actor effects=normal resistance/fire source=durable restart=exact clients=equal\n";
+                        return;
+                    }
                 }
                 auto invalidUse = use; invalidUse.sourceId ^= 1;
                 require(!service.prepareMagicUse(authority, proposal(invalidUse), id<ServerTick>(castTick)),

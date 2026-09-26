@@ -3,6 +3,7 @@
 #include "door_tests.hpp"
 #include "equipment_tests.hpp"
 #include "inventory_service_tests.hpp"
+#include "magic_runtime.hpp"
 #include "transfer_rehearsal.hpp"
 
 namespace TES3MP::Native::Testing { void checkItemPlacement(); }
@@ -6544,6 +6545,50 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 4 && std::string_view(argv[1]) == "actor-effect-mod-records")
+        {
+            const auto load = [&](const char* directory) {
+                const std::string argument = std::string("--config=") + directory;
+                const char* options[]{argv[0], argument.c_str()};
+                return TES3MP::Native::Loadout(TES3MP::Native::readLoadoutOptions(2, options));
+            };
+            std::set<std::string> baseSpells, baseEnchantments;
+            {
+                const auto base = load(argv[2]);
+                for (const auto& spell : base.store().get<ESM::Spell>())
+                    if (spell.mId.is<ESM::StringRefId>())
+                        baseSpells.emplace(spell.mId.getRefIdString());
+                for (const auto& enchantment : base.store().get<ESM::Enchantment>())
+                    if (enchantment.mId.is<ESM::StringRefId>())
+                        baseEnchantments.emplace(enchantment.mId.getRefIdString());
+            }
+            const auto mod = load(argv[3]);
+            size_t spells = 0, enchantments = 0, trSpells = 0, trEnchantments = 0;
+            for (const auto& spell : mod.store().get<ESM::Spell>())
+                if (spell.mId.is<ESM::StringRefId>()
+                    && !baseSpells.contains(std::string(spell.mId.getRefIdString()))
+                    && TES3MP::Native::prepareInstantSpell(spell, mod.store(), true))
+                {
+                    ++spells;
+                    if (spell.mId.getRefIdString().starts_with("T_")) ++trSpells;
+                }
+            for (const auto& enchantment : mod.store().get<ESM::Enchantment>())
+                if (enchantment.mId.is<ESM::StringRefId>()
+                    && !baseEnchantments.contains(std::string(enchantment.mId.getRefIdString()))
+                    && (enchantment.mData.mType == ESM::Enchantment::WhenUsed
+                        || enchantment.mData.mType == ESM::Enchantment::WhenStrikes)
+                    && TES3MP::Native::prepareInstantEffects(enchantment.mEffects, mod.store(), true))
+                {
+                    ++enchantments;
+                    if (enchantment.mId.getRefIdString().starts_with("T_")) ++trEnchantments;
+                }
+            require(spells >= 2 && enchantments >= 2 && trSpells >= 2 && trEnchantments >= 2,
+                "Real mod loadout has too few newly supported actor effect records");
+            std::cout << "mod actor effects spells=" << spells << " enchantments=" << enchantments
+                << " TR spells=" << trSpells << " TR enchantments=" << trEnchantments << '\n';
+            std::cout << "PASS actor-effect-mod-records\n";
+            return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "traveler-neighborhood")
         {
             TES3MP::Native::Testing::checkTravelerNeighborhood(std::filesystem::absolute(argv[2]),
@@ -6609,6 +6654,22 @@ int main(int argc, char** argv)
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true);
             std::cout << "PASS npc-timed-spell\n"; return 0;
+        }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-actor-effects")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true,
+                false, false, false, false, false, false, false, true);
+            std::cout << "PASS npc-actor-effects\n"; return 0;
+        }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-actor-effect-strike")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, false, false, false,
+                false, false, false, true, false, false, false, true);
+            std::cout << "PASS npc-actor-effect-strike\n"; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "npc-area-spell")
         {
