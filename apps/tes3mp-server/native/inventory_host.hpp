@@ -17,6 +17,9 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V36 derives fixed Fortify Luck shirt instances from candidate equipment.
+    // Item identity and caster survive restart; indefinite effects leave with
+    // unequip/replacement. V36 requires a fresh campaign.
     // V35 carries bounded actor effect instances with source/caster identity,
     // rolled magnitude, resistance and active duration in the composed image.
     // Timed elemental/resource effects accrue on active ticks; timed resistance

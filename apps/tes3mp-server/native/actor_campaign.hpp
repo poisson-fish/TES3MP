@@ -24,9 +24,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t KnockoutActorCampaignMagic = 0x4350434154335354;
     inline constexpr uint64_t MeleeDefenseActorCampaignMagic = 0x4450434154335354;
     inline constexpr uint64_t EffectActorCampaignMagic = 0x4550434154335354;
+    inline constexpr uint64_t ConstantActorCampaignMagic = 0x4650434154335354;
     inline constexpr bool hasKnockoutState(uint64_t magic)
     { return magic == KnockoutActorCampaignMagic || magic == MeleeDefenseActorCampaignMagic
-        || magic == EffectActorCampaignMagic; }
+        || magic == EffectActorCampaignMagic || magic == ConstantActorCampaignMagic; }
     inline constexpr size_t MaximumActorProjectiles = 8;
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
@@ -196,7 +197,8 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native knockout state invalid");
                     state.knockedDown[actor] = value != 0;
                 }
-            if (magic == MeleeDefenseActorCampaignMagic || magic == EffectActorCampaignMagic)
+            if (magic == MeleeDefenseActorCampaignMagic || magic == EffectActorCampaignMagic
+                || magic == ConstantActorCampaignMagic)
                 for (size_t actor = 0; actor < state.hitRecoveryTicks.size(); ++actor)
                 {
                     const auto value = getAreaWord(bytes, offset);
@@ -333,7 +335,7 @@ namespace TES3MP::Native
             || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            const size_t effectBytes = magic == EffectActorCampaignMagic ? 80 : 24;
+            const size_t effectBytes = magic == EffectActorCampaignMagic || magic == ConstantActorCampaignMagic ? 80 : 24;
             if (count > MaximumActorTimedEffects || count > (bytes.size() - offset) / effectBytes)
                 throw std::invalid_argument("Native timed effect count invalid");
             timedEffects.reserve(size_t(count));
@@ -345,7 +347,7 @@ namespace TES3MP::Native
                 if (bits > UINT32_MAX) throw std::invalid_argument("Native timed effect magnitude bits invalid");
                 effect.magnitude = std::bit_cast<float>(uint32_t(bits));
                 effect.expiresTick = getAreaWord(bytes, offset);
-                if (magic == EffectActorCampaignMagic)
+                if (magic == EffectActorCampaignMagic || magic == ConstantActorCampaignMagic)
                 {
                     effect.effectIndex = getAreaWord(bytes, offset);
                     effect.caster = getAreaWord(bytes, offset);
@@ -358,15 +360,20 @@ namespace TES3MP::Native
                     effect.startTick = getAreaWord(bytes, offset);
                     effect.durationTicks = getAreaWord(bytes, offset);
                     if (!effect.effectIndex || effect.effectIndex > 255 || !effect.caster || !effect.source
-                        || effect.sourceKind > 2 || !std::isfinite(effect.resistance)
+                        || effect.sourceKind > (magic == ConstantActorCampaignMagic ? 3u : 2u)
+                        || !std::isfinite(effect.resistance)
                         || effect.resistance < -20000 || effect.resistance > 100
-                        || effect.startTick > tick || !effect.durationTicks
-                        || effect.durationTicks > 108000)
+                        || effect.startTick > tick
+                        || (effect.sourceKind == 3
+                            ? (magic != ConstantActorCampaignMagic || effect.durationTicks != 0
+                                || effect.expiresTick != UINT64_MAX)
+                            : (!effect.durationTicks || effect.durationTicks > 108000)))
                         throw std::invalid_argument("Native effect identity or duration invalid");
                 }
                 if (effect.actor >= 3 || !std::isfinite(effect.magnitude)
-                    || effect.magnitude <= 0 || effect.magnitude > (magic == EffectActorCampaignMagic ? 100000 : 1000)
-                    || effect.expiresTick <= tick || effect.expiresTick - tick > 108000)
+                    || effect.magnitude <= 0 || effect.magnitude > (hasKnockoutState(magic) && effect.effectIndex ? 100000 : 1000)
+                    || effect.expiresTick <= tick
+                    || (effect.sourceKind != 3 && effect.expiresTick - tick > 108000))
                     throw std::invalid_argument("Native timed effect state invalid");
                 timedEffects.push_back(effect);
             }

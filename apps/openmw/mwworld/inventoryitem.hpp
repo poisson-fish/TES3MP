@@ -55,7 +55,9 @@ namespace MWWorld
             if (identity == slots[slot])
             {
                 if (found || !record.mSlots.contains(slot) || count == 0 || (!record.mSlots.mStack && std::abs(count) != 1)
-                    || ((!record.mStrikeOnly && (!record.mEnchant.empty() || !record.mScript.empty()))
+                    || (!record.mStrikeOnly && !record.mEnchant.empty()
+                        && slot != InventoryStore::Slot_Shirt)
+                    || (!record.mScript.empty()
                         && (slot != InventoryStore::Slot_Shirt || !npcStats)))
                     throw std::invalid_argument("Invalid equipment slot, count, duplicate item or unavailable effects");
                 found = true;

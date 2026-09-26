@@ -97,9 +97,10 @@ namespace TES3MP::Native
         std::shared_ptr<const EquipmentScriptLocals> locals, MWBase::ScriptManager* declarations,
         std::optional<size_t> restartActor, bool connected, std::vector<EquipmentContainerBinding> containers,
         int lootLevel, uint32_t lootSeed, std::optional<std::vector<ESM::CellRef>> worldItems, std::optional<ESM::CellRef> door,
-        std::optional<EquipmentSessionValues::WorldCells> cells, size_t cellCount, size_t worldCapacity)
+        std::optional<EquipmentSessionValues::WorldCells> cells, size_t cellCount, size_t worldCapacity,
+        bool constantEffects)
         : mStore(content), mWorld(world), mScripts(scripts), mRuntime(std::move(runtime)), mContent(contentIdentity)
-        , mScriptLocals(std::move(locals)), mConnected(connected)
+        , mScriptLocals(std::move(locals)), mConnected(connected), mConstantEffects(constantEffects)
     {
         if (&world.mStore != &content || !scripts.usesStore(content) || mRuntime.empty()
             || mRuntime.size() > 128 || mRuntime.find('\0') != std::string::npos
@@ -332,7 +333,12 @@ namespace TES3MP::Native
                     if (slot != inventory.end())
                     {
                         const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
-                        if (!record.mStrikeOnly && (!record.mScript.empty() || !record.mEnchant.empty()))
+                        const bool supportedConstant = mConstantEffects
+                            && slot == inventory.mSlots[InventoryStore::Slot_Shirt]
+                            && record.mType == ESM::Clothing::sRecordId && record.mScript.empty()
+                            && MWMechanics::constantFortifyLuckMagnitude(mStore, record.mEnchant) > 0;
+                        if (!record.mStrikeOnly && !supportedConstant
+                            && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
                     }
                 effects(index).mListener.equipmentChanged();

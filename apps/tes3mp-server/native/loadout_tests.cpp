@@ -6663,6 +6663,14 @@ int main(int argc, char** argv)
                 false, false, false, false, false, false, false, true);
             std::cout << "PASS npc-actor-effects\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-constant-effects")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true,
+                false, false, false, false, false, false, false, true, true);
+            std::cout << "PASS npc-constant-effects\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "npc-actor-effect-strike")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),

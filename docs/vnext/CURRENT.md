@@ -40,6 +40,19 @@ The TR stack prepares 130 added `T_` spells and 98 `T_` use/strike
 enchantments (`build/logs/m4-actor-effects-mod-records-final.log`).
 Live mod-record outcomes remain unproved.
 
-Next: wire constant effects and AI casts into V35.
-Prove varied real mod records and two-client convergence.
-Then finish knockdown and melee rules.
+V36 begins equipped constant effects in the composed tick. For the currently
+supported fixed Fortify Luck shirt, the candidate equipment determines a
+durable item source, caster, magnitude and indefinite instance. Equip,
+unequip and replacement commit with the effect; detached combat stats overlay
+Luck without accumulating a saved modifier. Respawn derives a fresh source.
+V35 images still recover. The synthetic gate covers rollback, replacement,
+forged-source rejection and restart
+(`build/logs/m4-constant-test-final-02.log`); the V35 actor-effect and stock
+enchantment regressions pass (`build/logs/m4-actor-effects-legacy-verify-01.log`,
+`build/logs/m4-constant-equipment-regression-01.log`). V36 requires a fresh
+campaign. This does not establish other constant-effect types or live mod
+records.
+
+Next: broaden equipped constants through OpenMW's effect rules, then route
+server AI spells and enchanted items through the cast lifecycle. Prove varied
+real mod records and two-client convergence; then finish knockdown and melee.

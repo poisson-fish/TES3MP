@@ -742,7 +742,9 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment item is stale, dormant or slot is invalid");
             const auto record = inventoryItemRecord(mContext.mStore, item->getCellRef().getRefId());
             if (!record.mSlots.contains(slot)
-                || ((!record.mStrikeOnly && (!record.mEnchant.empty() || !record.mScript.empty()))
+                || (!record.mStrikeOnly && !record.mEnchant.empty()
+                    && slot != InventoryStore::Slot_Shirt)
+                || (!record.mScript.empty()
                     && (slot != InventoryStore::Slot_Shirt || !mContext.mNpcStats)))
                 throw std::invalid_argument("Equipment type or required effect services unsupported");
             if (equip)

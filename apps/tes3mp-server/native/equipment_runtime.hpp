@@ -95,6 +95,7 @@ namespace TES3MP::Native
         void validateWorldItems(const EquipmentSessionValues& values) const;
         bool mFailedClosed = false;
         const bool mConnected;
+        const bool mConstantEffects;
         const std::shared_ptr<const void> mLifetime = std::make_shared<const char>(0);
         // Actor diagnostics recover 0 or 1; a connected session uses 2 to
         // authorize only recovery of the complete pair. Never a command field.
@@ -333,7 +334,7 @@ namespace TES3MP::Native
             std::vector<EquipmentContainerBinding> containers = {}, int lootLevel = 1, uint32_t lootSeed = 0,
             std::optional<std::vector<ESM::CellRef>> worldItems = {}, std::optional<ESM::CellRef> door = {},
             std::optional<EquipmentSessionValues::WorldCells> cells = {}, size_t cellCount = 2,
-            size_t worldCapacity = PreparedPlainEquipment::MaxItems);
+            size_t worldCapacity = PreparedPlainEquipment::MaxItems, bool constantEffects = false);
         // Diagnostic convenience; delegates to the same multi-owner runtime.
         EquipmentRuntime(const ESMStore& content, WorldModel& world, LocalScripts& scripts,
             std::string runtime, std::array<unsigned char, 32> contentIdentity,

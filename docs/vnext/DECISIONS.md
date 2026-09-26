@@ -73,6 +73,10 @@ movement cutover. V18 persists destination, door-avoidance timer, stuck position
 direction and private RNG. Rotating geometry is a synchronized derived cache.
 Only the selected NPC moves; neighbor propagation awaits multiple actors.
 
+**V36 passive source.** Candidate equipment selects a constant effect by item
+instance before combat. It commits without an expiry; recovery checks membership.
+Only fixed Fortify Luck shirts are supported so far.
+
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding
 bounded historical actor/obstacle queries. Full-world rewind is not selected. Reuse
@@ -214,19 +218,6 @@ Preserve engine execution/serialization; no substitute quest language.
 M5 must prove these unimplemented contracts. Ordinary shared loot still requires
 renewable access/transfer rules; no automatic quest-item classifier is assumed.
 Preserve v8 campaigns until explicit versioning/migration.
-
-### System coverage
-
-The enumeration remains an engine checklist, not a per-quest adaptation catalog.
-
-| Systems | Required behavior |
-|---|---|
-| 1–5: creation/tutorial; journals/branches; dialogue/topics; disposition; factions/titles | Personal startup, choices, history, relationships and eligibility. |
-| 6–9: crime/reputation; NPC death/departure; combat/bosses; escorts/followers | Personal attribution; shared lives; scoped scripted departures and follower ownership. |
-| 10–14: quest items/keys; artifacts; rewards/training; loot/crafting/merchants; doors/traps/travel | Personal grants/turn-ins, shared economy/mechanisms, renewable access; scarcity remains an explicit policy. |
-| 15–18: puzzles/triggers; buildings/strongholds; endings; diseases/transformations | Scoped irreversible changes and personal effects; coherent physical variants where necessary. |
-| 19–22: script state; spawns/ambushes; time/rest; menus/dreams/cutscenes | Contextual execution, lifecycle identity, bounded scheduling, protected deadlines, correct UI recipient. |
-| 23–25: death/recovery; parties/late joins; persistence/concurrency | No world rollback or copied journals; coherent recovery and replay-safe effects. |
 
 ## Integrity and migration
 
