@@ -6751,6 +6751,12 @@ int main(int argc, char** argv)
                 true, true, true, true, true, false, false, false, false, false, false, false, true);
             std::cout << "PASS npc-knockout\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "player-swings")
+        {
+            TES3MP::Native::Testing::checkPlayerSwings(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]));
+            std::cout << "PASS player-swings\n"; return 0;
+        }
         if (argc == 5 && (std::string_view(argv[1]) == "npc-weapon-execution"
                 || std::string_view(argv[1]) == "npc-attack-modes"))
         {

@@ -4,6 +4,7 @@
 #include <string_view>
 namespace TES3MP::Native::Testing
 {
+    void checkPlayerSwings(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcWeaponExecution(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
         bool generalAttackModes = false);
     void checkTravelerNeighborhood(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);

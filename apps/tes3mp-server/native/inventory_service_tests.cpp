@@ -4124,6 +4124,340 @@ namespace TES3MP::Native::Testing
         require(completed, "Neighborhood traveler did not complete");
     }
 
+    static void checkPreparedPlayerSwings(const std::filesystem::path& scratch)
+    {
+        const auto descriptor = scratch / "native.txt";
+        {
+            std::ifstream input(descriptor);
+            std::string text((std::istreambuf_iterator<char>(input)), {}); input.close();
+            text.replace(0, std::string_view("native-inventory-44").size(), "native-inventory-46");
+            std::ofstream(descriptor) << text;
+        }
+        auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "Player swing crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Swing participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        auto authority = players(SessionGeneration::initial(), 1, 2);
+        {
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            for (auto& entity : nearby)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                    Transform(entity.transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+        }
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1, 2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            records.push_back({{id<PlayerId>(i),id<EntityId>(i == 1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
+                digest, *authority.findPlayer(id<PlayerId>(i)), profile});
+        }
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+        InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+        auto& service = host.service(); service.synchronizeCells(authority);
+        const auto bytes = [](const auto& runtime) {
+            return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end());
+        };
+        const auto state = [&](const auto& runtime) {
+            const auto image = runtime.inventoryImage();
+            return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+        };
+        const auto intent = [&](auto& runtime, const auto& players, uint64_t tick, uint64_t owner,
+                                MeleeAttackType mode, float strength) {
+            const auto* player = players.findPlayer(id<PlayerId>(owner));
+            const auto view = runtime.projectInventory(players, id<SessionId>(owner), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), nullptr);
+            require(view && !view->equipment->motions.empty(), "Player swing NPC projection missing");
+            ClientMeleeAttackCommand attack{id<SessionId>(owner), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(tick),
+                CombatRevision::initial(), CombatRevision::initial(), mode, strength};
+            ServerCommandProposal proposal(id<SessionId>(owner), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MeleeAttackCommandProposal(attack));
+            return runtime.prepareMeleeAttack(players, proposal, id<ServerTick>(tick));
+        };
+        const auto commit = [](auto& pending) {
+            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Player swing commit failed");
+        };
+        std::unique_ptr<InventoryHost> replay;
+        std::array<unsigned, 2> hits{};
+        std::array<std::optional<PlayerSwing>, 2> beforeHits;
+        std::vector<std::byte> beforeFirstHit;
+        std::vector<std::byte> windup;
+        bool savedRelease = false, savedFollow = false;
+        uint64_t lastTick = 0;
+        for (uint64_t tick = 1; tick <= 100; ++tick)
+        {
+            auto command = tick <= 2 ? intent(service, authority, tick, tick,
+                tick == 1 ? MeleeAttackType::Slash : MeleeAttackType::Thrust, tick == 1 ? .3f : .8f) : nullptr;
+            require(tick > 2 || bool(command), "Player swing intent rejected");
+            const auto before = bytes(service);
+            auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+            require(bool(pending), "Player swing tick preparation failed");
+            const auto events = service.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), pending.get());
+            const auto peer = service.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), pending.get());
+            require(bool(events) == bool(peer) && (!events || std::ranges::equal(events->events(), peer->events())),
+                "Player swing observers disagree");
+            std::vector<std::byte> proposed;
+            require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && bytes(service) == before, "Rejected player swing leaked state");
+            if (replay)
+            {
+                auto resumed = replay->service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                require(resumed && resumed->commit([&](auto image) {
+                    require(std::ranges::equal(image, proposed), "Player swing restart changed outcome");
+                    return CanonicalDurabilityResult::Committed;
+                }) == CanonicalDurabilityResult::Committed, "Player swing restart failed");
+            }
+            commit(pending);
+            const auto current = state(service);
+            if (tick <= 2)
+            {
+                require(!events || events->events().empty(), "Player intent dealt immediate damage");
+                require(current.combat->swings[tick - 1] && !current.combat->swings[tick - 1]->state.mReleased,
+                    "Player intent omitted durable wind-up");
+            }
+            if (events) for (const auto& event : events->events())
+            {
+                const size_t owner = event.attackerPlayerId.value() - 1;
+                require(owner < 2 && current.combat->swings[owner]->state.mHit,
+                    "Player damage preceded the authored hit key");
+                const auto previous = readActorCampaign({reinterpret_cast<const char*>(before.data()), before.size()});
+                beforeHits[owner] = previous.combat->swings[owner];
+                if (!owner) beforeFirstHit = before;
+                ++hits[owner];
+            }
+            if (tick == 2)
+            {
+                windup = proposed;
+                require(!intent(service, authority, 3, 1, MeleeAttackType::Chop, 1.f),
+                    "Second player intent replaced an active swing");
+            }
+            bool release = false, follow = false;
+            for (const auto& swing : current.combat->swings) if (swing)
+            {
+                release |= swing->state.mPhase == MeleeAnimation::Phase::Release;
+                follow |= swing->state.mPhase == MeleeAnimation::Phase::Follow;
+            }
+            if (tick == 2 || (release && !savedRelease) || (follow && !savedFollow))
+            {
+                replay.reset();
+                replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                replay->service().synchronizeCells(authority);
+                require(bytes(replay->service()) == proposed, "Player swing recovery rewrote state");
+                savedRelease |= release; savedFollow |= follow;
+            }
+            lastTick = tick;
+            if (hits[0] && hits[1] && std::ranges::all_of(current.combat->swings,
+                    [](const auto& swing) { return swing && !swing->pending(); })) break;
+        }
+        require(hits == std::array<unsigned, 2>{1, 1} && savedRelease && savedFollow,
+            "Concurrent player swings did not resolve and recover exactly once");
+        const auto finished = state(service);
+        require(finished.combat->swings[0]->direction == 1 && finished.combat->swings[1]->direction == 2
+            && finished.combat->swings[0]->strength == .3f && finished.combat->swings[1]->strength == .8f,
+            "Player direction or strength changed during execution");
+        {
+            // Align the two independently reached pre-hit snapshots to exercise
+            // both authored keys in one transaction, including shared NPC armor.
+            auto simultaneous = beforeFirstHit;
+            const auto saved = readActorCampaign({reinterpret_cast<const char*>(simultaneous.data()), simultaneous.size()});
+            const auto size = [](const auto& swing) { return 8 + 13 * 8 + swing->weapon.size() + swing->identity.size(); };
+            const auto start = simultaneous.size() - saved.actor.size() - saved.inventory.size()
+                - size(saved.combat->swings[1]);
+            size_t field = start + 9 * 8 + saved.combat->swings[1]->weapon.size() + saved.combat->swings[1]->identity.size();
+            const auto& second = beforeHits[1]->state;
+            for (const uint64_t value : {uint64_t(second.mPhase), uint64_t(std::bit_cast<uint32_t>(second.mTime)),
+                    uint64_t(std::bit_cast<uint32_t>(second.mStrength)), uint64_t(second.mReleased), uint64_t(second.mHit)})
+            {
+                for (size_t byte = 0; byte < 8; ++byte) simultaneous.at(field + byte) = std::byte((value >> (byte * 8)) & 0xff);
+                field += 8;
+            }
+            InventoryHost aligned(descriptor, testContentManifest(), *registry, *crypto, simultaneous);
+            auto& runtime = aligned.service(); runtime.synchronizeCells(authority);
+            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(saved.tick + 1), 1.f/30, {});
+            const auto events = runtime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(saved.tick + 1),
+                id<CanonicalRevision>(saved.tick + 1), pending.get());
+            require(events && events->events().size() == 2, "Simultaneous player hit keys lost an outcome");
+            std::vector<std::byte> proposed;
+            require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && bytes(runtime) == simultaneous, "Rejected simultaneous armor outcomes leaked");
+            commit(pending);
+            InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, proposed);
+            require(bytes(restored.service()) == proposed, "Simultaneous player hits failed durable recovery");
+        }
+        // Disconnect one player while the peer keeps the encounter active.
+        replay.reset();
+        InventoryHost disconnected(descriptor, testContentManifest(), *registry, *crypto, windup);
+        const std::vector survivor{*authority.findActiveSession(id<SessionId>(1))};
+        const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), survivor));
+        disconnected.service().synchronizeCells(offline);
+        auto cancelled = disconnected.service().prepareNativeTick(offline, id<ServerTick>(3), 1.f/30, {});
+        commit(cancelled);
+        require(state(disconnected.service()).combat->swings[1]->interruption == PlayerSwing::Disconnected,
+            "Disconnected player's swing survived active encounter");
+        const auto cancelledBytes = bytes(disconnected.service());
+        InventoryHost rejoined(descriptor, testContentManifest(), *registry, *crypto, cancelledBytes);
+        rejoined.service().synchronizeCells(authority);
+        require(state(rejoined.service()).combat->swings[1]->interruption == PlayerSwing::Disconnected,
+            "Reconnect reset interrupted swing");
+        const auto pausedDescriptor = scratch / "paused-native.txt";
+        {
+            std::ifstream input(descriptor);
+            std::string text((std::istreambuf_iterator<char>(input)), {});
+            const auto at = text.find("processing 1 2"); require(at != std::string::npos, "Player processing fixture missing");
+            text.replace(at, std::string_view("processing 1 2").size(), "processing 1 0");
+            std::ofstream(pausedDescriptor) << text;
+        }
+        for (const auto& sourceDescriptor : {descriptor, pausedDescriptor})
+        {
+            InventoryHost changed(sourceDescriptor, testContentManifest(), *registry, *crypto, windup);
+            auto& runtime = changed.service(); runtime.synchronizeCells(authority);
+            const auto view = runtime.projectInventory(authority, id<SessionId>(2), id<ServerTick>(3), id<CanonicalRevision>(3));
+            const auto& inventory = view->playerInventory.front();
+            const auto slot = std::ranges::find(inventory.equipment, EquipmentSlot::CarriedRight, &EquipmentBinding::slot);
+            require(slot != inventory.equipment.end(), "Player source test has no weapon");
+            const auto item = std::ranges::find(inventory.stacks, slot->stackId, &CanonicalItemStack::stackId);
+            require(item != inventory.stacks.end(), "Player source stack missing");
+            ClientInventoryTransactionCommand unequip{id<SessionId>(2), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(3), id<CanonicalRevision>(3),
+                InventoryTransactionKind::UnequipItem, {}, item->prototypeId, item->stackId, 1,
+                EquipmentSlot::CarriedRight, inventory.revision, {}, {}, Position3(0,0,0)};
+            auto command = runtime.prepareInventory(authority, bind(authority, unequip).proposal());
+            require(bool(command), "Player source unequip rejected");
+            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(3), 1.f/30, std::move(command));
+            commit(pending);
+            require(state(runtime).combat->swings[1]->interruption == PlayerSwing::SourceChanged,
+                "Player swing did not cancel atomically with source unequip");
+            InventoryHost restored(sourceDescriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+            require(state(restored.service()).combat->swings == state(runtime).combat->swings,
+                "Interrupted unequipped source could not recover");
+        }
+        {
+            InventoryHost paused(pausedDescriptor, testContentManifest(), *registry, *crypto, windup);
+            paused.service().synchronizeCells(authority);
+            const auto swings = state(paused.service()).combat->swings;
+            auto pending = paused.service().prepareNativeTick(authority, id<ServerTick>(3), 1.f/30, {});
+            commit(pending);
+            require(state(paused.service()).combat->swings == swings, "Saturated player swings advanced partially");
+        }
+        {
+            const auto saved = readActorCampaign({reinterpret_cast<const char*>(windup.data()), windup.size()});
+            size_t swingSize = 0;
+            for (const auto& swing : saved.combat->swings)
+                swingSize += 8 + (swing ? 13 * 8 + swing->weapon.size() + swing->identity.size() : 0);
+            const auto start = windup.size() - saved.actor.size() - saved.inventory.size() - swingSize;
+            for (const size_t offset : {start + 2 * 8, start + 6 * 8}) // source identity, strength bits
+            {
+                auto malformed = windup;
+                for (size_t byte = 0; byte < 8; ++byte) malformed.at(offset + byte) = std::byte{0xff};
+                bool rejected = false;
+                try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, malformed); }
+                catch (const std::invalid_argument&) { rejected = true; }
+                require(rejected && bytes(rejoined.service()) == cancelledBytes,
+                    "Malformed player swing recovered or mutated another runtime");
+            }
+        }
+        // A hit must use the current server contact, not the position at admission.
+        InventoryHost missed(descriptor, testContentManifest(), *registry, *crypto, windup);
+        std::vector<CanonicalPlayerEntityState> distant(authority.players().begin(), authority.players().end());
+        for (auto& entity : distant)
+            entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(3),
+                Transform(entity.transform().cell(), Position3(60 * 1024, -400 * 1024, 1024),
+                    entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+        const auto far = std::get<CanonicalServerState>(createCanonicalServerState(distant, authority.activeSessions()));
+        missed.service().synchronizeCells(far);
+        for (uint64_t tick = 3; tick <= 65; ++tick)
+        {
+            auto pending = missed.service().prepareNativeTick(far, id<ServerTick>(tick), 1.f/30, {});
+            const auto events = missed.service().projectCombatEvents(far, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), pending.get());
+            if (events) for (const auto& event : events->events())
+                require(!event.hit && event.damage == 0, "Player hit retained stale admission contact");
+            commit(pending);
+        }
+        {
+            InventoryHost interrupted(descriptor, testContentManifest(), *registry, *crypto, {});
+            auto& runtime = interrupted.service(); runtime.synchronizeCells(authority);
+            bool checked = false;
+            for (uint64_t tick = 1; tick <= 240 && !checked; ++tick)
+            {
+                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                const auto events = runtime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
+                    id<CanonicalRevision>(tick), pending.get());
+                if (events && !events->actorEvents().empty() && events->actorEvents().front().damage > 0)
+                {
+                    const auto owner = events->actorEvents().front().targetPlayerId.value();
+                    auto command = intent(runtime, authority, tick, owner, MeleeAttackType::Chop, 1.f);
+                    require(bool(command), "Player could not enter wind-up before NPC hit");
+                    pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+                    commit(pending);
+                    require(state(runtime).combat->swings[owner - 1]->interruption == PlayerSwing::Incapacitated,
+                        "NPC hit did not interrupt the player's wind-up in the same commit");
+                    InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                    require(state(restored.service()).combat->swings == state(runtime).combat->swings,
+                        "Interrupted hit recovery changed on restart");
+                    checked = true;
+                }
+                else commit(pending);
+            }
+            require(checked, "Player interruption fixture never received an NPC hit");
+        }
+        {
+            auto lethalImage = windup;
+            const auto saved = readActorCampaign({reinterpret_cast<const char*>(lethalImage.data()), lethalImage.size()});
+            const size_t currentHealth = 56 + 8 + saved.melee->identity.size() + 7 * 8 + 8
+                + (2 * ActorCampaignCombat::StatCount * 5 + 8 * 5 + 2) * 8;
+            const auto bits = uint64_t(std::bit_cast<uint32_t>(1.f));
+            for (size_t byte = 0; byte < 8; ++byte) lethalImage.at(currentHealth + byte) = std::byte((bits >> (byte * 8)) & 0xff);
+            InventoryHost lethal(descriptor, testContentManifest(), *registry, *crypto, lethalImage);
+            auto& runtime = lethal.service(); runtime.synchronizeCells(authority);
+            unsigned deaths = 0;
+            for (uint64_t tick = 3; tick <= 65; ++tick)
+            {
+                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                const auto events = runtime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
+                    id<CanonicalRevision>(tick), pending.get());
+                if (events) for (const auto& event : events->events()) if (event.targetDied) ++deaths;
+                commit(pending);
+            }
+            require(deaths == 1 && state(runtime).life->generation == 2
+                && state(runtime).combat->swings[1]->interruption == PlayerSwing::TargetLost
+                && !state(runtime).combat->swings[0]->pending(),
+                "Lethal swing lost recovery or redirected the peer's wind-up into a respawn");
+        }
+        auto uncertain = service.prepareNativeTick(authority, id<ServerTick>(lastTick + 1), 1.f/30, {});
+        std::vector<std::byte> durable;
+        require(uncertain && uncertain->commit([&](auto image) { durable.assign(image.begin(), image.end());
+            return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && service.inventoryImage().empty(), "Uncertain player swing write did not fail closed");
+        InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, durable);
+        require(bytes(recovered.service()) == durable, "Uncertain player swing recovery changed durable image");
+        std::cout << "player swings=two direction=slash+thrust strength=.3+.8 restart=windup+release+follow"
+            << " rejection=atomic disconnect=cancel source=cancel hit=interrupt life=bound capacity=pause malformed=rejected contact=revalidated uncertain=closed\n";
+    }
+
+    void checkPlayerSwings(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        // Keep the large fixture builder off the recovery test's stack.
+        checkNpcDoors(scratch, config, settings,
+            true, true, true, true, true, false, false, false, false, false, false, false,
+            false, true, false, false, false, false, false, false, false, false, false, false, {}, true, true);
+        checkPreparedPlayerSwings(scratch);
+    }
+
     void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool generalAttackModes)
     {

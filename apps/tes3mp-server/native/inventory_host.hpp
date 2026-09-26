@@ -17,12 +17,19 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V46 schedules both players' melee intents through participant-bound
+    // wind-up, release, KF hit and follow-through. Direction, requested strength,
+    // weapon instance/record, target life and interruption persist atomically.
+    // An intent requests a strength; the server advances to it before release.
+    // Inactive/saturated areas pause. Active disconnect, source change, target
+    // loss and hit recovery cancel; recovery never re-equips or rerolls a hit.
+    // Fresh campaign required. Player swing presentation remains inherited.
     // V45 selects each NPC melee direction with stock damage-weighted RNG
     // (uniform when unarmed). Selection RNG and the directional clip commit
     // together; recovery binds that clip without rerolling. Same image layout
     // as V44, distinct descriptor fingerprint; fresh campaign required.
     // The descriptor direction remains the idle sentinel. Player swing timing
-    // still uses the inherited immediate-hit path.
+    // uses the inherited immediate-hit path in V45 and older campaigns.
     // V44 equips selected carried melee weapons and repeats NPC swings using
     // their layered group/fallback and record speed. The descriptor still
     // chooses the direction. A distinct campaign saves the pre-release target

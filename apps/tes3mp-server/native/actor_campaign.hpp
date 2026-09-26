@@ -29,8 +29,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t CasterActorCampaignMagic = 0x4850434154335354;
     inline constexpr uint64_t CastLifecycleCampaignMagic = 0x4950434154335354;
     inline constexpr uint64_t WeaponExecutionCampaignMagic = 0x4a50434154335354;
+    inline constexpr uint64_t PlayerSwingCampaignMagic = 0x4b50434154335354;
+    inline constexpr bool hasWeaponExecution(uint64_t magic)
+    { return magic == WeaponExecutionCampaignMagic || magic == PlayerSwingCampaignMagic; }
     inline constexpr bool hasCastLifecycle(uint64_t magic)
-    { return magic == CastLifecycleCampaignMagic || magic == WeaponExecutionCampaignMagic; }
+    { return magic == CastLifecycleCampaignMagic || hasWeaponExecution(magic); }
     inline constexpr bool hasCasterState(uint64_t magic)
     { return magic == CasterActorCampaignMagic || hasCastLifecycle(magic); }
     inline constexpr bool hasGeneralConstantState(uint64_t magic)
@@ -57,6 +60,16 @@ namespace TES3MP::Native
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
     // players and the selected NPC. Equipped item condition remains in the
     // nested equipment image, committed with this wrapper.
+    struct PlayerSwing
+    {
+        enum Interruption : uint64_t { None, Disconnected, SourceChanged, Incapacitated, TargetLost };
+        uint64_t command = 0, source = 0, targetLife = 0, direction = 0, interruption = None;
+        float strength = 0;
+        std::string weapon, identity;
+        MeleeAnimation::Snapshot state;
+        bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
+        bool operator==(const PlayerSwing&) const = default;
+    };
     struct ActorCampaignCombat
     {
         static constexpr size_t StatCount = 8 + 3 + 27;
@@ -65,6 +78,7 @@ namespace TES3MP::Native
         std::array<bool, 3> knockedDown{};
         // Remaining CPU hit animation frames; paused for inactive actors.
         std::array<uint32_t, 3> hitRecoveryTicks{};
+        std::array<std::optional<PlayerSwing>, 2> swings;
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -199,7 +213,7 @@ namespace TES3MP::Native
                 const auto contact = getAreaWord(bytes, offset);
                 if (contact > 1 || (contact && (!value.target || !value.state.mHit))
                     || (value.state.mReleased && !value.target)
-                    || (magic != WeaponExecutionCampaignMagic && value.state.mReleased != bool(value.target)))
+                    || (!hasWeaponExecution(magic) && value.state.mReleased != bool(value.target)))
                     throw std::invalid_argument("Native melee contact state invalid");
                 value.contact = bool(contact);
             }
@@ -476,6 +490,44 @@ namespace TES3MP::Native
                 casting = value;
             }
         }
+        if (magic == PlayerSwingCampaignMagic)
+            for (auto& swing : combat->swings)
+            {
+                const auto present = getAreaWord(bytes, offset);
+                if (present > 1) throw std::invalid_argument("Native player swing presence invalid");
+                if (!present) continue;
+                auto& value = swing.emplace();
+                for (auto* field : {&value.command, &value.source, &value.targetLife, &value.direction, &value.interruption})
+                    *field = getAreaWord(bytes, offset);
+                const auto number = [&] {
+                    const auto bits = getAreaWord(bytes, offset);
+                    const float result = std::bit_cast<float>(uint32_t(bits));
+                    if (bits > UINT32_MAX || !std::isfinite(result))
+                        throw std::invalid_argument("Native player swing number invalid");
+                    return result;
+                };
+                value.strength = number();
+                for (auto* text : {&value.weapon, &value.identity})
+                {
+                    const auto size = getAreaWord(bytes, offset);
+                    if (size > 512 || size > bytes.size() - offset)
+                        throw std::invalid_argument("Native player swing identity length invalid");
+                    text->assign(bytes.data() + offset, size_t(size)); offset += size_t(size);
+                    if (text->find('\0') != std::string::npos)
+                        throw std::invalid_argument("Native player swing identity invalid");
+                }
+                const auto phase = getAreaWord(bytes, offset);
+                value.state.mTime = number(); value.state.mStrength = number();
+                const auto released = getAreaWord(bytes, offset), hit = getAreaWord(bytes, offset);
+                if (!value.command || !value.targetLife || value.targetLife > life->generation
+                    || value.direction > 2 || value.interruption > PlayerSwing::TargetLost
+                    || value.strength < 0 || value.strength > 1 || value.identity.empty()
+                    || bool(value.source) != !value.weapon.empty()
+                    || phase > uint64_t(MeleeAnimation::Phase::Complete) || released > 1 || hit > 1)
+                    throw std::invalid_argument("Native player swing state invalid");
+                value.state.mPhase = MeleeAnimation::Phase(phase);
+                value.state.mReleased = bool(released); value.state.mHit = bool(hit);
+            }
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset
             || actorSize != bytes.size()-offset-inventorySize)
             throw std::invalid_argument("Native actor campaign lengths invalid");

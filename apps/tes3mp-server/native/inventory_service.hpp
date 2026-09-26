@@ -112,6 +112,8 @@ namespace TES3MP::Native
         // Empty direction uses the descriptor clip (including the idle sentinel).
         std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)> mWeaponMelee;
         bool mGeneralAttackModes = false;
+        // V46: independent player animation resources; empty for older campaigns.
+        std::array<std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)>, 2> mPlayerMelee;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;

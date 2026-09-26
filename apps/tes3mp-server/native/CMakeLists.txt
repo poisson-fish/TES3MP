@@ -113,6 +113,11 @@ add_executable(tes3mp_native_loadout_tests loadout_tests.cpp environment_tests.c
     inventory_view.cpp inventory_view.hpp
     test_allocations.cpp test_allocations.hpp)
 target_link_libraries(tes3mp_native_loadout_tests PRIVATE tes3mp_native_loadout tes3mp_native_inventory_host tes3mp_native_inventory_service tes3mp_client_session openmw_tes3mp_adapter)
+if(MSVC)
+    # Composed recovery fixtures retain several full campaign candidates.
+    # Match the usual 8 MiB desktop test stack instead of Windows' 1 MiB default.
+    target_link_options(tes3mp_native_loadout_tests PRIVATE /STACK:8388608)
+endif()
 target_compile_definitions(tes3mp_native_loadout_tests PRIVATE TES3MP_NATIVE_INVENTORY_SCENARIO
     TES3MP_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_tests ALLOWED tes3mp_native_loadout tes3mp_native_inventory_host tes3mp_native_inventory_service tes3mp_client_session openmw_tes3mp_adapter)
