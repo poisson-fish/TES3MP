@@ -612,6 +612,8 @@ namespace TES3MP::Native
     {
         if (mBinding.mWeaponMelee && !mBinding.mBoundHits)
             throw std::invalid_argument("Native weapon execution requires participant resource binding");
+        if (mBinding.mGeneralAttackModes && !mBinding.mWeaponMelee)
+            throw std::invalid_argument("Native attack selection requires weapon animation binding");
         if (mBinding.mBoundHits)
         {
             if (!mBinding.mNpcCastLifecycle || !mBinding.mMeleeDefenseRules)
@@ -665,7 +667,7 @@ namespace TES3MP::Native
                 || mBinding.mBoundMelee->mResourceIdentity.size() > 512)
                 throw std::invalid_argument("Native melee binding invalid");
             mMelee = mBinding.mBoundMelee->mAnimation;
-            if (mBinding.mWeaponMelee) mMelee = mBinding.mWeaponMelee(nullptr);
+            if (mBinding.mWeaponMelee) mMelee = mBinding.mWeaponMelee(nullptr, {});
             mIdleMelee = mMelee;
         }
         initializeAreaDoors();
@@ -1863,22 +1865,29 @@ namespace TES3MP::Native
                     if (!decoded.melee->target && (decoded.melee->identity != restoredMelee->identity()
                             || decoded.melee->state != restoredMelee->snapshot()))
                         throw std::invalid_argument("Saved idle weapon swing is not at rest");
-                    if (decoded.melee->target && !decoded.melee->state.mHit
-                        && decoded.melee->identity == restoredMelee->identity()
-                        && values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight].isSet())
-                        throw std::invalid_argument("Saved unarmed swing has an equipped weapon");
-                    if (decoded.melee->identity != restoredMelee->identity())
+                    if (decoded.melee->target)
                     {
-                        bool found = false;
+                        const auto match = [&](const ESM::Weapon* weapon) {
+                            const std::array<std::string_view, 3> modes{"chop", "slash", "thrust"};
+                            for (size_t i = 0; i < (mBinding.mGeneralAttackModes ? modes.size() : 1); ++i)
+                            {
+                                auto animation = mBinding.mWeaponMelee(weapon,
+                                    mBinding.mGeneralAttackModes ? modes[i] : std::string_view{});
+                                if (animation.identity() != decoded.melee->identity) continue;
+                                restoredMelee = std::move(animation); return true;
+                            }
+                            return false;
+                        };
+                        bool found = (decoded.melee->state.mHit
+                            || !values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight].isSet()) && match(nullptr);
                         for (const auto& item : values.mObjects)
                         {
+                            if (found) break;
                             if (item.mRef.mCount <= 0 || mRuntime.mStore.find(item.mRef.mRefID) != ESM::Weapon::sRecordId
                                 || (!decoded.melee->state.mHit && item.mRef.mRefNum != values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])) continue;
                             const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(item.mRef.mRefID);
                             if (MWMechanics::getWeaponType(weapon->mData.mType)->mWeaponClass != ESM::WeaponType::Melee) continue;
-                            auto animation = mBinding.mWeaponMelee(weapon);
-                            if (animation.identity() != decoded.melee->identity) continue;
-                            restoredMelee = std::move(animation); found = true; break;
+                            found = match(weapon);
                         }
                         if (!found) throw std::invalid_argument("Saved native swing has no bound weapon source");
                     }
@@ -3293,7 +3302,10 @@ namespace TES3MP::Native
                         if (!command)
                         {
                             // Validate the executable clip before preparing any equipment.
-                            (void)mBinding.mWeaponMelee(weapon);
+                            if (mBinding.mGeneralAttackModes)
+                                for (const auto mode : {"chop", "slash", "thrust"})
+                                    (void)mBinding.mWeaponMelee(weapon, mode);
+                            else (void)mBinding.mWeaponMelee(weapon, {});
                             auto prepared = mRuntime.prepareNpcEquipment(mCombatNpcOwner, winningWeapon->mRef.mRefNum);
                             const auto equipped = mRuntime.preparedValues(prepared, mCombatNpcOwner);
                             Misc::Rng::Generator rng{combat->rng};
@@ -3307,7 +3319,11 @@ namespace TES3MP::Native
                     }
                     else if (weapon || !values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight].isSet())
                     {
-                        melee = mBinding.mWeaponMelee(weapon);
+                        Misc::Rng::Generator rng{combat->rng};
+                        const auto mode = mBinding.mGeneralAttackModes
+                            ? MWMechanics::chooseMeleeAttack(weapon, rng) : std::string_view{};
+                        melee = mBinding.mWeaponMelee(weapon, mode);
+                        combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                         target = enemy->playerId().value();
                     }
                 }

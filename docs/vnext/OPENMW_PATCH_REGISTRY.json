@@ -34,17 +34,20 @@
       "id": "M4-006",
       "slice": "explicit melee resources and detached directional animation scheduling",
       "owner": "OpenMW mechanics and native headless checks",
-      "purpose": "Share stock hit chance, fatigue, reach, weapon wear and hit-resource mutation through explicit actor/content inputs; CreatureStats accepts a simulation timestamp for first death. Share wind-up, release skipping, follow-through and melee hit-key interpretation with CharacterController. A bounded app-local directional scheduler uses these helpers and the shared SceneUtil animation-section lookup; detached value copies emit hit proposals without damage or presentation callbacks. Host resource binding, encounter staging, validated player contacts, loot, receipts and client convergence remain pending. Stock combat/character paths are shared with P16-001; CreatureStats and Npc paths with M2-001; rendered section lookup with P8-004; CMake remains covered by its existing entry.",
+      "purpose": "Share stock hit chance, fatigue, reach, weapon wear and hit-resource mutation through explicit actor/content inputs; CreatureStats accepts a simulation timestamp for first death. Share wind-up, release skipping, follow-through and melee hit-key interpretation with CharacterController. The bounded app-local scheduler emits proposals for the authoritative host transaction. V45 shares weighted/unarmed direction selection and explicit RNG with AiCombat and CharacterController; repeated NPC swings persist their selected clip and RNG with recovery/rejection coverage. Player durable swing scheduling and live physical encounter proof remain pending. Stock combat/character paths are shared with P16-001; CreatureStats and Npc paths with M2-001; rendered section lookup with P8-004; CMake remains covered by its existing entry.",
       "paths": [
         "apps/openmw/mwmechanics/meleestate.cpp",
-        "apps/openmw/mwmechanics/meleestate.hpp"
+        "apps/openmw/mwmechanics/meleestate.hpp",
+        "apps/openmw/mwmechanics/aicombat.cpp"
       ],
       "tests": [
         "tes3mp_native_melee_tests melee-context",
         "tes3mp_native_melee_tests melee-timing",
-        "tes3mp_native_melee_tests melee-scheduling"
+        "tes3mp_native_melee_tests melee-scheduling",
+        "tes3mp_native_melee_tests attack-modes",
+        "tes3mp_native_loadout_tests npc-attack-modes"
       ],
-      "disposition": "shared engine extraction; no native combat authority enabled",
+      "disposition": "shared engine extraction; authoritative NPC directional execution",
       "removal_condition": "OpenMW supplies equivalent explicit actor/content/clock and gameplay text-key interfaces"
     },
     {

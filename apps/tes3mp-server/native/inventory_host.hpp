@@ -17,6 +17,12 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V45 selects each NPC melee direction with stock damage-weighted RNG
+    // (uniform when unarmed). Selection RNG and the directional clip commit
+    // together; recovery binds that clip without rerolling. Same image layout
+    // as V44, distinct descriptor fingerprint; fresh campaign required.
+    // The descriptor direction remains the idle sentinel. Player swing timing
+    // still uses the inherited immediate-hit path.
     // V44 equips selected carried melee weapons and repeats NPC swings using
     // their layered group/fallback and record speed. The descriptor still
     // chooses the direction. A distinct campaign saves the pre-release target

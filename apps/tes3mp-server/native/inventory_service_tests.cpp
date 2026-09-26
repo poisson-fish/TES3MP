@@ -4125,12 +4125,21 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings)
+        const std::filesystem::path& settings, bool generalAttackModes)
     {
         // Finish the large shared fixture builder before entering recovery tests.
         checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false, false, false, false, false, false, false, false, {}, false, true);
+        if (generalAttackModes)
+        {
+            const auto path = scratch / "native.txt";
+            std::ifstream input(path);
+            std::string descriptor((std::istreambuf_iterator<char>(input)), {});
+            input.close();
+            descriptor.replace(0, std::string_view("native-inventory-44").size(), "native-inventory-45");
+            std::ofstream(path) << descriptor;
+        }
         auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "NPC door crypto unavailable");
         struct Identities final : PlayerIdentityPersistence
         { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
@@ -4172,8 +4181,11 @@ namespace TES3MP::Native::Testing
         std::unique_ptr<InventoryHost> replay;
         unsigned hits = 0;
         bool equipped = false, savedWindUp = false, savedFollow = false, savedEquipment = false;
+        std::set<std::string> recoveredModes, hitModes;
         uint64_t lastTick = 0;
-        for (uint64_t time = 1; time <= 360 && (hits < 3 || !savedEquipment || !savedFollow); ++time)
+        for (uint64_t time = 1; time <= (generalAttackModes ? 1200u : 360u)
+            && (hits < 3 || !savedEquipment || !savedFollow
+                || (generalAttackModes && (recoveredModes.size() < 3 || hitModes.size() < 3))); ++time)
         {
             const auto before = bytes(service);
             auto step = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
@@ -4210,6 +4222,11 @@ namespace TES3MP::Native::Testing
             const auto state = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
             require(!state.casting, "Weapon-only fixture unexpectedly cast");
             if (events) hits += unsigned(events->actorEvents().size());
+            std::string mode;
+            for (const auto name : {"chop", "slash", "thrust"})
+                if (state.melee->identity.find(':' + std::string(name) + ':') != std::string::npos) mode = name;
+            require(!mode.empty(), "Persisted swing lost its attack direction");
+            if (events && !events->actorEvents().empty()) hitModes.insert(mode);
             const auto condition = native.selectedNpcWeaponCondition();
             require(std::ranges::count_if(state.timedEffects, [](const auto& effect) {
                     return effect.actor == 2 && effect.sourceKind == 3;
@@ -4218,18 +4235,22 @@ namespace TES3MP::Native::Testing
             const bool windUp = state.melee->target && state.melee->state.mPhase == MeleeAnimation::Phase::WindUp;
             const bool follow = !condition && state.melee->state.mPhase == MeleeAnimation::Phase::Follow;
             const bool equipment = hits > 0 && condition && *condition == 1000 && !state.melee->target;
-            if ((!savedWindUp && windUp) || (!savedFollow && follow) || (!savedEquipment && equipment))
+            const bool newMode = generalAttackModes && windUp && !recoveredModes.contains(mode);
+            if ((!savedWindUp && windUp) || (!savedFollow && follow) || (!savedEquipment && equipment) || newMode)
             {
                 replay.reset();
                 replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, proposed);
                 replay->service().synchronizeCells(authority);
                 require(bytes(replay->service()) == proposed, "Weapon recovery changed saved state");
                 savedWindUp |= windUp; savedFollow |= follow; savedEquipment |= equipment;
+                if (windUp) recoveredModes.insert(mode);
             }
             lastTick = time;
         }
         require(hits >= 3 && equipped && savedWindUp && savedFollow && savedEquipment,
             "NPC failed to break, equip a carried spear and repeat its bound swing");
+        require(!generalAttackModes || (recoveredModes.size() == 3 && hitModes.size() == 3),
+            "NPC failed to execute and recover chop, slash and thrust");
         const auto checkpoint = bytes(service);
         const auto prior = readActorCampaign({reinterpret_cast<const char*>(checkpoint.data()), checkpoint.size()});
         require(prior.melee->identity.ends_with(std::to_string(std::bit_cast<uint32_t>(1.25f))),
@@ -4268,6 +4289,7 @@ namespace TES3MP::Native::Testing
         InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, durable);
         require(bytes(recovered.service()) == durable, "Uncertain weapon write failed exact durable recovery");
         std::cout << "weapon execution=sword-break+carried-spear repeated=" << hits
+            << " attack-modes=" << hitModes.size()
             << " passive=equip+break rejection=atomic restart=windup+follow+equipment inactive=pause uncertain=closed\n";
         return;
     }

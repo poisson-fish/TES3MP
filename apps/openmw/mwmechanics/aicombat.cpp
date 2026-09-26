@@ -24,15 +24,13 @@
 #include "combat.hpp"
 #include "creaturestats.hpp"
 #include "movement.hpp"
+#include "meleestate.hpp"
 #include "pathgrid.hpp"
 #include "steering.hpp"
 #include "weapontype.hpp"
 
 namespace
 {
-
-    // chooses an attack depending on probability to avoid uniformity
-    std::string_view chooseBestAttack(const ESM::Weapon* weapon);
 
     osg::Vec3f AimDirToMovingTarget(const MWWorld::Ptr& actor, const MWWorld::Ptr& target,
         const osg::Vec3f& vLastTargetPos, float duration, int weapType, float strength);
@@ -653,7 +651,8 @@ namespace MWMechanics
                 actor.getClass().getCreatureStats(actor).setAttackingOrSpell(true);
 
                 if (!distantCombat)
-                    characterController.setAIAttackType(chooseBestAttack(weapon));
+                    characterController.setAIAttackType(chooseMeleeAttack(weapon,
+                        MWBase::Environment::get().getWorld()->getPrng()));
 
                 auto& prng = MWBase::Environment::get().getWorld()->getPrng();
                 mStrength = Misc::Rng::rollClosedProbability(prng);
@@ -726,27 +725,6 @@ namespace MWMechanics
 
 namespace
 {
-
-    std::string_view chooseBestAttack(const ESM::Weapon* weapon)
-    {
-        if (weapon != nullptr)
-        {
-            // the more damage attackType deals the more probability it has
-            int slash = (weapon->mData.mSlash[0] + weapon->mData.mSlash[1]) / 2;
-            int chop = (weapon->mData.mChop[0] + weapon->mData.mChop[1]) / 2;
-            int thrust = (weapon->mData.mThrust[0] + weapon->mData.mThrust[1]) / 2;
-
-            auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-            float roll = Misc::Rng::rollClosedProbability(prng) * (slash + chop + thrust);
-            if (roll <= slash)
-                return "slash";
-            else if (roll <= (slash + thrust))
-                return "thrust";
-            else
-                return "chop";
-        }
-        return MWMechanics::CharacterController::getRandomAttackType();
-    }
 
     osg::Vec3f AimDirToMovingTarget(const MWWorld::Ptr& actor, const MWWorld::Ptr& target,
         const osg::Vec3f& vLastTargetPos, float duration, int weapType, float strength)

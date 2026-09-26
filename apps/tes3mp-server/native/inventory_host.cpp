@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 44; ++candidate)
+            for (unsigned candidate = 3; candidate <= 45; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -570,17 +570,20 @@ namespace TES3MP::Native
                         placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
                     }
                 }
-                if (start.text.starts_with("native-inventory-44"))
+                start.binding.mGeneralAttackModes = start.text.starts_with("native-inventory-45");
+                if (start.text.starts_with("native-inventory-44") || start.binding.mGeneralAttackModes)
                 {
                     const auto& npc = *loadout.store().get<ESM::NPC>().find(owner.mBase);
                     const auto& race = *loadout.store().get<ESM::Race>().find(npc.mRace);
                     start.binding.mWeaponMelee = [scene, &npc, &race, attack = start.navigation->meleeAttack,
-                        cache = std::map<ESM::RefId, MeleeAnimation>{}](const ESM::Weapon* weapon) mutable {
-                        const auto id = weapon ? weapon->mId : ESM::RefId{};
+                        cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
+                        (const ESM::Weapon* weapon, std::string_view direction) mutable {
+                        const std::string mode(direction.empty() ? std::string_view(attack) : direction);
+                        const auto id = std::pair{weapon ? weapon->mId : ESM::RefId{}, mode};
                         if (const auto found = cache.find(id); found != cache.end()) return found->second;
-                        if (cache.size() >= PlainEquipmentValues::MaxItems + 1)
+                        if (cache.size() >= 3 * (PlainEquipmentValues::MaxItems + 1))
                             throw std::invalid_argument("Native weapon animation cache exceeded inventory bound");
-                        return cache.emplace(id, scene->bindWeaponMeleeAnimation(npc, race, weapon, attack)).first->second;
+                        return cache.emplace(id, scene->bindWeaponMeleeAnimation(npc, race, weapon, mode)).first->second;
                     };
                 }
                 if (start.binding.mRetainTraveler)

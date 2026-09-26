@@ -2944,13 +2944,7 @@ namespace MWMechanics
 
     std::string_view CharacterController::getRandomAttackType()
     {
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        float random = Misc::Rng::rollProbability(world->getPrng());
-        if (random >= 2 / 3.f)
-            return "thrust";
-        if (random >= 1 / 3.f)
-            return "slash";
-        return "chop";
+        return chooseMeleeAttack(nullptr, MWBase::Environment::get().getWorld()->getPrng());
     }
 
     bool CharacterController::readyToPrepareAttack() const

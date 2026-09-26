@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include <components/sceneutil/textkeymap.hpp>
+#include <components/misc/rng.hpp>
 #include <osg/Vec3f>
 
 #include "../mwworld/timestamp.hpp"
@@ -17,6 +18,10 @@ namespace MWWorld { class ESMStore; }
 namespace MWMechanics
 {
     class CreatureStats;
+
+    // Stock AI damage-weighted direction (uniform when unarmed). The caller
+    // owns the RNG so a detached transaction can discard or persist the roll.
+    std::string_view chooseMeleeAttack(const ESM::Weapon* weapon, Misc::Rng::Generator& rng);
 
     // Shared stock mechanics with explicit actor/content context. These are
     // simulation operations, not command authorization: the caller owns timing,

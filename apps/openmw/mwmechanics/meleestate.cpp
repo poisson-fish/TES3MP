@@ -13,6 +13,25 @@
 
 namespace MWMechanics
 {
+    std::string_view chooseMeleeAttack(const ESM::Weapon* weapon, Misc::Rng::Generator& rng)
+    {
+        if (weapon)
+        {
+            // Preserve stock integer averages, closed roll and boundary ties.
+            const int slash = (weapon->mData.mSlash[0] + weapon->mData.mSlash[1]) / 2;
+            const int chop = (weapon->mData.mChop[0] + weapon->mData.mChop[1]) / 2;
+            const int thrust = (weapon->mData.mThrust[0] + weapon->mData.mThrust[1]) / 2;
+            const float roll = Misc::Rng::rollClosedProbability(rng) * (slash + chop + thrust);
+            if (roll <= slash) return "slash";
+            if (roll <= slash + thrust) return "thrust";
+            return "chop";
+        }
+        const float roll = Misc::Rng::rollProbability(rng);
+        if (roll >= 2 / 3.f) return "thrust";
+        if (roll >= 1 / 3.f) return "slash";
+        return "chop";
+    }
+
     bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical)
     {
         return weapon && !(weapon->mData.mFlags & (ESM::Weapon::Silver | ESM::Weapon::Magical))

@@ -286,6 +286,76 @@ namespace
         rejects(many);
     }
 
+    void attackModes()
+    {
+        ESM::Weapon weapon;
+        weapon.blank();
+        weapon.mData.mSlash[0] = 1; weapon.mData.mSlash[1] = 4;
+        weapon.mData.mChop[0] = 5; weapon.mData.mChop[1] = 8;
+        weapon.mData.mThrust[0] = 9; weapon.mData.mThrust[1] = 12;
+        Misc::Rng::Generator actual{713}, stock{713};
+        std::array<unsigned, 3> counts{};
+        for (unsigned i = 0; i < 1024; ++i)
+        {
+            // Original AiCombat arithmetic: integer averages 2, 6 and 10.
+            const float roll = Misc::Rng::rollClosedProbability(stock) * 18;
+            const auto expected = roll <= 2 ? "slash" : roll <= 12 ? "thrust" : "chop";
+            const auto mode = MWMechanics::chooseMeleeAttack(&weapon, actual);
+            require(mode == expected && actual == stock, "Weighted attack selection or RNG consumption differs from stock");
+            ++counts[mode == "chop" ? 0 : mode == "slash" ? 1 : 2];
+        }
+        require(counts[2] > counts[0] && counts[0] > counts[1] && counts[1] > 0,
+            "Weighted selection did not exercise all directions");
+        weapon.blank();
+        require(MWMechanics::chooseMeleeAttack(&weapon, actual) == "slash",
+            "Zero-damage weapon lost stock slash tie");
+        Misc::Rng::rollClosedProbability(stock);
+        require(actual == stock, "Zero-damage weapon stopped consuming its stock roll");
+        counts = {};
+        for (unsigned i = 0; i < 1024; ++i)
+        {
+            const float roll = Misc::Rng::rollProbability(stock);
+            const auto expected = roll >= 2 / 3.f ? "thrust" : roll >= 1 / 3.f ? "slash" : "chop";
+            const auto mode = MWMechanics::chooseMeleeAttack(nullptr, actual);
+            require(mode == expected && actual == stock, "Unarmed selection differs from CharacterController");
+            ++counts[mode == "chop" ? 0 : mode == "slash" ? 1 : 2];
+        }
+        require(counts[0] && counts[1] && counts[2], "Unarmed selection did not exercise all directions");
+        for (const auto mode : {"chop", "slash", "thrust"})
+        {
+            SceneUtil::TextKeyMap keys;
+            for (const auto& [time, key] : directionalKeys())
+            {
+                if (time >= 1.f && key == "weapononehand: chop hit") continue;
+                std::string renamed(key);
+                const auto at = renamed.find("chop");
+                if (at != std::string::npos) renamed.replace(at, 4, mode);
+                keys.emplace(time, std::move(renamed));
+            }
+            TES3MP::Native::MeleeAnimation swing(keys, "weapononehand", mode, 1.f);
+            unsigned hits = 0;
+            for (unsigned tick = 0; tick < 240; ++tick)
+            {
+                // Recovery must retain every intermediate state without replaying a hit.
+                TES3MP::Native::MeleeAnimation recovered(keys, "weapononehand", mode, 1.f);
+                recovered.restore(swing.snapshot());
+                if (swing.windUp() == 1.f)
+                { swing.release(1.f); recovered.release(1.f); }
+                const auto hit = swing.advance(1.f / 30);
+                require(recovered.advance(1.f / 30) == hit && recovered.snapshot() == swing.snapshot(),
+                    "Directional animation changed at restart");
+                if (hit)
+                {
+                    ++hits;
+                    require(*hit == MWMechanics::meleeHitType("weapononehand", std::string(mode) + " hit"),
+                        "Directional hit emitted the wrong damage mode");
+                }
+            }
+            require(hits == 1 && swing.snapshot().mPhase == TES3MP::Native::MeleeAnimation::Phase::Complete,
+                "Directional animation did not finish with exactly one hit");
+        }
+    }
+
     void scheduling()
     {
         using TES3MP::Native::MeleeAnimation;
@@ -496,6 +566,7 @@ int main(int argc, char** argv)
         else if (filter == "melee-timing") timing();
         else if (filter == "melee-scheduling") scheduling();
         else if (filter == "hit-resources") hitResources();
+        else if (filter == "attack-modes") attackModes();
         else throw std::invalid_argument("Unknown melee filter");
         std::cout << "PASS " << filter << " (synthetic content, shared stock primitives, no Environment)\n";
         return 0;

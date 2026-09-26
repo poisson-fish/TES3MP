@@ -109,8 +109,9 @@ namespace TES3MP::Native
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
         std::optional<std::array<BoundHitAnimations, 3>> mBoundHits;
         // V44: bind the selected NPC's actual weapon group and speed. The
-        // descriptor still chooses one attack direction for this bounded slice.
-        std::function<MeleeAnimation(const ESM::Weapon*)> mWeaponMelee;
+        // Empty direction uses the descriptor clip (including the idle sentinel).
+        std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)> mWeaponMelee;
+        bool mGeneralAttackModes = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
