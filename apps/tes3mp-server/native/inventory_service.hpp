@@ -132,6 +132,15 @@ namespace TES3MP::Native
         class ActorTransaction;
         class AttackTransaction;
         class SpellTransaction;
+        // Combat slots and inventory owners belong to different domains: the
+        // selected NPC is combat slot 2 but may follow many shared containers.
+        struct MagicCasterContext
+        {
+            size_t combatIndex;
+            size_t inventoryOwner;
+            uint64_t identity;
+        };
+        MagicCasterContext magicCaster(size_t combatIndex) const;
         struct WeaponWear
         {
             size_t owner;

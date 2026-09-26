@@ -4535,10 +4535,24 @@ namespace TES3MP::Native::Testing
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
             ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("npc_door"); door.mModel = "npc-door.osgt";
             out.startRecord(ESM::Door::sRecordId, 0); door.save(out); out.endRecord(ESM::Door::sRecordId);
+            ESM::Container earlierOwner; earlierOwner.blank();
+            earlierOwner.mId = ESM::RefId::stringRefId("npc_magic_earlier_inventory");
+            if (effectLifecycle && strike)
+            {
+                out.startRecord(ESM::Container::sRecordId, 0);
+                earlierOwner.save(out); out.endRecord(ESM::Container::sRecordId);
+            }
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
             cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
             uint32_t index = 0;
+            if (effectLifecycle && strike)
+            {
+                // Inventory owner 2 is a container; NPC combat slot 2 must map to owner 3.
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                placed.mRefID = earlierOwner.mId; placed.mPos = {{-200, -200, 1}, {0, 0, 0}};
+                placed.save(out);
+            }
             for (auto record : {npc.mId, floor.mId, door.mId})
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
@@ -4562,6 +4576,116 @@ namespace TES3MP::Native::Testing
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
             Loadout loadout(readLoadoutOptions(3, arguments));
+            if (effectLifecycle && strike)
+            {
+                const auto& content = loadout.store();
+                auto enchantment = *content.get<ESM::Enchantment>().find(
+                    ESM::RefId::stringRefId("npc_strike_enchantment"));
+                MWMechanics::NpcStats caster(content);
+                caster.initializeExplicitStats(*content.get<ESM::NPC>().find(
+                    ESM::RefId::stringRefId("npc_door_actor")), 2.f);
+                caster.getSkill(ESM::Skill::Enchant).setBase(10);
+                for (int type : {ESM::Enchantment::WhenUsed, ESM::Enchantment::WhenStrikes})
+                {
+                    enchantment.mData.mType = type;
+                    const auto full = prepareEnchantmentCast(enchantment, caster, -1.f, content, true);
+                    const auto spent = prepareEnchantmentCast(enchantment, caster, 2.f, content, true);
+                    const auto empty = prepareEnchantmentCast(enchantment, caster, 1.f, content, true);
+                    require(full && full->affordable && !full->consume && full->chargeAfter == 18.f
+                        && spent && spent->affordable && spent->chargeAfter == 0.f
+                        && empty && !empty->affordable && empty->chargeAfter == 1.f,
+                        "Shared item preparation changed full, exact or insufficient charge");
+                    for (float invalid : {-2.f, -.5f, 21.f, std::numeric_limits<float>::infinity(),
+                            std::numeric_limits<float>::quiet_NaN()})
+                        require(!prepareEnchantmentCast(enchantment, caster, invalid, content, true),
+                            "Shared item preparation accepted malformed charge");
+                    caster.getSkill(ESM::Skill::Enchant).setBase(100);
+                    const auto skilled = prepareEnchantmentCast(enchantment, caster, -1.f, content, true);
+                    require(skilled && skilled->chargeAfter == 19.f,
+                        "Shared item preparation ignored caster Enchant skill");
+                    caster.getSkill(ESM::Skill::Enchant).setBase(10);
+                }
+                enchantment.mData.mType = ESM::Enchantment::CastOnce;
+                const auto once = prepareEnchantmentCast(enchantment, caster, -1.f, content, true);
+                require(once && once->consume && once->affordable && once->chargeAfter == -1.f,
+                    "CastOnce did not retain consumption semantics");
+                enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+                require(!prepareEnchantmentCast(enchantment, caster, -1.f, content, true),
+                    "Constant equipment entered shared cast preparation");
+                enchantment.mData.mType = ESM::Enchantment::WhenUsed;
+                enchantment.mEffects.mList.back().mData.mEffectID = ESM::MagicEffect::Levitate;
+                require(!prepareEnchantmentCast(enchantment, caster, -1.f, content, true),
+                    "Unsupported mixed item record entered shared cast preparation");
+
+                const auto room = ESM::RefId::stringRefId("NPC Door Contact Test");
+                const auto npc = loadout.placedActors(room).at(0);
+                const auto chest = loadout.placedContainers(room).at(0);
+                require(chest.mIdentity < npc.mIdentity, "Caster fixture did not separate owner and combat indices");
+                const auto bindCaster = [&] {
+                    const auto cell = CellId::interior(id<CellSpaceId>(7));
+                    InventoryServiceBinding binding{{id<PlayerId>(1), id<PlayerId>(2)}, {},
+                        {{{npc.mRef.mRefID, {}, 0, false, true}, {npc.mRef.mRefID, {}, 0, false, true}}}, {1, 2, 3},
+                        {{id<ContainerId>(chest.mIdentity), cell, Position3(-200*1024, -200*1024, 1024),
+                             chest.mRef.mRefID, chest.mRef},
+                         {id<ContainerId>(npc.mIdentity), cell, Position3(60*1024, -32*1024, 1024),
+                             npc.mRef.mRefID, npc.mRef}}};
+                    binding.mNavigatingActor = std::make_shared<InteriorActorScene>(loadout,
+                        "NPC Door Contact Test", npc.mIdentity, "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                    binding.mNavigatingActor->enableNavigation(actorSettings.string());
+                    binding.mNavigatingActor->travelTo({60, -32, 1});
+                    binding.mBoundMelee = binding.mNavigatingActor->bindMeleeAnimation("weapononehand", "chop", 1);
+                    binding.mMeleeContact = binding.mCombatState = binding.mCombatResolution = true;
+                    binding.mNpcLifecycle = binding.mMagicUse = binding.mMagicProjectile = true;
+                    binding.mMagicItemUse = binding.mMagicTimed = binding.mMagicArea = true;
+                    binding.mMagicPlayerTarget = binding.mMagicProjectileCollection = true;
+                    binding.mKnockoutRules = binding.mMeleeDefenseRules = binding.mActorEffectLifecycle = true;
+                    binding.mStreamExteriors = true;
+                    binding.mWorldItems.emplace(InventoryServiceBinding::WorldItems{cell, {}});
+                    return binding;
+                };
+                InventoryService service(loadout.store(), loadout.readers(), bindCaster());
+                auto authority = players(SessionGeneration::initial(), 1, 2);
+                service.synchronizeCells(authority);
+                const auto bytes = [](const auto& service) {
+                    return std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                };
+                const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+                bool hit = false;
+                for (uint64_t tick = 1; tick <= 64 && !hit; ++tick)
+                {
+                    const auto before = bytes(service);
+                    auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                    std::vector<std::byte> proposed;
+                    require(pending && pending->commit([&](auto image) {
+                            proposed.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected && bytes(service) == before,
+                        "Separated caster rejection mutated charge, effects or RNG");
+                    const auto state = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+                    hit = !state.timedEffects.empty();
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Separated caster tick failed to commit");
+                    if (!hit) continue;
+                    require(state.timedEffects.size() == 1 && state.timedEffects.front().actor == 2
+                        && state.timedEffects.front().caster == npc.mIdentity
+                        && state.timedEffects.front().sourceKind == 2
+                        && service.selectedNpcWeaponCharge() == 18.f,
+                        "AI strike confused inventory owner, combat slot or caster identity");
+                    InventoryService restored(loadout.store(), loadout.readers(), bindCaster(), true);
+                    std::vector<ESM::RefId> refs{npc.mRef.mRefID, chest.mRef.mRefID};
+                    for (const auto& [id, record] : MWWorld::inventoryRecords(content)) refs.push_back(record);
+                    for (const auto& [id, record] : MWWorld::inventorySoulRecords(content)) refs.push_back(record);
+                    restored.recover(proposed, refs); restored.synchronizeCells(authority);
+                    require(bytes(restored) == proposed, "Separated caster restart changed its committed image");
+                    auto next = service.prepareNativeTick(authority, id<ServerTick>(tick + 1), 1.f/30, {});
+                    auto replay = restored.prepareNativeTick(authority, id<ServerTick>(tick + 1), 1.f/30, {});
+                    require(next && replay && next->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bytes(service) == bytes(restored),
+                        "Separated caster restart diverged in charge, effects, expiry or RNG");
+                }
+                require(hit, "Separated caster fixture never applied an AI strike effect");
+                std::cout << "shared caster: combat=2 inventory=3 charge=18 rejection=atomic restart=exact\n";
+            }
             if (spell)
             {
                 const auto& content = loadout.store();

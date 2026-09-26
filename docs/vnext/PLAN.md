@@ -61,11 +61,15 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    destinations/completion; never simulate an actor twice.
 4. Generalize OpenMW combat through one cast lifecycle: prepare source/effects,
    pay spell cost or item charge, launch, resolve server contact, apply effects.
-   Prove a resistible Target spell with durable projectile/outcome first, then
-   enchantment charge/use on that path, then effect durations, areas and player
-   targets. Broaden sources and allow concurrent projectiles next. Finish
-   knockout, unarmed health damage, armor, block and remaining melee rules. Preserve wear and
-   durability; validate misses, targeting, retries and two-client reconnect.
+   Next, unify player and server-AI caster context for spells and enchanted items,
+   sharing cost/charge, cast, contact, resistance and ordered effects. Then carry
+   attribute/skill arguments through timed effects and broaden equipment constants
+   using the same OpenMW rules. Preserve source, caster/life, RNG, expiry and death
+   attribution across restart; retire replaced new-campaign instant-effect and
+   Resist Magicka paths while retaining legacy recovery. Prove varied real mod
+   records with two clients under loss, reconnect and restart, including concurrent
+   casts and failed persistence. Advance one verified slice at a time. Then finish
+   knockout, unarmed health damage, armor, block and remaining melee rules.
 5. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.

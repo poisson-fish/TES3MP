@@ -1383,6 +1383,14 @@ namespace TES3MP::Native
         { return CanonicalDurabilityResult::Rejected; }
     };
 
+    InventoryService::MagicCasterContext InventoryService::magicCaster(size_t index) const
+    {
+        if (index < mBinding.mPlayers.size()) return {index, index, mBinding.mPlayers[index].value()};
+        if (index == 2 && mBinding.mNavigatingActor && mCombat)
+            return {index, mCombatNpcOwner, mBinding.mNavigatingActor->actorId()};
+        throw std::invalid_argument("Native magic caster context invalid");
+    }
+
     class InventoryService::SpellTransaction final : public PreparedNativeInventory
     {
     public:
@@ -1453,8 +1461,8 @@ namespace TES3MP::Native
         if (use.sourceKind == MagicUseSourceKind::EnchantedItem)
         {
             if (use.expectedInventoryRevision.value() != mWorld.getPtrRegistryRevision()) return {};
-            const size_t owner = actor(player->playerId());
-            const auto values = mRuntime.installedValues(owner);
+            const auto context = magicCaster(actor(player->playerId()));
+            const auto values = mRuntime.installedValues(context.inventoryOwner);
             const auto item = std::ranges::find_if(values.mObjects, [&](const auto& object) {
                 return object.mRef.mCount > 0 && wireId(object.mRef.mRefNum).value() == use.sourceId;
             });
@@ -1467,39 +1475,26 @@ namespace TES3MP::Native
                     && enchantment->mData.mType != ESM::Enchantment::CastOnce)) return {};
             const uint64_t effectSource = spellRecordId(enchantId);
             if (!effectSource || enchantmentBySource(mRuntime.mStore, effectSource) != enchantment) return {};
-            auto effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore,
-                mBinding.mActorEffectLifecycle);
-            if (!effects || std::ranges::any_of(effects->effects,
+            const auto caster = loadCombatStats(mRuntime.mStore, mCombat->actors[context.combatIndex],
+                mTimedEffects, context.combatIndex);
+            auto prepared = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge,
+                mRuntime.mStore, mBinding.mActorEffectLifecycle);
+            if (!prepared || !prepared->affordable) return {};
+            const auto& effects = prepared->effects;
+            if (std::ranges::any_of(effects.effects,
                     [&](const auto& effect) { return effect.mArea != 0
                         && (!mBinding.mMagicArea || effect.mRange != ESM::RT_Target); })
-                || (!mBinding.mMagicTimed && std::ranges::any_of(effects->effects,
+                || (!mBinding.mMagicTimed && std::ranges::any_of(effects.effects,
                     [](const auto& effect) { return effect.mDuration != 0; }))
                 || (use.targetKind == MagicUseTargetKind::Self
-                    ? !effects->onlyRange(ESM::RT_Self)
-                    : !effects->hasRange(ESM::RT_Target) || effects->hasRange(ESM::RT_Touch))) return {};
-            if (enchantment->mData.mType == ESM::Enchantment::CastOnce)
-            {
-                // Consume one item at launch. The remaining stack keeps its identity;
-                // the pending effect retains the enchantment record independently.
-                if (!ptr.getClass().getScript(ptr).empty()) return {};
-                PreparedInstantSpell prepared{0, std::move(*effects)};
-                return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(prepared),
-                    ItemCharge{owner, item->mRef.mRefNum, item->mRef.mEnchantmentCharge,
-                        item->mRef.mEnchantmentCharge, true}, effectSource);
-            }
-            const auto caster = loadCombatStats(mRuntime.mStore, mCombat->actors[owner], mTimedEffects, owner);
-            const float baseCost = MWMechanics::getEnchantmentCastCost(*enchantment, mRuntime.mStore);
-            if (!std::isfinite(baseCost) || baseCost < 0 || baseCost > 1'000'000) return {};
-            const int cost = MWMechanics::getEffectiveEnchantmentCastCost(baseCost,
-                caster.getSkill(ESM::Skill::Enchant).getModified());
-            const int maximum = MWMechanics::getEnchantmentCharge(*enchantment, mRuntime.mStore);
-            const float before = item->mRef.mEnchantmentCharge;
-            const float available = before == -1.f ? float(maximum) : before;
-            if (cost < 1 || maximum < 1 || maximum > 1'000'000 || !std::isfinite(available)
-                || available < cost || available > maximum) return {};
-            PreparedInstantSpell prepared{0, std::move(*effects)};
-            return std::make_unique<SpellTransaction>(use, player->playerId(), std::move(prepared),
-                ItemCharge{owner, item->mRef.mRefNum, before, available - cost}, effectSource);
+                    ? !effects.onlyRange(ESM::RT_Self)
+                    : !effects.hasRange(ESM::RT_Target) || effects.hasRange(ESM::RT_Touch))) return {};
+            // CastOnce consumes one item; its pending effects retain record identity.
+            if (prepared->consume && !ptr.getClass().getScript(ptr).empty()) return {};
+            return std::make_unique<SpellTransaction>(use, player->playerId(),
+                PreparedInstantSpell{0, std::move(prepared->effects)},
+                ItemCharge{context.inventoryOwner, item->mRef.mRefNum, item->mRef.mEnchantmentCharge,
+                    prepared->chargeAfter, prepared->consume}, effectSource);
         }
         const auto& known = mRuntime.mStore.get<ESM::NPC>().find(mBinding.mActors[actor(player->playerId())].mBase)->mSpells.mList;
         const ESM::Spell* selected = nullptr;
@@ -2372,45 +2367,35 @@ namespace TES3MP::Native
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
         EquipmentBytes wornCore;
-        const auto applyStrike = [&](size_t owner, const EquipmentRuntime::EquippedWeaponCondition& held,
+        const auto applyStrike = [&](MagicCasterContext context, const EquipmentRuntime::EquippedWeaponCondition& held,
             const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,
             size_t victimIndex, Misc::Rng::Generator& rng) {
             if (weapon.mEnchant.empty()) return;
             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(weapon.mEnchant);
             if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenStrikes) return;
-            const auto plan = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore,
-                mBinding.mActorEffectLifecycle);
-            if (!plan || std::ranges::any_of(plan->effects,
-                    [](const auto& effect) { return effect.mArea != 0; }))
-                throw std::invalid_argument("Native strike enchantment effects unsupported");
-            const auto values = mRuntime.installedValues(owner);
+            const auto values = mRuntime.installedValues(context.inventoryOwner);
             const auto item = std::ranges::find(values.mObjects, held.mItem,
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == values.mObjects.end())
                 throw std::invalid_argument("Native strike weapon identity missing");
-            const float baseCost = MWMechanics::getEnchantmentCastCost(*enchantment, mRuntime.mStore);
-            if (!std::isfinite(baseCost) || baseCost < 0 || baseCost > 1'000'000)
-                throw std::invalid_argument("Native strike enchantment cost invalid");
-            const int cost = MWMechanics::getEffectiveEnchantmentCastCost(baseCost,
-                attacker.getSkill(ESM::Skill::Enchant).getModified());
-            const int maximum = MWMechanics::getEnchantmentCharge(*enchantment, mRuntime.mStore);
             const float beforeCharge = item->mRef.mEnchantmentCharge;
-            const float available = beforeCharge == -1.f ? float(maximum) : beforeCharge;
-            if (cost < 1 || maximum < 1 || maximum > 1'000'000 || !std::isfinite(available)
-                || available > maximum)
-                throw std::invalid_argument("Native strike enchantment charge invalid");
-            if (available < cost) return;
-            charges.push_back(ItemCharge{owner, held.mItem, beforeCharge, available - cost});
-            const uint64_t casterId = owner == 2 ? mBinding.mNavigatingActor->actorId()
-                : mBinding.mPlayers[owner].value();
+            const auto prepared = prepareEnchantmentCast(*enchantment, attacker, beforeCharge,
+                mRuntime.mStore, mBinding.mActorEffectLifecycle);
+            if (!prepared || std::ranges::any_of(prepared->effects.effects,
+                    [](const auto& effect) { return effect.mArea != 0; }))
+                throw std::invalid_argument("Native strike enchantment source invalid");
+            if (!prepared->affordable) return;
+            charges.push_back(ItemCharge{context.inventoryOwner, held.mItem, beforeCharge, prepared->chargeAfter});
             const uint64_t sourceId = spellRecordId(weapon.mEnchant);
-            resolveActorEffects(*plan, ESM::RT_Self, owner, attacker, tick.value(), casterId,
+            if (!sourceId || enchantmentBySource(mRuntime.mStore, sourceId) != enchantment)
+                throw std::invalid_argument("Native strike enchantment source collision");
+            resolveActorEffects(prepared->effects, ESM::RT_Self, context.combatIndex, attacker, tick.value(), context.identity,
                 sourceId, 2, rng, mRuntime.mStore, timedEffects, mBinding.mActorEffectLifecycle,
                 mBinding.mUncappedDamageFatigue);
-            resolveActorEffects(*plan, ESM::RT_Touch, victimIndex, victim, tick.value(), casterId,
+            resolveActorEffects(prepared->effects, ESM::RT_Touch, victimIndex, victim, tick.value(), context.identity,
                 sourceId, 2, rng, mRuntime.mStore, timedEffects, mBinding.mActorEffectLifecycle,
                 mBinding.mUncappedDamageFatigue);
-            resolveActorEffects(*plan, ESM::RT_Target, victimIndex, victim, tick.value(), casterId,
+            resolveActorEffects(prepared->effects, ESM::RT_Target, victimIndex, victim, tick.value(), context.identity,
                 sourceId, 2, rng, mRuntime.mStore, timedEffects, mBinding.mActorEffectLifecycle,
                 mBinding.mUncappedDamageFatigue);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
@@ -2702,7 +2687,7 @@ namespace TES3MP::Native
                 wear.push_back({owner, *held,
                     MWMechanics::weaponConditionAfterHit(held->mCondition, weaponDamage, success, multiplier)});
             }
-            if (success && weapon) applyStrike(owner, *held, *weapon, attacker, victim, 2, rng);
+            if (success && weapon) applyStrike(magicCaster(owner), *held, *weapon, attacker, victim, 2, rng);
             saveCombatStats(combat->actors[owner], attacker, timedEffects, owner);
             saveCombatStats(combat->actors[2], victim, timedEffects, 2);
             if (mBinding.mKnockoutRules)
@@ -2742,7 +2727,8 @@ namespace TES3MP::Native
         const size_t flyingCount = projectiles.size();
         if (playerSpell && combat)
         {
-            const size_t owner = actor(spellCaster);
+            const auto context = magicCaster(actor(spellCaster));
+            const size_t owner = context.combatIndex;
             auto caster = loadCombatStats(mRuntime.mStore, combat->actors[owner], timedEffects, owner);
             addTimedResistance(caster, timedEffects, owner);
             Misc::Rng::Generator rng;
@@ -2760,7 +2746,7 @@ namespace TES3MP::Native
                 {
                     const auto applied = resolveActorEffects(spellRecord->effects, ESM::RT_Self,
                         owner, caster, tick.value(),
-                        spellCaster.value(), spellCharge ? spellEffectSource : playerSpell->sourceId,
+                        context.identity, spellCharge ? spellEffectSource : playerSpell->sourceId,
                         uint64_t(playerSpell->sourceKind), rng, mRuntime.mStore, timedEffects,
                         mBinding.mActorEffectLifecycle, mBinding.mUncappedDamageFatigue);
                     launch.result.health += applied.health;
@@ -3132,7 +3118,7 @@ namespace TES3MP::Native
                             MWMechanics::weaponConditionAfterHit(held->mCondition, weaponDamage, success, multiplier)});
                     }
                     if (success && weapon)
-                        applyStrike(mCombatNpcOwner, *held, *weapon, attacker, victim, victimIndex, rng);
+                        applyStrike(magicCaster(2), *held, *weapon, attacker, victim, victimIndex, rng);
                     saveCombatStats(combat->actors[victimIndex], victim, timedEffects, victimIndex);
                     if (mBinding.mKnockoutRules)
                         combat->knockedDown[victimIndex] = victim.getHealth().getCurrent() > 0

@@ -9,6 +9,7 @@
 
 namespace MWWorld { class ESMStore; }
 namespace MWMechanics { class CreatureStats; class NpcStats; }
+namespace ESM { struct Enchantment; }
 
 namespace TES3MP::Native
 {
@@ -44,6 +45,20 @@ namespace TES3MP::Native
         bool succeeded = false;
         InstantSpellResult result;
     };
+
+    // Preparation is identical for player and AI inventories. Insufficient
+    // charge is a valid plan with affordable=false; malformed sources reject.
+    struct PreparedEnchantmentCast
+    {
+        PreparedInstantEffects effects;
+        float chargeAfter = 0;
+        bool affordable = false;
+        bool consume = false;
+    };
+
+    std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
+        const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
+        bool actorLifecycle = false);
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
         const MWWorld::ESMStore& content);

@@ -11,6 +11,7 @@
 #include <components/esm3/loadspel.hpp>
 #include <components/misc/rng.hpp>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -151,6 +152,30 @@ namespace TES3MP::Native
             result.effects.push_back(effect);
         }
         return result;
+    }
+
+    std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
+        const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
+        bool actorLifecycle)
+    {
+        if (enchantment.mData.mType != ESM::Enchantment::WhenUsed
+            && enchantment.mData.mType != ESM::Enchantment::WhenStrikes
+            && enchantment.mData.mType != ESM::Enchantment::CastOnce) return std::nullopt;
+        auto effects = prepareInstantEffects(enchantment.mEffects, content, actorLifecycle);
+        if (!effects || !std::isfinite(charge) || (charge < 0 && charge != -1.f)) return std::nullopt;
+        if (enchantment.mData.mType == ESM::Enchantment::CastOnce)
+            return PreparedEnchantmentCast{std::move(*effects), charge, true, true};
+        const float baseCost = MWMechanics::getEnchantmentCastCost(enchantment, content);
+        const float skill = caster.getSkill(ESM::Skill::Enchant).getModified();
+        if (!std::isfinite(baseCost) || baseCost < 0 || baseCost > 1'000'000
+            || !std::isfinite(skill) || skill < 0 || skill > 1'000'000) return std::nullopt;
+        const int cost = MWMechanics::getEffectiveEnchantmentCastCost(baseCost, skill);
+        const int maximum = MWMechanics::getEnchantmentCharge(enchantment, content);
+        const float available = charge == -1.f ? float(maximum) : charge;
+        if (cost < 1 || maximum < 1 || maximum > 1'000'000 || available > maximum) return std::nullopt;
+        const bool affordable = available >= cost;
+        return PreparedEnchantmentCast{std::move(*effects), affordable ? available - cost : charge,
+            affordable, false};
     }
 
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
