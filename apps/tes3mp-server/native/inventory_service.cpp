@@ -4187,6 +4187,28 @@ namespace TES3MP::Native
                     others.push_back(snapshot(loadCombatStats(mRuntime.mStore, combat.actors[index],
                         effects, index), other->playerId()));
             }
+        std::vector<PlayerSwingSnapshot> swings;
+        if (mBinding.mPlayerMelee[0])
+            for (size_t index = 0; index < 2; ++index)
+            {
+                const auto owner = mBinding.mPlayers[index];
+                if (index != selfIndex && std::ranges::none_of(others,
+                        [&](const auto& other) { return other.playerId == owner; })) continue;
+                PlayerSwingSnapshot projected{owner};
+                if (const auto& swing = combat.swings[index])
+                {
+                    const auto* weapon = swing->weapon.empty() ? nullptr
+                        : mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing->weapon));
+                    const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
+                    auto clip = mBinding.mPlayerMelee[index](weapon, directions[swing->direction]);
+                    clip.restore(swing->state);
+                    projected = {owner, swing->command, swing->source, swing->targetLife,
+                        uint8_t(swing->direction), uint8_t(unsigned(swing->state.mPhase) + 1),
+                        uint8_t(swing->interruption), swing->strength, clip.phaseCompletion(), clip.group()};
+                }
+                swings.push_back(std::move(projected));
+            }
+        std::ranges::sort(swings, {}, &PlayerSwingSnapshot::playerId);
         std::vector<ActorCombatSnapshot> visible;
         const auto scene = moving && moving->actor ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
         if (actorCell(scene) == player->transform().cell())
@@ -4224,7 +4246,7 @@ namespace TES3MP::Native
             player->playerId(), combatRevision, self.getHealth().getCurrent(), self.getHealth().getModified(),
             self.getFatigue().getCurrent(), self.getFatigue().getModified(), self.getMagicka().getCurrent(),
             self.getMagicka().getModified(), self.getHealth().getCurrent() <= 0,
-            visible, skills, others);
+            visible, skills, others, {}, swings);
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
     }

@@ -6,15 +6,9 @@ and doors at 60 Hz, committing at 30 Hz. Neighbors freeze; players use contact
 proxies until movement cutover.
 
 V42 persists casting/flight/recovery, RNG, resources and effects through bound KF
-keys. Two players cast alongside the NPC. T3C3 requires capability 21.
+keys. Two players cast alongside the NPC. T3C4 requires capability 22.
 
-Verified evidence:
-
-- `npc-cast-lifecycle`: durability, restart, concurrency, interruption and effects
-  (`build/logs/m4-cast-lifecycle-final.log`).
-- Combat wire/handshake: `build/logs/m4-cast-protocol-test-02.log` and
-  `build/logs/m4-cast-handshake-test.log`.
-- Two-desktop casting passed target switching, reconnect and wind-up restart
+Two-desktop casting passed target switching, reconnect and wind-up restart
   under 10% loss/100 ms delay/jitter:
   `build/m4-cast-vanilla-live-10/result.json` (`Fireball_large`) and
   `build/m4-cast-tr-live-02/result.json` (`T_Ayl_Des_DWelkynd_FIR`), plus equipped
@@ -23,37 +17,35 @@ Verified evidence:
   Gameplay records unchanged; actor stats/placements synthetic.
   TR Lua packages are disabled; native Lua services remain M5 work.
 
-V43 binds participant hit resources/timers to the campaign fingerprint.
-`hit-resources` and `npc-hit-resources` passed female/Argonian/NPC recovery:
-`build/logs/m4-hit-resources-unit.log`, `build/logs/m4-hit-resources-host-final.log`.
+V43 binds participant hit resources/timers.
 
 V34 retains melee defense and knockout; get-up timing remains pending.
 V37 supports multi-slot constant fortification/resistance;
 other constant effects reject.
 
-V44 equips carried melee weapons and repeats bound swings; breakage removes
-passive effects atomically. Recovery never re-equips. V45 adds stock weighted
-chop/slash/thrust selection (uniform unarmed), persisting rolls and clips.
-Fresh campaigns required. RNG parity, all directions, restart, weapon replacement
-and durability passed: `build/logs/m4-attack-modes-unit.log`,
-`build/logs/m4-attack-modes-host.log`; V44 regression:
-`build/logs/m4-attack-modes-v44.log`. V43–V45 evidence is synthetic/headless.
+V44–V45 equip carried melee weapons, repeat swings and persist stock weighted
+chop/slash/thrust selection. Breakage removes passive effects atomically; recovery
+never re-equips.
+V43–V45 evidence is synthetic/headless.
 
-V46 schedules both players through bound wind-up, release, KF hit and follow-through.
-Intents request direction/strength; the server advances to release. Weapon
-instance/record, target life, phase and interruption persist.
-Source changes, active disconnect, target loss and hit recovery cancel; capacity
-and inactivity pause. Simultaneous hits share outcomes and accumulated armor wear.
-Fresh campaigns required; older domains keep immediate player hits. Player swing
-presentation remains inherited, without committed phase replication.
+V46 persists player wind-up/release/hit/follow-through, requested direction/strength,
+source and target life. Source changes, active disconnect, target loss and hit
+recovery cancel; capacity/inactivity pause. Simultaneous hits share armor wear.
+Fresh campaigns required; older domains retain immediate hits.
 
-`tes3mp_native_loadout_tests player-swings` passed simultaneous armored hits,
-restart, durability, interruption, pause, malformed saves, contact and life checks
-(`build/logs/m4-player-swings-final.log`; synthetic/headless, vanilla resources).
-Regressions: `build/logs/m4-player-swings-v45.log`
-(`npc-attack-modes`) and `build/logs/m4-player-swings-defense.log`
-(`npc-armor-block`).
+T3C4 replicates complete player swing identities, phases, direction, strength,
+interruption and section progress to self and peers without gameplay keys or Lua
+animation-ended callbacks. Terminal states survive reconnect. V46 persistence is
+unchanged; local input predicts before admission.
 
-Next: committed player-swing presentation, then ranged/ammunition/thrown flight,
-close-combat completion, physical/casting composition and vanilla/TR two-desktop
-encounters with death/loot as specified in PLAN. Player movement remains last.
+`tes3mp_native_loadout_tests player-swings` passed observer agreement, restart,
+durability, armored hits, interruption and malformed saves
+(`build/logs/m4-swing-host-test.log`). `melee-presentation` passed real vanilla KF
+section sampling, all directions/strength tiers, frozen client clocks, reconnect and
+callback suppression (`build/logs/m4-swing-pose-test.log`); this is headless animation
+state, not rendered desktop evidence. Protocol/handshake passed
+`build/logs/m4-swing-protocol-test.log` and `build/logs/m4-swing-handshake-test.log`.
+
+Next: two-desktop swing presentation/reconnect validation, then ranged/ammunition/
+thrown flight, close-combat completion, physical/casting composition and varied
+vanilla/TR encounters with death/loot as specified in PLAN. Movement remains last.

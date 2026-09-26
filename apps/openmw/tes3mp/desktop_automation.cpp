@@ -744,6 +744,18 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"fatigue\":" << player.fatigue << ",\"magicka\":" << player.magicka
                     << ",\"dead\":" << (player.dead ? "true" : "false") << '}';
             }
+            mOutput << "],\"swings\":[";
+            first = true;
+            for (const auto& swing : snapshot.swings())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"player\":" << swing.playerId.value() << ",\"command\":" << swing.command
+                    << ",\"source\":" << swing.source << ",\"target_life\":" << swing.targetLife
+                    << ",\"direction\":" << unsigned(swing.direction) << ",\"phase\":" << unsigned(swing.phase)
+                    << ",\"interruption\":" << unsigned(swing.interruption) << ",\"strength\":" << swing.strength
+                    << ",\"completion\":" << swing.completion << ",\"group\":\"" << swing.group << "\"}";
+            }
             mOutput << "],\"actor_hits\":[";
             first = true;
             for (const auto& batch : events)

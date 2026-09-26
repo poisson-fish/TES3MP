@@ -4201,6 +4201,15 @@ namespace TES3MP::Native::Testing
             const auto before = bytes(service);
             auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
             require(bool(pending), "Player swing tick preparation failed");
+            const auto projected = service.projectCombat(authority, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), pending.get());
+            const auto projectedPeer = service.projectCombat(authority, id<SessionId>(2), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), pending.get());
+            require(projected && projectedPeer && projected->swings().size() == 2
+                && std::ranges::equal(projected->swings(), projectedPeer->swings()),
+                "Player swing presentation observers disagree");
+            const auto committedBefore = service.projectCombat(authority, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), nullptr);
             const auto events = service.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
                 id<CanonicalRevision>(tick), pending.get());
             const auto peer = service.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(tick),
@@ -4211,6 +4220,11 @@ namespace TES3MP::Native::Testing
             require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
                 return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
                 && bytes(service) == before, "Rejected player swing leaked state");
+            const auto rejectedView = service.projectCombat(authority, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), nullptr);
+            require(committedBefore && rejectedView
+                && std::ranges::equal(committedBefore->swings(), rejectedView->swings()),
+                "Rejected player swing leaked presentation");
             if (replay)
             {
                 auto resumed = replay->service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
@@ -4218,9 +4232,24 @@ namespace TES3MP::Native::Testing
                     require(std::ranges::equal(image, proposed), "Player swing restart changed outcome");
                     return CanonicalDurabilityResult::Committed;
                 }) == CanonicalDurabilityResult::Committed, "Player swing restart failed");
+                const auto restoredView = replay->service().projectCombat(authority, id<SessionId>(2),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick), nullptr);
+                require(restoredView && std::ranges::equal(projected->swings(), restoredView->swings()),
+                    "Player swing restart changed presentation");
             }
             commit(pending);
             const auto current = state(service);
+            for (size_t owner = 0; owner < 2; ++owner)
+            {
+                const auto& view = projected->swings()[owner];
+                const auto& saved = current.combat->swings[owner];
+                require(saved ? (view.command == saved->command && view.source == saved->source
+                        && view.targetLife == saved->targetLife && view.direction == saved->direction
+                        && view.strength == saved->strength && view.interruption == saved->interruption
+                        && view.phase == unsigned(saved->state.mPhase) + 1 && !view.group.empty()
+                        && view.completion >= 0 && view.completion <= 1)
+                    : (view.command == 0 && view.phase == 0), "Committed player swing projection lost state");
+            }
             if (tick <= 2)
             {
                 require(!events || events->events().empty(), "Player intent dealt immediate damage");
@@ -4312,6 +4341,11 @@ namespace TES3MP::Native::Testing
         rejoined.service().synchronizeCells(authority);
         require(state(rejoined.service()).combat->swings[1]->interruption == PlayerSwing::Disconnected,
             "Reconnect reset interrupted swing");
+        const auto rejoinedView = rejoined.service().projectCombat(authority, id<SessionId>(2),
+            id<ServerTick>(3), id<CanonicalRevision>(3), nullptr);
+        require(rejoinedView && rejoinedView->swings().size() == 2
+            && rejoinedView->swings()[1].interruption == PlayerSwing::Disconnected,
+            "Reconnect lost terminal swing presentation");
         const auto pausedDescriptor = scratch / "paused-native.txt";
         {
             std::ifstream input(descriptor);

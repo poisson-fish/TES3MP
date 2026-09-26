@@ -73,6 +73,17 @@ namespace TES3MP::Native
         mState.mTime = mWindUp.mStart;
     }
 
+    float MeleeAnimation::phaseCompletion() const
+    {
+        if (mState.mPhase == Phase::Complete) return 1.f;
+        const auto strength = MWMechanics::attackFollowStrength(mState.mStrength);
+        const auto range = mState.mPhase == Phase::WindUp ? mWindUp
+            : mState.mPhase == Phase::Release ? mRelease
+            : mFollow[strength == "small" ? 0 : strength == "medium" ? 1 : 2];
+        return range.mStop == range.mStart ? 1.f
+            : std::clamp((mState.mTime - range.mStart) / (range.mStop - range.mStart), 0.f, 1.f);
+    }
+
     float MeleeAnimation::windUp() const
     {
         return MWMechanics::attackWindUp(mState.mTime, mMinimumAttack, mWindUp.mStop);

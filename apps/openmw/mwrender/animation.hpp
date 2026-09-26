@@ -227,6 +227,7 @@ namespace MWRender
         osg::Vec3f mAccumulate;
 
         TextKeyListener* mTextKeyListener;
+        std::string mCommittedMeleeGroup;
 
         osg::ref_ptr<RotateController> mHeadController;
         osg::ref_ptr<RotateController> mSpineController;
@@ -406,6 +407,11 @@ namespace MWRender
         void play(std::string_view groupname, const AnimPriority& priority, int blendMask, bool autodisable,
             float speedmult, std::string_view start, std::string_view stop, float startpoint, uint32_t loops,
             bool loopfallback = false);
+
+        // Sample a server-owned pose without dispatching gameplay keys or advancing its clock.
+        bool setCommittedMelee(std::string_view group, unsigned phase, unsigned direction,
+            float strength, float completion);
+        bool hasCommittedMelee() const { return !mCommittedMeleeGroup.empty(); }
 
         /** Adjust the speed multiplier of an already playing animation.
          */

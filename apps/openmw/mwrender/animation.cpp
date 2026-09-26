@@ -60,6 +60,7 @@
 
 #include "../mwmechanics/character.hpp" // FIXME: for MWMechanics::Priority
 #include "../mwmechanics/weapontype.hpp"
+#include "../mwmechanics/meleestate.hpp"
 
 #include "actorutil.hpp"
 #include "rotatecontroller.hpp"
@@ -889,6 +890,54 @@ namespace MWRender
         {
             Log(Debug::Error) << "Error handling text key " << evt << ": " << e.what();
         }
+    }
+
+    bool Animation::setCommittedMelee(std::string_view group, unsigned phase, unsigned direction,
+        float strength, float completion)
+    {
+        if (phase > 4 || direction > 2 || !std::isfinite(strength) || strength < 0 || strength > 1
+            || !std::isfinite(completion) || completion < 0 || completion > 1) return false;
+        // Replacing a pose also ends old animation states. Suppress both text-key
+        // callbacks and Lua animation-ended notifications throughout that operation.
+        struct RestoreCallbacks
+        {
+            Context& context;
+            TextKeyListener*& listener;
+            Context previousContext;
+            TextKeyListener* previousListener;
+            ~RestoreCallbacks() { context = previousContext; listener = previousListener; }
+        } restore{mContext, mTextKeyListener, mContext, mTextKeyListener};
+        mContext = Context::ReplicatedActor;
+        mTextKeyListener = nullptr;
+        if (!phase || phase == 4)
+        {
+            if (!mCommittedMeleeGroup.empty()) disable(mCommittedMeleeGroup);
+            mCommittedMeleeGroup.clear();
+            return true;
+        }
+        if (!hasAnimation(group)) return false;
+        const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
+        const std::string prefix = std::string(directions[direction]) + ' ';
+        const std::string follow(MWMechanics::attackFollowStrength(strength));
+        const std::string start = prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + " follow start");
+        const std::string stop = prefix + (phase == 1 ? "max attack" : phase == 2 ? "hit" : follow + " follow stop");
+        if (mCommittedMeleeGroup == group)
+            if (const auto found = mStates.find(group); found != mStates.end()
+                && found->second.mStartKey == start && found->second.mStopKey == stop)
+            {
+                auto& state = found->second;
+                state.setTime(state.mStartTime + (state.mStopTime - state.mStartTime) * completion);
+                state.mPlaying = state.getTime() < state.mStopTime;
+                return true;
+            }
+        if (!mCommittedMeleeGroup.empty()) disable(mCommittedMeleeGroup);
+        mCommittedMeleeGroup.clear();
+        disable(group); // Replace a predicted swing or a previous snapshot, including its clock.
+        play(group, MWMechanics::Priority_Weapon, BlendMask_UpperBody, false, 0.f,
+            start, stop, completion, 0, false);
+        if (!getInfo(group)) return false;
+        mCommittedMeleeGroup = group;
+        return true;
     }
 
     void Animation::play(std::string_view groupname, const AnimPriority& priority, int blendMask, bool autodisable,
@@ -1981,7 +2030,7 @@ namespace MWRender
 
     void Animation::animationEnded(AnimState& state) const
     {
-        if (mContext == Context::ReplicatedActor)
+        if (mContext == Context::ReplicatedActor || state.mGroupname == mCommittedMeleeGroup)
             return;
         MWBase::Environment::get().getLuaManager()->animationEnded(
             mPtr, state.mGroupname, state.getTime(), state.getCompletion(), state.mStartKey, state.mStopKey);

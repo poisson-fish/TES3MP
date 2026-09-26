@@ -176,12 +176,16 @@ namespace
 
     bool actor_cast_layout_requires_capability()
     {
-        const auto required = TES3MP::actorCastLifecycleCapability().value();
-        const auto server = offer(versionRange(1, 10, 10), {}, {required});
-        const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, 20}, {}));
-        const auto current = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, 20, required}, {}));
-        return std::holds_alternative<SessionRejected>(TES3MP::negotiateClientHello(old, server))
-            && std::holds_alternative<ServerHello>(TES3MP::negotiateClientHello(current, server));
+        for (const auto required : {TES3MP::actorCastLifecycleCapability().value(),
+                TES3MP::playerSwingPresentationCapability().value()})
+        {
+            const auto server = offer(versionRange(1, 10, 10), {}, {required});
+            const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required - 1}, {}));
+            const auto current = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required - 1, required}, {}));
+            if (!std::holds_alternative<SessionRejected>(TES3MP::negotiateClientHello(old, server))
+                || !std::holds_alternative<ServerHello>(TES3MP::negotiateClientHello(current, server))) return false;
+        }
+        return true;
     }
 
     bool current_and_previous_minor_select_highest_overlap()

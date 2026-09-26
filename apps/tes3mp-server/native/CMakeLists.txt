@@ -101,6 +101,7 @@ tes3mp_verify_target_includes(tes3mp_native_melee_tests
 set_target_properties(tes3mp_native_melee_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
 
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp environment_tests.cpp environment_tests.hpp
+    melee_presentation_tests.cpp
     ../server_app_tests.cpp
     inventory_service_tests.cpp inventory_service_tests.hpp
     placed_container_tests.cpp placement_tests.cpp door_tests.cpp door_tests.hpp

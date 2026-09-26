@@ -52,11 +52,12 @@ namespace
         return std::nullopt;
     }
 
-    flatbuffers::Verifier verifier(std::span<const std::byte> payload, std::size_t maximum)
+    flatbuffers::Verifier verifier(std::span<const std::byte> payload, std::size_t maximum,
+        flatbuffers::uoffset_t maximumTables = 8)
     {
         flatbuffers::Verifier::Options options;
         options.max_depth = 8;
-        options.max_tables = 8;
+        options.max_tables = maximumTables;
         options.max_size = maximum + 1;
         options.check_alignment = true;
         options.check_nested_flatbuffers = false;
@@ -105,7 +106,8 @@ namespace TES3MP
         PlayerId self, CombatRevision selfRevision, float selfHealth, float selfMaximumHealth, float selfFatigue,
         float selfMaximumFatigue, float selfMagicka, float selfMaximumMagicka, bool selfDead,
         std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
-        std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects)
+        std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects,
+        std::span<const PlayerSwingSnapshot> swings)
     {
         if (!std::isfinite(selfHealth) || !std::isfinite(selfMaximumHealth) || !std::isfinite(selfFatigue)
             || !std::isfinite(selfMaximumFatigue) || !std::isfinite(selfMagicka) || !std::isfinite(selfMaximumMagicka)
@@ -171,10 +173,34 @@ namespace TES3MP
                 || (i && activeEffects[i - 1].instanceId >= effect.instanceId))
                 return error(Code::InvalidMagicEffect, 0, 0, i);
         }
+        if (swings.size() > MaximumCombatSnapshotPlayers + 1)
+            return error(Code::TooManyEntries, swings.size(), MaximumCombatSnapshotPlayers + 1);
+        if (!swings.empty() && swings.size() != players.size() + 1)
+            return error(Code::TooManyEntries, swings.size(), players.size() + 1);
+        for (std::size_t i = 0; i < swings.size(); ++i)
+        {
+            const auto& swing = swings[i];
+            if ((i && swings[i - 1].playerId >= swing.playerId)
+                || (swing.playerId != self && std::ranges::none_of(players,
+                    [&](const auto& player) { return player.playerId == swing.playerId; })))
+                return error(Code::EntriesNotStrictlySorted, swing.playerId.value(), 0, i);
+            if (!std::isfinite(swing.strength) || swing.strength < 0 || swing.strength > 1
+                || !std::isfinite(swing.completion) || swing.completion < 0 || swing.completion > 1)
+                return error(Code::InvalidFloat, 0, 0, i);
+            if (!swing.command ? (swing.source || swing.targetLife || swing.direction || swing.phase
+                    || swing.interruption || swing.strength || swing.completion || !swing.group.empty())
+                : (!swing.targetLife || swing.direction > 2 || swing.phase < 1 || swing.phase > 4
+                    || swing.interruption > 4 || swing.group.empty() || swing.group.size() > 64
+                    || !std::ranges::all_of(swing.group, [](unsigned char ch) {
+                        return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'); })
+                    || (swing.phase == 4 && swing.completion != 1)))
+                return error(Code::InvalidAttackType, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision, selfHealth,
             selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka, selfDead,
             std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()),
-            std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()));
+            std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()),
+            std::vector(swings.begin(), swings.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
@@ -284,10 +310,15 @@ namespace TES3MP
                 static_cast<Snapshot::MagicUseSourceKind>(effect.sourceKind),
                 static_cast<Snapshot::MagicUseTargetKind>(effect.targetKind),
                 static_cast<std::uint8_t>(effect.effectKind));
+        std::vector<flatbuffers::Offset<Snapshot::PlayerSwingSnapshot>> swings;
+        for (const auto& swing : input.swings())
+            swings.push_back(Snapshot::CreatePlayerSwingSnapshot(builder, swing.playerId.value(), swing.command,
+                swing.source, swing.targetLife, swing.direction, swing.phase, swing.interruption,
+                swing.strength, swing.completion, builder.CreateString(swing.group)));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
-                builder.CreateVectorOfStructs(activeEffects));
+                builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -393,7 +424,7 @@ namespace TES3MP
         const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
         if (!Snapshot::SizePrefixedLatestWinsCombatSnapshotBufferHasIdentifier(bytes))
             return error(Code::InvalidIdentifier);
-        auto checked = verifier(payload, LatestWinsSnapshotMaximumPayloadBytes);
+        auto checked = verifier(payload, LatestWinsSnapshotMaximumPayloadBytes, MaximumCombatSnapshotPlayers + 3);
         if (!Snapshot::VerifySizePrefixedLatestWinsCombatSnapshotBuffer(checked))
             return error(Code::VerificationFailed);
         const auto* root = Snapshot::GetSizePrefixedLatestWinsCombatSnapshot(bytes);
@@ -495,11 +526,27 @@ namespace TES3MP
                 static_cast<DirectMagicEffectKind>(current.effect_kind()), current.magnitude_per_second(),
                 *value(start), *value(end) });
         }
+        const auto swingCount = root->swings() ? root->swings()->size() : 0;
+        if (swingCount > MaximumCombatSnapshotPlayers + 1)
+            return error(Code::TooManyEntries, swingCount, MaximumCombatSnapshotPlayers + 1);
+        std::vector<PlayerSwingSnapshot> swings;
+        swings.reserve(swingCount);
+        for (std::size_t i = 0; i < swingCount; ++i)
+        {
+            const auto* current = root->swings()->Get(static_cast<flatbuffers::uoffset_t>(i));
+            if (!current || (current->group() && current->group()->size() > 64))
+                return error(Code::TooManyEntries, 0, 64, i);
+            auto owner = strong<PlayerId>(current->player_id(), i);
+            if (auto* failure = std::get_if<Error>(&owner)) return *failure;
+            swings.push_back({*value(owner), current->command(), current->source(), current->target_life(),
+                current->direction(), current->phase(), current->interruption(), current->strength(),
+                current->completion(), current->group() ? current->group()->str() : std::string{}});
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
             root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
-            activeEffects);
+            activeEffects, swings);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(

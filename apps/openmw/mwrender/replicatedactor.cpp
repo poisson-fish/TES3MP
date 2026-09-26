@@ -680,6 +680,20 @@ namespace MWRender
         catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
     }
 
+    ReplicatedActorResult Objects::setReplicatedActorMelee(const MWWorld::Ptr& ptr, std::string_view group,
+        unsigned phase, unsigned direction, float strength, float completion) noexcept
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
+            return ReplicatedActorResult::LifecycleViolation;
+        try
+        {
+            return found->second->setCommittedMelee(group, phase, direction, strength, completion)
+                ? ReplicatedActorResult::Accepted : ReplicatedActorResult::ResourceLoadFailed;
+        }
+        catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
+    }
+
     ReplicatedActorResult Objects::playReplicatedActorAction(
         const MWWorld::Ptr& ptr, ReplicatedActorAction action) noexcept
     {
@@ -750,6 +764,9 @@ namespace MWRender
 
         ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept
         { return mRendering.getObjects().setReplicatedActorCast(mPtr, active, range, completion); }
+        ReplicatedActorResult setMelee(std::string_view group, unsigned phase, unsigned direction,
+            float strength, float completion) noexcept
+        { return mRendering.getObjects().setReplicatedActorMelee(mPtr, group, phase, direction, strength, completion); }
 
         ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept
         {
@@ -792,6 +809,13 @@ namespace MWRender
     {
         if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
         return mImpl->setCast(active, range, completion);
+    }
+
+    ReplicatedActorResult ReplicatedActor::setMelee(std::string_view group, unsigned phase, unsigned direction,
+        float strength, float completion) noexcept
+    {
+        if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
+        return mImpl->setMelee(group, phase, direction, strength, completion);
     }
 
     ReplicatedActorResult ReplicatedActor::playAction(ReplicatedActorAction action) noexcept

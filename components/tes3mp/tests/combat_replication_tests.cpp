@@ -216,6 +216,77 @@ namespace
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create());
     }
 
+    bool swing_states_round_trip_and_reject_invalid_values()
+    {
+        std::vector players{TES3MP::PlayerCombatSnapshot{value<TES3MP::PlayerId>(2),
+            TES3MP::CombatRevision::initial(), 100, 100}};
+        std::vector<TES3MP::PlayerSwingSnapshot> swings{
+            {value<TES3MP::PlayerId>(1), 17, 51, 3, 1, 1, 0, .3f, .2f, "weapononehand"},
+            {value<TES3MP::PlayerId>(2), 18, 0, 3, 2, 2, 0, .8f, .5f, "handtohand"}};
+        const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+            value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 50, 50, false,
+            {}, skills(), players, {}, swings); };
+        const auto rejected = [&] { return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create()); };
+        for (unsigned phase = 1; phase <= 4; ++phase)
+            for (unsigned interruption = 0; interruption <= 4; ++interruption)
+            {
+                swings[0].phase = static_cast<std::uint8_t>(phase);
+                swings[0].interruption = static_cast<std::uint8_t>(interruption);
+                swings[0].completion = phase == 4 ? 1.f : .25f;
+                const auto made = create();
+                if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+                const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+                auto bytes = TES3MP::encodeLatestWinsCombatSnapshot(snapshot);
+                const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(bytes);
+                if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+                    || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
+                bytes[11] = std::byte('3');
+                if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(
+                        TES3MP::decodeLatestWinsCombatSnapshot(bytes))) return false;
+            }
+        const auto good = swings;
+        swings[0].strength = std::numeric_limits<float>::quiet_NaN();
+        if (!rejected()) return false;
+        swings = good; swings[0].completion = 1.1f;
+        if (!rejected()) return false;
+        swings = good; swings[0].phase = 5;
+        if (!rejected()) return false;
+        swings = good; swings[0].interruption = 5;
+        if (!rejected()) return false;
+        swings = good; swings[0].direction = 3;
+        if (!rejected()) return false;
+        swings = good; swings[0].group.assign(65, 'a');
+        if (!rejected()) return false;
+        swings = good; swings[0].group = "weapon: hit";
+        if (!rejected()) return false;
+        swings = good; swings[0].command = 0;
+        if (!rejected()) return false;
+        swings = good; swings[0].targetLife = 0;
+        if (!rejected()) return false;
+        swings = good; swings[1].playerId = value<TES3MP::PlayerId>(3);
+        if (!rejected()) return false;
+        swings = good; swings[1].playerId = swings[0].playerId;
+        if (!rejected()) return false;
+        swings = good; swings.resize(TES3MP::MaximumCombatSnapshotPlayers + 2, good[0]);
+        if (!rejected()) return false;
+        swings = {{value<TES3MP::PlayerId>(1)}};
+        if (!rejected()) return false; // A supported domain must include every visible participant.
+        players.clear();
+        if (rejected()) return false;
+        for (unsigned i = 2; i <= TES3MP::MaximumCombatSnapshotPlayers + 1; ++i)
+        {
+            players.push_back({value<TES3MP::PlayerId>(i), TES3MP::CombatRevision::initial(), 100, 100});
+            swings.push_back({value<TES3MP::PlayerId>(i)});
+        }
+        const auto made = create();
+        if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+        const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+        const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(TES3MP::encodeLatestWinsCombatSnapshot(snapshot));
+        return std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+            && std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) == snapshot;
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -233,7 +304,8 @@ int main()
 {
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
-            && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing() && frame_classes_are_pinned()
+            && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing()
+            && swing_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()
         ? 0
         : 1;
 }

@@ -1243,6 +1243,15 @@ namespace MWMechanics
 
     bool CharacterController::updateWeaponState()
     {
+        if (mAnimation->hasCommittedMelee())
+        {
+            // Input still predicts new swings between commits. A committed swing
+            // cannot run the local hit/release state machine a second time.
+            setAttackingOrSpell(false);
+            mReadyToHit = false;
+            mUpperBodyState = UpperBodyState::WeaponEquipped;
+            return false;
+        }
         // If the current animation is scripted, we can't do anything here.
         if (isScriptedAnimPlaying())
             return false;

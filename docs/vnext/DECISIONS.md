@@ -82,7 +82,10 @@ V42 binds spellcast keys/resources and persists selection through recovery with
 payment, RNG and effects. Inactive areas pause; launch revalidates source, life,
 target and visibility. Two distinct player casters share the transaction; repeated
 commands from one cannot. Timed arguments and mixed ranges use the shared resolver.
-T3C3 casting snapshots require capability 21; T3C2 events retain caster life.
+T3C4 snapshots require capability 22; T3C2 events retain caster life. V46 player
+swings project complete committed poses, including terminal interruption, for self
+and visible peers. Reconnect samples the bound animation section without replaying
+gameplay keys or Lua animation-ended callbacks; clients never advance that clock.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays

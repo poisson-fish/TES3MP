@@ -29,6 +29,9 @@ struct CombatSkillSnapshot;
 
 struct ActiveMagicEffectSnapshot;
 
+struct PlayerSwingSnapshot;
+struct PlayerSwingSnapshotBuilder;
+
 struct LatestWinsCombatSnapshot;
 struct LatestWinsCombatSnapshotBuilder;
 
@@ -563,6 +566,166 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
   return builder_.Finish();
 }
 
+struct PlayerSwingSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PlayerSwingSnapshotBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_PLAYER_ID = 4,
+    VT_COMMAND = 6,
+    VT_SOURCE = 8,
+    VT_TARGET_LIFE = 10,
+    VT_DIRECTION = 12,
+    VT_PHASE = 14,
+    VT_INTERRUPTION = 16,
+    VT_STRENGTH = 18,
+    VT_COMPLETION = 20,
+    VT_GROUP = 22
+  };
+  uint64_t player_id() const {
+    return GetField<uint64_t>(VT_PLAYER_ID, 0);
+  }
+  uint64_t command() const {
+    return GetField<uint64_t>(VT_COMMAND, 0);
+  }
+  uint64_t source() const {
+    return GetField<uint64_t>(VT_SOURCE, 0);
+  }
+  uint64_t target_life() const {
+    return GetField<uint64_t>(VT_TARGET_LIFE, 0);
+  }
+  uint8_t direction() const {
+    return GetField<uint8_t>(VT_DIRECTION, 0);
+  }
+  uint8_t phase() const {
+    return GetField<uint8_t>(VT_PHASE, 0);
+  }
+  uint8_t interruption() const {
+    return GetField<uint8_t>(VT_INTERRUPTION, 0);
+  }
+  float strength() const {
+    return GetField<float>(VT_STRENGTH, 0.0f);
+  }
+  float completion() const {
+    return GetField<float>(VT_COMPLETION, 0.0f);
+  }
+  const ::flatbuffers::String *group() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_GROUP);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_PLAYER_ID, 8) &&
+           VerifyField<uint64_t>(verifier, VT_COMMAND, 8) &&
+           VerifyField<uint64_t>(verifier, VT_SOURCE, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TARGET_LIFE, 8) &&
+           VerifyField<uint8_t>(verifier, VT_DIRECTION, 1) &&
+           VerifyField<uint8_t>(verifier, VT_PHASE, 1) &&
+           VerifyField<uint8_t>(verifier, VT_INTERRUPTION, 1) &&
+           VerifyField<float>(verifier, VT_STRENGTH, 4) &&
+           VerifyField<float>(verifier, VT_COMPLETION, 4) &&
+           VerifyOffset(verifier, VT_GROUP) &&
+           verifier.VerifyString(group()) &&
+           verifier.EndTable();
+  }
+};
+
+struct PlayerSwingSnapshotBuilder {
+  typedef PlayerSwingSnapshot Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_player_id(uint64_t player_id) {
+    fbb_.AddElement<uint64_t>(PlayerSwingSnapshot::VT_PLAYER_ID, player_id, 0);
+  }
+  void add_command(uint64_t command) {
+    fbb_.AddElement<uint64_t>(PlayerSwingSnapshot::VT_COMMAND, command, 0);
+  }
+  void add_source(uint64_t source) {
+    fbb_.AddElement<uint64_t>(PlayerSwingSnapshot::VT_SOURCE, source, 0);
+  }
+  void add_target_life(uint64_t target_life) {
+    fbb_.AddElement<uint64_t>(PlayerSwingSnapshot::VT_TARGET_LIFE, target_life, 0);
+  }
+  void add_direction(uint8_t direction) {
+    fbb_.AddElement<uint8_t>(PlayerSwingSnapshot::VT_DIRECTION, direction, 0);
+  }
+  void add_phase(uint8_t phase) {
+    fbb_.AddElement<uint8_t>(PlayerSwingSnapshot::VT_PHASE, phase, 0);
+  }
+  void add_interruption(uint8_t interruption) {
+    fbb_.AddElement<uint8_t>(PlayerSwingSnapshot::VT_INTERRUPTION, interruption, 0);
+  }
+  void add_strength(float strength) {
+    fbb_.AddElement<float>(PlayerSwingSnapshot::VT_STRENGTH, strength, 0.0f);
+  }
+  void add_completion(float completion) {
+    fbb_.AddElement<float>(PlayerSwingSnapshot::VT_COMPLETION, completion, 0.0f);
+  }
+  void add_group(::flatbuffers::Offset<::flatbuffers::String> group) {
+    fbb_.AddOffset(PlayerSwingSnapshot::VT_GROUP, group);
+  }
+  explicit PlayerSwingSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<PlayerSwingSnapshot> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<PlayerSwingSnapshot>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<PlayerSwingSnapshot> CreatePlayerSwingSnapshot(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t player_id = 0,
+    uint64_t command = 0,
+    uint64_t source = 0,
+    uint64_t target_life = 0,
+    uint8_t direction = 0,
+    uint8_t phase = 0,
+    uint8_t interruption = 0,
+    float strength = 0.0f,
+    float completion = 0.0f,
+    ::flatbuffers::Offset<::flatbuffers::String> group = 0) {
+  PlayerSwingSnapshotBuilder builder_(_fbb);
+  builder_.add_target_life(target_life);
+  builder_.add_source(source);
+  builder_.add_command(command);
+  builder_.add_player_id(player_id);
+  builder_.add_group(group);
+  builder_.add_completion(completion);
+  builder_.add_strength(strength);
+  builder_.add_interruption(interruption);
+  builder_.add_phase(phase);
+  builder_.add_direction(direction);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<PlayerSwingSnapshot> CreatePlayerSwingSnapshotDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t player_id = 0,
+    uint64_t command = 0,
+    uint64_t source = 0,
+    uint64_t target_life = 0,
+    uint8_t direction = 0,
+    uint8_t phase = 0,
+    uint8_t interruption = 0,
+    float strength = 0.0f,
+    float completion = 0.0f,
+    const char *group = nullptr) {
+  auto group__ = group ? _fbb.CreateString(group) : 0;
+  return TES3MP::Protocol::Schema::CombatSnapshot::CreatePlayerSwingSnapshot(
+      _fbb,
+      player_id,
+      command,
+      source,
+      target_life,
+      direction,
+      phase,
+      interruption,
+      strength,
+      completion,
+      group__);
+}
+
 struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef LatestWinsCombatSnapshotBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -570,7 +733,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_ACTORS = 6,
     VT_SELF_SKILLS = 8,
     VT_PLAYERS = 10,
-    VT_ACTIVE_EFFECTS = 12
+    VT_ACTIVE_EFFECTS = 12,
+    VT_SWINGS = 14
   };
   const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *>(VT_HEADER);
@@ -587,6 +751,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *> *active_effects() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *> *>(VT_ACTIVE_EFFECTS);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>> *swings() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>> *>(VT_SWINGS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -600,6 +767,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(players()) &&
            VerifyOffset(verifier, VT_ACTIVE_EFFECTS) &&
            verifier.VerifyVector(active_effects()) &&
+           VerifyOffset(verifier, VT_SWINGS) &&
+           verifier.VerifyVector(swings()) &&
+           verifier.VerifyVectorOfTables(swings()) &&
            verifier.EndTable();
   }
 };
@@ -623,6 +793,9 @@ struct LatestWinsCombatSnapshotBuilder {
   void add_active_effects(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects) {
     fbb_.AddOffset(LatestWinsCombatSnapshot::VT_ACTIVE_EFFECTS, active_effects);
   }
+  void add_swings(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>>> swings) {
+    fbb_.AddOffset(LatestWinsCombatSnapshot::VT_SWINGS, swings);
+  }
   explicit LatestWinsCombatSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -640,8 +813,10 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>>> swings = 0) {
   LatestWinsCombatSnapshotBuilder builder_(_fbb);
+  builder_.add_swings(swings);
   builder_.add_active_effects(active_effects);
   builder_.add_players(players);
   builder_.add_self_skills(self_skills);
@@ -656,18 +831,21 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot> *actors = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot> *self_skills = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot> *players = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot> *active_effects = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot> *active_effects = nullptr,
+    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>> *swings = nullptr) {
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot>(*actors) : 0;
   auto self_skills__ = self_skills ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot>(*self_skills) : 0;
   auto players__ = players ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot>(*players) : 0;
   auto active_effects__ = active_effects ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot>(*active_effects) : 0;
+  auto swings__ = swings ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>>(*swings) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateLatestWinsCombatSnapshot(
       _fbb,
       header,
       actors__,
       self_skills__,
       players__,
-      active_effects__);
+      active_effects__,
+      swings__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot *GetLatestWinsCombatSnapshot(const void *buf) {
@@ -679,7 +857,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3C3";
+  return "T3C4";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

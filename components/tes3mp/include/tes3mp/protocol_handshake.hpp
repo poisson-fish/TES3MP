@@ -40,6 +40,7 @@ namespace TES3MP
     // T3C2 cast events identify both player and placement/life casters.
     inline constexpr std::uint32_t ActorCastReplicationCapabilityValue = 20;
     inline constexpr std::uint32_t ActorCastLifecycleCapabilityValue = 21;
+    inline constexpr std::uint32_t PlayerSwingPresentationCapabilityValue = 22;
 
     class CapabilityId
     {
@@ -70,6 +71,8 @@ namespace TES3MP
 
     inline constexpr CapabilityId actorCastLifecycleCapability() noexcept
     { return *CapabilityId::fromValue(ActorCastLifecycleCapabilityValue); }
+    inline constexpr CapabilityId playerSwingPresentationCapability() noexcept
+    { return *CapabilityId::fromValue(PlayerSwingPresentationCapabilityValue); }
 
     inline constexpr CapabilityId vrPoseCapability() noexcept
     {

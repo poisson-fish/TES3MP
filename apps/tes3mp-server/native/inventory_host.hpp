@@ -23,7 +23,8 @@ namespace TES3MP::Native
     // An intent requests a strength; the server advances to it before release.
     // Inactive/saturated areas pause. Active disconnect, source change, target
     // loss and hit recovery cancel; recovery never re-equips or rerolls a hit.
-    // Fresh campaign required. Player swing presentation remains inherited.
+    // Fresh campaign required. T3C4/capability 22 projects committed player
+    // swing sections and terminal interruptions without changing this save layout.
     // V45 selects each NPC melee direction with stock damage-weighted RNG
     // (uniform when unarmed). Selection RNG and the directional clip commit
     // together; recovery binds that clip without rerolling. Same image layout

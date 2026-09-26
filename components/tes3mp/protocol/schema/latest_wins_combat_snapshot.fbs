@@ -76,14 +76,28 @@ struct ActiveMagicEffectSnapshot {
   effect_kind:ubyte;
 }
 
+table PlayerSwingSnapshot {
+  player_id:ulong;
+  command:ulong;
+  source:ulong;
+  target_life:ulong;
+  direction:ubyte;
+  phase:ubyte;
+  interruption:ubyte;
+  strength:float;
+  completion:float;
+  group:string;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
   self_skills:[CombatSkillSnapshot] (id: 2);
   players:[PlayerCombatSnapshot] (id: 3);
   active_effects:[ActiveMagicEffectSnapshot] (id: 4);
+  swings:[PlayerSwingSnapshot] (id: 5);
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C3";
+file_identifier "T3C4";
 file_extension "t3cs";

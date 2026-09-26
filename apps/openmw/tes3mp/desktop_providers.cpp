@@ -21,6 +21,7 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwrender/replicatedactor.hpp"
+#include "../mwrender/animation.hpp"
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -972,6 +973,13 @@ namespace TES3MP::OpenMWAdapter
                 if (world)
                 {
                     world->clearDoorAuthority();
+                    if (auto* animation = world->getAnimation(world->getPlayerPtr()))
+                    {
+                        animation->setCommittedMelee({}, 0, 0, 0, 0);
+                        const auto ptr = world->getPlayerPtr();
+                        animation->showWeapons(ptr.getClass().getCreatureStats(ptr).getDrawState()
+                            == MWMechanics::DrawState::Weapon);
+                    }
                     for (const auto& [stack, ptr] : presentedGroundItems)
                     {
                         (void)stack;
@@ -1745,6 +1753,25 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
             auto player = world->getPlayerPtr();
             auto& playerStats = player.getClass().getCreatureStats(player);
+            for (const auto& swing : snapshot.swings())
+            {
+                const unsigned phase = swing.interruption ? 0 : swing.phase;
+                if (swing.playerId == snapshot.selfPlayerId())
+                {
+                    auto* animation = world->getAnimation(player);
+                    if (!animation || !animation->setCommittedMelee(swing.group,
+                            snapshot.selfDead() ? 0 : phase, swing.direction, swing.strength, swing.completion))
+                        return ProviderResult::PresentationFailed;
+                    animation->showWeapons(phase >= 1 && phase <= 3 && !snapshot.selfDead()
+                        ? swing.source != 0 : playerStats.getDrawState() == MWMechanics::DrawState::Weapon);
+                }
+                else
+                    for (auto& [entity, remote] : remotes)
+                        if (remote.actor && remote.lastObserved && remote.lastObserved->playerId() == swing.playerId)
+                            if (!replicatedActorResultAccepted(remote.actor->setMelee(swing.group, phase,
+                                    swing.direction, swing.strength, swing.completion)))
+                                return ProviderResult::PresentationFailed;
+            }
             auto sound = MWBase::Environment::get().getSoundManager();
             if (!snapshot.selfDead() && playerStats.isDead())
                 MWBase::Environment::get().getMechanicsManager()->resurrect(player);
