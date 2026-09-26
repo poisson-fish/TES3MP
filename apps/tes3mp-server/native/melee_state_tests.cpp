@@ -7,6 +7,7 @@
 #include <components/sceneutil/animationkeys.hpp>
 
 #include "melee_animation.hpp"
+#include "hit_animation.hpp"
 #include "actor_campaign.hpp"
 
 #include <cmath>
@@ -241,6 +242,50 @@ namespace
         return keys;
     }
 
+    void hitResources()
+    {
+        using TES3MP::Native::readHitAnimations;
+        SceneUtil::TextKeyMap base, female, custom, empty;
+        base.emplace(0.f, "hit1: start"); base.emplace(.5f, "hit1: stop");
+        base.emplace(1.f, "hit2: start"); base.emplace(2.f, "hit2: stop");
+        female.emplace(3.f, "hit1: start"); female.emplace(3.25f, "hit1: stop");
+        custom.emplace(4.f, "hit2: start"); custom.emplace(4.125f, "hit2: stop");
+        const auto first = readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 1>{&base});
+        const auto second = readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &female});
+        const auto npc = readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 3>{&base, &female, &custom});
+        require(first.count == 2 && first.ticks[0] == 15 && first.ticks[1] == 30
+            && second.count == 2 && second.ticks[0] == 8 && second.ticks[1] == 30
+            && npc.count == 2 && npc.ticks[0] == 8 && npc.ticks[1] == 4,
+            "Participant resources lost group-specific source priority or rounded timing");
+        require(readHitAnimations({}).count == 0
+            && readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &empty}) == first,
+            "Missing hit groups hid lower layers or fabricated recovery");
+        SceneUtil::TextKeyMap gap;
+        gap.emplace(1.f, "hit3: start"); gap.emplace(2.f, "hit3: stop");
+        require(readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 1>{&gap}).count == 0,
+            "Nonconsecutive recovery groups entered stock random selection");
+        const auto rejects = [&](const SceneUtil::TextKeyMap& keys) {
+            bool rejected = false;
+            try { (void)readHitAnimations(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &keys}); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "Invalid winning hit resource silently fell back");
+        };
+        SceneUtil::TextKeyMap missingStop;
+        missingStop.emplace(3.f, "hit1: start"); rejects(missingStop);
+        SceneUtil::TextKeyMap reversed;
+        reversed.emplace(2.f, "hit1: start"); reversed.emplace(1.f, "hit1: stop"); rejects(reversed);
+        SceneUtil::TextKeyMap tooLong;
+        tooLong.emplace(1.f, "hit1: start"); tooLong.emplace(62.f, "hit1: stop"); rejects(tooLong);
+        auto oversized = base; oversized.emplace(3.f, std::string(257, 'x')); rejects(oversized);
+        SceneUtil::TextKeyMap many;
+        for (unsigned i = 1; i <= 17; ++i)
+        {
+            many.emplace(float(i * 2), "hit" + std::to_string(i) + ": start");
+            many.emplace(float(i * 2 + 1), "hit" + std::to_string(i) + ": stop");
+        }
+        rejects(many);
+    }
+
     void scheduling()
     {
         using TES3MP::Native::MeleeAnimation;
@@ -450,6 +495,7 @@ int main(int argc, char** argv)
         if (filter == "melee-context") mechanics();
         else if (filter == "melee-timing") timing();
         else if (filter == "melee-scheduling") scheduling();
+        else if (filter == "hit-resources") hitResources();
         else throw std::invalid_argument("Unknown melee filter");
         std::cout << "PASS " << filter << " (synthetic content, shared stock primitives, no Environment)\n";
         return 0;

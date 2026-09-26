@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 42; ++candidate)
+            for (unsigned candidate = 3; candidate <= 44; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -282,6 +282,7 @@ namespace TES3MP::Native
                 binding.mNpcWeaponCompetition = descriptorVersion >= 40;
                 binding.mNpcFullSelection = descriptorVersion >= 41;
                 binding.mNpcCastLifecycle = descriptorVersion >= 42;
+                if (descriptorVersion >= 43) binding.mBoundHits.emplace();
             }
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
@@ -558,6 +559,30 @@ namespace TES3MP::Native
                     start.binding.mBoundCasts = scene->bindCastAnimations();
                     placement << start.binding.mBoundCasts->resourceIdentity;
                 }
+                if (start.binding.mBoundHits)
+                {
+                    auto& hits = *start.binding.mBoundHits;
+                    const std::array participants{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase};
+                    for (size_t i = 0; i < participants.size(); ++i)
+                    {
+                        const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
+                        hits[i] = scene->bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace));
+                        placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
+                    }
+                }
+                if (start.text.starts_with("native-inventory-44"))
+                {
+                    const auto& npc = *loadout.store().get<ESM::NPC>().find(owner.mBase);
+                    const auto& race = *loadout.store().get<ESM::Race>().find(npc.mRace);
+                    start.binding.mWeaponMelee = [scene, &npc, &race, attack = start.navigation->meleeAttack,
+                        cache = std::map<ESM::RefId, MeleeAnimation>{}](const ESM::Weapon* weapon) mutable {
+                        const auto id = weapon ? weapon->mId : ESM::RefId{};
+                        if (const auto found = cache.find(id); found != cache.end()) return found->second;
+                        if (cache.size() >= PlainEquipmentValues::MaxItems + 1)
+                            throw std::invalid_argument("Native weapon animation cache exceeded inventory bound");
+                        return cache.emplace(id, scene->bindWeaponMeleeAnimation(npc, race, weapon, attack)).first->second;
+                    };
+                }
                 if (start.binding.mRetainTraveler)
                 {
                     const auto meleeIdentity = start.binding.mBoundMelee
@@ -566,13 +591,24 @@ namespace TES3MP::Native
                     const auto meleeAttack = start.navigation->meleeAttack;
                     const auto meleeSpeed = start.navigation->meleeSpeed;
                     start.binding.mNavigationActivity = [scene, createScene, meleeIdentity,
-                        meleeGroup, meleeAttack, meleeSpeed](bool active) {
+                        meleeGroup, meleeAttack, meleeSpeed, &loadout, hits = start.binding.mBoundHits,
+                        participants = std::array{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase}](bool active) {
                         if (active && !scene->loaded())
                         {
                             auto fresh = createScene();
                             if (!meleeIdentity.empty() && fresh->bindMeleeAnimation(
                                     meleeGroup, meleeAttack, meleeSpeed).mResourceIdentity != meleeIdentity)
                                 throw std::invalid_argument("Native melee resource changed after binding");
+                            if (hits)
+                                for (size_t i = 0; i < participants.size(); ++i)
+                                {
+                                    const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
+                                    const auto rebound = fresh->bindHitAnimations(npc,
+                                        *loadout.store().get<ESM::Race>().find(npc.mRace));
+                                    if (rebound.resourceIdentity != (*hits)[i].resourceIdentity
+                                        || rebound.animations != (*hits)[i].animations)
+                                        throw std::invalid_argument("Native hit resource changed after binding");
+                                }
                             scene->reload(*fresh);
                         }
                         else if (!active) scene->unload();

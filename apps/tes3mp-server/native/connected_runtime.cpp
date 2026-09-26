@@ -414,19 +414,31 @@ namespace TES3MP::Native
     }
     EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepare(EquipmentCaller caller, EquipmentCommand command)
     {
+        return prepareEquipment(validateCommand(caller, command), command);
+    }
+
+    EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareNpcEquipment(size_t owner, ESM::RefNum item)
+    {
+        if (owner < 2 || owner >= ownerCount() || !inventoryStorage(owner))
+            throw std::invalid_argument("Native AI equipment owner invalid");
+        return prepareEquipment(owner, {ownedId(ownerPtr(owner).getCellRef().getRefNum()), ownedId(item),
+            mWorld.getPtrRegistryRevision(), EquipmentRequestedState::Equipped, InventoryStore::Slot_CarriedRight});
+    }
+
+    EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareEquipment(size_t actor, EquipmentCommand command)
+    {
         using namespace Allocations;
         InPhase phase(Phase::Validation);
         if (mFailedClosed || !mConnected || mRestartActor
             || command.mExpectedRevision >= std::numeric_limits<size_t>::max() - 1)
             throw std::invalid_argument("Equipment persistence, recovery or revision mode invalid");
-        const auto actor = validateCommand(caller, command);
         for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
         const ESM::RefNum item{command.mItem.mIndex, command.mItem.mContentFile};
         phase.set(Phase::Preparation);
         auto input = PreparedPlainEquipment::prepare(ContainerStoreResolution(storage(actor), ownerPtr(actor)),
             mWorld.getPtr(item), item, command.mExpectedRevision,
             command.mState == EquipmentRequestedState::Equipped, preparationContext(actor), command.mSlot);
-        auto staged = stageInstallation(actor, ownerPtr(actor), std::move(input), actor);
+        auto staged = stageInstallation(actor, ownerPtr(actor), std::move(input), actor < 2 ? actor : 0);
         // Slot changes invalidate stale commands even when no stack was split.
         staged->mRevision = std::max(staged->mRevision, size_t(command.mExpectedRevision) + 1);
         const auto& result = staged->mPrepared.result();
@@ -434,7 +446,9 @@ namespace TES3MP::Native
             ownedId(result.mSlots[InventoryStore::Slot_Shirt]), ownedId(result.mSelected),
             ownedId(result.mLastGenerated), staged->mRevision, result.mLuck, result.mSkipped});
         EquipmentSessionValues values{{installedValues(0), installedValues(1)}, staged->mRevision};
-        values.mActors[actor] = staged->mSaved;
+        if (actor < 2) values.mActors[actor] = staged->mSaved;
+        for (size_t i = 2; i < ownerCount(); ++i)
+            values.mContainers.push_back(i == actor ? staged->mSaved : installedValues(i));
         EquipmentBytes image;
         encodeSession(std::move(values), image);
         auto state = std::make_unique<PreparedEquipment::State>();
@@ -458,7 +472,9 @@ namespace TES3MP::Native
             throw std::invalid_argument("Equipment preparation does not belong to this live runtime");
         auto& state = *prepared.mState;
         const auto& command = state.mSuccess->mCommand;
-        if (validateCommand({command.mActor}, command) != state.mActor)
+        if (state.mActor < 2 ? validateCommand({command.mActor}, command) != state.mActor
+            : command.mActor != ownedId(ownerPtr(state.mActor).getCellRef().getRefNum())
+                || command.mExpectedRevision != mWorld.getPtrRegistryRevision())
             throw std::invalid_argument("Equipment preparation actor changed");
         for (size_t i = 0; i < ownerCount(); ++i) validateCaller(i, ownerPtr(i));
         phase.set(Phase::Revalidation);

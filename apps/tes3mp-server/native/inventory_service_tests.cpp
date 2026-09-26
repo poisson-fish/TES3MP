@@ -4124,10 +4124,158 @@ namespace TES3MP::Native::Testing
         require(completed, "Neighborhood traveler did not complete");
     }
 
+    void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        // Finish the large shared fixture builder before entering recovery tests.
+        checkNpcDoors(scratch, config, settings,
+            true, true, true, true, true, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false, {}, false, true);
+        auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "NPC door crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Door participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        auto authority = players(SessionGeneration::initial(), 1, 2);
+        {
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            for (auto& entity : nearby)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                    Transform(entity.transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+        }
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1, 2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            records.push_back({{id<PlayerId>(i),id<EntityId>(i == 1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
+                digest, *authority.findPlayer(id<PlayerId>(i)), profile});
+        }
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+        const auto descriptor = scratch / "native.txt";
+        InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+        auto& service = host.service(); service.synchronizeCells(authority);
+        const auto bytes = [](const auto& runtime) {
+            return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end());
+        };
+        auto& native = dynamic_cast<InventoryService&>(service);
+        require(native.selectedNpcWeaponCondition() == 1000,
+            "Repeat fixture did not start with the stock auto-equipped spear");
+        const auto itemIdentities = [&] {
+            auto result = native.selectedNpcItemIdentities();
+            std::ranges::sort(result, [](auto a, auto b) { return a < b; }); return result;
+        };
+        const auto identities = itemIdentities();
+        std::unique_ptr<InventoryHost> replay;
+        unsigned hits = 0;
+        bool equipped = false, savedWindUp = false, savedFollow = false, savedEquipment = false;
+        uint64_t lastTick = 0;
+        for (uint64_t time = 1; time <= 360 && (hits < 3 || !savedEquipment || !savedFollow); ++time)
+        {
+            const auto before = bytes(service);
+            auto step = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+            require(bool(step), "Repeated weapon tick did not prepare");
+            const auto events = service.projectCombatEvents(authority, id<SessionId>(1),
+                id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+            const auto peer = service.projectCombatEvents(authority, id<SessionId>(2),
+                id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+            require(bool(events) == bool(peer) && (!events || std::ranges::equal(events->actorEvents(), peer->actorEvents())),
+                "Repeated weapon observers disagree");
+            std::vector<std::byte> proposed;
+            const auto rejectedWrite = step->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                return CanonicalDurabilityResult::Rejected; });
+            require(rejectedWrite == CanonicalDurabilityResult::Rejected, "Repeated swing rejection failed closed");
+            require(bytes(service) == before, "Rejected repeated swing/equipment leaked state");
+            require(itemIdentities() == identities, "Repeated weapon equipment changed item identities");
+            auto retry = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+            require(retry && retry->commit([&](auto image) {
+                require(std::ranges::equal(image, proposed), "Repeated weapon retry changed RNG/equipment/outcome");
+                return CanonicalDurabilityResult::Rejected;
+            }) == CanonicalDurabilityResult::Rejected, "Repeated weapon retry committed");
+            if (replay)
+            {
+                auto resumed = replay->service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                require(resumed && resumed->commit([&](auto image) {
+                    require(std::ranges::equal(image, proposed), "Weapon restart diverged from uninterrupted execution");
+                    return CanonicalDurabilityResult::Committed;
+                }) == CanonicalDurabilityResult::Committed, "Weapon restart tick failed");
+            }
+            require(step->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Repeated weapon commit failed");
+            require(bytes(service) == proposed && itemIdentities() == identities,
+                "Repeated weapon installed another inventory image");
+            const auto state = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+            require(!state.casting, "Weapon-only fixture unexpectedly cast");
+            if (events) hits += unsigned(events->actorEvents().size());
+            const auto condition = native.selectedNpcWeaponCondition();
+            require(std::ranges::count_if(state.timedEffects, [](const auto& effect) {
+                    return effect.actor == 2 && effect.sourceKind == 3;
+                }) == (condition == 1 ? 1 : 0), "Weapon passive source disagrees with committed equipment");
+            equipped |= condition && *condition > 1;
+            const bool windUp = state.melee->target && state.melee->state.mPhase == MeleeAnimation::Phase::WindUp;
+            const bool follow = !condition && state.melee->state.mPhase == MeleeAnimation::Phase::Follow;
+            const bool equipment = hits > 0 && condition && *condition == 1000 && !state.melee->target;
+            if ((!savedWindUp && windUp) || (!savedFollow && follow) || (!savedEquipment && equipment))
+            {
+                replay.reset();
+                replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                replay->service().synchronizeCells(authority);
+                require(bytes(replay->service()) == proposed, "Weapon recovery changed saved state");
+                savedWindUp |= windUp; savedFollow |= follow; savedEquipment |= equipment;
+            }
+            lastTick = time;
+        }
+        require(hits >= 3 && equipped && savedWindUp && savedFollow && savedEquipment,
+            "NPC failed to break, equip a carried spear and repeat its bound swing");
+        const auto checkpoint = bytes(service);
+        const auto prior = readActorCampaign({reinterpret_cast<const char*>(checkpoint.data()), checkpoint.size()});
+        require(prior.melee->identity.ends_with(std::to_string(std::bit_cast<uint32_t>(1.25f))),
+            "Selected weapon speed was not retained in the saved clip");
+        auto invalid = checkpoint;
+        invalid.at(64) ^= std::byte{1};
+        bool rejectedSource = false;
+        try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+        catch (const std::invalid_argument&) { rejectedSource = true; }
+        require(rejectedSource && bytes(service) == checkpoint, "Malformed weapon clip installed during recovery");
+        const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+        service.synchronizeCells(offline);
+        auto paused = service.prepareNativeTick(offline, id<ServerTick>(++lastTick), 1.f/30, {});
+        require(paused && paused->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+            == CanonicalDurabilityResult::Committed, "Offline swing tick failed");
+        const auto pausedBytes = bytes(service);
+        const auto frozen = readActorCampaign({reinterpret_cast<const char*>(pausedBytes.data()), pausedBytes.size()});
+        require(frozen.melee->state == prior.melee->state && frozen.combat == prior.combat,
+            "Inactive weapon swing or resources advanced");
+        const std::vector survivors{*authority.findActiveSession(id<SessionId>(prior.melee->target == 1 ? 2 : 1))};
+        const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), survivors));
+        service.synchronizeCells(disconnected);
+        auto cancelled = service.prepareNativeTick(disconnected, id<ServerTick>(++lastTick), 1.f/30, {});
+        require(cancelled && cancelled->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+            == CanonicalDurabilityResult::Committed, "Disconnected weapon target tick failed");
+        const auto cancelledBytes = bytes(service);
+        const auto cancelledState = readActorCampaign({reinterpret_cast<const char*>(cancelledBytes.data()), cancelledBytes.size()});
+        require(!cancelledState.melee->target && !cancelledState.melee->state.mReleased,
+            "Disconnected weapon target retained a pending swing");
+        service.synchronizeCells(authority);
+        auto uncertain = service.prepareNativeTick(authority, id<ServerTick>(++lastTick), 1.f/30, {});
+        std::vector<std::byte> durable;
+        require(uncertain && uncertain->commit([&](auto image) { durable.assign(image.begin(), image.end());
+            return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+            && service.inventoryImage().empty(), "Uncertain weapon write did not close the runtime");
+        InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, durable);
+        require(bytes(recovered.service()) == durable, "Uncertain weapon write failed exact durable recovery");
+        std::cout << "weapon execution=sword-break+carried-spear repeated=" << hits
+            << " passive=equip+break rejection=atomic restart=windup+follow+equipment inactive=pause uncertain=closed\n";
+        return;
+    }
+
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4147,6 +4295,7 @@ namespace TES3MP::Native::Testing
         }
         std::filesystem::create_directory(scratch / "openmw");
         std::filesystem::copy_file(config / "openmw.cfg", scratch / "openmw" / "openmw.cfg");
+        std::array<BoundHitAnimations, 3> expectedHits;
         ESM::Weapon defenseWeapon;
         float defenseStrengthBase = 0, defenseStrengthMultiplier = 0;
         TES3MP::OpenMwMeleeSettings passiveSettings;
@@ -4527,10 +4676,55 @@ namespace TES3MP::Native::Testing
                         << items.front()->mEnchant.getRefIdString() << '\n';
                 }
             }
+            std::array<ESM::Weapon, 2> executionWeapons;
+            ESM::Enchantment executionEnchantment;
+            if (weaponExecution)
+            {
+                executionEnchantment.blank();
+                executionEnchantment.mId = ESM::RefId::stringRefId("npc_weapon_passive");
+                executionEnchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+                executionEnchantment.mEffects.populate({{ESM::MagicEffect::FortifyAttribute, {},
+                    ESM::Attribute::Luck, ESM::RT_Self, 0, 0, 1, 1}});
+                npc.mSpells.mList.clear(); npc.mInventory.mList.clear();
+                npc.mNpdt.mHealth = 10000; npc.mNpdt.mFatigue = 10000;
+                for (auto& skill : npc.mNpdt.mSkills) skill = 100;
+                for (size_t i = 0; i < executionWeapons.size(); ++i)
+                {
+                    auto& weapon = executionWeapons[i];
+                    weapon = *base.store().get<ESM::Weapon>().find(ESM::RefId::stringRefId(i ? "iron spear" : "iron shortsword"));
+                    weapon.mId = ESM::RefId::stringRefId(i ? "npc_repeat_spear" : "npc_break_sword");
+                    weapon.mEnchant = {}; weapon.mScript = {};
+                    if (!i) weapon.mEnchant = executionEnchantment.mId;
+                    weapon.mData.mHealth = i ? 1000 : 1;
+                    weapon.mData.mSpeed = i ? 1.25f : 1.f;
+                    for (auto* range : {&weapon.mData.mChop, &weapon.mData.mSlash, &weapon.mData.mThrust})
+                        (*range)[0] = (*range)[1] = i ? 5 : 20;
+                    npc.mInventory.mList.push_back({1, weapon.mId});
+                }
+            }
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
+            if (weaponExecution)
+            {
+                out.startRecord(ESM::Enchantment::sRecordId, 0);
+                executionEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+            }
+            if (weaponExecution) for (const auto& weapon : executionWeapons)
+            {
+                out.startRecord(ESM::Weapon::sRecordId, 0); weapon.save(out); out.endRecord(ESM::Weapon::sRecordId);
+            }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            if (participantHits)
+            {
+                auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
+                auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
+                beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
+                for (const auto& participant : {female, beast})
+                {
+                    out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
+                }
+            }
             if (constantEffects)
                 for (size_t i = 0; i < (generalConstants ? 4u : 2u); ++i)
                 {
@@ -5688,6 +5882,20 @@ namespace TES3MP::Native::Testing
             const auto door = loadout.ordinaryDoors(cell, 128).at(0).mIdentity;
             InteriorActorScene scene(loadout, "NPC Door Path Test", actor, "meshes/base_anim.nif", "meshes/base_animkna.nif");
             const std::array ids{door}; scene.bindDoors(ids, avoidance); scene.enableNavigation(settings.string());
+            if (participantHits)
+            {
+                const std::array names{"npc_hit_female", "npc_hit_beast", "npc_door_actor"};
+                for (size_t i = 0; i < names.size(); ++i)
+                {
+                    const auto& npc = *loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId(names[i]));
+                    expectedHits[i] = scene.bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace));
+                    require(expectedHits[i].animations.count > 0, "Participant lacks authored hit groups");
+                }
+                require(expectedHits[0].resourceIdentity.find("xbase_anim_female.kf") != std::string::npos
+                    && expectedHits[1].resourceIdentity.find("xbase_animkna.kf") != std::string::npos
+                    && expectedHits[1].resourceIdentity.find("xargonian_swimkna.kf") != std::string::npos,
+                    "Participant binding lost female or Argonian sources");
+            }
             scene.travelTo({0, -40, 1});
             const auto initial = scene.image();
             const std::array closed{ActorSceneDoor{door, 0}}, opened{ActorSceneDoor{door, osg::PIf / 2}};
@@ -5786,6 +5994,15 @@ namespace TES3MP::Native::Testing
             "Door participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
             CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
         auto authority = players(SessionGeneration::initial(), 1, 2);
+        if (weaponExecution)
+        {
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            for (auto& entity : nearby)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                    Transform(entity.transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+        }
         if (shield)
         {
             std::vector<CanonicalPlayerEntityState> facing(authority.players().begin(), authority.players().end());
@@ -5806,7 +6023,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -5822,16 +6039,49 @@ namespace TES3MP::Native::Testing
                 : traveler ? "native-inventory-19\nmanifest "
                 : avoidance ? "native-inventory-18\nmanifest " : "native-inventory-17\nmanifest ");
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
-            out << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
+            out << "\nconfig \"openmw\"\nplayers 1 2\nactors "
+                << (participantHits ? "\"npc_hit_female\" \"npc_hit_beast\"" : "\"npc_door_actor\" \"npc_door_actor\"")
+                << "\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
                 << "npc \"npc_door_actor\" " << std::quoted(actorSettings.string())
                 << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
         }
+        if (weaponExecution) return;
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        const auto initialHitImage = participantHits
+            ? std::vector(service.inventoryImage().begin(), service.inventoryImage().end()) : std::vector<std::byte>{};
+        if (participantHits)
+        {
+            // Change only the player's resource resolution, keeping plugin
+            // records, NPC melee and the durable layout identical.
+            std::ifstream settingsInput(settings);
+            std::string alteredSettings(std::istreambuf_iterator<char>{settingsInput}, {});
+            const std::string prior = "baseanimfemale = meshes/base_anim_female.nif";
+            const auto at = alteredSettings.find(prior);
+            require(at != std::string::npos, "Female model fixture setting missing");
+            alteredSettings.replace(at, prior.size(), "baseanimfemale = meshes/base_anim.nif");
+            const auto changedSettings = scratch / "changed-hit-settings.cfg";
+            std::ofstream(changedSettings) << alteredSettings;
+            std::ifstream descriptorInput(descriptor);
+            std::string alteredDescriptor(std::istreambuf_iterator<char>{descriptorInput}, {});
+            std::ostringstream oldPath, newPath;
+            oldPath << std::quoted(actorSettings.string()); newPath << std::quoted(changedSettings.string());
+            const auto pathAt = alteredDescriptor.find(oldPath.str());
+            require(pathAt != std::string::npos, "Hit fixture descriptor setting path missing");
+            alteredDescriptor.replace(pathAt, oldPath.str().size(), newPath.str());
+            const auto changedDescriptor = scratch / "changed-hit-native.txt";
+            std::ofstream(changedDescriptor) << alteredDescriptor;
+            { InventoryHost valid(changedDescriptor, testContentManifest(), *registry, *crypto, {}); }
+            bool rejectedBinding = false;
+            try { InventoryHost invalid(changedDescriptor, testContentManifest(), *registry, *crypto, initialHitImage); }
+            catch (const std::invalid_argument&) { rejectedBinding = true; }
+            require(rejectedBinding && std::ranges::equal(initialHitImage, service.inventoryImage()),
+                "Changed player hit resource installed an existing campaign");
+        }
         if (constantEffects)
         {
             const auto image = [&] { return std::vector(service.inventoryImage().begin(), service.inventoryImage().end()); };
@@ -6120,6 +6370,10 @@ namespace TES3MP::Native::Testing
                             && candidate.combat->hitRecoveryTicks[0] > 0
                             && condition(*staged, false) < condition(*current, false),
                             "Armor hit did not stage reduced health damage and armor wear");
+                        if (participantHits)
+                            require(std::ranges::find(expectedHits[0].animations.ticks,
+                                    candidate.combat->hitRecoveryTicks[0]) != expectedHits[0].animations.ticks.end(),
+                                "Player recovery did not use that participant's authored groups");
                     }
                     require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
                         && std::ranges::equal(proposed, service.inventoryImage()),
@@ -6148,6 +6402,20 @@ namespace TES3MP::Native::Testing
                         catch (const std::invalid_argument&) { rejectedRecovery = true; }
                         require(rejectedRecovery && std::ranges::equal(proposed, recovered.inventoryImage()),
                             "Malformed hit recovery changed the installed campaign");
+                        if (participantHits)
+                        {
+                            auto excessive = proposed;
+                            const uint64_t tooLong = *std::max_element(expectedHits[0].animations.ticks.begin(),
+                                expectedHits[0].animations.ticks.end()) + 1;
+                            require(tooLong <= 1800, "Fixture cannot distinguish resource from codec bounds");
+                            for (size_t byte = 0; byte < 8; ++byte)
+                                excessive[recoveryOffset + byte] = std::byte((tooLong >> (byte * 8)) & 0xff);
+                            bool rejectedResource = false;
+                            try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, excessive); }
+                            catch (const std::invalid_argument&) { rejectedResource = true; }
+                            require(rejectedResource && std::ranges::equal(proposed, recovered.inventoryImage()),
+                                "Recovery accepted a timer longer than the participant's animation");
+                        }
                         const auto offline = std::get<CanonicalServerState>(
                             createCanonicalServerState(authority.players(), {}));
                         recovered.synchronizeCells(offline);
@@ -6311,6 +6579,11 @@ namespace TES3MP::Native::Testing
                         require(!hit.blocked && hit.damage > 0
                             && candidate.combat->actors[2][8][2] < prior.combat->actors[2][8][2],
                             "NPC armor did not reduce a player melee hit");
+                    if (participantHits)
+                        require(candidate.combat->hitRecoveryTicks[2] > 0
+                            && std::ranges::find(expectedHits[2].animations.ticks,
+                                candidate.combat->hitRecoveryTicks[2]) != expectedHits[2].animations.ticks.end(),
+                            "NPC recovery did not use the NPC's authored groups");
                     require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
                         && std::ranges::equal(proposed, service.inventoryImage()),
                         "Player hit did not commit its exact candidate");
@@ -6331,6 +6604,50 @@ namespace TES3MP::Native::Testing
                     "Player defense setup tick did not commit");
             }
             require(playerResolved, "No player hit resolved against NPC defense");
+            if (participantHits)
+            {
+                // Replay the fresh encounter with Bob alone, exercising the
+                // other combat slot and its independent resource binding.
+                const std::vector active{*authority.findActiveSession(id<SessionId>(2))};
+                const auto bob = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), active));
+                InventoryHost bobHost(descriptor, testContentManifest(), *registry, *crypto, initialHitImage);
+                auto& bobService = bobHost.service();
+                bobService.synchronizeCells(bob);
+                bool hitBob = false;
+                auto saved = initialHitImage;
+                const auto start = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()}).tick;
+                for (uint64_t time = start + 1; time <= start + 128 && !hitBob; ++time)
+                {
+                    auto candidate = bobService.prepareNativeTick(bob, id<ServerTick>(time), 1.f/30, {});
+                    require(bool(candidate), "Second participant hit failed to prepare");
+                    const auto events = bobService.projectCombatEvents(bob, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), candidate.get());
+                    std::vector<std::byte> proposed;
+                    require(candidate->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(saved, bobService.inventoryImage()),
+                        "Rejected second participant hit leaked state or RNG");
+                    if (events && !events->actorEvents().empty() && events->actorEvents()[0].hit
+                        && events->actorEvents()[0].damage > 0)
+                    {
+                        const auto state = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+                        require(state.combat->hitRecoveryTicks[1] > 0
+                            && std::ranges::find(expectedHits[1].animations.ticks, state.combat->hitRecoveryTicks[1])
+                                != expectedHits[1].animations.ticks.end(),
+                            "Second participant inherited another actor's hit timing");
+                        InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                        restart.service().synchronizeCells(bob);
+                        require(std::ranges::equal(proposed, restart.service().inventoryImage()),
+                            "Second participant recovery changed on restart");
+                        hitBob = true;
+                    }
+                    require(candidate->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Second participant hit retry failed");
+                    saved = std::move(proposed);
+                }
+                require(hitBob, "No hit resolved on second participant");
+                std::cout << "participant resources=female+argonian+npc rejection=atomic inactive=pause restart=exact\n";
+            }
             std::cout << "defense=" << (shield ? "block" : "armor")
                 << " defenders=player+npc rejection=atomic restart=exact hit=durable\n";
             return;

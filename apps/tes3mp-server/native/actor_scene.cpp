@@ -1,4 +1,6 @@
 #include "actor_scene.hpp"
+#include <apps/openmw/mwmechanics/weapontype.hpp>
+#include <components/esm3/loadweap.hpp>
 #include "actor_inventory.hpp"
 #include "loadout.hpp"
 #include "actor_spawns.hpp"
@@ -37,6 +39,7 @@
 #include <components/resource/keyframemanager.hpp>
 #include <components/sceneutil/keyframe.hpp>
 #include <components/vfs/manager.hpp>
+#include <components/vfs/recursivedirectoryiterator.hpp>
 #include <components/vfs/registerarchives.hpp>
 
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
@@ -138,6 +141,9 @@ namespace TES3MP::Native
         std::vector<uint64_t> mContacts;
         std::string mFingerprint;
         std::vector<VFS::Path::Normalized> mMeleeSources;
+        // Stock third-person base, male, female, beast and Argonian swim layers.
+        std::array<VFS::Path::Normalized, 5> mHitModels;
+        bool mAdditionalHitSources = false;
         bool mCustomMeleeModel = false;
         DetourNavigator::AgentBounds mAgentBounds;
         std::unique_ptr<DetourNavigator::Navigator> mNavigator;
@@ -611,6 +617,105 @@ namespace TES3MP::Native
         throw std::invalid_argument("Selected NPC lacks spellcast animation keys");
     }
 
+    std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
+    InteriorActorScene::bindAnimationSources(const ESM::NPC& npc, const ESM::Race& race)
+    {
+        if (!mImpl || !mImpl->mNavigator)
+            throw std::invalid_argument("Native hit resources require initialized actor settings");
+        // NpcAnimation/ReplicatedActor load a base, sex/race skeleton, custom
+        // skeleton, then the Argonian swim layer. Resolve each group's winning
+        // source independently, as Animation::play does.
+        const auto& models = mImpl->mHitModels;
+        const bool beast = (race.mData.mFlags & ESM::Race::Beast) != 0;
+        const auto& normal = models[beast ? 3 : npc.isMale() ? 1 : 2];
+        std::vector<VFS::Path::Normalized> paths{models[0]};
+        const VFS::Path::Normalized skeleton(Misc::ResourceHelpers::correctActorModelPath(normal, &mImpl->mVfs));
+        if (skeleton != models[0]) paths.push_back(skeleton);
+        if (!npc.mModel.empty())
+        {
+            const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(npc.mModel));
+            if (model != models[1] && model != models[2] && model != models[3])
+                paths.emplace_back(Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs));
+        }
+        if (beast && npc.mRace.contains("argonian")) paths.push_back(models[4]);
+        std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>> sources;
+        std::ostringstream identity;
+        identity << "native-hit-resources-1\n" << npc.mId << ':' << npc.mRace << ':' << npc.isMale() << '\n';
+        size_t sourceCount = 0;
+        const auto appendSource = [&](const VFS::Path::Normalized& path) {
+            if (++sourceCount > MaximumHitSources || path.value().size() > 512)
+                throw std::invalid_argument("Native hit resource path budget exceeded");
+            identity << path.value() << ':';
+            if (!mImpl->mVfs.exists(path)) { identity << "absent\n"; return; }
+            auto stream = mImpl->mVfs.get(path);
+            const auto hash = Files::getHash(path.value(), *stream);
+            identity << hash[0] << ':' << hash[1] << '\n';
+            if (identity.tellp() > std::streamoff(MaximumHitResourceIdentity))
+                throw std::invalid_argument("Native hit resource identity too large");
+            const auto holder = mImpl->mResources.getKeyframeManager()->get(path);
+            if (!holder || holder->mTextKeys.empty() || holder->mKeyframeControllers.empty()) return;
+            sources.emplace_back(&holder->mTextKeys, [holder](const SceneUtil::TextKeyMap*) {});
+        };
+        for (auto path : paths)
+        {
+            if (path.extension() == VFS::Path::ExtensionView("nif"))
+                path.changeExtension(VFS::Path::ExtensionView("kf"));
+            appendSource(path);
+            // Animation::loadAdditionalAnimations inserts this directory's KF
+            // files immediately after their base source, in VFS order.
+            if (!mImpl->mAdditionalHitSources || !path.value().starts_with("meshes/")) continue;
+            std::string directory(path.value());
+            directory.replace(0, 7, "animations/");
+            const auto extension = directory.find_last_of(VFS::Path::extensionSeparator);
+            if (extension == std::string::npos) continue;
+            directory.replace(extension, directory.size() - extension, "/");
+            for (const auto& extra : mImpl->mVfs.getRecursiveDirectoryIterator(directory))
+                if (extra.extension() == VFS::Path::ExtensionView("kf")) appendSource(extra);
+        }
+        if (identity.tellp() > std::streamoff(MaximumHitResourceIdentity))
+            throw std::invalid_argument("Native hit resource identity too large");
+        return {std::move(sources), identity.str()};
+    }
+
+    BoundHitAnimations InteriorActorScene::bindHitAnimations(const ESM::NPC& npc, const ESM::Race& race)
+    {
+        const auto [owned, identity] = bindAnimationSources(npc, race);
+        std::vector<const SceneUtil::TextKeyMap*> sources;
+        for (const auto& source : owned) sources.push_back(source.get());
+        return {readHitAnimations(sources), identity};
+    }
+
+    MeleeAnimation InteriorActorScene::bindWeaponMeleeAnimation(const ESM::NPC& npc, const ESM::Race& race,
+        const ESM::Weapon* weapon, const std::string& attack)
+    {
+        const auto type = weapon ? weapon->mData.mType : ESM::Weapon::HandToHand;
+        const auto* info = MWMechanics::getWeaponType(type);
+        if (info->mWeaponClass != ESM::WeaponType::Melee)
+            throw std::invalid_argument("Native ranged execution is not bound");
+        const auto [sources, resourceIdentity] = bindAnimationSources(npc, race);
+        std::string group(info->mLongGroup);
+        const auto findGroup = [&](const std::string& name) -> const SceneUtil::TextKeyMap* {
+            for (auto it = sources.rbegin(); it != sources.rend(); ++it)
+                if ((*it)->hasGroupStart(name)) return it->get();
+            return nullptr;
+        };
+        auto* keys = findGroup(group);
+        // CharacterController's real-weapon fallback, using the same layered sources.
+        if (!keys && weapon)
+        {
+            group = MWMechanics::getWeaponType(info->mFlags & ESM::WeaponType::TwoHanded
+                ? ESM::Weapon::LongBladeTwoHand : ESM::Weapon::LongBladeOneHand)->mLongGroup;
+            keys = findGroup(group);
+        }
+        if (!keys) throw std::invalid_argument("Native selected weapon has no melee animation");
+        const float speed = weapon ? weapon->mData.mSpeed : 1.f;
+        // Resource bytes already belong to the participant campaign fingerprint.
+        // Keep the persisted clip recipe small and distinguish speed exactly.
+        const std::string identity = "native-weapon-melee-1:" + group + ':' + attack + ':'
+            + std::to_string(std::bit_cast<uint32_t>(speed));
+        return MeleeAnimation(*keys, group, attack, speed, identity);
+    }
+
     void InteriorActorScene::unload()
     {
         if (!mImpl) return;
@@ -651,6 +756,10 @@ namespace TES3MP::Native
             }
         } restore;
         Settings::SettingsFileParser().loadSettingsFile(settingsFile, Settings::Manager::mDefaultSettings);
+        constexpr std::array modelNames{"xbaseanim", "baseanim", "baseanimfemale", "baseanimkna", "xargonianswimkna"};
+        for (size_t i = 0; i < modelNames.size(); ++i)
+            mImpl->mHitModels[i] = VFS::Path::Normalized(Settings::Manager::getString(modelNames[i], "Models"));
+        mImpl->mAdditionalHitSources = Settings::Manager::getBool("use additional anim sources", "Game");
         mImpl->mSmoothMovement = Settings::Manager::getBool("smooth movement", "Game");
         mImpl->mEnchantedWeaponsAreMagical = Settings::Manager::getBool("enchanted weapons are magical", "Game");
         mImpl->mUncappedDamageFatigue = Settings::Manager::getBool("uncapped damage fatigue", "Game");

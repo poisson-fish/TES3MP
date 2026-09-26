@@ -106,6 +106,11 @@ namespace TES3MP::Native
         bool mNpcFullSelection = false;
         bool mNpcCastLifecycle = false;
         std::optional<BoundCastAnimations> mBoundCasts;
+        // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
+        std::optional<std::array<BoundHitAnimations, 3>> mBoundHits;
+        // V44: bind the selected NPC's actual weapon group and speed. The
+        // descriptor still chooses one attack direction for this bounded slice.
+        std::function<MeleeAnimation(const ESM::Weapon*)> mWeaponMelee;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;
@@ -175,6 +180,7 @@ namespace TES3MP::Native
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};
         std::optional<MeleeAnimation> mMelee;
+        std::optional<MeleeAnimation> mIdleMelee;
         uint64_t mMeleeTarget = 0;
         bool mMeleeContacted = false;
         std::optional<ActorCampaignCombat> mCombat;
@@ -199,6 +205,7 @@ namespace TES3MP::Native
             uint64_t requested, float reach) const;
         EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command,
             std::span<const ItemCharge> charges = {}) const;
+        PlainEquipmentValues combatEquipmentValues(size_t owner, const PreparedNativeInventory* command) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;
         struct AreaDoor

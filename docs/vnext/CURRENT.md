@@ -5,31 +5,16 @@
 and doors at 60 Hz, committing at 30 Hz. Neighbors freeze; players use contact
 proxies until movement cutover.
 
-V42 owns autonomous casting from selection through durable recovery. It compares
-carried/equipped melee, bows/crossbows with compatible ammo, thrown weapons,
-known spells and equipped unscripted WhenUsed. Server visibility filters targets.
-Bound KF keys drive preparation, wind-up, release and recovery. Source, target,
-life, interruption and visibility checks precede payment; inactive areas pause.
-Two distinct players can cast in the same transaction as the NPC.
-
-Selection/preparation/wind-up/release/flight/recovery persist with RNG, resources,
-effects and identities. Recovery validates sources/targets before installation.
-Shared effects support timed Fortify Attribute/Skill arguments, original effect
-ordinals, mixed Self/Touch/Target and areas. Base stats do not accumulate modifiers.
-T3C3 snapshots require capability 21 and drive native NPC casting animation.
-Old campaign layouts remain distinct; V42 requires a fresh descriptor-bound campaign.
+V42 persists autonomous selection/casting/flight/recovery with RNG, resources and
+effects. Weapons/ammunition, spells and equipped WhenUsed compete. Bound KF keys,
+visibility and source/life checks govern release; inactivity pauses execution.
+Two players can cast alongside the NPC. Effects include timed Fortify Attribute/Skill,
+mixed ranges and areas. T3C3 casting snapshots require capability 21.
 
 Verified narrow evidence:
 
-- `tes3mp_native_ai_magic_tests weapons`: carried weapon classes/ammo, condition,
-  range, resistance and ties (`build/logs/m4-ai-selection-weapons.log`).
-- `npc-full-selection`: equipped WhenUsed, spell competition and observer outcomes
-  (`build/logs/m4-full-selection-test-03.log`).
-- `npc-cast-lifecycle`: every stage/flight restart, rejected-write identity,
-  uncertain-write closure and recovery,
-  two player casts, disconnect/occlusion interruption, inactive restart, malformed
-  recovery, typed effects/expiry and mixed areas (`build/logs/m4-cast-lifecycle-final.log`).
-- Legacy `npc-actor-casts` recovery: `build/logs/m4-cast-legacy-final.log`.
+- `npc-cast-lifecycle`: durability, restart, concurrency, interruption and effects
+  (`build/logs/m4-cast-lifecycle-final.log`).
 - Combat wire/handshake: `build/logs/m4-cast-protocol-test-02.log` and
   `build/logs/m4-cast-handshake-test.log`.
 - Four two-desktop encounters passed concurrent casting, target switching,
@@ -41,12 +26,30 @@ Verified narrow evidence:
   Gameplay records are unchanged; actor stats/room placements are synthetic.
   TR Lua packages are disabled; native Lua services remain M5 work.
 
-V34 retains melee defense/recovery and knockout; distinct player hit resources
-remain unbound. V37 supports multi-slot constant fortification/resistance;
-other constant effects reject. V38 retains caster life through respawn and effects.
-These are bounded migration domains, not complete M4 combat compatibility.
+V43 binds each participant's layered hit resources and timer bounds into the
+campaign fingerprint. `tes3mp_native_melee_tests hit-resources` passed
+(`build/logs/m4-hit-resources-unit.log`); `npc-hit-resources` covers female/Argonian/NPC
+hits, armor, durability and recovery (`build/logs/m4-hit-resources-host-final.log`).
 
-The autonomous casting block has durable encounter evidence. Remaining M4 work
-includes weapon execution, knockout and the other unsupported combat/effect paths;
-weapon competition here does not implement ranged weapon firing. Next: finish the
-remaining melee/knockout work; player movement remains last.
+V34 retains melee defense and knockout; get-up timing remains pending.
+V37 supports multi-slot constant fortification/resistance;
+other constant effects reject.
+
+V44 equips carried melee weapons and repeats NPC swings. Layered weapon groups,
+stock fallback and record speed drive timing; the descriptor chooses one direction.
+Targets persist before release. Interrupted/disconnected/occluded swings cancel;
+inactivity pauses. Breakage removes passive effects atomically. V43/V44 require
+fresh campaigns; recovery never re-equips.
+`npc-weapon-execution` passed carried sword selection, breakage, spear replacement,
+three attacks, passive equip/break, rejected-write replay, wind-up/follow/equipment
+restart, malformed source rejection, offline pause, disconnect and uncertain-write
+closure/recovery (`build/logs/m4-weapon-execution-test.log`). V43/V44 evidence is
+synthetic/headless with vanilla KF resources. The loadout-test target built
+(`build/logs/m4-weapon-build.log`); regressions passed: `npc-hit-resources`
+(`build/logs/m4-weapon-hit-regression.log`) and `equipment-slots`
+(`build/logs/m4-weapon-equipment-regression.log`).
+
+Next: generalize attack-mode selection and bind player swing hit/release keys,
+then ranged/ammunition/thrown flight and remaining close combat. Complete
+physical/casting composition, durable death/loot and varied vanilla/TR two-desktop
+encounters as specified in PLAN. Player movement remains last.

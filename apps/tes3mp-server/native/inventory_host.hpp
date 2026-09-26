@@ -17,6 +17,13 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V44 equips selected carried melee weapons and repeats NPC swings using
+    // their layered group/fallback and record speed. The descriptor still
+    // chooses the direction. A distinct campaign saves the pre-release target
+    // and clip recipe; recovery never re-equips. Fresh campaign required.
+    // V43 binds each player's and the NPC's hit groups to their own layered
+    // animation resources. The descriptor fingerprint owns those identities;
+    // saved recovery must fit that participant's authored durations.
     // V42 persists Selected/Prepared/WindUp/Released/Recovery against bound KF
     // release keys, with immutable source/life/target and inactive-area pause.
     // Revalidation precedes payment; two distinct player casts compose with

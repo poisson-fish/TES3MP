@@ -75,19 +75,14 @@ NPC respawn clears its body effects while attribution on others survives. Truste
 NPC commands never enter client input. Death cancels NPC flights. Older images
 retain their layouts; new descriptor domains require fresh campaigns.
 
-V39-V42 use committed eight-tick admission boundaries. Nearest active living
-player wins, with ID ties; V41 filters server visibility and compares carried/
-equipped melee, ranged/ammunition and thrown ratings. Items win weapon ties;
-weapons win spell ties. Unsupported weapon plans do not become zero ratings.
-
-V42 binds CPU spellcast start/release/stop keys and resource identity. Selection,
-preparation, wind-up, release, flight and recovery commit with payment, RNG and
-effects. Inactive areas pause; active casts revalidate source, life, target and
-visibility before payment. Returning another player first can cancel an absent
-target's restored cast. Two distinct player casters may share that transaction;
-repeat commands from one caster cannot. Timed Fortify Attribute/Skill arguments
-and mixed Self/Touch/Target effects use the shared resolver. T3C3 casting snapshots
-require capability 21; T3C2 events retain caster life.
+V39-V42 admit actions on committed eight-tick boundaries. Nearest visible living
+player wins, with ID ties. Carried weapons/ammunition compete with equipped WhenUsed
+and spells using stock ratings; unsupported plans never become zero ratings.
+V42 binds spellcast keys/resources and persists selection through recovery with
+payment, RNG and effects. Inactive areas pause; launch revalidates source, life,
+target and visibility. Two distinct player casters share the transaction; repeated
+commands from one cannot. Timed arguments and mixed ranges use the shared resolver.
+T3C3 casting snapshots require capability 21; T3C2 events retain caster life.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays
@@ -107,9 +102,16 @@ collision. This bounded proxy remains until shared player hull physics is bound.
 **Melee state.** V33 persists knockout: active actors recover fatigue at OpenMW's
 combat rate, inactive actors pause, negative fatigue prevents attacks and redirects
 unarmed damage to health. Recovery occurs at zero; get-up timing remains pending.
-V34 shares carried-left shield visibility and durable CPU hit recovery. The
-selected NPC's KF hit resource currently serves all three actors; distinct player
-resources are required before general loadout acceptance.
+V34 shares carried-left shield visibility and durable CPU hit recovery. V43 binds all three
+participants' layered hit resources independently, including their bytes in the
+campaign fingerprint. Recovery validates each saved timer against its own clips;
+older descriptor domains retain the NPC resource for all participants.
+
+V44 persists melee targets before release in a distinct campaign layout. Selected
+carried weapons equip through the stock detached inventory transaction before
+execution; recovery never auto-equips. NPC clips bind layered weapon groups,
+stock fallback, descriptor direction and record speed. Completed swings return to
+selection; breakage and passive-source removal commit together.
 
 **Movement smoothness (target).** Cut over after smooth replication and unified
 engine collision. Until then validate inherited combat contacts on the server.

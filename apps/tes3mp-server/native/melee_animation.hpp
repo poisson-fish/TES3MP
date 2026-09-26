@@ -34,7 +34,8 @@ namespace TES3MP::Native
         };
 
         MeleeAnimation(const SceneUtil::TextKeyMap& keys, std::string group,
-            std::string attack, float speed);
+            std::string attack, float speed, std::string identity = {});
+        const std::string& identity() const { return mIdentity; }
         float windUp() const;
         // Stock CharacterController plays one of the consecutive hit groups at
         // speed one. A missing group clears recovery on the next update.
@@ -54,6 +55,7 @@ namespace TES3MP::Native
         struct Range { float mStart, mStop; };
         std::shared_ptr<const SceneUtil::TextKeyMap> mKeys;
         std::string mGroup;
+        std::string mIdentity;
         float mSpeed, mMinimumAttack, mMinimumHit;
         Range mWindUp, mRelease;
         std::array<Range, 3> mFollow;

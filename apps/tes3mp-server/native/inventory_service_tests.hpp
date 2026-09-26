@@ -4,13 +4,14 @@
 #include <string_view>
 namespace TES3MP::Native::Testing
 {
+    void checkNpcWeaponExecution(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkTravelerNeighborhood(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcDoors(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
         bool avoidance = false, bool traveler = false, bool melee = false, bool combat = false,
         bool lifecycle = false, bool spell = false, bool projectile = false, bool timed = false,
         bool area = false, bool playerTarget = false, bool collection = false, bool strike = false,
         bool knockout = false, bool defense = false, bool shield = false,
-        bool effectLifecycle = false, bool constantEffects = false, bool generalConstants = false, bool durableCasters = false, bool actorCasts = false, bool automaticCasts = false, bool weaponCompetition = false, bool fullSelection = false, bool castLifecycle = false, std::string_view encounterProfile = {});
+        bool effectLifecycle = false, bool constantEffects = false, bool generalConstants = false, bool durableCasters = false, bool actorCasts = false, bool automaticCasts = false, bool weaponCompetition = false, bool fullSelection = false, bool castLifecycle = false, std::string_view encounterProfile = {}, bool participantHits = false, bool weaponExecution = false);
     void checkNavigatingActor(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkDoorService(const std::filesystem::path& scratch, bool streaming = false);
     void checkAreaCrossings(const std::filesystem::path& scratch);

@@ -6751,6 +6751,20 @@ int main(int argc, char** argv)
                 true, true, true, true, true, false, false, false, false, false, false, false, true);
             std::cout << "PASS npc-knockout\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-weapon-execution")
+        {
+            TES3MP::Native::Testing::checkNpcWeaponExecution(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]));
+            std::cout << "PASS npc-weapon-execution\n"; return 0;
+        }
+        if (argc == 5 && std::string_view(argv[1]) == "npc-hit-resources")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, false, false, false, false, false, false, false,
+                false, true, false, false, false, false, false, false, false, false, false, false, {}, true);
+            std::cout << "PASS npc-hit-resources\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "npc-armor-block")
         {
             const auto root = std::filesystem::absolute(argv[2]);

@@ -1,4 +1,5 @@
 #include "melee_animation.hpp"
+#include "hit_animation.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -18,8 +19,8 @@ namespace TES3MP::Native
     }
 
     MeleeAnimation::MeleeAnimation(const SceneUtil::TextKeyMap& keys, std::string group,
-        std::string attack, float speed)
-        : mGroup(std::move(group)), mSpeed(speed)
+        std::string attack, float speed, std::string identity)
+        : mGroup(std::move(group)), mIdentity(std::move(identity)), mSpeed(speed)
     {
         if (mGroup.empty() || mGroup.size() > 64 || !std::isfinite(speed) || speed <= 0 || speed > 100
             || (attack != "chop" && attack != "slash" && attack != "thrust"))
@@ -45,24 +46,10 @@ namespace TES3MP::Native
             const std::string strength(MWMechanics::attackFollowStrength(static_cast<float>(i) / 2));
             mFollow[i] = range(strength + " follow start", strength + " follow stop");
         }
-        for (unsigned i = 0; i < mHitRecoveryTicks.size(); ++i)
-        {
-            SceneUtil::AnimationKeys found;
-            if (!SceneUtil::findAnimationKeys(keys, "hit" + std::to_string(i + 1),
-                    "start", "stop", found)) break;
-            const float duration = found.mStop->first - found.mStart->first;
-            if (!std::isfinite(duration) || duration < 0 || duration > 60)
-                throw std::invalid_argument("Native hit recovery clip duration invalid");
-            mHitRecoveryTicks[i] = std::max(1u, unsigned(std::ceil(duration * 30.f)));
-            ++mHitRecoveryCount;
-        }
-        if (mHitRecoveryCount == mHitRecoveryTicks.size())
-        {
-            SceneUtil::AnimationKeys extra;
-            if (SceneUtil::findAnimationKeys(keys, "hit" + std::to_string(mHitRecoveryCount + 1),
-                    "start", "stop", extra))
-                throw std::invalid_argument("Native hit recovery group count exceeded");
-        }
+        const std::array sources{&keys};
+        const auto hits = readHitAnimations(sources);
+        mHitRecoveryTicks = hits.ticks;
+        mHitRecoveryCount = hits.count;
         // Use the engine's first prefix match for getTextKeyTime. Reject
         // duplicate/inconsistent timing rather than silently mix two clips.
         auto keyTime = [&](std::string_view suffix) {

@@ -317,6 +317,11 @@ namespace TES3MP::Native
             std::span<const char> image() const;
         };
         PreparedEquipment prepare(EquipmentCaller caller, EquipmentCommand command);
+        // Trusted AI equipment; client commands still authorize player owners only.
+        PreparedEquipment prepareNpcEquipment(size_t owner, ESM::RefNum item);
+    private:
+        PreparedEquipment prepareEquipment(size_t owner, EquipmentCommand command);
+    public:
         PersistenceResult commit(PreparedEquipment& prepared, EquipmentSessionCommitter& durability,
             std::unique_ptr<const EquipmentSuccess>& output, EquipmentBytes& bytes);
 

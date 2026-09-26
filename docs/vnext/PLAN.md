@@ -59,21 +59,23 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 3. Retain bounded simulation around active travelers after both players leave.
    Cover processing range, cell boundaries, unload/restart and preserved
    destinations/completion; never simulate an actor twice.
-4. Advance autonomous NPC combat through the shared casting lifecycle in verified
-   slices. Connect selection/execution with OpenMW priorities, weapon competition
-   and equipped WhenUsed. Require server-side line-of-sight targeting in a follow-up
-   slice; test occluded and newly visible players. Implement wind-up, animation
-   release, recovery and interruption; revalidate target visibility, source and
-   life before payment/launch. Persist preparation, wind-up and flight; rejected
-   writes must leak no charge, RNG, effects or successful events. Broaden timed
-   attribute/skill arguments and effect/range combinations; retire replaced special
-   cases while retaining legacy recovery. Prove varied vanilla/TR encounters with
-   two desktop clients casting concurrently with the NPC under loss, disconnect,
-   reconnect and restart. Endpoint: independent NPC actions against both players,
-   durable outcomes and matching presentation. Then finish knockout, unarmed health
-   damage, armor, block and remaining melee. Preserve source, caster/life, RNG,
-   expiry and death attribution.
-5. Switch player movement last, after unified collision/physics and smoothness
+4. Preserve autonomous casting through shared OpenMW selection, equipped WhenUsed,
+   visibility, animation-key release/recovery and interruption. Retain durable
+   source/caster/life, RNG, effects, expiry and two concurrent player casts;
+   broaden remaining unsupported effects before M4 exit.
+5. Complete physical combat, from weapon selection through durable death/loot and
+   two-client encounters, in connected bounded slices. Equip selected carried
+   weapons; execute repeated melee attacks and all attack modes, bows/crossbows
+   with ammunition, and thrown weapons. Bind each participant's actual animation
+   resources and hit/release keys. Complete unarmed fatigue, knockout, health damage
+   while down, get-up timing, hit recovery, armor, block, resistances and wear.
+   Compose physical attacks, concurrent casting, enchantments, interruption,
+   attributed death, corpse inventory and respawn in one authoritative transaction.
+   Persist swings, flight, ammunition expenditure, recovery, knockout, death and
+   loot; failed writes leak no resources, RNG, damage or successful events. Prove
+   varied vanilla/TR weapons and armor with two desktop clients fighting and casting
+   alongside the NPC under loss, disconnect, reconnect and restart.
+6. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.
 

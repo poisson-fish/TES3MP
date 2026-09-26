@@ -28,8 +28,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t GeneralConstantActorCampaignMagic = 0x4750434154335354;
     inline constexpr uint64_t CasterActorCampaignMagic = 0x4850434154335354;
     inline constexpr uint64_t CastLifecycleCampaignMagic = 0x4950434154335354;
+    inline constexpr uint64_t WeaponExecutionCampaignMagic = 0x4a50434154335354;
+    inline constexpr bool hasCastLifecycle(uint64_t magic)
+    { return magic == CastLifecycleCampaignMagic || magic == WeaponExecutionCampaignMagic; }
     inline constexpr bool hasCasterState(uint64_t magic)
-    { return magic == CasterActorCampaignMagic || magic == CastLifecycleCampaignMagic; }
+    { return magic == CasterActorCampaignMagic || hasCastLifecycle(magic); }
     inline constexpr bool hasGeneralConstantState(uint64_t magic)
     { return magic == GeneralConstantActorCampaignMagic || hasCasterState(magic); }
     inline constexpr bool hasConstantState(uint64_t magic)
@@ -195,7 +198,8 @@ namespace TES3MP::Native
                 value.target = getAreaWord(bytes, offset);
                 const auto contact = getAreaWord(bytes, offset);
                 if (contact > 1 || (contact && (!value.target || !value.state.mHit))
-                    || (value.state.mReleased != bool(value.target)))
+                    || (value.state.mReleased && !value.target)
+                    || (magic != WeaponExecutionCampaignMagic && value.state.mReleased != bool(value.target)))
                     throw std::invalid_argument("Native melee contact state invalid");
                 value.contact = bool(contact);
             }
@@ -417,7 +421,7 @@ namespace TES3MP::Native
                         effect.argument = getAreaWord(bytes, offset);
                         effect.ordinal = getAreaWord(bytes, offset);
                         if (effect.argument > 35 || effect.ordinal >= 8
-                            || (magic != CastLifecycleCampaignMagic && effect.sourceKind != 3 && (effect.argument || effect.ordinal)))
+                            || (!hasCastLifecycle(magic) && effect.sourceKind != 3 && (effect.argument || effect.ordinal)))
                             throw std::invalid_argument("Native effect argument or ordinal invalid");
                     }
                     else if (effect.sourceKind == 3) effect.argument = 8; // V36 Luck.
@@ -448,7 +452,7 @@ namespace TES3MP::Native
         }
         std::string castResource;
         std::optional<ActorCampaignCast> casting;
-        if (magic == CastLifecycleCampaignMagic)
+        if (hasCastLifecycle(magic))
         {
             const auto size = getAreaWord(bytes, offset);
             if (!size || size > 1024 || size > bytes.size() - offset)
