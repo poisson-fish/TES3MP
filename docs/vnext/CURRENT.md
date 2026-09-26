@@ -1,49 +1,48 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** The [native host](../../apps/tes3mp-server/native/inventory_host.hpp)
-simulates one traveler, doors and frozen actors with two 60 Hz steps.
-Player contact uses a proxy sphere.
+**M4 in [PLAN.md](PLAN.md) is active.** The [host](../../apps/tes3mp-server/native/inventory_host.hpp)
+simulates one traveler and doors at 60 Hz; neighbors freeze. Player contact uses
+a proxy sphere.
 
-V34 composes armor/block/wear, hit recovery, knockout, RNG and death.
-Animation-key recovery pauses offline; player hit resources remain unbound.
-Both directions share normal-weapon resistance and knockout damage
-(`build/logs/m4-melee-defense-recovery-gate-final.log`).
+V34 composes armor/block/wear, knockout, RNG, death and offline-paused hit
+recovery. Player hit resources remain unbound. Both directions share normal-weapon
+resistance and knockout damage (`build/logs/m4-melee-defense-recovery-gate-final.log`).
 
-V35 composes spell/enchantment cost/charge, eight projectiles, areas and actor
-effects: source/caster, rolled magnitude, resistance, duration, expiry and RNG.
-Timed damage/restoration and statuses feed shared combat; inactive expiry pauses
-and NPC effect deaths retain attribution. Spells, `WhenUsed` and `WhenStrikes`
-install instances. Older image paths remain.
+V35 composes spell/enchantment cost/charge, eight projectiles, areas and timed
+effects with source/caster, rolls, resistance, expiry and RNG. Inactive expiry
+pauses; NPC effect deaths retain attribution. Spells, WhenUsed and WhenStrikes
+install instances. Older images retain recovery.
+Vanilla/synthetic loss/reconnect: `build/m4-actor-effects-live-03/result.json`;
+healing restart: `build/m4-actor-effects-restart-live-02/result.json`.
 
-Vanilla/synthetic two-client loss/reconnect evidence:
-`build/m4-actor-effects-live-03/result.json`; healing restart:
-`build/m4-actor-effects-restart-live-02/result.json`.
-TR prepares 130 added spells and 98 use/strike enchantments
-(`build/logs/m4-actor-effects-mod-records-final.log`); live outcomes remain unproved.
+V37 constants cover Fortify Attribute/Skill and Resist Magicka/Normal
+Weapons/Fire/Frost/Shock/Poison across equipment slots. Eight effects/item,
+512 instances; sources/rolls persist. Atomic replacement/respawn and stat overlays
+preserve saved base stats.
+Other constants reject. Fresh campaign required; V36 Luck-shirt/V35 recovery remains.
+`tes3mp_native_loadout_tests npc-general-constants`:
+`build/logs/m4-general-constants-test-final.log`. All-slot presentation remains unproved.
 
-V37 generalizes equipped constants to Fortify Attribute, Fortify Skill and
-Resist Magicka/Normal Weapons/Fire/Frost/Shock/Poison across equipment slots.
-Bounds: eight effects/item, 512 instances. Arguments, ordinals, sources and rolls
-persist; replacement/respawn derives new sources atomically. OpenMW stat overlays
-never accumulate in saved base stats. Other constants reject. V37 requires a fresh
-campaign; V36 fixed Luck-shirt and V35 effect images retain recovery.
+Shared caster preparation separates combat/inventory indices. Synthetic
+`npc-actor-effect-strike` proves slot 2/owner 3, attribution and atomic restart
+(`build/logs/m4-caster-context-test-05.log`); player regression:
+`build/logs/m4-caster-player-test-01.log`.
 
-`tes3mp_native_loadout_tests npc-general-constants` proves synthetic mixed
-attributes/skills/resistances, duplicate/zero/variable rolls, atomic rejection,
-forged-source rejection, exact restart/RNG, derived resources and damage
-(`build/logs/m4-general-constants-test-final.log`). Legacy/stock evidence:
-`build/logs/m4-general-constants-legacy.log`, `build/logs/m4-general-constants-stock.log`.
-All-slot presentation and AI casting remain unproved.
+Detached AI selection/preparation shares OpenMW ratings, resistance, restoration,
+range settings, eligibility and rechargeable-item preference with stock callers.
+Bounded sources preserve ordered effects, identity and proposed charge without
+mutation or RNG consumption. `tes3mp_native_ai_magic_tests` filters `selection`,
+`rejection`, `items`, `launch` pass individually
+(`build/logs/m4-ai-magic-{selection,rejection,items,launch}.log`). Spell launch
+shares player cost/failure/RNG behavior and defers Target effects.
+Build: `build/logs/m4-ai-magic-build-final.log`.
+The `records` filter selects 284 spells/100 WhenUsed enchantments, including
+106/30 TR sources and 85 mixed records (`build/logs/m4-ai-magic-records.log`).
+Real records use synthetic caster/equipment/activity; live TR outcomes remain
+unproved. Selection is not scheduled by the authoritative tick; weapon/potion
+competition, timing and automatic AI launch remain pending.
 
-Shared caster context separates combat/inventory indices and identity. Player
-items and player/AI strikes share preparation/charge calculation.
-Synthetic `npc-actor-effect-strike` proves NPC combat slot 2/inventory owner 3,
-attribution, charge, rejection, exact restart and ward-modified melee
-(`build/logs/m4-caster-context-test-05.log`). Build: `build/logs/m4-caster-context-build-04.log`.
-Player spell/item regression passes `npc-actor-effects`
-(`build/logs/m4-caster-player-test-01.log`).
-
-Next: AI spell/WhenUsed selection/launch, durable caster kind/life and projection.
-Then timed arguments/constants, durability and retirement with legacy recovery.
-Prove real mod outcomes with two clients under loss, reconnect/restart, concurrent
-casts and failed persistence; then finish melee.
+Next: wire prepared AI sources into shared tick/launch after durable caster
+kind/life and actor-cast projection; preserve concurrent player use. Then timed
+arguments/constants, retirement with legacy recovery, and two-client real-mod
+proof under loss, reconnect/restart and failed persistence; then finish melee.

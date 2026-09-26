@@ -35,7 +35,7 @@ tes3mp_verify_target_includes(tes3mp_native_placement_scene
 
 # Detached M4 navigation/physics candidates; the host owns durable installation.
 add_library(tes3mp_native_actor_runtime STATIC actor_scene.cpp actor_scene.hpp melee_animation.cpp melee_animation.hpp
-    magic_runtime.cpp magic_runtime.hpp)
+    magic_runtime.cpp magic_runtime.hpp ai_magic.cpp ai_magic.hpp)
 target_compile_features(tes3mp_native_actor_runtime PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_actor_runtime PRIVATE tes3mp_native_loadout openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_actor_runtime ALLOWED tes3mp_native_loadout openmw-lib)
@@ -72,6 +72,13 @@ target_link_libraries(tes3mp_native_actor_probe PRIVATE tes3mp_native_actor_runt
 tes3mp_verify_target_dependencies(tes3mp_native_actor_probe ALLOWED tes3mp_native_actor_runtime tes3mp_native_loadout)
 
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
+add_executable(tes3mp_native_ai_magic_tests ai_magic_tests.cpp)
+target_compile_features(tes3mp_native_ai_magic_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_ai_magic_tests PRIVATE tes3mp_native_actor_runtime tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_ai_magic_tests ALLOWED tes3mp_native_actor_runtime tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_ai_magic_tests
+    FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+
 # M4 movement seam only: the stock solver is linked, without constructing its
 # World/renderer/player services. This does not yet install an NPC authority.
 add_executable(tes3mp_native_actor_tests actor_physics_tests.cpp)

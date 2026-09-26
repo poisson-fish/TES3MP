@@ -129,6 +129,177 @@ namespace MWMechanics
         return types;
     }
 
+    std::optional<float> rateCommonEffect(const ESM::ENAMstruct& effect,
+        const CreatureStats& actor, float restoreMagickaPriority)
+    {
+        float rating = 1.f;
+        if (effect.mEffectID == ESM::MagicEffect::ResistFire || effect.mEffectID == ESM::MagicEffect::ResistFrost
+            || effect.mEffectID == ESM::MagicEffect::ResistMagicka
+            || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
+            || effect.mEffectID == ESM::MagicEffect::ResistParalysis
+            || effect.mEffectID == ESM::MagicEffect::ResistPoison || effect.mEffectID == ESM::MagicEffect::ResistShock
+            || effect.mEffectID == ESM::MagicEffect::SpellAbsorption || effect.mEffectID == ESM::MagicEffect::Reflect)
+            return 0.f; // probably useless since we don't know in advance what the enemy will cast
+
+        // don't cast these for now as they would make the NPC cast the same effect over and over again, especially
+        // when they have potions
+        else if (effect.mEffectID == ESM::MagicEffect::FortifyAttribute
+            || effect.mEffectID == ESM::MagicEffect::FortifyHealth
+            || effect.mEffectID == ESM::MagicEffect::FortifyMagicka
+            || effect.mEffectID == ESM::MagicEffect::FortifyFatigue
+            || effect.mEffectID == ESM::MagicEffect::FortifySkill
+            || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
+            || effect.mEffectID == ESM::MagicEffect::FortifyAttack)
+            return 0.f;
+        if (effect.mEffectID == ESM::MagicEffect::RestoreHealth
+            || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
+            || effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
+        {
+            if (effect.mRange == ESM::RT_Self)
+            {
+                auto targetStat = Stats::Health;
+                if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka)
+                    targetStat = Stats::Magicka;
+                else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
+                    targetStat = Stats::Fatigue;
+
+                const MWMechanics::CreatureStats& stats = actor;
+                const DynamicStat<float>& current = stats.getDynamic(targetStat);
+                if (current.getModified() <= 0.f) return 0.f;
+                // NB: this currently assumes the hardcoded magic effect flags are used
+                const float magnitude = (effect.mMagnMin + effect.mMagnMax) / 2.f;
+                const float toHeal = magnitude * std::max(1, effect.mDuration);
+                const float damage = std::max(current.getModified() - current.getCurrent(), 0.f);
+                float priority = 0.f;
+                if (effect.mEffectID == ESM::MagicEffect::RestoreHealth)
+                    priority = 4.f;
+                else if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka)
+                    priority = restoreMagickaPriority;
+                else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
+                    priority = 2.f;
+                float overheal = 0.f;
+                float heal = toHeal;
+                if (damage < toHeal && current.getCurrent() > current.getModified() * 0.5)
+                {
+                    overheal = toHeal - damage;
+                    heal = damage;
+                }
+
+                priority = (priority - 1.f) / 2.f * std::pow((damage / current.getModified() + 0.6f), priority * 2)
+                    + priority * (heal - 2.f * overheal) / current.getModified() - 0.5f;
+                rating = priority;
+            }
+        }
+        else if (effect.mEffectID != ESM::MagicEffect::DamageHealth
+            && effect.mEffectID != ESM::MagicEffect::DamageMagicka
+            && effect.mEffectID != ESM::MagicEffect::DamageFatigue
+            && effect.mEffectID != ESM::MagicEffect::FireDamage
+            && effect.mEffectID != ESM::MagicEffect::FrostDamage
+            && effect.mEffectID != ESM::MagicEffect::ShockDamage
+            && effect.mEffectID != ESM::MagicEffect::Poison
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToNormalWeapons
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToFire
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToFrost
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToShock
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToPoison
+            && effect.mEffectID != ESM::MagicEffect::WeaknessToMagicka)
+            return std::nullopt;
+        return rating;
+    }
+
+    float adjustEffectRating(const ESM::ENAMstruct& effect, float rating,
+        const CreatureStats& actor, const CreatureStats* enemy, const MWWorld::ESMStore& store,
+        bool actorUnderwater, bool enemyUnderwater)
+    {
+        // Underwater casting not possible
+        if (effect.mRange == ESM::RT_Target)
+        {
+            if (actorUnderwater)
+                return 0.f;
+
+            if (!enemy)
+                return 0.f;
+
+            if (enemyUnderwater)
+                return 0.f;
+        }
+
+        const ESM::MagicEffect* magicEffect
+            = store.get<ESM::MagicEffect>().find(effect.mEffectID);
+        if (magicEffect->mData.mFlags & ESM::MagicEffect::Harmful)
+        {
+            rating *= -1.f;
+
+            if (!enemy)
+                return 0.f;
+
+            // Check resistance for harmful effects
+            const CreatureStats& stats = *enemy;
+
+            float resistance = MWMechanics::getEffectResistanceAttribute(effect.mEffectID, &stats.getMagicEffects());
+
+            rating *= (1.f - std::min(resistance, 100.f) / 100.f);
+        }
+
+        // for harmful no-magnitude effects (e.g. silence) check if enemy is already has them
+        // for non-harmful no-magnitude effects (e.g. bound items) check if actor is already has them
+        if (magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+        {
+            if (magicEffect->mData.mFlags & ESM::MagicEffect::Harmful)
+            {
+                const CreatureStats& stats = *enemy;
+
+                if (stats.getMagicEffects().getOrDefault(effect.mEffectID).getMagnitude() > 0)
+                    return 0.f;
+            }
+            else
+            {
+                const CreatureStats& stats = actor;
+
+                if (stats.getMagicEffects().getOrDefault(effect.mEffectID).getMagnitude() > 0)
+                    return 0.f;
+            }
+        }
+
+        rating *= calcEffectCost(effect, store, magicEffect);
+
+        // Currently treating all "on target" or "on touch" effects to target the enemy actor.
+        // Combat AI is egoistic, so doesn't consider applying positive effects to friendly actors.
+        if (effect.mRange != ESM::RT_Self)
+            rating *= -1.f;
+
+        return rating;
+    }
+
+    float effectRatingMultiplier(int range, const MWWorld::ESMStore& store)
+    {
+        return store.get<ESM::GameSetting>().find(range == ESM::RT_Target
+            ? "fAIRangeMagicSpellMult" : "fAIMagicSpellMult")->mValue.getFloat();
+    }
+
+    float spellRatingMultiplier(const ESM::Spell& spell, float successChance,
+        bool racialPower, bool activeOnSelf, bool activeOnEnemy)
+    {
+        if (spell.mData.mType != ESM::Spell::ST_Spell || successChance <= 0.f || racialPower)
+            return 0.f;
+        const int types = getRangeTypes(spell.mEffects);
+        if (((types & Self) && activeOnSelf) || ((types & (Touch | Target)) && activeOnEnemy))
+            return 0.f;
+        return successChance / 100.f;
+    }
+
+    float magicItemRatingMultiplier(const ESM::Enchantment& enchantment, bool npc, bool equipped,
+        float charge, int castCost, bool activeOnSelf, float enemyDuration)
+    {
+        const int types = getRangeTypes(enchantment.mEffects);
+        if (((types & Self) && activeOnSelf) || ((types & (Touch | Target)) && enemyDuration > 3.f))
+            return 0.f;
+        if (enchantment.mData.mType == ESM::Enchantment::CastOnce) return 1.f;
+        if (enchantment.mData.mType != ESM::Enchantment::WhenUsed || (npc && !equipped)
+            || (charge != -1.f && charge < castCost)) return 0.f;
+        return 1.25f; // Prefer rechargeable magic items over spells.
+    }
+
     float ratePotion(const MWWorld::Ptr& item, const MWWorld::Ptr& actor)
     {
         if (item.getType() != ESM::Potion::sRecordId)
@@ -156,14 +327,10 @@ namespace MWMechanics
                 return 0.f;
         }
 
-        // Spells don't stack, so early out if the spell is still active on the target
-        int types = getRangeTypes(spell->mEffects);
-        if ((types & Self) && isSpellActive(actor, actor, spell->mId))
-            return 0.f;
-        if (((types & Touch) || (types & Target)) && !enemy.isEmpty() && isSpellActive(actor, enemy, spell->mId))
-            return 0.f;
-
-        return rateEffects(spell->mEffects, actor, enemy) * (successChance / 100.f);
+        const float multiplier = spellRatingMultiplier(*spell, successChance, false,
+            isSpellActive(actor, actor, spell->mId),
+            !enemy.isEmpty() && isSpellActive(actor, enemy, spell->mId));
+        return multiplier == 0.f ? 0.f : rateEffects(spell->mEffects, actor, enemy) * multiplier;
     }
 
     float rateMagicItem(const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor, const MWWorld::Ptr& enemy)
@@ -174,37 +341,15 @@ namespace MWMechanics
         const ESM::Enchantment* enchantment = MWBase::Environment::get().getESMStore()->get<ESM::Enchantment>().find(
             ptr.getClass().getEnchantment(ptr));
 
-        // Spells don't stack, so early out if the spell is still active on the target
-        int types = getRangeTypes(enchantment->mEffects);
-        if ((types & Self)
-            && actor.getClass().getCreatureStats(actor).getActiveSpells().isSpellActive(ptr.getCellRef().getRefId()))
-            return 0.f;
-
-        if (types & (Touch | Target) && getSpellDuration(enemy, ptr.getCellRef().getRefId()) > 3)
-            return 0.f;
-
-        if (enchantment->mData.mType == ESM::Enchantment::CastOnce)
-        {
-            return rateEffects(enchantment->mEffects, actor, enemy);
-        }
-        else if (enchantment->mData.mType == ESM::Enchantment::WhenUsed)
-        {
-            // Creatures can not wear armor/clothing, so allow creatures to use non-equipped items,
-            if (actor.getClass().isNpc() && !actor.getClass().getInventoryStore(actor).isEquipped(ptr))
-                return 0.f;
-
-            int castCost = getEffectiveEnchantmentCastCost(*enchantment, actor);
-
-            if (ptr.getCellRef().getEnchantmentCharge() != -1 && ptr.getCellRef().getEnchantmentCharge() < castCost)
-                return 0.f;
-
-            float rating = rateEffects(enchantment->mEffects, actor, enemy);
-
-            rating *= 1.25f; // prefer rechargeable magic items over spells
-            return rating;
-        }
-
-        return 0.f;
+        const bool npc = actor.getClass().isNpc();
+        const float multiplier = magicItemRatingMultiplier(*enchantment, npc,
+            !npc || actor.getClass().getInventoryStore(actor).isEquipped(ptr),
+            ptr.getCellRef().getEnchantmentCharge(),
+            enchantment->mData.mType == ESM::Enchantment::WhenUsed
+                ? getEffectiveEnchantmentCastCost(*enchantment, actor) : 0,
+            actor.getClass().getCreatureStats(actor).getActiveSpells().isSpellActive(ptr.getCellRef().getRefId()),
+            enemy.isEmpty() ? 0.f : getSpellDuration(enemy, ptr.getCellRef().getRefId()));
+        return multiplier == 0.f ? 0.f : rateEffects(enchantment->mEffects, actor, enemy) * multiplier;
     }
 
     float rateEffect(const ESM::ENAMstruct& effect, const MWWorld::Ptr& actor, const MWWorld::Ptr& enemy)
@@ -212,7 +357,15 @@ namespace MWMechanics
         // NOTE: enemy may be empty
 
         float rating = 1;
-        if (effect.mEffectID == ESM::MagicEffect::Soultrap || effect.mEffectID == ESM::MagicEffect::AlmsiviIntervention
+        const auto common = rateCommonEffect(effect, actor.getClass().getCreatureStats(actor),
+            effect.mEffectID == ESM::MagicEffect::RestoreMagicka && effect.mRange == ESM::RT_Self
+                ? getRestoreMagickaPriority(actor) : 0.f);
+        if (common)
+        {
+            if (*common == 0.f) return 0.f;
+            rating = *common;
+        }
+        else if (effect.mEffectID == ESM::MagicEffect::Soultrap || effect.mEffectID == ESM::MagicEffect::AlmsiviIntervention
             || effect.mEffectID == ESM::MagicEffect::DivineIntervention
             || effect.mEffectID == ESM::MagicEffect::CalmHumanoid || effect.mEffectID == ESM::MagicEffect::CalmCreature
             || effect.mEffectID == ESM::MagicEffect::FrenzyHumanoid
@@ -298,24 +451,6 @@ namespace MWMechanics
             return 0.f; // TODO: implement based on attribute damage
         else if (effect.mEffectID == ESM::MagicEffect::RestoreSkill)
             return 0.f; // TODO: implement based on skill damage
-        else if (effect.mEffectID == ESM::MagicEffect::ResistFire || effect.mEffectID == ESM::MagicEffect::ResistFrost
-            || effect.mEffectID == ESM::MagicEffect::ResistMagicka
-            || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
-            || effect.mEffectID == ESM::MagicEffect::ResistParalysis
-            || effect.mEffectID == ESM::MagicEffect::ResistPoison || effect.mEffectID == ESM::MagicEffect::ResistShock
-            || effect.mEffectID == ESM::MagicEffect::SpellAbsorption || effect.mEffectID == ESM::MagicEffect::Reflect)
-            return 0.f; // probably useless since we don't know in advance what the enemy will cast
-
-        // don't cast these for now as they would make the NPC cast the same effect over and over again, especially
-        // when they have potions
-        else if (effect.mEffectID == ESM::MagicEffect::FortifyAttribute
-            || effect.mEffectID == ESM::MagicEffect::FortifyHealth
-            || effect.mEffectID == ESM::MagicEffect::FortifyMagicka
-            || effect.mEffectID == ESM::MagicEffect::FortifyFatigue
-            || effect.mEffectID == ESM::MagicEffect::FortifySkill
-            || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
-            || effect.mEffectID == ESM::MagicEffect::FortifyAttack)
-            return 0.f;
         else if (effect.mEffectID == ESM::MagicEffect::Burden)
         {
             if (enemy.isEmpty())
@@ -399,44 +534,6 @@ namespace MWMechanics
             {
                 rating = 0.5f;
                 rating *= getRestoreMagickaPriority(actor);
-            }
-        }
-        else if (effect.mEffectID == ESM::MagicEffect::RestoreHealth
-            || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
-            || effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
-        {
-            if (effect.mRange == ESM::RT_Self)
-            {
-                auto targetStat = Stats::Health;
-                if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka)
-                    targetStat = Stats::Magicka;
-                else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
-                    targetStat = Stats::Fatigue;
-
-                const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-                const DynamicStat<float>& current = stats.getDynamic(targetStat);
-                // NB: this currently assumes the hardcoded magic effect flags are used
-                const float magnitude = (effect.mMagnMin + effect.mMagnMax) / 2.f;
-                const float toHeal = magnitude * std::max(1, effect.mDuration);
-                const float damage = std::max(current.getModified() - current.getCurrent(), 0.f);
-                float priority = 0.f;
-                if (effect.mEffectID == ESM::MagicEffect::RestoreHealth)
-                    priority = 4.f;
-                else if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka)
-                    priority = getRestoreMagickaPriority(actor);
-                else if (effect.mEffectID == ESM::MagicEffect::RestoreFatigue)
-                    priority = 2.f;
-                float overheal = 0.f;
-                float heal = toHeal;
-                if (damage < toHeal && current.getCurrent() > current.getModified() * 0.5)
-                {
-                    overheal = toHeal - damage;
-                    heal = damage;
-                }
-
-                priority = (priority - 1.f) / 2.f * std::pow((damage / current.getModified() + 0.6f), priority * 2)
-                    + priority * (heal - 2.f * overheal) / current.getModified() - 0.5f;
-                rating = priority;
             }
         }
         else if (effect.mEffectID == ESM::MagicEffect::Dispel)
@@ -643,64 +740,13 @@ namespace MWMechanics
                 return 0.f;
         }
 
-        // Underwater casting not possible
-        if (effect.mRange == ESM::RT_Target)
-        {
-            if (MWBase::Environment::get().getWorld()->isUnderwater(MWWorld::ConstPtr(actor), 0.75f))
-                return 0.f;
-
-            if (enemy.isEmpty())
-                return 0.f;
-
-            if (MWBase::Environment::get().getWorld()->isUnderwater(MWWorld::ConstPtr(enemy), 0.75f))
-                return 0.f;
-        }
-
-        const ESM::MagicEffect* magicEffect
-            = MWBase::Environment::get().getESMStore()->get<ESM::MagicEffect>().find(effect.mEffectID);
-        if (magicEffect->mData.mFlags & ESM::MagicEffect::Harmful)
-        {
-            rating *= -1.f;
-
-            if (enemy.isEmpty())
-                return 0.f;
-
-            // Check resistance for harmful effects
-            CreatureStats& stats = enemy.getClass().getCreatureStats(enemy);
-
-            float resistance = MWMechanics::getEffectResistanceAttribute(effect.mEffectID, &stats.getMagicEffects());
-
-            rating *= (1.f - std::min(resistance, 100.f) / 100.f);
-        }
-
-        // for harmful no-magnitude effects (e.g. silence) check if enemy is already has them
-        // for non-harmful no-magnitude effects (e.g. bound items) check if actor is already has them
-        if (magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude)
-        {
-            if (magicEffect->mData.mFlags & ESM::MagicEffect::Harmful)
-            {
-                CreatureStats& stats = enemy.getClass().getCreatureStats(enemy);
-
-                if (stats.getMagicEffects().getOrDefault(effect.mEffectID).getMagnitude() > 0)
-                    return 0.f;
-            }
-            else
-            {
-                CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-
-                if (stats.getMagicEffects().getOrDefault(effect.mEffectID).getMagnitude() > 0)
-                    return 0.f;
-            }
-        }
-
-        rating *= calcEffectCost(effect, magicEffect);
-
-        // Currently treating all "on target" or "on touch" effects to target the enemy actor.
-        // Combat AI is egoistic, so doesn't consider applying positive effects to friendly actors.
-        if (effect.mRange != ESM::RT_Self)
-            rating *= -1.f;
-
-        return rating;
+        const auto& store = *MWBase::Environment::get().getESMStore();
+        const bool target = effect.mRange == ESM::RT_Target;
+        return adjustEffectRating(effect, rating, actor.getClass().getCreatureStats(actor),
+            enemy.isEmpty() ? nullptr : &enemy.getClass().getCreatureStats(enemy), store,
+            target && MWBase::Environment::get().getWorld()->isUnderwater(MWWorld::ConstPtr(actor), 0.75f),
+            target && !enemy.isEmpty()
+                && MWBase::Environment::get().getWorld()->isUnderwater(MWWorld::ConstPtr(enemy), 0.75f));
     }
 
     float rateEffects(
@@ -710,21 +756,13 @@ namespace MWMechanics
 
         float rating = 0.f;
 
-        const MWWorld::Store<ESM::GameSetting>& gmst
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-        static const float fAIMagicSpellMult = gmst.find("fAIMagicSpellMult")->mValue.getFloat();
-        static const float fAIRangeMagicSpellMult = gmst.find("fAIRangeMagicSpellMult")->mValue.getFloat();
+        const auto& store = *MWBase::Environment::get().getESMStore();
 
         for (const ESM::IndexedENAMstruct& effect : list.mList)
         {
             float effectRating = rateEffect(effect.mData, actor, enemy);
             if (useSpellMult)
-            {
-                if (effect.mData.mRange == ESM::RT_Target)
-                    effectRating *= fAIRangeMagicSpellMult;
-                else
-                    effectRating *= fAIMagicSpellMult;
-            }
+                effectRating *= effectRatingMultiplier(effect.mData.mRange, store);
             rating += effectRating;
         }
         return rating;

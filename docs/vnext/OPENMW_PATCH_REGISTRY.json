@@ -3,6 +3,25 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-007",
+      "slice": "explicit AI magic ratings and bounded source preparation",
+      "owner": "OpenMW mechanics and native actor runtime",
+      "purpose": "Share common combat-effect priorities, restoration, resistance, effect cost, range settings, spell eligibility and enchanted-item preference through explicit actor/content/activity inputs. Stock Ptr callers retain world-specific effects and queries. The native selector prepares known spells and equipped WhenUsed items with existing player cost/charge helpers, preserving source identity and ordered effects without mutation or RNG consumption. Unsupported plans are skipped whole. Automatic server scheduling, weapon/potion competition, durable actor caster identity and actor-cast replication remain pending.",
+      "paths": [
+        "apps/openmw/mwmechanics/spellpriority.cpp",
+        "apps/openmw/mwmechanics/spellpriority.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_ai_magic_tests selection",
+        "tes3mp_native_ai_magic_tests rejection",
+        "tes3mp_native_ai_magic_tests items",
+        "tes3mp_native_ai_magic_tests launch",
+        "tes3mp_native_ai_magic_tests records"
+      ],
+      "disposition": "shared engine extraction and verified preparation; no automatic AI casting enabled",
+      "removal_condition": "OpenMW supplies equivalent explicit AI rating and source selection interfaces"
+    },
+    {
       "id": "M4-006",
       "slice": "explicit melee resources and detached directional animation scheduling",
       "owner": "OpenMW mechanics and native headless checks",
