@@ -879,7 +879,7 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view(argv[1]) == "native-capabilities")
     {
         const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),
-            nativeLeveledActorsCapability(), nativeActorMotionCapability() };
+            nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability() };
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
             versions, {}, required, testContentManifestId()));

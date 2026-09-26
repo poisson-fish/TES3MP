@@ -6,7 +6,7 @@
       "id": "M4-007",
       "slice": "explicit AI magic ratings and bounded source preparation",
       "owner": "OpenMW mechanics and native actor runtime",
-      "purpose": "Share common combat-effect priorities, restoration, resistance, effect cost, range settings, spell eligibility and enchanted-item preference through explicit actor/content/activity inputs. Stock Ptr callers retain world-specific effects and queries. The native selector prepares known spells and equipped WhenUsed items with existing player cost/charge helpers, preserving source identity and ordered effects without mutation or RNG consumption. Unsupported plans are skipped whole. Automatic server scheduling, weapon/potion competition, durable actor caster identity and actor-cast replication remain pending.",
+      "purpose": "Share common combat-effect priorities, restoration, resistance, effect cost, range settings, spell eligibility and enchanted-item preference through explicit actor/content/activity inputs. Stock Ptr callers retain world-specific effects and queries. The native selector prepares known spells and equipped WhenUsed items with existing player cost/charge helpers, preserving source identity and ordered effects without mutation or RNG consumption. Unsupported plans are skipped whole. Durable actor identity and trusted actor-cast execution/replication are wired through the composed native tick. Automatic server scheduling and weapon/potion competition remain pending.",
       "paths": [
         "apps/openmw/mwmechanics/spellpriority.cpp",
         "apps/openmw/mwmechanics/spellpriority.hpp"

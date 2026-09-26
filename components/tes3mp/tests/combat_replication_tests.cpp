@@ -1,9 +1,11 @@
 #include <tes3mp/combat_replication.hpp>
 #include <tes3mp/protocol_frame.hpp>
+#include "../protocol/generated/reliable_combat_event_batch_generated.h"
 
 #include <array>
 #include <cmath>
 #include <limits>
+#include <tuple>
 
 namespace
 {
@@ -145,6 +147,46 @@ namespace
                 == TES3MP::CombatReplicationDecodeErrorCode::InvalidMagicEffect;
     }
 
+    bool actor_casts_reject_malformed_wire_identity()
+    {
+        namespace Wire = TES3MP::Protocol::Schema::CombatEvent;
+        const auto decode = [](uint64_t caster, uint64_t life, uint8_t kind) {
+            flatbuffers::FlatBufferBuilder builder;
+            const auto header = Wire::CreateCombatEventHeader(builder, 1, 1, 1, 1);
+            const std::vector<Wire::MagicUseCombatEvent> events{
+                {caster, life, 42, 7, 1, 1, 0, 0, -5, -2, 0, 0,
+                    Wire::MagicUseSourceKind::Spell, Wire::MagicUseTargetKind::Player, true, false, kind}};
+            const auto root = Wire::CreateReliableCombatEventBatch(builder, header, 0, 0, builder.CreateVectorOfStructs(events));
+            Wire::FinishSizePrefixedReliableCombatEventBatchBuffer(builder, root);
+            return TES3MP::decodeReliableCombatEventBatch({reinterpret_cast<const std::byte*>(builder.GetBufferPointer()), builder.GetSize()});
+        };
+        for (const auto& [id, life, kind] : std::array<std::tuple<uint64_t, uint64_t, uint8_t>, 6>{
+                {{0, 1, 2}, {7, 0, 2}, {7, 1, 0}, {7, 1, 3}, {7, 1, 255}, {7, 2, 1}}})
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(decode(id, life, kind))) return false;
+        const auto actor = decode(7, 3, 2);
+        const auto player = decode(7, 1, 1);
+        if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(actor)
+            || !std::holds_alternative<TES3MP::ReliableCombatEventBatch>(player)) return false;
+        const auto& a = std::get<TES3MP::ReliableCombatEventBatch>(actor);
+        const auto& b = std::get<TES3MP::ReliableCombatEventBatch>(player);
+        if (!a.magicEvents()[0].actorCaster() || a.magicEvents()[0].casterLife != 3
+            || b.magicEvents()[0].actorCaster() || a.magicEvents()[0].caster == b.magicEvents()[0].caster) return false;
+        const std::array mixed{a.magicEvents()[0], b.magicEvents()[0]};
+        auto batch = std::get<TES3MP::ReliableCombatEventBatch>(TES3MP::ReliableCombatEventBatch::create(
+            value<TES3MP::SessionId>(1), TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(1),
+            value<TES3MP::CanonicalRevision>(1), {}, {}, mixed));
+        auto bytes = TES3MP::encodeReliableCombatEventBatch(batch);
+        if (std::get<TES3MP::ReliableCombatEventBatch>(TES3MP::decodeReliableCombatEventBatch(bytes)) != batch) return false;
+        // Reject the prior struct layout at the identifier, before interpreting its fields.
+        bytes[11] = std::byte('E');
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(TES3MP::decodeReliableCombatEventBatch(bytes))) return false;
+        auto invalid = mixed;
+        invalid[0].casterLife = 0;
+        return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(TES3MP::ReliableCombatEventBatch::create(
+            value<TES3MP::SessionId>(1), TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(1),
+            value<TES3MP::CanonicalRevision>(1), {}, {}, invalid));
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -162,7 +204,7 @@ int main()
 {
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
-            && frame_classes_are_pinned()
+            && actor_casts_reject_malformed_wire_identity() && frame_classes_are_pinned()
         ? 0
         : 1;
 }

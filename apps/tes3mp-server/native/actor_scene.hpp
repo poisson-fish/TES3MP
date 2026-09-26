@@ -76,7 +76,7 @@ namespace TES3MP::Native
         // First server-owned collision and impact point along a spell bolt
         // segment. Actor zero means world geometry; absence means clear.
         std::optional<ActorProjectileContact> projectileContact(const std::array<float, 3>& from,
-            const std::array<float, 3>& to) const;
+            const std::array<float, 3>& to, uint64_t casterActor = 0) const;
         uint64_t actorId() const noexcept;
         const std::string& fingerprint() const;
         bool enchantedWeaponsAreMagical() const;

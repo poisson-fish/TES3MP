@@ -77,6 +77,10 @@ Players retain life 1 across reconnect. NPC respawn clears effects on its body;
 effects on others retain the old caster life. V38 requires a fresh campaign;
 legacy recovery never invents missing life metadata.
 
+**Actor casts.** Trusted placement/life/source input composes with player commands;
+clients cannot submit it. NPC death cancels flights; installed effects retain
+attribution. V38 retains its layout. T3C2 events require capability 20 at admission.
+
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays
 equipped; replacement and respawn install new sources in the same transaction.

@@ -254,7 +254,7 @@ namespace TES3MP
 
     struct MagicUseCombatEvent
     {
-        PlayerId casterPlayerId;
+        std::variant<PlayerId, ActorId> caster;
         MagicUseSourceKind sourceKind = MagicUseSourceKind::Spell;
         std::uint64_t sourceId = 0;
         MagicUseTargetKind targetKind = MagicUseTargetKind::Self;
@@ -269,6 +269,10 @@ namespace TES3MP
         float targetFatigueDelta = 0.f;
         float targetMagickaDelta = 0.f;
         bool targetDied = false;
+        std::uint64_t casterLife = 1;
+        std::uint64_t casterId() const noexcept
+        { return std::visit([](auto id) { return id.value(); }, caster); }
+        bool actorCaster() const noexcept { return std::holds_alternative<ActorId>(caster); }
         friend constexpr bool operator==(MagicUseCombatEvent, MagicUseCombatEvent) noexcept = default;
     };
 

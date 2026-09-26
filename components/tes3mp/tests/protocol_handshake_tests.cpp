@@ -174,6 +174,16 @@ namespace
             && hasError(CapabilityOffer::create(versions, tooMany, {}), HandshakeErrorCode::TooManyCapabilities);
     }
 
+    bool actor_cast_layout_requires_capability()
+    {
+        const auto required = TES3MP::actorCastReplicationCapability().value();
+        const auto server = offer(versionRange(1, 10, 10), {}, {required});
+        const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19}, {}));
+        const auto current = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required}, {}));
+        return std::holds_alternative<SessionRejected>(TES3MP::negotiateClientHello(old, server))
+            && std::holds_alternative<ServerHello>(TES3MP::negotiateClientHello(current, server));
+    }
+
     bool current_and_previous_minor_select_highest_overlap()
     {
         const auto server = offer(versionRange(1, 0, 1), {}, {});
@@ -530,7 +540,7 @@ int main(int argc, char** argv)
         return verifyCorpus(argv[2]) ? 0 : 1;
 
     return value_factories_reject_invalid_ranges_and_capability_sets()
-            && current_and_previous_minor_select_highest_overlap()
+            && actor_cast_layout_requires_capability() && current_and_previous_minor_select_highest_overlap()
             && optional_capabilities_intersect_without_enabling_unknown_ids()
             && version_and_required_capability_failures_are_stable()
             && content_manifest_mismatch_rejects_before_admission() && all_payloads_round_trip_as_owned_values()

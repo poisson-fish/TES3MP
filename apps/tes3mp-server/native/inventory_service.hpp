@@ -11,6 +11,16 @@
 
 namespace TES3MP::Native
 {
+    // Trusted server execution input, never decoded from player packets. The
+    // scheduler owns castId; placement/life and source are revalidated at launch.
+    struct ActorMagicCast
+    {
+        uint64_t actorId, life, castId;
+        MagicUseSourceKind sourceKind;
+        uint64_t sourceId;
+        MagicUseTargetKind targetKind;
+        uint64_t targetId;
+    };
     // Trusted composition for the loaded placed inventory domain. Bindings
     // come from server startup, never first arrival/client fields.
     // Production resolves placements from OpenMW; synthetic tests may use
@@ -289,8 +299,13 @@ namespace TES3MP::Native
             if (!mCombat) return {};
             const auto weapon = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
             if (!weapon) return {};
+            return selectedNpcItemCharge(weapon->mItem);
+        }
+        std::optional<float> selectedNpcItemCharge(ESM::RefNum instance) const
+        {
+            if (!mCombat) return {};
             for (const auto& item : mRuntime.installedValues(mCombatNpcOwner).mObjects)
-                if (item.mRef.mRefNum == weapon->mItem) return item.mRef.mEnchantmentCharge;
+                if (item.mRef.mRefNum == instance) return item.mRef.mEnchantmentCharge;
             return {};
         }
         std::vector<ESM::RefNum> selectedNpcItemIdentities() const
@@ -303,6 +318,9 @@ namespace TES3MP::Native
         }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
+        std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+            std::optional<ActorMagicCast> actorCast);
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
         bool allowsCellTransition(CellId current, CellId requested, Position3 position) const override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(

@@ -21,7 +21,8 @@ namespace TES3MP::Native
     // effects and NPC death history. Players retain life 1 across reconnect;
     // NPC placement/life attribution survives respawn on other targets.
     // Requires a fresh campaign; V37 and older retain their recovery layouts.
-    // NPC projectile execution/publication and automatic casting remain pending.
+    // Trusted NPC spells/WhenUsed share player launch/contact/effect execution.
+    // Automatic AI scheduling remains pending; T3C2 publishes typed cast events.
     // V37 adds constant effect arguments/ordinals, variable rolls, multiple sources
     // and all equipment slots. Attribute/skill fortification and six resistances
     // are supported; other constant behaviors reject. Maximum 512 instances.

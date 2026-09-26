@@ -772,7 +772,8 @@ namespace TES3MP::OpenMWAdapter
                 {
                     if (!first) mOutput << ',';
                     first = false;
-                    mOutput << "{\"caster\":" << cast.casterPlayerId.value() << ",\"source\":"
+                    mOutput << "{\"caster\":" << cast.casterId() << ",\"caster_kind\":"
+                        << (cast.actorCaster() ? 2 : 1) << ",\"caster_life\":" << cast.casterLife << ",\"source\":"
                         << cast.sourceId << ",\"success\":" << (cast.castSucceeded ? "true" : "false")
                         << ",\"health_delta\":" << cast.selfHealthDelta
                         << ",\"magicka_delta\":" << cast.selfMagickaDelta << '}';
@@ -880,7 +881,7 @@ namespace TES3MP::OpenMWAdapter
             }
             for (const auto& batch : events)
                 if (std::ranges::any_of(batch.magicEvents(), [&](const MagicUseCombatEvent& event) {
-                        return event.casterPlayerId == snapshot.selfPlayerId()
+                        return !event.actorCaster() && event.casterId() == snapshot.selfPlayerId().value()
                             && event.sourceKind == MagicUseSourceKind::EnchantedItem
                             && event.targetKind == MagicUseTargetKind::Actor && mMagicActor
                             && event.targetId == mMagicActor->value() && event.castSucceeded;

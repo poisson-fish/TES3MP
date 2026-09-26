@@ -206,6 +206,7 @@ namespace TES3MP
             if (static_cast<std::uint8_t>(event.sourceKind)
                     > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem)
                 || static_cast<std::uint8_t>(event.targetKind) > static_cast<std::uint8_t>(MagicUseTargetKind::Actor)
+                || !event.casterLife || (!event.actorCaster() && event.casterLife != 1)
                 || event.sourceId == 0 || ((event.targetKind == MagicUseTargetKind::Self) != (event.targetId == 0)))
                 return error(Code::InvalidMagicKind, 0, 0, i);
         }
@@ -303,11 +304,12 @@ namespace TES3MP
         std::vector<Event::MagicUseCombatEvent> magicEvents;
         magicEvents.reserve(input.magicEvents().size());
         for (const auto& event : input.magicEvents())
-            magicEvents.emplace_back(event.casterPlayerId.value(), event.sourceId, event.targetId,
+            magicEvents.emplace_back(event.casterId(), event.casterLife, event.sourceId, event.targetId,
                 event.casterCombatRevision.value(), event.targetCombatRevision.value(), event.selfHealthDelta,
                 event.selfFatigueDelta, event.selfMagickaDelta, event.targetHealthDelta, event.targetFatigueDelta,
                 event.targetMagickaDelta, static_cast<Event::MagicUseSourceKind>(event.sourceKind),
-                static_cast<Event::MagicUseTargetKind>(event.targetKind), event.castSucceeded, event.targetDied);
+                static_cast<Event::MagicUseTargetKind>(event.targetKind), event.castSucceeded, event.targetDied,
+                event.actorCaster() ? 2 : 1);
         std::vector<Event::MagicEffectCombatEvent> magicEffectEvents;
         magicEffectEvents.reserve(input.magicEffectEvents().size());
         for (const auto& event : input.magicEffectEvents())
@@ -579,7 +581,10 @@ namespace TES3MP
         for (std::size_t i = 0; i < magicCount; ++i)
         {
             const auto current = copyStruct(encodedMagicEvents, i);
-            auto caster = strong<PlayerId>(current.caster_player_id(), i);
+            if ((current.caster_kind() != 1 && current.caster_kind() != 2) || !current.caster_life()
+                || (current.caster_kind() == 1 && current.caster_life() != 1))
+                return error(Code::InvalidMagicKind, 0, 0, i);
+            auto caster = strong<PlayerId>(current.caster_id(), i);
             auto casterRevision = strong<CombatRevision>(current.caster_combat_revision(), i);
             auto targetRevision = strong<CombatRevision>(current.target_combat_revision(), i);
             if (auto* failure = std::get_if<Error>(&caster))
@@ -595,11 +600,14 @@ namespace TES3MP
                 && current.target_kind() != Event::MagicUseTargetKind::Player
                 && current.target_kind() != Event::MagicUseTargetKind::Actor)
                 return error(Code::InvalidMagicKind, 0, 0, i);
-            magicEvents.push_back({ *value(caster), static_cast<MagicUseSourceKind>(current.source_kind()),
+            const std::variant<PlayerId, ActorId> identity = current.caster_kind() == 1
+                ? std::variant<PlayerId, ActorId>(*value(caster))
+                : std::variant<PlayerId, ActorId>(*ActorId::fromValue(current.caster_id()));
+            magicEvents.push_back({ identity, static_cast<MagicUseSourceKind>(current.source_kind()),
                 current.source_id(), static_cast<MagicUseTargetKind>(current.target_kind()), current.target_id(),
                 *value(casterRevision), *value(targetRevision), current.cast_succeeded(), current.self_health_delta(),
                 current.self_fatigue_delta(), current.self_magicka_delta(), current.target_health_delta(),
-                current.target_fatigue_delta(), current.target_magicka_delta(), current.target_died() });
+                current.target_fatigue_delta(), current.target_magicka_delta(), current.target_died(), current.caster_life() });
         }
         const auto* encodedMagicEffectEvents = root->magic_effect_events();
         const std::size_t magicEffectCount = encodedMagicEffectEvents ? encodedMagicEffectEvents->size() : 0;

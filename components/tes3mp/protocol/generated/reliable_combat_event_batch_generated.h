@@ -329,7 +329,8 @@ FLATBUFFERS_STRUCT_END(ActorMeleeCombatEvent, 40);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLASS {
  private:
-  uint64_t caster_player_id_;
+  uint64_t caster_id_;
+  uint64_t caster_life_;
   uint64_t source_id_;
   uint64_t target_id_;
   uint64_t caster_combat_revision_;
@@ -344,11 +345,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLA
   uint8_t target_kind_;
   uint8_t cast_succeeded_;
   uint8_t target_died_;
-  int32_t padding0__;
+  uint8_t caster_kind_;
+  int8_t padding0__;  int16_t padding1__;
 
  public:
   MagicUseCombatEvent()
-      : caster_player_id_(0),
+      : caster_id_(0),
+        caster_life_(0),
         source_id_(0),
         target_id_(0),
         caster_combat_revision_(0),
@@ -363,11 +366,15 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLA
         target_kind_(0),
         cast_succeeded_(0),
         target_died_(0),
-        padding0__(0) {
+        caster_kind_(0),
+        padding0__(0),
+        padding1__(0) {
     (void)padding0__;
+    (void)padding1__;
   }
-  MagicUseCombatEvent(uint64_t _caster_player_id, uint64_t _source_id, uint64_t _target_id, uint64_t _caster_combat_revision, uint64_t _target_combat_revision, float _self_health_delta, float _self_fatigue_delta, float _self_magicka_delta, float _target_health_delta, float _target_fatigue_delta, float _target_magicka_delta, TES3MP::Protocol::Schema::CombatEvent::MagicUseSourceKind _source_kind, TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind _target_kind, bool _cast_succeeded, bool _target_died)
-      : caster_player_id_(::flatbuffers::EndianScalar(_caster_player_id)),
+  MagicUseCombatEvent(uint64_t _caster_id, uint64_t _caster_life, uint64_t _source_id, uint64_t _target_id, uint64_t _caster_combat_revision, uint64_t _target_combat_revision, float _self_health_delta, float _self_fatigue_delta, float _self_magicka_delta, float _target_health_delta, float _target_fatigue_delta, float _target_magicka_delta, TES3MP::Protocol::Schema::CombatEvent::MagicUseSourceKind _source_kind, TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind _target_kind, bool _cast_succeeded, bool _target_died, uint8_t _caster_kind)
+      : caster_id_(::flatbuffers::EndianScalar(_caster_id)),
+        caster_life_(::flatbuffers::EndianScalar(_caster_life)),
         source_id_(::flatbuffers::EndianScalar(_source_id)),
         target_id_(::flatbuffers::EndianScalar(_target_id)),
         caster_combat_revision_(::flatbuffers::EndianScalar(_caster_combat_revision)),
@@ -382,11 +389,17 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLA
         target_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_kind))),
         cast_succeeded_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_cast_succeeded))),
         target_died_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_died))),
-        padding0__(0) {
+        caster_kind_(::flatbuffers::EndianScalar(_caster_kind)),
+        padding0__(0),
+        padding1__(0) {
     (void)padding0__;
+    (void)padding1__;
   }
-  uint64_t caster_player_id() const {
-    return ::flatbuffers::EndianScalar(caster_player_id_);
+  uint64_t caster_id() const {
+    return ::flatbuffers::EndianScalar(caster_id_);
+  }
+  uint64_t caster_life() const {
+    return ::flatbuffers::EndianScalar(caster_life_);
   }
   uint64_t source_id() const {
     return ::flatbuffers::EndianScalar(source_id_);
@@ -430,8 +443,11 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLA
   bool target_died() const {
     return ::flatbuffers::EndianScalar(target_died_) != 0;
   }
+  uint8_t caster_kind() const {
+    return ::flatbuffers::EndianScalar(caster_kind_);
+  }
 };
-FLATBUFFERS_STRUCT_END(MagicUseCombatEvent, 72);
+FLATBUFFERS_STRUCT_END(MagicUseCombatEvent, 80);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicEffectCombatEvent FLATBUFFERS_FINAL_CLASS {
  private:
@@ -703,7 +719,7 @@ inline const TES3MP::Protocol::Schema::CombatEvent::ReliableCombatEventBatch *Ge
 }
 
 inline const char *ReliableCombatEventBatchIdentifier() {
-  return "T3CE";
+  return "T3C2";
 }
 
 inline bool ReliableCombatEventBatchBufferHasIdentifier(const void *buf) {

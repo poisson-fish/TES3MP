@@ -4127,7 +4127,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -4379,6 +4379,9 @@ namespace TES3MP::Native::Testing
                         damageBeforeWard.mEffects.populate({
                             {ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Self, 0, 0, 8, 8},
                             {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 0, 2, 100, 100}});
+                        if (actorCasts)
+                            damageBeforeWard.mEffects.mList.front().mData.mMagnMin
+                                = damageBeforeWard.mEffects.mList.front().mData.mMagnMax = 1000;
                         npc.mSpells.mList.push_back(damageBeforeWard.mId);
                     }
                 }
@@ -4657,6 +4660,248 @@ namespace TES3MP::Native::Testing
                     return std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
                 };
                 const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+                if (actorCasts)
+                {
+                    auto entities = std::vector(authority.players().begin(), authority.players().end());
+                    for (size_t i = 0; i < entities.size(); ++i)
+                    {
+                        const auto old = entities[i];
+                        entities[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(old,
+                            id<ServerTick>(1), Transform(old.transform().cell(),
+                                Position3((i ? 1800 : 60)*1024, -200*1024, 1024), old.transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                    }
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
+                    service.synchronizeCells(authority);
+                    const auto source = [](std::string_view text) {
+                        uint64_t hash = 14695981039346656037ull;
+                        for (unsigned char c : text) hash = (hash ^ c) * 1099511628211ull;
+                        return hash;
+                    };
+                    const auto fire = source("npc_elemental_damage");
+                    ClientMagicUseCommand use{id<SessionId>(1), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        MagicUseSourceKind::Spell, fire, MagicUseTargetKind::Actor, npc.mIdentity,
+                        id<ServerTick>(1), CombatRevision::initial(), CombatRevision::initial(), InventoryRevision::initial()};
+                    const auto* player = authority.findPlayer(id<PlayerId>(1));
+                    ServerCommandProposal proposal(id<SessionId>(1), SessionGeneration::initial(),
+                        use.commandSequence, use.commandId, use.observedCanonicalRevision,
+                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+                    ActorMagicCast npcCast{npc.mIdentity, 1, 1, MagicUseSourceKind::Spell, fire,
+                        MagicUseTargetKind::Player, 1};
+                    const auto initial = bytes(service);
+                    for (const auto invalid : {ActorMagicCast{npc.mIdentity, 2, 1, MagicUseSourceKind::Spell, fire, MagicUseTargetKind::Player, 1},
+                            ActorMagicCast{npc.mIdentity, 1, 0, MagicUseSourceKind::Spell, fire, MagicUseTargetKind::Player, 1},
+                            ActorMagicCast{npc.mIdentity, 1, 1, MagicUseSourceKind::Spell, 999, MagicUseTargetKind::Player, 1},
+                            ActorMagicCast{npc.mIdentity, 1, 1, MagicUseSourceKind::Spell, fire, MagicUseTargetKind::Player, 999}})
+                    {
+                        bool rejected = false;
+                        try { (void)service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {}, invalid); }
+                        catch (const std::invalid_argument&) { rejected = true; }
+                        require(rejected && bytes(service) == initial, "Invalid NPC launch mutated canonical state");
+                    }
+                    auto playerCast = service.prepareMagicUse(authority, proposal, id<ServerTick>(1));
+                    require(bool(playerCast), "Concurrent player cast rejected");
+                    auto launch = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, std::move(playerCast), npcCast);
+                    require(bool(launch), "Concurrent actor launch missing");
+                    for (uint64_t observer : {1, 2})
+                    {
+                        const auto event = service.projectCombatEvents(authority, id<SessionId>(observer),
+                            id<ServerTick>(1), id<CanonicalRevision>(1), launch.get());
+                        require(event && event->magicEvents().size() == 2 && !event->magicEvents()[0].actorCaster()
+                            && event->magicEvents()[1].actorCaster() && event->magicEvents()[1].casterId() == npc.mIdentity
+                            && event->magicEvents()[1].casterLife == 1, "Observer lost actor/player launch identity");
+                        const auto decoded = decodeReliableCombatEventBatch(encodeReliableCombatEventBatch(*event));
+                        require(std::get<ReliableCombatEventBatch>(decoded) == *event, "Actor cast projection wire roundtrip failed");
+                    }
+                    require(launch->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && bytes(service) == initial, "Rejected paired launch leaked costs, RNG or projectiles");
+                    require(launch->commit(accepted) == CanonicalDurabilityResult::Committed, "Paired launch commit failed");
+                    const auto checkpoint = bytes(service);
+                    const auto state = readActorCampaign({reinterpret_cast<const char*>(checkpoint.data()), checkpoint.size()});
+                    const auto initialState = readActorCampaign({reinterpret_cast<const char*>(initial.data()), initial.size()});
+                    require(state.projectiles.size() == 2 && state.projectiles[0].casterKind == 1 && state.projectiles[1].casterKind == 2
+                        && state.projectiles[1].casterLife == 1 && state.projectiles[1].generation == 1
+                        && state.combat->actors[0][9][2] == initialState.combat->actors[0][9][2] - 1
+                        && state.combat->actors[2][9][2] == initialState.combat->actors[2][9][2] - 1,
+                        "Concurrent launch lost a flight or charged the wrong combat owner");
+                    bool duplicate = false;
+                    try { (void)service.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {}, npcCast); }
+                    catch (const std::invalid_argument&) { duplicate = true; }
+                    require(duplicate && bytes(service) == checkpoint, "Pending NPC cast was not deduplicated");
+                    std::vector<ESM::RefId> refs{npc.mRef.mRefID, chest.mRef.mRefID};
+                    for (const auto& [id, record] : MWWorld::inventoryRecords(content)) refs.push_back(record);
+                    for (const auto& [id, record] : MWWorld::inventorySoulRecords(content)) refs.push_back(record);
+                    InventoryService restored(loadout.store(), loadout.readers(), bindCaster(), true);
+                    restored.recover(checkpoint, refs); restored.synchronizeCells(authority);
+                    require(bytes(restored) == checkpoint, "NPC in-flight restart changed bytes");
+                    const auto projectileOffset = size_t(state.inventory.data() - reinterpret_cast<const char*>(checkpoint.data())) - 8 - 136;
+                    for (const auto [offset, value] : std::array<std::pair<size_t, uint64_t>, 5>{
+                        {{0, 999}, {120, 0}, {120, 1}, {128, 0}, {128, 2}}})
+                    {
+                        auto invalid = checkpoint;
+                        for (size_t i = 0; i < 8; ++i) invalid.at(projectileOffset + offset + i) = std::byte(value >> (8*i));
+                        bool rejected = false;
+                        try { restored.recover(invalid, refs); } catch (const std::invalid_argument&) { rejected = true; }
+                        require(rejected && bytes(restored) == checkpoint, "Malformed NPC projectile recovery leaked mutation");
+                    }
+                    const auto replacement = players(SessionGeneration::initial().next().value(), 1, 2);
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, replacement.activeSessions()));
+                    service.synchronizeCells(authority); restored.synchronizeCells(authority);
+                    size_t npcContacts = 0, playerContacts = 0;
+                    bool effectsSeen = false;
+                    for (uint64_t tick = 2; tick <= 70; ++tick)
+                    {
+                        const auto before = bytes(service);
+                        auto step = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                        auto replay = restored.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                        const auto event = service.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
+                            id<CanonicalRevision>(tick), step.get());
+                        const auto otherEvent = service.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(tick),
+                            id<CanonicalRevision>(tick), step.get());
+                        require(bool(event) == bool(otherEvent) && (!event
+                            || (event->targetSessionGeneration() == replacement.activeSessions()[0].sessionGeneration()
+                                && std::ranges::equal(event->magicEvents(), otherEvent->magicEvents()))),
+                            "Observers diverged on concurrent contacts after session replacement");
+                        if (event) for (const auto& cast : event->magicEvents())
+                        {
+                            require(cast.castSucceeded && cast.casterLife == 1, "Concurrent projectile missed or lost life");
+                            if (cast.actorCaster()) ++npcContacts; else ++playerContacts;
+                        }
+                        require(step->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                            && bytes(service) == before, "Rejected contact/effect tick leaked mutation");
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && bytes(service) == bytes(restored), "Concurrent NPC/player restart diverged");
+                        const auto image = bytes(service);
+                        const auto current = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+                        if (current.timedEffects.size() == 2)
+                        {
+                            effectsSeen = true;
+                            require(std::ranges::any_of(current.timedEffects, [&](const auto& effect) {
+                                return effect.actor == 0 && effect.caster == npc.mIdentity && effect.casterKind == 2 && effect.casterLife == 1;
+                            }) && std::ranges::any_of(current.timedEffects, [](const auto& effect) {
+                                return effect.actor == 2 && effect.caster == 1 && effect.casterKind == 1 && effect.casterLife == 1;
+                            }), "Shared contact attributed effects to the wrong caster");
+                        }
+                        if (tick == 70)
+                            require(current.projectiles.empty() && current.timedEffects.empty()
+                                && current.combat->actors[0][8][2] < state.combat->actors[0][8][2]
+                                && current.combat->actors[2][8][2] < state.combat->actors[2][8][2], "Timed projectile damage/expiry missing");
+                    }
+                    require(effectsSeen && npcContacts == 1 && playerContacts == 1, "Concurrent contact was missing or duplicated");
+                    // A carried WhenUsed item follows the same flight/effect path,
+                    // with payment tied to its inventory owner rather than combat slot 2.
+                    std::unique_ptr<PreparedNativeInventory> itemLaunch;
+                    ESM::RefNum usedInstance;
+                    ActorMagicCast itemCast = npcCast;
+                    itemCast.sourceKind = MagicUseSourceKind::EnchantedItem;
+                    itemCast.castId = 71;
+                    const auto itemBefore = bytes(service);
+                    for (const auto ref : service.selectedNpcItemIdentities())
+                    {
+                        itemCast.sourceId = (uint64_t(std::bit_cast<uint32_t>(ref.mContentFile)) << 32) | ref.mIndex;
+                        std::unique_ptr<PreparedNativeInventory> candidate;
+                        try { candidate = service.prepareNativeTick(authority, id<ServerTick>(71), 1.f/30, {}, itemCast); }
+                        catch (const std::invalid_argument&) { continue; }
+                        std::vector<std::byte> proposed;
+                        require(candidate->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                            return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected,
+                            "NPC item preparation became durable");
+                        const auto state = readActorCampaign({reinterpret_cast<const char*>(proposed.data()), proposed.size()});
+                        if (!state.projectiles.empty() && state.projectiles.back().effectSource == source("npc_used_damage"))
+                        { usedInstance = ref; itemLaunch = std::move(candidate); break; }
+                    }
+                    require(itemLaunch && bytes(service) == itemBefore && service.selectedNpcItemCharge(usedInstance) == -1.f,
+                        "Rejected NPC item launch leaked charge or selected wrong inventory owner");
+                    require(itemLaunch->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && service.selectedNpcItemCharge(usedInstance) == 18.f, "NPC WhenUsed charge was not paid exactly once");
+                    const auto itemCheckpoint = bytes(service);
+                    InventoryService itemRestored(loadout.store(), loadout.readers(), bindCaster(), true);
+                    itemRestored.recover(itemCheckpoint, refs); itemRestored.synchronizeCells(authority);
+                    size_t itemContacts = 0;
+                    for (uint64_t tick = 72; tick <= 82; ++tick)
+                    {
+                        auto step = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                        auto replay = itemRestored.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                        const auto event = service.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick),
+                            id<CanonicalRevision>(tick), step.get());
+                        if (event) for (const auto& cast : event->magicEvents())
+                        {
+                            require(cast.actorCaster() && cast.castSucceeded && cast.sourceKind == MagicUseSourceKind::EnchantedItem
+                                && cast.sourceId == itemCast.sourceId, "NPC item contact lost launch source");
+                            ++itemContacts;
+                        }
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && replay->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(service) == bytes(itemRestored),
+                            "NPC item restart/contact diverged");
+                    }
+                    require(itemContacts == 1 && service.selectedNpcItemCharge(usedInstance) == 18.f, "NPC item charged or contacted twice");
+                    // Fill the durable collection with distant bolts; ninth input must
+                    // leave both payment and every existing flight unchanged.
+                    auto farEntities = entities;
+                    const auto old = farEntities[0];
+                    farEntities[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(old,
+                        id<ServerTick>(83), Transform(old.transform().cell(), Position3(60*1024, -1800*1024, 1024),
+                            old.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                    const auto farAuthority = std::get<CanonicalServerState>(createCanonicalServerState(farEntities, authority.activeSessions()));
+                    for (uint64_t tick = 83; tick < 91; ++tick)
+                    {
+                        npcCast.castId = tick;
+                        auto cast = service.prepareNativeTick(farAuthority, id<ServerTick>(tick), 1.f/30, {}, npcCast);
+                        require(cast && cast->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC capacity setup rejected");
+                    }
+                    const auto full = bytes(service);
+                    const auto fullState = readActorCampaign({reinterpret_cast<const char*>(full.data()), full.size()});
+                    require(fullState.projectiles.size() == MaximumActorProjectiles, "NPC capacity setup lost a newly appended flight");
+                    npcCast.castId = 91;
+                    bool saturated = false;
+                    try { (void)service.prepareNativeTick(farAuthority, id<ServerTick>(91), 1.f/30, {}, npcCast); }
+                    catch (const std::invalid_argument&) { saturated = true; }
+                    require(saturated && bytes(service) == full, "Ninth projectile exceeded capacity or leaked cost");
+                    // Death cancels the caster's remaining flights in the same image;
+                    // restart and a new body must never execute old-life projectiles.
+                    ActorMagicCast lethal{npc.mIdentity, 1, 92, MagicUseSourceKind::Spell,
+                        source("npc_damage_before_ward"), MagicUseTargetKind::Self, 0};
+                    auto death = service.prepareNativeTick(farAuthority, id<ServerTick>(91), 1.f/30, {}, lethal);
+                    require(death && death->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(service) == full,
+                        "Rejected NPC self-death cancelled flights or installed death");
+                    require(death->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC self-death did not commit");
+                    const auto deadImage = bytes(service);
+                    const auto dead = readActorCampaign({reinterpret_cast<const char*>(deadImage.data()), deadImage.size()});
+                    require(dead.projectiles.empty() && dead.life->respawnTick == 94 && dead.life->deaths.size() == 1
+                        && dead.life->deaths[0].killer == npc.mIdentity && dead.life->deaths[0].killerKind == 2,
+                        "NPC self-death lost attribution, deadline or retained flights");
+                    InventoryService deadRestart(loadout.store(), loadout.readers(), bindCaster(), true);
+                    deadRestart.recover(deadImage, refs); deadRestart.synchronizeCells(farAuthority);
+                    for (uint64_t tick = 92; tick <= 94; ++tick)
+                    {
+                        auto step = service.prepareNativeTick(farAuthority, id<ServerTick>(tick), 1.f/30, {});
+                        auto replay = deadRestart.prepareNativeTick(farAuthority, id<ServerTick>(tick), 1.f/30, {});
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && bytes(service) == bytes(deadRestart), "NPC cast-death restart/respawn diverged");
+                    }
+                    const auto respawned = bytes(service);
+                    bool staleLife = false;
+                    try { (void)service.prepareNativeTick(farAuthority, id<ServerTick>(95), 1.f/30, {}, npcCast); }
+                    catch (const std::invalid_argument&) { staleLife = true; }
+                    require(staleLife && bytes(service) == respawned, "Old-life cast executed on respawned NPC");
+                    npcCast.life = 2;
+                    auto newLife = service.prepareNativeTick(farAuthority, id<ServerTick>(95), 1.f/30, {}, npcCast);
+                    require(newLife && newLife->commit(accepted) == CanonicalDurabilityResult::Committed, "Respawned NPC could not cast");
+                    const auto newImage = bytes(service);
+                    InventoryService newRestart(loadout.store(), loadout.readers(), bindCaster(), true);
+                    newRestart.recover(newImage, refs);
+                    const auto newState = readActorCampaign({reinterpret_cast<const char*>(newImage.data()), newImage.size()});
+                    require(newState.projectiles.size() == 1 && newState.projectiles[0].casterLife == 2
+                        && bytes(newRestart) == newImage, "New-life NPC projectile recovery failed");
+                    std::cout << "NPC cast death: flights cancelled atomically; attributed respawn/restart; stale life rejected; new-life flight recovered\n";
+                    std::cout << "NPC WhenUsed: owner charge isolated; mixed Self/Target; restart exact; eight-flight bound atomic\n";
+                    std::cout << "actor casts: two observers; concurrent player/NPC launch and contact; timed damage/expiry; restart/session replacement exact; rejected launch/contact/recovery atomic\n";
+                    return;
+                }
                 if (durableCasters)
                 {
                     auto entities = std::vector(authority.players().begin(), authority.players().end());

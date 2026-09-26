@@ -700,6 +700,9 @@ int main(int argc, char** argv)
         }
         std::erase(optionalCapabilities, TES3MP::inventoryReplicationCapability());
     }
+    if (std::ranges::find(optionalCapabilities, TES3MP::combatReplicationCapability()) != optionalCapabilities.end()
+        || std::ranges::find(requiredCapabilities, TES3MP::combatReplicationCapability()) != requiredCapabilities.end())
+        requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
     std::ranges::sort(requiredCapabilities);
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,
         requiredCapabilities, config.contentManifest.id());

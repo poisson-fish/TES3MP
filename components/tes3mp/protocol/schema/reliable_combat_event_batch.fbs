@@ -48,7 +48,8 @@ struct ActorMeleeCombatEvent {
 }
 
 struct MagicUseCombatEvent {
-  caster_player_id:ulong;
+  caster_id:ulong;
+  caster_life:ulong;
   source_id:ulong;
   target_id:ulong;
   caster_combat_revision:ulong;
@@ -63,6 +64,7 @@ struct MagicUseCombatEvent {
   target_kind:MagicUseTargetKind;
   cast_succeeded:bool;
   target_died:bool;
+  caster_kind:ubyte;
 }
 
 enum MagicEffectCombatEventKind : ubyte {
@@ -102,5 +104,5 @@ table ReliableCombatEventBatch {
 }
 
 root_type ReliableCombatEventBatch;
-file_identifier "T3CE";
+file_identifier "T3C2";
 file_extension "t3ce";

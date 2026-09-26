@@ -505,7 +505,7 @@ namespace TES3MP::Native
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
     std::optional<ActorProjectileContact> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
-        const std::array<float, 3>& to) const
+        const std::array<float, 3>& to, uint64_t casterActor) const
     {
         if (!mImpl) throw std::invalid_argument("Projectile scene is unloaded");
         for (float value : from)
@@ -518,7 +518,14 @@ namespace TES3MP::Native
         btSphereShape sphere(4.f);
         const btTransform startFrame(btQuaternion::getIdentity(), start);
         const btTransform endFrame(btQuaternion::getIdentity(), end);
-        btCollisionWorld::ClosestConvexResultCallback hit(start, end);
+        struct Contact final : btCollisionWorld::ClosestConvexResultCallback
+        {
+            const btCollisionObject* ignored;
+            Contact(const btVector3& from, const btVector3& to, const btCollisionObject* caster)
+                : ClosestConvexResultCallback(from, to), ignored(caster) {}
+            bool needsCollision(btBroadphaseProxy* proxy) const override
+            { return proxy->m_clientObject != ignored && ClosestConvexResultCallback::needsCollision(proxy); }
+        } hit(start, end, casterActor == mImpl->mActorId ? mImpl->mActor->mCollisionObject : nullptr);
         hit.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
         hit.m_collisionFilterMask = MWPhysics::CollisionType_World
             | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor;

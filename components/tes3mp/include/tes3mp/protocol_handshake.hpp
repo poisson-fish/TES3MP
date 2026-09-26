@@ -37,6 +37,8 @@ namespace TES3MP
     inline constexpr std::uint32_t NativeStreamingCapabilityValue = 17;
     inline constexpr std::uint32_t NativeLeveledActorsCapabilityValue = 18;
     inline constexpr std::uint32_t NativeActorMotionCapabilityValue = 19;
+    // T3C2 cast events identify both player and placement/life casters.
+    inline constexpr std::uint32_t ActorCastReplicationCapabilityValue = 20;
 
     class CapabilityId
     {
@@ -61,6 +63,9 @@ namespace TES3MP
 
         std::uint32_t mValue;
     };
+
+    inline constexpr CapabilityId actorCastReplicationCapability() noexcept
+    { return *CapabilityId::fromValue(ActorCastReplicationCapabilityValue); }
 
     inline constexpr CapabilityId vrPoseCapability() noexcept
     {
