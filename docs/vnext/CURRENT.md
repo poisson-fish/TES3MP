@@ -12,36 +12,33 @@ Paralyze blocks actions/movement. Touch attribution/on-strike death deduplicatio
 Inherited fatigue captures: `build/m4-knockout-live-05/result.json`,
 `build/m4-npc-knockout-live-03/result.json`. NPC physical captures:
 `build/m4-physical-female-live-04/result.json`, `build/m4-physical-khajiit-live-03/result.json`,
-`build/m4-physical-argonian-live-03/result.json`. Synthetic vanilla bodies/stats/placements;
-two clients, 10% loss/100 ms delay/jitter, reconnect/restart.
+`build/m4-physical-argonian-live-03/result.json` (synthetic, impaired, reconnect/restart).
 
-Inherited player physical capture: `build/m4-player-physical-live-08/result.json`.
-Remote creation/equipment and local POV/skeleton rebuilds retain combat poses.
-Inherited four-layer check: `build/logs/m4-player-physical-pose-test.log`.
+Inherited player capture: `build/m4-player-physical-live-08/result.json`;
+rebuild pose retention: `build/logs/m4-player-physical-pose-test.log`.
 
-Tick-373 reconnect fixed: native campaigns exclude retained pose velocity from
-legacy integration across disconnect/rejoin/restart. Inherited checks:
-`build/logs/m4-reconnect-before.log`, `m4-reconnect-pose.log`.
+Native reconnect excludes retained velocity from legacy integration.
+Inherited check: `build/logs/m4-reconnect-pose.log`.
 
-NPC wind-up lock fixed: out-of-reach targets cancel unreleased swings at full
-wind-up; normal selection resumes. Released swings retain targets and recheck
-reach at the hit key. Inherited transaction/failure evidence:
+NPC wind-up cancels unreachable targets; released swings recheck reach at impact.
+Inherited transaction/failure checks:
 `build/logs/m4-windup-test.log`, `m4-windup-reconnect.log`, `m4-windup-getup.log`,
-`m4-windup-weapons.log`. Server build: `m4-windup-server-build.log`.
+`m4-windup-weapons.log`.
 
-New inspected capture: `build/m4-retarget-getup-live-06/result.json` (18 screenshots,
-binary hashes). Stock male bodies/iron longsword; synthetic stats/placements.
-Both desktops show swings and retargeting during player get-up, 128-tick retreat,
-return/reconnect/restart and final convergence without duplicated observed outcomes.
-100 ms delay, +/-25 ms jitter, 10% loss; 147 drops. Reconnect frame 35; restore 33.
-Bob restarts first; offline Alice pauses. General overlapping melee/ranged/magic remains unproven.
+Inspected: `build/m4-retarget-getup-live-06/result.json` (18 screenshots, binary hashes).
+Stock male/longsword; synthetic stats/placements. Both desktops: get-up/retargeting,
+128-tick retreat, reconnect/restart, convergence; 100 ms delay, +/-25 ms jitter,
+10% loss. Bob restarts first; offline Alice pauses. General overlapping combat remains unproven.
 
 Fixed native-placement melee-event routing and stock weapon sections. Cosmetic chops
 restart and release completed poses; replica callbacks are suppressed.
 Checks: `build/logs/m4-retarget-action-test.log` (four
 stock body layers), `m4-retarget-validator.log`, `m4-retarget-baseline-test.log`;
-client build: `m4-retarget-client-build.log`. Harness fixes: fresh movement,
-startup-prefix exclusion, shutdown packet drain; failed attempts remain in `build/`.
+client build: `m4-retarget-client-build.log`.
+
+User reports choppy/slow combat animations versus walking; speed remains unmeasured.
+Committed attack/fall poses hold received samples; captures cap rendering at 30 FPS.
+PLAN's bounded smoothness slice follows NPC swing replication, before body/effect expansion.
 
 **M4 incomplete. Next: replicate the committed NPC swing recipe/clock and
 target-facing to both desktops**, replacing the cosmetic event-only chop fallback.
@@ -79,9 +76,8 @@ coverage and remaining effects.
   SummonCreature04, SummonCreature05.
 
 43 implemented + 100 remaining = 143 IDs; arbitrary scripted/mod support unproven.
-Allowlisting is insufficient: PLAN's applicable integration and live acceptance
-remain required. Powers/abilities/diseases remain outside general casting; preserve
-stock restrictions. Resolve multi-NPC/summon/player-life prerequisites as needed.
+PLAN acceptance remains mandatory. Powers/abilities/diseases remain outside general
+casting; preserve stock restrictions. Multi-NPC/summon/player-life prerequisites remain.
 Ranged completion and overlapping combat precede movement/collision cutover.
-Plain ranged sources/body proxies and inherited movement remain limitations;
+Plain ranged sources/body proxies remain;
 TR Lua awaits M5.

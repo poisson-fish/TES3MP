@@ -1,8 +1,6 @@
 # Implementation plan
 
-This is the sole roadmap; CURRENT.md holds status and next action. Advance the
-active milestone through connected behavior and verification. Preserve outcomes without
-adding phase plans or diaries.
+Sole roadmap; CURRENT.md holds status and next action. Advance one verified slice.
 
 ## M1 - Prove the native loadout and runtime seam
 
@@ -61,7 +59,15 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    unrelated tick rollback, and complete life-indexed death attribution within the
    save byte budget. Preserve focused failure/recovery and death/loot deduplication
    checks; M5 owns personal quest credit and rewards.
-   Retain committed knockout/get-up presentation and prove it on both desktops.
+   After committed NPC swing replication, complete a bounded **combat animation
+   smoothness** slice: attacks, hit reactions, falls, knockout loops and get-up
+   for self, remote players and one NPC. Measure render cadence, snapshot gaps
+   and clip duration against stock at matching weapon speed; remove the capture's
+   30-FPS cap. Sample visual poses each render frame between server timestamps;
+   preserve authoritative timing, pauses, interruption and callback suppression.
+   Accept with 60-FPS video/frame traces on both desktops showing smooth progression
+   and stock-speed recovery under loss/delay/jitter and reconnect/restart, without
+   duplicate hits or premature recovery. Keep movement cutover separate.
    Finish unarmed fatigue/health damage while down,
    hit recovery, armor, block, resistances and wear. Complete the 143 built-in
    effect IDs (remaining inventory in CURRENT), including stock ExtraSpell.
