@@ -69,12 +69,15 @@ namespace TES3MP::Native
         }
     }
 
-    Environment::Environment(const Loadout& loadout, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed)
-        : Environment(loadout.store(), loadout.options().mFallbacks, loadout.contentFingerprint(), manifest, crypto, seed) {}
+    Environment::Environment(const Loadout& loadout, ContentManifestId manifest, CredentialCrypto& crypto,
+        uint32_t seed, bool sunRules)
+        : Environment(loadout.store(), loadout.options().mFallbacks, loadout.contentFingerprint(), manifest,
+            crypto, seed, sunRules) {}
 
     Environment::Environment(const MWWorld::ESMStore& store, const std::map<std::string, std::string>& fallbacks,
-        std::string contentIdentity, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed)
-        : mInterval(setting(fallbacks, "Weather_Hours_Between_Weather_Changes")), mSeed(seed)
+        std::string contentIdentity, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed,
+        bool sunRules)
+        : mInterval(setting(fallbacks, "Weather_Hours_Between_Weather_Changes")), mSeed(seed), mSunRules(sunRules)
     {
         mGlobals.fill(store);
         std::ostringstream binding;
@@ -95,6 +98,29 @@ namespace TES3MP::Native
                 "Native weather transition exceeds timing budget");
             mWeather.push_back(*WeatherId::fromValue(MWWorld::environmentRecordId(ESM::RefId::stringRefId(MWWorld::WeatherNames[i]))));
             binding << mDeltas[i] << '\n';
+        }
+        if (mSunRules)
+        {
+            mSunriseTime = setting(fallbacks, "Weather_Sunrise_Time");
+            mSunriseDuration = setting(fallbacks, "Weather_Sunrise_Duration");
+            mSunsetTime = setting(fallbacks, "Weather_Sunset_Time");
+            mSunsetDuration = setting(fallbacks, "Weather_Sunset_Duration");
+            mSunBlocked = store.get<ESM::GameSetting>().find("fMagicSunBlockedMult")->mValue.getFloat();
+            require(mSunriseDuration > 0 && mSunsetDuration > 0 && mSunriseTime < mSunsetTime
+                && mSunriseTime + mSunriseDuration <= mSunsetTime
+                && mSunsetTime + mSunsetDuration <= 24 && std::isfinite(mSunBlocked)
+                && mSunBlocked >= 0 && mSunBlocked <= 1, "Invalid native sunlight settings");
+            binding << mSunriseTime << ' ' << mSunriseDuration << ' ' << mSunsetTime << ' '
+                << mSunsetDuration << ' ' << mSunBlocked << '\n';
+            for (size_t i = 0; i < MWWorld::WeatherNames.size(); ++i)
+            {
+                const auto prefix = "Weather_" + std::string(MWWorld::WeatherNames[i]);
+                mSunGlare[i] = setting(fallbacks, prefix + "_Glare_View");
+                mSunCloudsMaximum[i] = setting(fallbacks, prefix + "_Clouds_Maximum_Percent");
+                require(mSunGlare[i] <= 1 && mSunCloudsMaximum[i] <= 1,
+                    "Invalid native weather sunlight settings");
+                binding << mSunGlare[i] << ' ' << mSunCloudsMaximum[i] << '\n';
+            }
         }
         for (const auto& region : store.get<ESM::Region>())
         {
@@ -125,6 +151,32 @@ namespace TES3MP::Native
         for (const auto byte : digest.bytes) identity << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
         mIdentity = identity.str();
         (void)initial();
+    }
+
+    float Environment::sunDamageScale(const CanonicalWorldState& world, ESM::RefId region) const
+    {
+        require(mSunRules, "Native sunlight rules unavailable");
+        const auto state = decode(world);
+        const auto selected = std::ranges::find(mRegions, region, &ESM::Region::mId);
+        require(selected != mRegions.end(), "Native sunlight region missing");
+        const float hour = state.calendar.getTimeStamp().getHour();
+        float risen = 0;
+        if (hour > mSunriseTime && hour < mSunsetTime + mSunsetDuration)
+        {
+            if (hour <= mSunriseTime + mSunriseDuration)
+                risen = (hour - mSunriseTime) / mSunriseDuration;
+            else if (hour > mSunsetTime)
+                risen = 1.f - (hour - mSunsetTime) / mSunsetDuration;
+            else risen = 1.f;
+        }
+        const auto& weather = state.regions[size_t(selected - mRegions.begin())];
+        float glare = mSunGlare[size_t(weather.mCurrentWeather)];
+        if (weather.mNextWeather >= 0 && weather.mTransitionFactor < mSunCloudsMaximum[size_t(weather.mNextWeather)])
+        {
+            const float ratio = weather.mTransitionFactor / mSunCloudsMaximum[size_t(weather.mNextWeather)];
+            glare = (1.f - ratio) * glare + ratio * mSunGlare[size_t(weather.mNextWeather)];
+        }
+        return std::clamp(std::max(glare * risen, mSunBlocked * risen), 0.f, 1.f);
     }
 
     Environment::State Environment::initial() const
@@ -211,7 +263,7 @@ namespace TES3MP::Native
                 && region.mNextWeather >= -1 && region.mNextWeather < 10
                 && region.mQueuedWeather >= -1 && region.mQueuedWeather < 10
                 && std::isfinite(region.mTransitionFactor) && region.mTransitionFactor <= 1.f
-                && region.mTransitionFactor >= -10000.f
+                && region.mTransitionFactor >= (mSunRules ? 0.f : -10000.f)
                 && (region.mNextWeather != -1 || region.mQueuedWeather == -1)
                 && (region.mNextWeather < 0 || mDeltas[region.mNextWeather] > 0 || region.mTransitionFactor == 1.f), "Invalid native weather transition");
             const auto& projected = world.weather()->regions[i];

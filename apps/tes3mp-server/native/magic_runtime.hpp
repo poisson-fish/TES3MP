@@ -20,7 +20,7 @@ namespace TES3MP::Native
     bool permanentStatEffect(ESM::RefId effect);
     bool wholeSourceCure(ESM::RefId effect);
     std::optional<PreparedInstantEffects> preparePersistentEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content);
+        const MWWorld::ESMStore& content, bool specialConditions = false);
     int fortifyDynamicStat(ESM::RefId effect);
     void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
         float magnitude, const MWWorld::ESMStore& content);
@@ -69,14 +69,16 @@ namespace TES3MP::Native
 
     std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
         const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
-        bool actorLifecycle = false, bool expandedEffects = false);
+        bool actorLifecycle = false, bool expandedEffects = false, bool specialConditions = false);
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
-        const MWWorld::ESMStore& content, bool expandedEffects = false);
+        const MWWorld::ESMStore& content, bool expandedEffects = false, bool specialConditions = false);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
-        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
+        bool persistentSpecial = false, bool specialConditions = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
+        bool specialConditions = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);

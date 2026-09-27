@@ -128,7 +128,8 @@ namespace TES3MP::Native
         for (const auto& source : spells)
             // Validate effects before autocalc; unsupported sources cannot be
             // made usable by restoring magicka in this bounded runtime.
-            if (const auto prepared = prepareInstantSpell(*source.record, content, true, context.expandedEffects))
+            if (const auto prepared = prepareInstantSpell(*source.record, content, true,
+                    context.expandedEffects, context.specialConditions))
             {
                 const int cost = prepared->cost;
                 if (cost > context.caster.getMagicka().getCurrent()
@@ -187,7 +188,8 @@ namespace TES3MP::Native
         }
         for (const auto& source : spells)
         {
-            auto prepared = prepareInstantSpell(*source.record, content, true, context.expandedEffects);
+            auto prepared = prepareInstantSpell(*source.record, content, true,
+                context.expandedEffects, context.specialConditions);
             if (!prepared) continue;
             const float multiplier = MWMechanics::spellRatingMultiplier(*source.record,
                 MWMechanics::getSpellSuccessChance(*source.record, context.caster, content),

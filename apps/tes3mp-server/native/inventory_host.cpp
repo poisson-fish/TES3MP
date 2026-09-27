@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 54; ++candidate)
+            for (unsigned candidate = 3; candidate <= 55; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -278,6 +278,7 @@ namespace TES3MP::Native
                 binding.mActorPresentation = descriptorVersion >= 52;
                 binding.mPlayerCastLifecycle = descriptorVersion >= 53;
                 binding.mPersistentConditions = descriptorVersion >= 54;
+                binding.mSpecialConditions = descriptorVersion >= 55;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -318,8 +319,8 @@ namespace TES3MP::Native
     {
         Loadout loadout;
         std::vector<std::unique_ptr<PlacementScene>> scenes;
-        InventoryService inventory;
         std::unique_ptr<Environment> environment;
+        InventoryService inventory;
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
             std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
@@ -413,6 +414,12 @@ namespace TES3MP::Native
                         world = &slot.emplace(InventoryServiceBinding::WorldItems{wireCell, {}});
                     }
                     else world = &start.binding.mAdditionalWorldItems.emplace_back(InventoryServiceBinding::WorldItems{wireCell, {}});
+                    const auto* resolvedCell = loadout.store().get<ESM::Cell>().find(cell);
+                    world->mSunExposed = resolvedCell->isExterior()
+                        || (resolvedCell->mData.mFlags & ESM::Cell::QuasiEx);
+                    world->mSunRegion = resolvedCell->mRegion;
+                    if (start.binding.mSpecialConditions && world->mSunExposed && world->mSunRegion.empty())
+                        throw std::invalid_argument("Native exposed cell lacks a weather region");
                     if (start.binding.mActorSelections && !start.navigation)
                         for (const auto& marker : loadout.placedActors(cell))
                             if (marker.mLeveled)
@@ -666,11 +673,17 @@ namespace TES3MP::Native
         }
         Impl(Startup start, ContentManifestId manifest, CredentialCrypto& crypto, std::span<const std::byte> restored)
             : loadout(std::move(start.options)),
+              environment(start.navigation || start.text.starts_with("native-inventory-12")
+                    || start.text.starts_with("native-inventory-13") || start.text.starts_with("native-inventory-14")
+                    || start.text.starts_with("native-inventory-15")
+                    ? std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed,
+                        start.binding.mSpecialConditions) : nullptr),
               inventory(loadout.store(), loadout.readers(), bind(start, loadout, crypto, scenes, restored), !restored.empty())
         {
-            if (start.navigation || start.text.starts_with("native-inventory-12") || start.text.starts_with("native-inventory-13")
-                || start.text.starts_with("native-inventory-14") || start.text.starts_with("native-inventory-15"))
-                environment = std::make_unique<Environment>(loadout, manifest, crypto, start.binding.mLootSeed);
+            if (start.binding.mSpecialConditions)
+                inventory.bindSunDamageScale([this](const CanonicalWorldState& world, ESM::RefId region) {
+                    return environment->sunDamageScale(world, region);
+                });
             if (!restored.empty())
             {
                 std::vector<ESM::RefId> references{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase};

@@ -40,8 +40,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t ActorPresentationCampaignMagic = 0x5150434154335354;
     inline constexpr uint64_t PlayerCastCampaignMagic = 0x5250434154335354;
     inline constexpr uint64_t PersistentConditionsCampaignMagic = 0x5350434154335354;
+    inline constexpr uint64_t SpecialConditionsCampaignMagic = 0x5450434154335354;
     inline constexpr bool hasPlayerCasts(uint64_t magic)
-    { return magic == PlayerCastCampaignMagic || magic == PersistentConditionsCampaignMagic; }
+    { return magic == PlayerCastCampaignMagic || magic == PersistentConditionsCampaignMagic
+        || magic == SpecialConditionsCampaignMagic; }
     inline constexpr bool hasActorPresentation(uint64_t magic)
     { return magic == ActorPresentationCampaignMagic || hasPlayerCasts(magic); }
     inline constexpr bool hasExpandedEffects(uint64_t magic)
@@ -133,6 +135,7 @@ namespace TES3MP::Native
         struct ConditionSource
         {
             uint64_t actor = 0, source = 0;
+            uint64_t nextWorseningMs = 0, lastObservedMs = 0, worsenings = 0;
             bool operator==(const ConditionSource&) const = default;
         };
         static constexpr size_t MaximumConditionSources = 128;
@@ -551,7 +554,7 @@ namespace TES3MP::Native
                         if (effect.beneficiary > 3) throw std::invalid_argument("Native effect beneficiary invalid");
                     }
                     if (!effect.effectIndex || effect.effectIndex > 255 || !effect.caster || !effect.source
-                        || effect.sourceKind > (magic == PersistentConditionsCampaignMagic ? 4u : hasConstantState(magic) ? 3u : 2u)
+                        || effect.sourceKind > ((magic == PersistentConditionsCampaignMagic || magic == SpecialConditionsCampaignMagic) ? 4u : hasConstantState(magic) ? 3u : 2u)
                         || !std::isfinite(effect.resistance)
                         || effect.resistance < -20000 || effect.resistance > 100
                         || effect.startTick > tick
@@ -618,16 +621,30 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native player cast state invalid");
                 combat->playerCasts[i] = value;
             }
-        if (magic == PersistentConditionsCampaignMagic)
+        if (magic == PersistentConditionsCampaignMagic || magic == SpecialConditionsCampaignMagic)
         {
             const auto count = getAreaWord(bytes, offset);
-            if (count > ActorCampaignCombat::MaximumConditionSources || count > (bytes.size() - offset) / 16)
+            const size_t sourceBytes = magic == SpecialConditionsCampaignMagic ? 40 : 16;
+            if (count > ActorCampaignCombat::MaximumConditionSources || count > (bytes.size() - offset) / sourceBytes)
                 throw std::invalid_argument("Native condition source count invalid");
             for (size_t i = 0; i < count; ++i)
             {
                 ActorCampaignCombat::ConditionSource value{getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (magic == SpecialConditionsCampaignMagic)
+                {
+                    value.nextWorseningMs = getAreaWord(bytes, offset);
+                    value.lastObservedMs = getAreaWord(bytes, offset);
+                    value.worsenings = getAreaWord(bytes, offset);
+                }
                 if (value.actor >= 3 || !value.source
-                    || std::ranges::find(combat->conditions, value) != combat->conditions.end())
+                    || value.worsenings > 100000
+                    || (value.nextWorseningMs && (!value.lastObservedMs
+                        || value.nextWorseningMs <= value.lastObservedMs
+                        || value.nextWorseningMs - value.lastObservedMs > 86400000))
+                    || (!value.nextWorseningMs && (value.lastObservedMs || value.worsenings))
+                    || std::ranges::any_of(combat->conditions, [&](const auto& prior) {
+                        return prior.actor == value.actor && prior.source == value.source;
+                    }))
                     throw std::invalid_argument("Native condition source identity invalid");
                 combat->conditions.push_back(value);
             }

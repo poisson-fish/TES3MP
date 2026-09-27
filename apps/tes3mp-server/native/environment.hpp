@@ -21,6 +21,10 @@ namespace TES3MP::Native
         MWWorld::Globals mGlobals;
         std::vector<ESM::Region> mRegions;
         std::array<float, 10> mDeltas;
+        std::array<float, 10> mSunGlare{}, mSunCloudsMaximum{};
+        float mSunriseTime = 0, mSunriseDuration = 0, mSunsetTime = 0, mSunsetDuration = 0;
+        float mSunBlocked = 0;
+        bool mSunRules = false;
         std::vector<WeatherId> mWeather;
         std::optional<WeatherCatalog> mCatalog;
         float mInterval;
@@ -32,13 +36,16 @@ namespace TES3MP::Native
         CanonicalWorldState project(const CanonicalWorldState& base, const State& state,
             ServerTick tick, bool initializing) const;
     public:
-        Environment(const Loadout& loadout, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed);
+        Environment(const Loadout& loadout, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed,
+            bool sunRules = false);
         Environment(const MWWorld::ESMStore& store, const std::map<std::string, std::string>& fallbacks,
-            std::string contentIdentity, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed);
+            std::string contentIdentity, ContentManifestId manifest, CredentialCrypto& crypto, uint32_t seed,
+            bool sunRules = false);
         CanonicalWorldState initialize(const CanonicalWorldState& base) const override;
         void validate(const CanonicalWorldState& world) const override;
         CanonicalWorldState advance(const CanonicalWorldState& world, ServerTick tick,
             unsigned int skippedHours = 0) const override;
+        float sunDamageScale(const CanonicalWorldState& world, ESM::RefId region) const;
     };
 }
 #endif

@@ -60,7 +60,8 @@ namespace TES3MP
         virtual std::unique_ptr<PreparedNativeInventory> prepareDoorStep(
             const CanonicalServerState&, ServerTick, float) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
-            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+            const CanonicalWorldState* world = nullptr)
         { return command ? std::move(command) : prepareDoorStep(players, tick, seconds); }
         virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };

@@ -283,13 +283,50 @@ namespace TES3MP::Native
             return id == ESM::MagicEffect::DamageHealth || id == ESM::MagicEffect::DamageMagicka
                 || id == ESM::MagicEffect::DamageFatigue || id == ESM::MagicEffect::FireDamage
                 || id == ESM::MagicEffect::ShockDamage || id == ESM::MagicEffect::FrostDamage
-                || id == ESM::MagicEffect::Poison;
+                || id == ESM::MagicEffect::Poison || id == ESM::MagicEffect::SunDamage;
         }
         bool timedRestore(ESM::RefId id)
         {
             return id == ESM::MagicEffect::RestoreHealth
                 || id == ESM::MagicEffect::RestoreMagicka
                 || id == ESM::MagicEffect::RestoreFatigue;
+        }
+        uint64_t gameTimeMilliseconds(const CanonicalWorldState* world)
+        {
+            if (!world || !world->time().daysPassed
+                || world->time().millisecondsSinceMidnight >= 86400000)
+                throw std::invalid_argument("Native special condition requires a valid game clock");
+            return uint64_t(*world->time().daysPassed) * 86400000
+                + world->time().millisecondsSinceMidnight;
+        }
+        bool sameCondition(const ActorCampaignCombat::ConditionSource& condition,
+            size_t actor, uint64_t source)
+        { return condition.actor == actor && condition.source == source; }
+        bool corprusStatOverlay(ESM::RefId id)
+        {
+            return id == ESM::MagicEffect::DrainAttribute || id == ESM::MagicEffect::DrainSkill
+                || id == ESM::MagicEffect::FortifyAttribute || id == ESM::MagicEffect::FortifySkill;
+        }
+        void applyCorprusOnce(MWMechanics::NpcStats& target, const ActorCampaignTimedEffect& effect,
+            const MWWorld::ESMStore& content, bool uncappedFatigue)
+        {
+            const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+            if (permanentStatEffect(id))
+            {
+                ESM::ENAMstruct entry{}; entry.mEffectID = id;
+                if (effect.argument <= 8) entry.mAttribute = ESM::Attribute::indexToRefId(int(effect.argument) - 1);
+                else entry.mSkill = ESM::Skill::indexToRefId(int(effect.argument) - 9);
+                applyPermanentStatEffect(target, entry, effect.magnitude, content);
+            }
+            else if (timedDamage(id) || timedRestore(id))
+            {
+                const int stat = id == ESM::MagicEffect::DamageMagicka || id == ESM::MagicEffect::RestoreMagicka ? 1
+                    : id == ESM::MagicEffect::DamageFatigue || id == ESM::MagicEffect::RestoreFatigue ? 2 : 0;
+                const MWWorld::TimeStamp deathTime{};
+                MWMechanics::adjustDynamicStatValue(target, stat,
+                    timedRestore(id) ? effect.magnitude : -effect.magnitude,
+                    stat == 2 && uncappedFatigue, false, &deathTime);
+            }
         }
         bool supportedTimedStatus(ESM::RefId id)
         {
@@ -438,7 +475,8 @@ namespace TES3MP::Native
 
         bool reconcileConstants(const MWWorld::PlainEquipmentValues& values, size_t actor, ActorCasterIdentity caster,
             uint64_t tick, const MWWorld::ESMStore& content, bool general,
-            std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng, bool expanded)
+            std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
+            bool expanded, bool specialConditions)
         {
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
@@ -455,7 +493,7 @@ namespace TES3MP::Native
                 PreparedInstantEffects plan;
                 if (general)
                 {
-                    auto prepared = prepareConstantEffects(record.mEnchant, content, expanded);
+                    auto prepared = prepareConstantEffects(record.mEnchant, content, expanded, specialConditions);
                     if (!prepared) throw std::invalid_argument("Native constant effects unsupported");
                     plan = std::move(*prepared);
                 }
@@ -583,7 +621,7 @@ namespace TES3MP::Native
             const std::array<ActorCasterIdentity, 3>& identities, const MWWorld::ESMStore& content,
             Misc::Rng::Generator& rng, bool uncappedFatigue, bool classicReflect,
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
-            bool ignoreResistance = false)
+            bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {})
         {
             std::array owned{loadCombatStats(content, combat.actors[0], effects, 0),
                 loadCombatStats(content, combat.actors[1], effects, 1), loadCombatStats(content, combat.actors[2], effects, 2)};
@@ -676,6 +714,33 @@ namespace TES3MP::Native
                 }
                 if (const auto cured = MWMechanics::curedEffect(effect.mEffectID); !cured.empty())
                 {
+                    if (cured == ESM::MagicEffect::Corprus)
+                    {
+                        for (auto& condition : combat.conditions)
+                            if (condition.actor == recipient)
+                            {
+                                const auto* record = spellBySource(content, condition.source);
+                                if (!record || !MWMechanics::Spells::hasCorprusEffect(record)) continue;
+                                for (const auto& candidate : effects)
+                                    if (candidate.actor == recipient && candidate.sourceKind == 4
+                                        && candidate.source == condition.source && candidate.argument)
+                                    {
+                                        const auto id = ESM::MagicEffect::indexToRefId(int(candidate.effectIndex));
+                                        const auto* magic = content.get<ESM::MagicEffect>().find(id);
+                                        if (corprusStatOverlay(id) && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
+                                            && (magic->mData.mFlags & ESM::MagicEffect::Harmful))
+                                            applyEffectStats(*states[recipient], content, {&candidate, 1}, recipient,
+                                                -float(condition.worsenings));
+                                    }
+                                std::erase_if(effects, [&](const auto& candidate) {
+                                    if (candidate.actor != recipient || candidate.sourceKind != 4
+                                        || candidate.source != condition.source) return false;
+                                    undo(candidate); return true;
+                                });
+                                condition.nextWorseningMs = condition.lastObservedMs = condition.worsenings = 0;
+                            }
+                        return;
+                    }
                     std::erase_if(effects, [&](const auto& candidate) {
                         if (candidate.actor != recipient
                             || candidate.effectIndex != uint64_t(ESM::MagicEffect::refIdToIndex(cured))) return false;
@@ -718,7 +783,9 @@ namespace TES3MP::Native
                     {
                         const int stat = effect.mEffectID == ESM::MagicEffect::DamageMagicka || effect.mEffectID == ESM::MagicEffect::RestoreMagicka ? 1
                             : effect.mEffectID == ESM::MagicEffect::DamageFatigue || effect.mEffectID == ESM::MagicEffect::RestoreFatigue ? 2 : 0;
-                        MWMechanics::adjustDynamicStatValue(victim, stat, timedRestore(effect.mEffectID) ? magnitude : -magnitude,
+                        const float scaled = effect.mEffectID == ESM::MagicEffect::SunDamage
+                            ? magnitude * (sunExposure ? sunExposure(recipient) : 0.f) : magnitude;
+                        MWMechanics::adjustDynamicStatValue(victim, stat, timedRestore(effect.mEffectID) ? scaled : -scaled,
                             stat == 2 && uncappedFatigue, false, &deathTime);
                     }
                 }
@@ -736,6 +803,10 @@ namespace TES3MP::Native
                         (absorb >= 0 || absorbStat(effect.mEffectID)) && author < 3 ? author + 1 : 0};
                     effects.push_back(active);
                     for (size_t i = 0; i < 3; ++i) applyEffectStats(*states[i], content, {&active, 1}, i, 1.f);
+                    if (sourceKind == 4 && spell && MWMechanics::Spells::hasCorprusEffect(spell)
+                        && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
+                        && effect.mEffectID != ESM::MagicEffect::Corprus)
+                        applyCorprusOnce(victim, active, content, uncappedFatigue);
                     if (!active.argument && !timedDamage(effect.mEffectID) && !timedRestore(effect.mEffectID))
                         victim.getMagicEffects().add(MWMechanics::EffectKey(effect.mEffectID), MWMechanics::EffectParam(magnitude));
                     if (drain >= 0) MWMechanics::adjustDynamicStatValue(victim, drain, -magnitude, true, false, &deathTime);
@@ -1915,7 +1986,7 @@ namespace TES3MP::Native
             const auto caster = loadCombatStats(mRuntime.mStore, combat.actors[context.combatIndex],
                 effectsState, context.combatIndex);
             auto prepared = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge,
-                mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects);
+                mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions);
             if (!prepared || !prepared->affordable) return {};
             const auto& effects = prepared->effects;
             if (std::ranges::any_of(effects.effects,
@@ -1943,7 +2014,8 @@ namespace TES3MP::Native
                 selected = mRuntime.mStore.get<ESM::Spell>().search(id);
             }
         if (!selected) return {};
-        auto prepared = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects);
+        auto prepared = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle,
+            mBinding.mExpandedEffects, mBinding.mSpecialConditions);
         if (!prepared || std::ranges::any_of(prepared->effects.effects,
                 [&](const auto& effect) { return (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty()))
                     || (effect.mArea != 0 && (!mBinding.mMagicArea || (!mBinding.mNpcCastLifecycle && effect.mRange != ESM::RT_Target))); })
@@ -2120,7 +2192,9 @@ namespace TES3MP::Native
                 || mBinding.mExpandedEffects != hasExpandedEffects(magic)
                 || mBinding.mActorPresentation != hasActorPresentation(magic)
                 || mBinding.mPlayerCastLifecycle != hasPlayerCasts(magic)
-                || mBinding.mPersistentConditions != (magic == PersistentConditionsCampaignMagic))
+                || mBinding.mPersistentConditions != (magic == PersistentConditionsCampaignMagic
+                    || magic == SpecialConditionsCampaignMagic)
+                || mBinding.mSpecialConditions != (magic == SpecialConditionsCampaignMagic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2213,7 +2287,8 @@ namespace TES3MP::Native
                         {
                             const auto* selected = mRuntime.mStore.get<ESM::Spell>().search(id);
                             const auto plan = selected ? prepareInstantSpell(*selected, mRuntime.mStore,
-                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects) : std::nullopt;
+                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
+                                mBinding.mSpecialConditions) : std::nullopt;
                             if (!plan || !plan->effects.hasRange(ESM::RT_Target)
                                 || (!mBinding.mNpcCastLifecycle && plan->effects.hasRange(ESM::RT_Touch)))
                                 throw std::invalid_argument("Native projectile spell source invalid");
@@ -2230,7 +2305,8 @@ namespace TES3MP::Native
                     const auto effects = selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
                         || selected->mData.mType == ESM::Enchantment::CastOnce)
                         ? prepareInstantEffects(selected->mEffects, mRuntime.mStore,
-                            mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects) : std::nullopt;
+                            mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
+                            false, mBinding.mSpecialConditions) : std::nullopt;
                     if (!effects || !effects->hasRange(ESM::RT_Target) || (!mBinding.mNpcCastLifecycle && effects->hasRange(ESM::RT_Touch))
                         || (!mBinding.mMagicArea && std::ranges::any_of(effects->effects,
                             [](const auto& effect) { return effect.mArea != 0; })))
@@ -2241,16 +2317,27 @@ namespace TES3MP::Native
                 for (const auto& condition : decoded.combat->conditions)
                 {
                     const auto* spell = spellBySource(mRuntime.mStore, condition.source);
-                    if (!decoded.tick || !spell || !preparePersistentEffects(*spell, mRuntime.mStore))
+                    if (!decoded.tick || !spell || !preparePersistentEffects(*spell, mRuntime.mStore,
+                            mBinding.mSpecialConditions))
                         throw std::invalid_argument("Native saved condition source unsupported");
+                    if (mBinding.mSpecialConditions && condition.nextWorseningMs
+                        && !MWMechanics::Spells::hasCorprusEffect(spell))
+                        throw std::invalid_argument("Native non-Corprus condition carries a worsening clock");
                 }
             std::set<std::tuple<uint64_t, uint64_t, uint64_t>> conditionEffects;
             if (mBinding.mActorEffectLifecycle)
                 for (const auto& effect : decoded.timedEffects)
                 {
                     const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                    if (!mBinding.mSpecialConditions && (id == ESM::MagicEffect::SunDamage
+                        || id == ESM::MagicEffect::ResistCorprusDisease
+                        || id == ESM::MagicEffect::WeaknessToCorprusDisease
+                        || id == ESM::MagicEffect::CureCorprusDisease))
+                        throw std::invalid_argument("Native saved special effect requires V55");
                     if (!timedDamage(id) && !timedRestore(id) && !supportedTimedStatus(id)
                         && !(mBinding.mExpandedEffects && expandedCombatEffect(id))
+                        && !(mBinding.mSpecialConditions && (id == ESM::MagicEffect::Corprus
+                            || id == ESM::MagicEffect::Vampirism))
                         && !((mBinding.mNpcCastLifecycle || (mBinding.mConstantEffects && effect.sourceKind == 3))
                             && (id == ESM::MagicEffect::FortifyAttribute || id == ESM::MagicEffect::FortifySkill))
                         && !(mBinding.mNpcCastLifecycle && (id == ESM::MagicEffect::DrainAttribute
@@ -2280,7 +2367,8 @@ namespace TES3MP::Native
                     else if (effect.sourceKind == 4)
                     {
                         const auto* spell = spellBySource(mRuntime.mStore, effect.source);
-                        const auto plan = spell ? preparePersistentEffects(*spell, mRuntime.mStore) : std::nullopt;
+                        const auto plan = spell ? preparePersistentEffects(*spell, mRuntime.mStore,
+                            mBinding.mSpecialConditions) : std::nullopt;
                         if (plan && effect.ordinal < plan->effects.size())
                         {
                             const auto& entry = plan->effects[effect.ordinal];
@@ -2292,8 +2380,9 @@ namespace TES3MP::Native
                                 && entry.mRange == ESM::RT_Self && effect.argument == argument && effect.durationTicks == 0 && effect.expiresTick == UINT64_MAX
                                 && (noMagnitude ? effect.magnitude == 1.f
                                     : effect.magnitude >= entry.mMagnMin * scale && effect.magnitude <= entry.mMagnMax * scale)
-                                && std::ranges::find(decoded.combat->conditions,
-                                    ActorCampaignCombat::ConditionSource{effect.actor, effect.source}) != decoded.combat->conditions.end()
+                                && std::ranges::any_of(decoded.combat->conditions, [&](const auto& condition) {
+                                    return sameCondition(condition, effect.actor, effect.source);
+                                })
                                 && conditionEffects.emplace(effect.actor, effect.source, effect.ordinal).second;
                         }
                     }
@@ -2474,7 +2563,8 @@ namespace TES3MP::Native
                             ? mBinding.mNavigatingActor->actorId() : mBinding.mPlayers[actorIndex].value(),
                             mBinding.mDurableCasters ? (actorIndex == 2 ? 2u : 1u) : 0u,
                             mBinding.mDurableCasters ? (actorIndex == 2 ? decoded.life->generation : 1u) : 0u},
-                            decoded.tick, mRuntime.mStore, mBinding.mGeneralConstants, decoded.timedEffects, nullptr, mBinding.mExpandedEffects);
+                            decoded.tick, mRuntime.mStore, mBinding.mGeneralConstants, decoded.timedEffects, nullptr,
+                            mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                     }
                 }
                 if (mBinding.mPlayerCastLifecycle)
@@ -2491,7 +2581,8 @@ namespace TES3MP::Native
                                 {
                                     if (effects) throw std::invalid_argument("Saved player spell identity ambiguous");
                                     const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id);
-                                    const auto plan = spell ? prepareInstantSpell(*spell, mRuntime.mStore, true, mBinding.mExpandedEffects) : std::nullopt;
+                                    const auto plan = spell ? prepareInstantSpell(*spell, mRuntime.mStore, true,
+                                        mBinding.mExpandedEffects, mBinding.mSpecialConditions) : std::nullopt;
                                     if (plan) effects = plan->effects;
                                 }
                         }
@@ -2505,7 +2596,8 @@ namespace TES3MP::Native
                                     const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(ptr.getClass().getEnchantment(ptr));
                                     if (enchantment && (enchantment->mData.mType == ESM::Enchantment::WhenUsed
                                             || (enchantment->mData.mType == ESM::Enchantment::CastOnce && ptr.getClass().getScript(ptr).empty())))
-                                        effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true, mBinding.mExpandedEffects);
+                                        effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true,
+                                            mBinding.mExpandedEffects, false, mBinding.mSpecialConditions);
                                 }
                         }
                         else continue; // Released items may have been consumed or transferred.
@@ -2529,7 +2621,8 @@ namespace TES3MP::Native
                     {
                         if (effects) throw std::invalid_argument("Native saved cast source ambiguous");
                         const auto* source = mRuntime.mStore.get<ESM::Spell>().search(id);
-                        const auto plan = source ? prepareInstantSpell(*source, mRuntime.mStore, true, mBinding.mExpandedEffects) : std::nullopt;
+                        const auto plan = source ? prepareInstantSpell(*source, mRuntime.mStore, true,
+                            mBinding.mExpandedEffects, mBinding.mSpecialConditions) : std::nullopt;
                         if (plan) effects = plan->effects;
                     }
                 }
@@ -2544,7 +2637,8 @@ namespace TES3MP::Native
                             const auto ptr = reference.getPtr();
                             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(ptr.getClass().getEnchantment(ptr));
                             if (enchantment && enchantment->mData.mType == ESM::Enchantment::WhenUsed)
-                                effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true, mBinding.mExpandedEffects);
+                                effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true,
+                                    mBinding.mExpandedEffects, false, mBinding.mSpecialConditions);
                         }
                 }
                 if (!effects || uint64_t(effects->effects.front().mRange) != cast.range
@@ -2603,7 +2697,7 @@ namespace TES3MP::Native
         {
             if (combat->conditions.size() > ActorCampaignCombat::MaximumConditionSources)
                 throw std::invalid_argument("Native condition source capacity exhausted");
-            castSize += 8 + combat->conditions.size() * 16;
+            castSize += 8 + combat->conditions.size() * (mBinding.mSpecialConditions ? 40 : 16);
         }
         const size_t timedSize = mBinding.mMagicTimed
             ? 8 + timedEffects.size() * (mBinding.mExpandedEffects ? 120 : mBinding.mDurableCasters ? 112 : mBinding.mGeneralConstants ? 96 : mBinding.mActorEffectLifecycle ? 80 : 24) : 0;
@@ -2627,7 +2721,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mPersistentConditions ? PersistentConditionsCampaignMagic
+        putAreaWord(result, mBinding.mSpecialConditions ? SpecialConditionsCampaignMagic
+            : mBinding.mPersistentConditions ? PersistentConditionsCampaignMagic
             : mBinding.mPlayerCastLifecycle ? PlayerCastCampaignMagic
             : mBinding.mActorPresentation ? ActorPresentationCampaignMagic
             : mBinding.mExpandedEffects ? ExpandedEffectsCampaignMagic
@@ -2773,7 +2868,15 @@ namespace TES3MP::Native
         {
             putAreaWord(result, combat->conditions.size());
             for (const auto& condition : combat->conditions)
-            { putAreaWord(result, condition.actor); putAreaWord(result, condition.source); }
+            {
+                putAreaWord(result, condition.actor); putAreaWord(result, condition.source);
+                if (mBinding.mSpecialConditions)
+                {
+                    putAreaWord(result, condition.nextWorseningMs);
+                    putAreaWord(result, condition.lastObservedMs);
+                    putAreaWord(result, condition.worsenings);
+                }
+            }
         }
         if (mBinding.mPlayerMelee[0])
             for (const auto& swing : combat->swings)
@@ -3154,12 +3257,13 @@ namespace TES3MP::Native
     };
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
-        ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command)
-    { return prepareNativeTick(players, tick, seconds, std::move(command), {}); }
+        ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+        const CanonicalWorldState* world)
+    { return prepareNativeTick(players, tick, seconds, std::move(command), {}, world); }
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
-        std::optional<ActorMagicCast> actorCast)
+        std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world)
     try
     {
         if (mRuntime.mFailedClosed || mRuntime.mRestartActor) return {};
@@ -3168,6 +3272,7 @@ namespace TES3MP::Native
         if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
         if (!std::isfinite(seconds) || std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
             throw std::invalid_argument("Native actor requires increasing 30 Hz durable ticks");
+        const uint64_t gameNowMs = mBinding.mSpecialConditions ? gameTimeMilliseconds(world) : 0;
         std::optional<ClientMeleeAttackCommand> playerAttack;
         PlayerId playerAttacker = mBinding.mPlayers[0];
         std::unique_ptr<SpellTransaction> playerCasts;
@@ -3210,6 +3315,18 @@ namespace TES3MP::Native
         if (active && !step) report.status = Diagnostics::Status::Boundary;
         else if (step && step->pathUnavailable()) report.status = Diagnostics::Status::NoPath;
         auto after = step ? step->snapshot() : before;
+        const std::function<float(size_t)> sunExposure = [&](size_t index) {
+            if (!mBinding.mSpecialConditions || !world)
+                throw std::invalid_argument("Native SunDamage requires a world snapshot");
+            const auto cell = index == 2 ? actorCell(after)
+                : players.findPlayer(mBinding.mPlayers[index])->transform().cell();
+            const auto* domain = worldDomain(cell);
+            if (!domain) throw std::invalid_argument("Native SunDamage cell is not bound");
+            if (!domain->mSunExposed) return 0.f;
+            if (!mSunDamageScale || domain->mSunRegion.empty())
+                throw std::invalid_argument("Native SunDamage weather is not bound");
+            return mSunDamageScale(*world, domain->mSunRegion);
+        };
         auto melee = mMelee;
         auto combat = mCombat;
         if (mBinding.mRangedFlight && combat)
@@ -3243,7 +3360,8 @@ namespace TES3MP::Native
                 {mBinding.mPlayers[0].value(), 1, 1}, {mBinding.mPlayers[1].value(), 1, 1},
                 {mBinding.mNavigatingActor->actorId(), 2, life->generation}}};
             auto result = resolveExpandedEffects(plan, range, index, victim, identity, source, kind, at,
-                *combat, effects, identities, content, rng, uncapped, mBinding.mClassicReflectedAbsorb, ordinals, casterStats);
+                *combat, effects, identities, content, rng, uncapped, mBinding.mClassicReflectedAbsorb,
+                ordinals, casterStats, false, sunExposure);
             if (result.deaths[2] && !life->respawnTick)
             {
                 const auto killer = *result.deaths[2];
@@ -3350,7 +3468,11 @@ namespace TES3MP::Native
             else if (mBinding.mActorEffectLifecycle && combat && effect.effectIndex)
             {
                 const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
-                if ((timedDamage(id) || timedRestore(id) || absorbDynamic(id) >= 0 || permanentStatEffect(id))
+                const auto* source = effect.sourceKind == 4 ? spellBySource(mRuntime.mStore, effect.source) : nullptr;
+                const bool corprusOnce = mBinding.mSpecialConditions && source
+                    && MWMechanics::Spells::hasCorprusEffect(source)
+                    && (mRuntime.mStore.get<ESM::MagicEffect>().find(id)->mData.mFlags & ESM::MagicEffect::AppliedOnce);
+                if (!corprusOnce && (timedDamage(id) || timedRestore(id) || absorbDynamic(id) >= 0 || permanentStatEffect(id))
                     && combat->actors[size_t(effect.actor)][8][2] > 0)
                 {
                     const uint64_t from = std::max(mActorTick, effect.startTick);
@@ -3363,7 +3485,8 @@ namespace TES3MP::Native
                                 || id == ESM::MagicEffect::RestoreMagicka ? 1
                             : id == ESM::MagicEffect::DamageFatigue
                                 || id == ESM::MagicEffect::RestoreFatigue ? 2 : 0;
-                        const float amount = effect.magnitude * float(until - from) / 30.f;
+                        const float amount = effect.magnitude * float(until - from) / 30.f
+                            * (id == ESM::MagicEffect::SunDamage ? sunExposure(size_t(effect.actor)) : 1.f);
                         if (permanentStatEffect(id))
                         {
                             ESM::ENAMstruct entry{}; entry.mEffectID = id;
@@ -3431,20 +3554,30 @@ namespace TES3MP::Native
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
                 if (reconcileConstants(values, actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
-                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects))
+                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
+                        mBinding.mSpecialConditions))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
         }
         const auto acquireCondition = [&](size_t index, const ESM::Spell& spell, Misc::Rng::Generator& rng,
             bool authored, MWMechanics::NpcStats* contactStats = nullptr) {
-            const ActorCampaignCombat::ConditionSource member{index, spellRecordId(spell.mId)};
-            if (std::ranges::find(combat->conditions, member) != combat->conditions.end()) return;
-            const auto plan = preparePersistentEffects(spell, mRuntime.mStore);
+            ActorCampaignCombat::ConditionSource member{index, spellRecordId(spell.mId)};
+            if (std::ranges::any_of(combat->conditions, [&](const auto& condition) {
+                    return sameCondition(condition, index, member.source);
+                })) return;
+            const auto plan = preparePersistentEffects(spell, mRuntime.mStore, mBinding.mSpecialConditions);
             if (!plan || !member.source || spellBySource(mRuntime.mStore, member.source) != &spell)
                 throw std::invalid_argument("Native persistent condition unsupported");
             if (combat->conditions.size() >= ActorCampaignCombat::MaximumConditionSources)
                 throw std::invalid_argument("Native condition source capacity exhausted");
+            if (mBinding.mSpecialConditions && MWMechanics::Spells::hasCorprusEffect(&spell))
+            {
+                if (gameNowMs > UINT64_MAX - 86400000)
+                    throw std::invalid_argument("Native Corprus deadline exhausted");
+                member.nextWorseningMs = gameNowMs + 86400000;
+                member.lastObservedMs = gameNowMs;
+            }
             auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
             addTimedResistance(stats, timedEffects, index);
             auto& victim = contactStats ? *contactStats : stats;
@@ -3454,7 +3587,16 @@ namespace TES3MP::Native
             combat->conditions.push_back(member);
             const auto outcome = resolveExpandedEffects(*plan, ESM::RT_Self, index, victim, identities[index], member.source,
                 4, tick.value(), *combat, timedEffects, identities, mRuntime.mStore, rng,
-                mBinding.mUncappedDamageFatigue, mBinding.mClassicReflectedAbsorb, {}, nullptr, authored);
+                mBinding.mUncappedDamageFatigue, mBinding.mClassicReflectedAbsorb,
+                {}, nullptr, authored, sunExposure);
+            if (member.nextWorseningMs && std::ranges::none_of(timedEffects, [&](const auto& effect) {
+                    return effect.actor == index && effect.sourceKind == 4 && effect.source == member.source
+                        && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Corprus));
+                }))
+            {
+                auto& stored = combat->conditions.back();
+                stored.nextWorseningMs = stored.lastObservedMs = 0;
+            }
             if (outcome.deaths[2]) recordEffectDeath(*outcome.deaths[2]);
         };
         const auto initializeConditions = [&](size_t index) {
@@ -3480,8 +3622,9 @@ namespace TES3MP::Native
             const auto sources = combat->conditions;
             for (const auto& carrier : sources)
             {
-                if (carrier.actor != 2 || std::ranges::find(combat->conditions,
-                        ActorCampaignCombat::ConditionSource{index, carrier.source}) != combat->conditions.end()) continue;
+                if (carrier.actor != 2 || std::ranges::any_of(combat->conditions, [&](const auto& condition) {
+                        return sameCondition(condition, index, carrier.source);
+                    })) continue;
                 const auto* spell = spellBySource(mRuntime.mStore, carrier.source);
                 const auto multiplier = MWMechanics::getDiseaseContactMultiplier(*spell, stats.getMagicEffects());
                 if (!multiplier) continue;
@@ -3491,6 +3634,67 @@ namespace TES3MP::Native
                 if (Misc::Rng::rollDice(10000, rng) < int(threshold)) acquireCondition(index, *spell, rng, false, &stats);
             }
         };
+        if (mBinding.mSpecialConditions)
+            for (auto& condition : combat->conditions)
+            {
+                if (!condition.nextWorseningMs) continue; // Cured sources retain membership.
+                const auto* source = spellBySource(mRuntime.mStore, condition.source);
+                if (!source || !MWMechanics::Spells::hasCorprusEffect(source)
+                    || gameNowMs < condition.lastObservedMs)
+                    throw std::invalid_argument("Native Corprus clock or source invalid");
+                const bool awake = condition.actor == 2 ? active
+                    : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                        return session.playerId() == mBinding.mPlayers[size_t(condition.actor)];
+                    });
+                if (!awake)
+                {
+                    const uint64_t elapsed = gameNowMs - condition.lastObservedMs;
+                    if (condition.nextWorseningMs > UINT64_MAX - elapsed)
+                        throw std::invalid_argument("Paused Corprus deadline exhausted");
+                    condition.nextWorseningMs += elapsed;
+                }
+                else
+                {
+                    const auto marker = std::ranges::find_if(timedEffects, [&](const auto& effect) {
+                        return effect.actor == condition.actor && effect.sourceKind == 4
+                            && effect.source == condition.source
+                            && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Corprus));
+                    });
+                    if (marker == timedEffects.end())
+                        throw std::invalid_argument("Active Corprus source lacks its marker");
+                    uint64_t steps = 0;
+                    while (gameNowMs >= condition.nextWorseningMs)
+                    {
+                        if (++steps > 32 || condition.worsenings >= 100000
+                            || condition.nextWorseningMs > UINT64_MAX - 86400000)
+                            throw std::invalid_argument("Native Corprus worsening bound exhausted");
+                        auto victim = loadCombatStats(mRuntime.mStore,
+                            combat->actors[size_t(condition.actor)], timedEffects, size_t(condition.actor));
+                        for (const auto& effect : timedEffects)
+                            if (effect.actor == condition.actor && effect.sourceKind == 4
+                                && effect.source == condition.source
+                                && effect.effectIndex != marker->effectIndex)
+                            {
+                                const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                                const auto* magic = mRuntime.mStore.get<ESM::MagicEffect>().find(id);
+                                if (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
+                                {
+                                    if (corprusStatOverlay(id))
+                                        applyEffectStats(victim, mRuntime.mStore, {&effect, 1},
+                                            size_t(condition.actor), 1.f);
+                                    applyCorprusOnce(victim, effect, mRuntime.mStore, mBinding.mUncappedDamageFatigue);
+                                }
+                            }
+                        saveCombatStats(combat->actors[size_t(condition.actor)], victim, timedEffects,
+                            size_t(condition.actor));
+                        if (condition.actor == 2 && victim.getHealth().getCurrent() <= 0)
+                            recordEffectDeath({marker->caster, marker->casterKind, marker->casterLife});
+                        ++condition.worsenings;
+                        condition.nextWorseningMs += 86400000;
+                    }
+                }
+                condition.lastObservedMs = gameNowMs;
+            }
         std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
         std::vector<MeleeCombatEvent> playerHits;
         std::optional<ActorMeleeCombatEvent> actorHit;
@@ -3511,7 +3715,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native strike weapon identity missing");
             const float beforeCharge = item->mRef.mEnchantmentCharge;
             const auto prepared = prepareEnchantmentCast(*enchantment, attacker, beforeCharge,
-                mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects);
+                mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions);
             if (!prepared || std::ranges::any_of(prepared->effects.effects,
                     [&](const auto& effect) { return effect.mArea != 0
                         || (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty())); }))
@@ -3764,7 +3968,8 @@ namespace TES3MP::Native
                 const auto previous = timedEffects;
                 if (reconcileConstants(respawn->values(), 2, {before.mActor,
                         mBinding.mDurableCasters ? 2u : 0u, mBinding.mDurableCasters ? life->generation + 1 : 0u}, tick.value(), mRuntime.mStore,
-                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects))
+                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
+                        mBinding.mSpecialConditions))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -4270,7 +4475,8 @@ namespace TES3MP::Native
                     if (selected) throw std::invalid_argument("Native actor spell identity ambiguous");
                     selected = mRuntime.mStore.get<ESM::Spell>().search(id);
                 }
-                if (selected) prepared = prepareInstantSpell(*selected, mRuntime.mStore, true, mBinding.mExpandedEffects);
+                if (selected) prepared = prepareInstantSpell(*selected, mRuntime.mStore, true,
+                    mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                 if (prepared && caster.getMagicka().getCurrent() < prepared->cost) prepared.reset();
             }
             else if (use.sourceKind == MagicUseSourceKind::EnchantedItem && mBinding.mMagicItemUse)
@@ -4289,7 +4495,7 @@ namespace TES3MP::Native
                     if (enchantment && enchantment->mData.mType == ESM::Enchantment::WhenUsed)
                     {
                         const auto plan = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge,
-                            mRuntime.mStore, true, mBinding.mExpandedEffects);
+                            mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                         effectSource = spellRecordId(enchantId);
                         if (plan && plan->affordable && effectSource
                             && enchantmentBySource(mRuntime.mStore, effectSource) == enchantment)
@@ -4407,6 +4613,7 @@ namespace TES3MP::Native
                     victim.setDrawState(MWMechanics::DrawState::Spell);
                 AiMagicContext selection{caster, &victim};
                 selection.expandedEffects = mBinding.mExpandedEffects;
+                selection.specialConditions = mBinding.mSpecialConditions;
                 for (const auto& effect : timedEffects)
                 {
                     if (effect.durationTicks <= 90) continue;
@@ -4485,7 +4692,8 @@ namespace TES3MP::Native
                 {
                     const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id);
                     if (!spell) continue;
-                    const auto plan = prepareInstantSpell(*spell, mRuntime.mStore, true, mBinding.mExpandedEffects);
+                    const auto plan = prepareInstantSpell(*spell, mRuntime.mStore, true,
+                        mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                     // Filter whole sources before rating: an unsupported winner
                     // must not hide a lower-ranked executable spell.
                     if (!plan || (plan->effects.hasRange(ESM::RT_Touch) && (!mBinding.mNpcCastLifecycle
@@ -4512,7 +4720,8 @@ namespace TES3MP::Native
                     const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
                     if (!record.mWhenUsed) continue;
                     const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().find(record.mEnchant);
-                    const auto plan = prepareEnchantmentCast(*enchantment, caster, item.mRef.mEnchantmentCharge, mRuntime.mStore, true, mBinding.mExpandedEffects);
+                    const auto plan = prepareEnchantmentCast(*enchantment, caster, item.mRef.mEnchantmentCharge,
+                        mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                     if (!plan || (!mBinding.mNpcCastLifecycle && std::ranges::any_of(plan->effects.effects,
                             [](const auto& effect) { return !effect.mAttribute.empty() || !effect.mSkill.empty(); })) || (plan->effects.hasRange(ESM::RT_Touch) && (!mBinding.mNpcCastLifecycle
                         || (!plan->effects.hasRange(ESM::RT_Target) && nearest > std::pow(mRuntime.mStore.get<ESM::GameSetting>().find("fCombatDistance")->mValue.getFloat(), 2))))
@@ -4568,7 +4777,8 @@ namespace TES3MP::Native
                             Misc::Rng::Generator rng{combat->rng};
                             const auto previous = timedEffects;
                             if (reconcileConstants(equipped, 2, magicCaster(2).identity, tick.value(), mRuntime.mStore,
-                                    mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects))
+                                    mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
+                                    mBinding.mSpecialConditions))
                                 updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                             command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
@@ -4917,14 +5127,15 @@ namespace TES3MP::Native
                                 }
                             if (!selected) throw std::invalid_argument("Native projectile spell source missing");
                             const auto plan = prepareInstantSpell(*selected, mRuntime.mStore,
-                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects);
+                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions);
                             if (plan) effects = plan->effects;
                         }
                         else if (const auto* selected = enchantmentBySource(mRuntime.mStore, pending.effectSource);
                             selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
                                 || selected->mData.mType == ESM::Enchantment::CastOnce))
                             effects = prepareInstantEffects(selected->mEffects, mRuntime.mStore,
-                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects);
+                                mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
+                                false, mBinding.mSpecialConditions);
                         if (!effects || !effects->hasRange(ESM::RT_Target))
                             throw std::invalid_argument("Native projectile effect plan changed");
                         std::array<PreparedInstantEffects, 3> selected;
@@ -5235,7 +5446,8 @@ namespace TES3MP::Native
                 const auto previous = timedEffects;
                 Misc::Rng::Generator rng{combat->rng};
                 if (reconcileConstants(values, index, magicCaster(index).identity, tick.value(), mRuntime.mStore,
-                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects))
+                        mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
+                        mBinding.mSpecialConditions))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }

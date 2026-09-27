@@ -6228,7 +6228,8 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
-        if (filter == "environment-clock" || filter == "environment-weather" || filter == "environment-durability")
+        if (filter == "environment-clock" || filter == "environment-weather" || filter == "environment-durability"
+            || filter == "environment-sun")
         {
             TES3MP::Native::Testing::checkEnvironment(root, filter);
             return;
@@ -6757,7 +6758,8 @@ int main(int argc, char** argv)
         }
         if (argc == 5 && (std::string_view(argv[1]) == "expanded-effects"
             || std::string_view(argv[1]) == "elemental-shields" || std::string_view(argv[1]) == "permanent-stats"
-            || std::string_view(argv[1]) == "fortify-resources" || std::string_view(argv[1]) == "condition-cures" || std::string_view(argv[1]) == "persistent-conditions"))
+            || std::string_view(argv[1]) == "fortify-resources" || std::string_view(argv[1]) == "condition-cures"
+            || std::string_view(argv[1]) == "persistent-conditions" || std::string_view(argv[1]) == "special-conditions"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),

@@ -57,7 +57,10 @@ namespace
         for (const auto effect : {ESM::MagicEffect::DamageHealth, ESM::MagicEffect::RestoreHealth,
                 ESM::MagicEffect::RestoreMagicka, ESM::MagicEffect::RestoreFatigue,
                 ESM::MagicEffect::FireDamage, ESM::MagicEffect::FrostDamage,
-                ESM::MagicEffect::ResistMagicka, ESM::MagicEffect::WeaknessToFire})
+                ESM::MagicEffect::ResistMagicka, ESM::MagicEffect::WeaknessToFire,
+                ESM::MagicEffect::Corprus, ESM::MagicEffect::Vampirism,
+                ESM::MagicEffect::CureCorprusDisease, ESM::MagicEffect::SunDamage,
+                ESM::MagicEffect::ResistCorprusDisease, ESM::MagicEffect::WeaknessToCorprusDisease})
         {
             ESM::MagicEffect record;
             record.blank(); record.mId = effect; record.mData.mSchool = ESM::Skill::Destruction;
@@ -65,6 +68,8 @@ namespace
             record.mData.mFlags = effect == ESM::MagicEffect::DamageHealth
                     || effect == ESM::MagicEffect::FireDamage || effect == ESM::MagicEffect::FrostDamage
                     || effect == ESM::MagicEffect::WeaknessToFire ? ESM::MagicEffect::Harmful : 0;
+            if (effect == ESM::MagicEffect::CureCorprusDisease)
+                record.mData.mFlags = ESM::MagicEffect::NoMagnitude | ESM::MagicEffect::NoDuration;
             store.insertStatic(record);
         }
     }
@@ -155,15 +160,32 @@ namespace
             require(plan && plan->hasRange(ESM::RT_Target), "Persistent source lost range/ordinal filtering");
             condition.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::Corprus;
             require(!preparePersistentEffects(condition, store), "Corprus admitted without special lifecycle");
+            condition.mEffects.mList.front().mData.mRange = ESM::RT_Self;
+            require(bool(preparePersistentEffects(condition, store, true)), "Special Corprus source rejected");
             if (type == ESM::Spell::ST_Blight)
                 require(!MWMechanics::Spells::isRemovedByCure(condition, cure), "Blight cure removed Corprus membership");
             condition.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::Vampirism;
             require(!preparePersistentEffects(condition, store), "Vampirism admitted without special lifecycle");
+            require(bool(preparePersistentEffects(condition, store, true)), "Special Vampirism source rejected");
             condition.mEffects.mList.resize(9);
             require(!preparePersistentEffects(condition, store), "Oversized persistent source admitted");
         }
         const auto ordinary = spell("ordinary", ESM::MagicEffect::DamageHealth, ESM::RT_Self);
         require(!MWMechanics::getDiseaseContactMultiplier(ordinary, caster.getMagicEffects()), "Ordinary spell became contagious");
+        auto cure = ordinary; cure.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::CureCorprusDisease;
+        cure.mEffects.mList.front().mData.mMagnMin = cure.mEffects.mList.front().mData.mMagnMax = 0;
+        cure.mEffects.mList.front().mData.mDuration = 0;
+        require(!prepareInstantSpell(cure, store, true, true)
+            && bool(prepareInstantSpell(cure, store, true, true, true)),
+            "Corprus cure crossed the V55 admission boundary");
+        for (const auto effect : {ESM::MagicEffect::ResistCorprusDisease,
+                ESM::MagicEffect::WeaknessToCorprusDisease, ESM::MagicEffect::SunDamage})
+        {
+            auto cast = spell("special", effect, ESM::RT_Self);
+            require(!prepareInstantSpell(cast, store, true, true)
+                && bool(prepareInstantSpell(cast, store, true, true, true)),
+                "Special condition effect crossed the V55 admission boundary");
+        }
     }
 
     void expandedEffects()

@@ -50,6 +50,8 @@ namespace TES3MP::Native
             std::function<ESM::Position(const ESM::Position&, const MWWorld::Ptr&,
                 const DropPlacementView&, std::span<const ESM::ObjectState>)> mPlacement;
             std::vector<NativeActorSpawn> mActorSpawns;
+            ESM::RefId mSunRegion;
+            bool mSunExposed = false;
         };
         std::optional<WorldItems> mWorldItems;
         std::optional<ESM::CellRef> mDoor;
@@ -111,6 +113,7 @@ namespace TES3MP::Native
         bool mNpcCastLifecycle = false;
         bool mPlayerCastLifecycle = false;
         bool mPersistentConditions = false; // V54 source membership survives selective cures.
+        bool mSpecialConditions = false; // V55 game-time Corprus and weather-sensitive effects.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
@@ -204,6 +207,7 @@ namespace TES3MP::Native
         std::optional<ActorCampaignLife> mLife;
         std::vector<ActorCampaignProjectile> mProjectiles;
         std::vector<ActorCampaignTimedEffect> mTimedEffects;
+        std::function<float(const CanonicalWorldState&, ESM::RefId)> mSunDamageScale;
         std::optional<ActorCampaignCast> mNpcCast;
         PlainEquipmentValues mRespawnInventory;
         size_t mCombatNpcOwner = 0;
@@ -351,10 +355,13 @@ namespace TES3MP::Native
             return result;
         }
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
-            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command) override;
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+            const CanonicalWorldState* world = nullptr) override;
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
-            std::optional<ActorMagicCast> actorCast);
+            std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr);
+        void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
+        { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
         bool allowsCellTransition(CellId current, CellId requested, Position3 position) const override;

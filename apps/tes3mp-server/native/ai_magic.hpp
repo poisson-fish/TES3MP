@@ -42,6 +42,7 @@ namespace TES3MP::Native
         bool enemyWerewolf = false;
         bool outsideEnemyReach = false;
         bool expandedEffects = false;
+        bool specialConditions = false;
         std::array<int, 2> selfCures{}; // Poison/paralysis effects lasting more than three seconds.
         std::array<int, 2> selfDispel{}, enemyDispel{}; // Beneficial/harmful temporary spell effects.
     };

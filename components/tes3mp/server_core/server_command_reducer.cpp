@@ -2096,7 +2096,7 @@ namespace TES3MP
         if (!mNativeInventory) return true;
         const bool hadCommand = static_cast<bool>(prepared.mNativeInventory);
         auto door = mNativeInventory->prepareNativeTick(*prepared.mState, tick, seconds,
-            std::move(prepared.mNativeInventory));
+            std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld);
         if (!door) return true;
         if (hadCommand)
         {

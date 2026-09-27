@@ -5443,6 +5443,7 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
+        const bool specialConditions = effectFamily == "special-conditions";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
             ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
@@ -6021,7 +6022,7 @@ namespace TES3MP::Native::Testing
                 spell("expanded_paralyze", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Touch, 1, 0)}, true);
                 spell("expanded_paralyze_self", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Self, 1, 0)});
                 spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
-                if (effectFamily == "persistent-conditions")
+                if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
                     transfer.mValue.setFloat(100.f);
@@ -6029,6 +6030,7 @@ namespace TES3MP::Native::Testing
                     for (const auto [name, type] : {std::pair{"persistent_common", ESM::Spell::ST_Disease},
                             {"persistent_blight", ESM::Spell::ST_Blight}, {"persistent_curse", ESM::Spell::ST_Curse}})
                     {
+                        if (specialConditions) continue;
                         ESM::Spell condition; condition.blank(); condition.mId = ESM::RefId::stringRefId(name);
                         condition.mData.mType = type;
                         condition.mEffects.populate({{ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Strength,
@@ -6046,6 +6048,29 @@ namespace TES3MP::Native::Testing
                         effect(ESM::MagicEffect::ResistBlightDisease, ESM::RT_Self, 300, 100)}, true);
                     spell("contact_weakness", {effect(ESM::MagicEffect::WeaknessToCommonDisease, ESM::RT_Self, 300, 100),
                         effect(ESM::MagicEffect::WeaknessToBlightDisease, ESM::RT_Self, 300, 100)}, true);
+                    if (specialConditions)
+                    {
+                        for (const auto [name, type, marker] : {
+                                std::tuple{"special_corprus", ESM::Spell::ST_Blight, ESM::MagicEffect::Corprus},
+                                std::tuple{"special_vampire", ESM::Spell::ST_Disease, ESM::MagicEffect::Vampirism}})
+                        {
+                            ESM::Spell condition; condition.blank(); condition.mId = ESM::RefId::stringRefId(name);
+                            condition.mData.mType = type;
+                            if (marker == ESM::MagicEffect::Corprus)
+                                condition.mEffects.populate({effect(marker, ESM::RT_Self, 0, 0),
+                                    {ESM::MagicEffect::DamageAttribute, {}, ESM::Attribute::Strength,
+                                        ESM::RT_Self, 0, 0, 4, 4},
+                                    {ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Intelligence,
+                                        ESM::RT_Self, 0, 0, 3, 3}});
+                            else condition.mEffects.populate({effect(marker, ESM::RT_Self, 0, 0)});
+                            npc.mSpells.mList.push_back(condition.mId);
+                            out.startRecord(ESM::Spell::sRecordId, 0); condition.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        }
+                        spell("special_cure", {effect(ESM::MagicEffect::CureCorprusDisease, ESM::RT_Self, 0, 0)}, true);
+                        spell("special_ward", {effect(ESM::MagicEffect::ResistCorprusDisease, ESM::RT_Self, 30, 100)}, true);
+                        spell("special_weakness", {effect(ESM::MagicEffect::WeaknessToCorprusDisease, ESM::RT_Self, 30, 50)}, true);
+                        spell("special_sun", {effect(ESM::MagicEffect::SunDamage, ESM::RT_Self, 0, 10)}, true);
+                    }
                 }
                 if (effectFamily == "condition-cures")
                 {
@@ -6141,7 +6166,7 @@ namespace TES3MP::Native::Testing
                     << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
                     << "\nmelee weapononehand\n";
             }
-            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources" && effectFamily != "persistent-conditions")
+            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources" && effectFamily != "persistent-conditions" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6232,18 +6257,22 @@ namespace TES3MP::Native::Testing
                         out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
                     }
                 }
-                if (effectFamily == "persistent-conditions")
+                if (effectFamily == "persistent-conditions" || specialConditions)
                     std::erase_if(beast.mSpells.mList, [](auto id) { return id.getRefIdString().starts_with("persistent_"); });
                 for (const auto& participant : {female, beast})
                 {
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
                 }
             }
-            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources" || effectFamily == "persistent-conditions")
+            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources" || effectFamily == "persistent-conditions" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
                 if (effectFamily == "persistent-conditions")
                     std::erase_if(npc.mSpells.mList, [](auto id) { return !id.getRefIdString().starts_with("persistent_"); });
+                else if (specialConditions)
+                    std::erase_if(npc.mSpells.mList, [](auto id) {
+                        return id.getRefIdString() != "special_corprus" && id.getRefIdString() != "special_vampire";
+                    });
                 else npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 100;
@@ -6351,7 +6380,9 @@ namespace TES3MP::Native::Testing
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
             if (!encounterProfile.empty())
                 cell.mAmbi.mAmbient = cell.mAmbi.mSunlight = 0x00b0b0b0;
-            cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
+            cell.mData.mFlags = ESM::Cell::Interior | (specialConditions ? ESM::Cell::QuasiEx : 0);
+            if (specialConditions) cell.mRegion = base.store().get<ESM::Region>().begin()->mId;
+            cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
             uint32_t index = 0;
             if (effectLifecycle && strike)
@@ -7548,7 +7579,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7582,7 +7613,7 @@ namespace TES3MP::Native::Testing
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
-        if (effectFamily == "persistent-conditions")
+        if (effectFamily == "persistent-conditions" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -7607,6 +7638,18 @@ namespace TES3MP::Native::Testing
             };
             auto seed = bytes(service);
             const auto initial = read(seed);
+            uint32_t specialDay = 42;
+            const auto specialWorld = [&]() {
+                CanonicalWorldTimeState time;
+                time.daysPassed = specialDay;
+                time.day = uint8_t(1 + specialDay - 42);
+                time.year = 427;
+                time.millisecondsSinceMidnight = 12 * 3600000;
+                const auto globals = GlobalVariableCatalog::create({}).value();
+                const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+                const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+                return CanonicalWorldState::initial(time, globals, quests, factions).value();
+            };
             const size_t statsOffset = 56 + 8 + initial.melee->identity.size() + 7 * 8 + 8;
             for (size_t owner : {0u, 1u}) for (const auto [stat, value] :
                 {std::pair<size_t, float>{8, 40.f}, {9, 30.f}, {10, 60.f}})
@@ -7617,6 +7660,9 @@ namespace TES3MP::Native::Testing
             }
             const auto make = [&]() {
                 auto result = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, seed);
+                if (specialConditions)
+                    static_cast<InventoryService&>(result->service()).bindSunDamageScale(
+                        [](const CanonicalWorldState&, ESM::RefId) { return .5f; });
                 result->service().synchronizeCells(authority); return result;
             };
             const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t tick, std::string_view name,
@@ -7648,7 +7694,9 @@ namespace TES3MP::Native::Testing
                     command = runtime.prepareMagicUse(authority, proposal(runtime, owner, tick, name, target, item, npc), id<ServerTick>(tick));
                     require(bool(command), ("Expanded effect rejected: " + std::string(name)).c_str());
                 }
-                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+                const auto world = specialConditions ? std::optional{specialWorld()} : std::nullopt;
+                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                    std::move(command), world ? &*world : nullptr);
                 require(bool(pending), "Expanded effect tick absent"); return pending;
             };
             const auto commit = [&](auto& runtime, uint64_t tick, std::string_view name = {}, uint64_t owner = 1,
@@ -7660,6 +7708,90 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (specialConditions)
+            {
+                auto running = make(); auto& runtime = running->service();
+                auto pending = advance(runtime, 1);
+                const auto before = bytes(runtime);
+                std::vector<std::byte> candidate;
+                require(pending->commit([&](auto image) {
+                    candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                    "Special condition acquisition leaked through a rejected write");
+                auto state = commit(runtime, 1);
+                require(bytes(runtime) == candidate && state.combat->conditions.size() == 6,
+                    "Special conditions were not acquired once per actor");
+                const auto corprus = source("special_corprus"), vampire = source("special_vampire");
+                std::array<std::byte, 16> conditionIdentity{};
+                for (unsigned byte = 0; byte < 8; ++byte)
+                    conditionIdentity[8 + byte] = std::byte(corprus >> (byte * 8));
+                const auto location = std::search(candidate.begin(), candidate.end(),
+                    conditionIdentity.begin(), conditionIdentity.end());
+                require(location != candidate.end(), "Corprus durable membership missing");
+                auto invalidClock = candidate;
+                const auto offset = size_t(location - candidate.begin());
+                std::copy_n(candidate.begin() + offset + 24, 8, invalidClock.begin() + offset + 16);
+                bool rejectedClock = false;
+                try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, invalidClock); }
+                catch (const std::invalid_argument&) { rejectedClock = true; }
+                require(rejectedClock && bytes(runtime) == candidate, "Malformed Corprus deadline changed live state");
+                const auto member = [&](const auto& value, size_t actor, uint64_t id) {
+                    return std::ranges::find_if(value.combat->conditions, [&](const auto& condition) {
+                        return condition.actor == actor && condition.source == id;
+                    });
+                };
+                require(member(state, 0, corprus) != state.combat->conditions.end()
+                    && member(state, 0, vampire) != state.combat->conditions.end()
+                    && member(state, 0, corprus)->nextWorseningMs == uint64_t(43) * 86400000 + 12 * 3600000
+                    && member(state, 0, vampire)->nextWorseningMs == 0,
+                    "Corprus and Vampirism did not retain distinct lifecycles");
+                const float initialDamage = state.combat->actors[0][0][3];
+                const float initialDrain = state.combat->actors[0][1][3];
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                restarted.service().synchronizeCells(authority);
+                specialDay = 43;
+                state = commit(runtime, 2); commit(restarted.service(), 2);
+                require(bytes(runtime) == bytes(restarted.service())
+                    && member(state, 0, corprus)->worsenings == 1
+                    && state.combat->actors[0][0][3] > initialDamage
+                    && state.combat->actors[0][1][3] > initialDrain,
+                    "Corprus did not worsen exactly once after a durable game day");
+                uint64_t tick = 3;
+                state = commit(runtime, tick, "special_cure");
+                for (unsigned frame = 0; frame < 180 && state.combat->playerCasts[0]; ++frame)
+                    state = commit(runtime, ++tick);
+                require(!state.combat->playerCasts[0] && member(state, 0, corprus) != state.combat->conditions.end()
+                    && member(state, 0, corprus)->nextWorseningMs == 0
+                    && member(state, 0, vampire) != state.combat->conditions.end()
+                    && std::ranges::none_of(state.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 0 && effect.source == corprus;
+                    }) && state.combat->actors[0][1][3] == initialDrain,
+                    "Corprus cure did not reverse harmful worsening while retaining membership and Vampirism");
+                InventoryHost cured(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                cured.service().synchronizeCells(authority);
+                specialDay = 44;
+                state = commit(runtime, ++tick); commit(cured.service(), tick);
+                require(bytes(runtime) == bytes(cured.service()) && member(state, 0, corprus)->worsenings == 0
+                    && member(state, 2, corprus)->worsenings == 2,
+                    "Cured Corprus resumed worsening or restart changed the remaining source");
+                const auto beforeSun = state.combat->actors[0][8][2];
+                state = commit(runtime, ++tick, "special_sun");
+                for (unsigned frame = 0; frame < 180 && state.combat->playerCasts[0]; ++frame)
+                    state = commit(runtime, ++tick);
+                require(!state.combat->playerCasts[0]
+                    && std::abs(state.combat->actors[0][8][2] - (beforeSun - 5.f)) < .001f,
+                    "SunDamage did not use exposed-cell weather scale");
+                static_cast<InventoryService&>(runtime).bindSunDamageScale(
+                    [](const CanonicalWorldState&, ESM::RefId) { return 0.f; });
+                const auto beforeNight = state.combat->actors[0][8][2];
+                state = commit(runtime, ++tick, "special_sun");
+                for (unsigned frame = 0; frame < 180 && state.combat->playerCasts[0]; ++frame)
+                    state = commit(runtime, ++tick);
+                require(!state.combat->playerCasts[0] && state.combat->actors[0][8][2] == beforeNight,
+                    "SunDamage harmed an actor with no sunlight");
+                std::cout << "special conditions corprus=daily+durable cure=selective vampire=retained sun=weather+night rejection=atomic restart=exact\n";
+                return;
+            }
             if (effectFamily == "persistent-conditions")
             {
                 for (bool item : {false, true})

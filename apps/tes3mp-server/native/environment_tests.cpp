@@ -97,8 +97,47 @@ namespace TES3MP::Native::Testing
         require(std::filesystem::create_directory(scratch), "Environment scratch already exists");
         auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         MWWorld::ESMStore store;
-        populateEnvironment(store);
+        populateEnvironment(store, 30, 0, 427, filter == "environment-sun" ? 12.f : 23.9999f);
         auto settings = environmentFallbacks();
+        if (filter == "environment-sun")
+        {
+            ESM::GameSetting blocked; blocked.mId = ESM::RefId::stringRefId("fMagicSunBlockedMult");
+            blocked.mValue = ESM::Variant(.25f); store.insertStatic(blocked);
+            settings.insert_or_assign("Weather_Sunrise_Time", "6");
+            settings.insert_or_assign("Weather_Sunrise_Duration", "2");
+            settings.insert_or_assign("Weather_Sunset_Time", "18");
+            settings.insert_or_assign("Weather_Sunset_Duration", "2");
+            for (const auto name : MWWorld::WeatherNames)
+            {
+                settings.insert_or_assign("Weather_" + std::string(name) + "_Glare_View", "0.1");
+                settings.insert_or_assign("Weather_" + std::string(name) + "_Clouds_Maximum_Percent", "0.5");
+            }
+            settings.insert_or_assign("Weather_Clear_Glare_View", "0.8");
+            Environment sun(store, settings, "sun", testContentManifestId(), *crypto, 17, true);
+            const auto region = ESM::RefId::stringRefId("native_region_0");
+            const auto noon = sun.initialize(baseWorld());
+            require(std::abs(sun.sunDamageScale(noon, region) - .8f) < .0001f,
+                "Clear noon sunlight ignored glare");
+            auto dawnStore = MWWorld::ESMStore{}; populateEnvironment(dawnStore, 30, 0, 427, 7.f, 30.f);
+            dawnStore.insertStatic(blocked);
+            Environment dawn(dawnStore, settings, "dawn", testContentManifestId(), *crypto, 17, true);
+            require(std::abs(dawn.sunDamageScale(dawn.initialize(baseWorld()), region) - .4f) < .0001f,
+                "Dawn sunlight ignored sun percentage");
+            auto nightStore = MWWorld::ESMStore{}; populateEnvironment(nightStore, 30, 0, 427, 21.f, 30.f);
+            nightStore.insertStatic(blocked);
+            Environment night(nightStore, settings, "night", testContentManifestId(), *crypto, 17, true);
+            require(night.sunDamageScale(night.initialize(baseWorld()), region) == 0.f,
+                "Night sunlight remained harmful");
+            require(std::abs(sun.sunDamageScale(noon, ESM::RefId::stringRefId("native_region_1")) - .25f) < .0001f,
+                "Blocked sunlight floor was lost");
+            rejects([&] { sun.sunDamageScale(noon, ESM::RefId::stringRefId("missing")); },
+                "Unknown sunlight region accepted");
+            auto changed = settings; changed["Weather_Clear_Glare_View"] = "0.7";
+            Environment incompatible(store, changed, "sun", testContentManifestId(), *crypto, 17, true);
+            rejects([&] { incompatible.validate(noon); }, "Changed sunlight settings accepted on recovery");
+            std::cout << "native environment: " << filter << " passed\n";
+            return;
+        }
         Environment service(store, settings, "fixture", testContentManifestId(), *crypto, 17);
         auto world = service.initialize(baseWorld());
         require(world.time().daysPassed == 42 && world.time().year == 427 && world.time().day == 30,
