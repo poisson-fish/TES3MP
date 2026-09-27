@@ -5254,7 +5254,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -7115,6 +7115,7 @@ namespace TES3MP::Native::Testing
         {
           for (bool physical : {false, true})
           {
+            if (zeroBase && physical) continue;
             const auto bytes = [](auto& current) { return std::vector(current.inventoryImage().begin(), current.inventoryImage().end()); };
             const auto read = [](const auto& image) { return readActorCampaign(
                 {reinterpret_cast<const char*>(image.data()), image.size()}); };
@@ -7131,8 +7132,14 @@ namespace TES3MP::Native::Testing
             };
             for (size_t i = 0; i < 3; ++i)
             {
-                if (!physical) word(seed, statsOffset + (i * ActorCampaignCombat::StatCount * 5 + 10 * 5 + 2) * 8,
-                    std::bit_cast<uint32_t>(-.001f));
+                const size_t fatigueOffset = statsOffset + (i * ActorCampaignCombat::StatCount * 5 + 10 * 5) * 8;
+                if (zeroBase)
+                {
+                    word(seed, fatigueOffset, std::bit_cast<uint32_t>(0.f));
+                    word(seed, fatigueOffset + 8, std::bit_cast<uint32_t>(100.f));
+                    word(seed, fatigueOffset + 16, std::bit_cast<uint32_t>(100.f));
+                }
+                else if (!physical) word(seed, fatigueOffset + 16, std::bit_cast<uint32_t>(-.001f));
                 word(seed, frameOffset + 3 * 8 + i * 8, physical);
                 word(seed, downOffset + i * 8, 1);
             }
@@ -7170,22 +7177,60 @@ namespace TES3MP::Native::Testing
                 "Disconnected player's get-up advanced");
 
             std::array<bool, 3> completed{};
-            for (uint64_t time = 2; time <= 1801; ++time)
+            std::array<bool, 3> looped{};
+            auto previousFrames = state.combat->knockoutFrame;
+            uint64_t nextTick = 2;
+            std::unique_ptr<InventoryHost> restoredHost, restoredRestart;
+            auto* recovering = &runtime;
+            auto* recoveringRestart = &restarted.service();
+            if (zeroBase)
             {
-                auto tick = runtime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
-                auto resumed = restarted.service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                for (; nextTick <= 1801; ++nextTick)
+                {
+                    auto tick = runtime.prepareNativeTick(authority, id<ServerTick>(nextTick), 1.f/30, {});
+                    auto resumed = restarted.service().prepareNativeTick(authority, id<ServerTick>(nextTick), 1.f/30, {});
+                    require(tick && resumed && tick->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && resumed->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bytes(runtime) == bytes(restarted.service()), "Zero-base restart changed canonical outcome");
+                    const auto after = read(bytes(runtime));
+                    for (size_t i = 0; i < 3; ++i)
+                    {
+                        require(after.combat->knockedDown[i] && after.combat->actors[i][10][2] > 0,
+                            "Zero-base fatigue allowed get-up despite positive current fatigue");
+                        looped[i] = looped[i] || after.combat->knockoutFrame[i] <= previousFrames[i];
+                    }
+                    previousFrames = after.combat->knockoutFrame;
+                    if (std::ranges::all_of(looped, [](bool done) { return done; })) { ++nextTick; break; }
+                }
+                require(std::ranges::all_of(looped, [](bool done) { return done; }), "Zero-base knockout did not loop");
+                // Restore positive base fatigue while retaining the committed clip phase.
+                auto restored = bytes(runtime);
+                for (size_t i = 0; i < 3; ++i)
+                    word(restored, statsOffset + (i * ActorCampaignCombat::StatCount * 5 + 10 * 5) * 8,
+                        std::bit_cast<uint32_t>(100.f));
+                restoredHost = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, restored);
+                restoredRestart = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, restored);
+                recovering = &restoredHost->service();
+                recoveringRestart = &restoredRestart->service();
+                recovering->synchronizeCells(authority);
+                recoveringRestart->synchronizeCells(authority);
+            }
+            for (uint64_t time = nextTick; time < nextTick + 1800; ++time)
+            {
+                auto tick = recovering->prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                auto resumed = recoveringRestart->prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
                 require(tick && resumed && tick->commit(accepted) == CanonicalDurabilityResult::Committed
                     && resumed->commit(accepted) == CanonicalDurabilityResult::Committed
-                    && bytes(runtime) == bytes(restarted.service()), "Mid-get-up restart changed canonical outcome");
-                const auto current = bytes(runtime); const auto after = read(current);
+                    && bytes(*recovering) == bytes(*recoveringRestart), "Mid-get-up restart changed canonical outcome");
+                const auto current = bytes(*recovering); const auto after = read(current);
                 for (size_t i = 0; i < 3; ++i)
                     if (!after.combat->knockedDown[i])
                     {
                         completed[i] = true;
                         require(!after.combat->knockoutFrame[i], "Completed get-up retained stale clock");
                     }
-                const auto alice = runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
-                const auto bob = runtime.projectCombat(authority, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
+                const auto alice = recovering->projectCombat(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                const auto bob = recovering->projectCombat(authority, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
                 require(alice && bob && std::ranges::equal(alice->actors(), bob->actors()),
                     "Get-up outcomes diverged across observers");
                 if (std::ranges::all_of(completed, [](bool done) { return done; })) break;

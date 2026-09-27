@@ -19,6 +19,9 @@ namespace MWMechanics
 {
     class CreatureStats;
 
+    // Stock exhaustion also includes zero base fatigue, even when fortified.
+    bool isFatigueKnockout(float baseFatigue, float currentFatigue);
+
     // Stock AI damage-weighted direction (uniform when unarmed). The caller
     // owns the RNG so a detached transaction can discard or persist the roll.
     std::string_view chooseMeleeAttack(const ESM::Weapon* weapon, Misc::Rng::Generator& rng);

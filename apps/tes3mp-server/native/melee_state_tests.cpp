@@ -311,6 +311,11 @@ namespace
 
     void knockoutTiming()
     {
+        require(MWMechanics::isFatigueKnockout(0.f, 0.f)
+            && MWMechanics::isFatigueKnockout(0.f, 100.f)
+            && MWMechanics::isFatigueKnockout(100.f, -.001f), "Stock exhaustion condition lost zero-base or negative fatigue");
+        require(!MWMechanics::isFatigueKnockout(100.f, 0.f)
+            && !MWMechanics::isFatigueKnockout(100.f, 100.f), "Nonnegative fatigue with positive base caused knockout");
         using namespace TES3MP::Native;
         SceneUtil::TextKeyMap base, override;
         base.emplace(1.f, "knockout: start");

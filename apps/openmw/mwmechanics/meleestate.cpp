@@ -14,6 +14,11 @@
 
 namespace MWMechanics
 {
+    bool isFatigueKnockout(float baseFatigue, float currentFatigue)
+    {
+        return currentFatigue < 0 || baseFatigue == 0;
+    }
+
     bool rollHitKnockdown(const MWWorld::ESMStore& store, const CreatureStats& victim,
         float healthDamage, Misc::Rng::Generator& rng)
     {

@@ -391,7 +391,7 @@ namespace MWMechanics
             return;
         const auto world = MWBase::Environment::get().getWorld();
         auto& stats = charClass.getCreatureStats(mPtr);
-        bool knockout = stats.getFatigue().getCurrent() < 0 || stats.getFatigue().getBase() == 0;
+        bool knockout = isFatigueKnockout(stats.getFatigue().getBase(), stats.getFatigue().getCurrent());
         bool recovery = stats.getHitRecovery();
         bool knockdown = stats.getKnockedDown();
         bool block = stats.getBlock() && !knockout && !recovery && !knockdown;

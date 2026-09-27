@@ -35,16 +35,22 @@ New headless checks:
   synthetic actors/spells/placements. Logs: `build/logs/m4-combined-test.log`,
   `build/logs/m4-combined-tr-crossbow-test.log`, `build/logs/m4-combined-tr-thrown-test.log`.
 
-**Full M4 acceptance is not ready.** Combined checks stage attack types in sequence;
-sustained overlapping desktop combat under network disruption remains unproven.
-Missing implementation includes knockout poses, broader effects/defenses, multi-NPC
+**M4 acceptance remains incomplete.** Overlapping desktop combat under network
+disruption remains unproven. Missing: knockout poses, broader effects/defenses, multi-NPC
 simulation, player respawn/life generations, ranged ammunition recovery/player
 contacts/NPC execution/input/rendering, and the final movement/collision cutover.
 Plain ranged sources and body-center proxies remain limitations.
 
-Source review found stock zero-base-fatigue knockout missing, interrupted-cast
-exceptions potentially rejecting unrelated composed progress, and a 1,024-death
-history ceiling rejecting later deaths. These findings have no new reproducer yet.
-Next: narrow parity/interruption/saturation tests and fixes, then the remaining
-ordered M4 work in PLAN. Ranged live acceptance follows combined combat;
-movement remains last. Existing headless passes do not close these gaps.
+V50 zero-base-fatigue knockout now shares stock initialization/combat/respawn/recovery
+rules; older formats retain behavior. `tes3mp_native_loadout_tests zero-base-fatigue`
+failed before (`build/logs/m4-zero-base-before.log`), passes after
+(`build/logs/m4-zero-base-test.log`): three synthetic participants on vanilla content,
+positive current fatigue, looping/restart, offline pause, rejected/uncertain writes,
+get-up after base restoration. Regression passes: `knockout-getup`
+(`build/logs/m4-zero-base-getup-regression.log`),
+`tes3mp_native_melee_tests knockout-timing` (`build/logs/m4-zero-base-knockout-timing.log`).
+
+Next: reproduce/fix interrupted casts discarding unrelated progress, then the
+1,024-death ceiling without losing attribution or duplicating deaths/rewards.
+Neither has a reproducer yet. Continue PLAN's order; live ranged acceptance follows
+combined combat; movement remains last.

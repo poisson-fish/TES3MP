@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #include "actor_spawns.hpp"
 #include "melee_animation.hpp"
+#include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -275,7 +276,8 @@ namespace TES3MP::Native
                 {
                     const auto value = getAreaWord(bytes, offset);
                     const bool expected = state.actors[actor][8][2] > 0
-                        && state.actors[actor][10][2] < 0;
+                        && MWMechanics::isFatigueKnockout(magic == KnockoutAnimationCampaignMagic
+                            ? state.actors[actor][10][0] : 1.f, state.actors[actor][10][2]);
                     if (value > 1 || (magic == KnockoutAnimationCampaignMagic
                             ? (expected && !value) || (state.actors[actor][8][2] <= 0 && value)
                             : bool(value) != expected))

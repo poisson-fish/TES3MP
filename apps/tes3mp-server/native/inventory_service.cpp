@@ -109,8 +109,13 @@ namespace TES3MP::Native
             SealedCommitter(EquipmentSessionCommitter& sink, const EquipmentBytes& image) : mSink(sink), mImage(image) {}
             PersistenceResult commit(std::span<const char>) noexcept override { return mSink.commit(mImage); }
         };
+        bool fatigueKnockout(const MWMechanics::CreatureStats& stats, bool stockBase)
+        {
+            return MWMechanics::isFatigueKnockout(stockBase ? stats.getFatigue().getBase() : 1.f,
+                stats.getFatigue().getCurrent());
+        }
         ActorCampaignCombat initialCombat(const std::array<ESM::RefId, 3>& actors,
-            const MWWorld::ESMStore& content, uint32_t seed)
+            const MWWorld::ESMStore& content, uint32_t seed, bool stockBase)
         {
             static_assert(ActorCampaignCombat::StatCount == ESM::Attribute::Length + 3 + ESM::Skill::Length);
             ActorCampaignCombat result;
@@ -141,7 +146,7 @@ namespace TES3MP::Native
                 if (index != result.actors[actor].size())
                     throw std::invalid_argument("Native combat stat shape invalid");
                 result.knockedDown[actor] = stats.getHealth().getCurrent() > 0
-                    && stats.getFatigue().getCurrent() < 0;
+                    && fatigueKnockout(stats, stockBase);
             }
             return result;
         }
@@ -457,7 +462,7 @@ namespace TES3MP::Native
                     applyEffectStats(stats, content, {&effect, 1}, actor, 1.f);
             saveCombatStats(combat.actors[actor], stats, current, actor);
             combat.knockedDown[actor] = stats.getHealth().getCurrent() > 0
-                && (stats.getFatigue().getCurrent() < 0 || (retainKnockout && combat.knockedDown[actor]));
+                && (fatigueKnockout(stats, retainKnockout) || (retainKnockout && combat.knockedDown[actor]));
         }
 
         std::string identity(const InventoryServiceBinding& binding, const MWWorld::ESMStore& content)
@@ -704,7 +709,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native combat stat owner must be the selected NPC");
             mCombatNpcOwner = size_t(owner - mBinding.mContainers.begin()) + 2;
             mCombat = initialCombat({mBinding.mActors[0].mBase, mBinding.mActors[1].mBase, owner->mBase},
-                content, mBinding.mLootSeed);
+                content, mBinding.mLootSeed, mBinding.mKnockoutAnimation);
             (void)mRuntime.equippedWeaponCondition(mCombatNpcOwner);
         }
         if (mBinding.mBoundMelee)
@@ -2759,12 +2764,12 @@ namespace TES3MP::Native
                     const auto& bound = (*mBinding.mBoundHits)[index];
                     const auto& clip = combat->hitKnockdown[index] ? bound.knockdown : bound.knockout;
                     auto& frame = combat->knockoutFrame[index];
-                    frame = clip.advance(frame, !combat->hitKnockdown[index] && stats.getFatigue().getCurrent() < 0);
+                    frame = clip.advance(frame, !combat->hitKnockdown[index] && fatigueKnockout(stats, mBinding.mKnockoutAnimation));
                     if (frame == clip.stop)
                     { frame = 0; combat->knockedDown[index] = false; combat->hitKnockdown[index] = false; }
                 }
                 combat->knockedDown[index] = stats.getHealth().getCurrent() > 0
-                    && (stats.getFatigue().getCurrent() < 0
+                    && (fatigueKnockout(stats, mBinding.mKnockoutAnimation)
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[index]));
                 saveCombatStats(combat->actors[index], stats, timedEffects, index);
             }
@@ -2823,7 +2828,7 @@ namespace TES3MP::Native
                             size_t(effect.actor));
                         if (mBinding.mKnockoutRules)
                             combat->knockedDown[size_t(effect.actor)] = victim.getHealth().getCurrent() > 0
-                                && (victim.getFatigue().getCurrent() < 0
+                                && (fatigueKnockout(victim, mBinding.mKnockoutAnimation)
                                     || (mBinding.mKnockoutAnimation && combat->knockedDown[size_t(effect.actor)]));
                         if (effect.actor == 2 && victim.getHealth().getCurrent() <= 0 && life
                             && !life->respawnTick)
@@ -3104,7 +3109,8 @@ namespace TES3MP::Native
             after = step->snapshot();
             combat->actors[2] = life->spawnStats;
             combat->knockedDown[2] = life->spawnStats[8][2] > 0
-                && life->spawnStats[10][2] < 0;
+                && MWMechanics::isFatigueKnockout(mBinding.mKnockoutAnimation
+                    ? life->spawnStats[10][0] : 1.f, life->spawnStats[10][2]);
             combat->hitRecoveryTicks[2] = 0;
             combat->knockoutFrame[2] = 0;
             combat->hitKnockdown[2] = false;
@@ -3451,10 +3457,10 @@ namespace TES3MP::Native
             if (mBinding.mKnockoutRules)
             {
                 combat->knockedDown[owner] = attacker.getHealth().getCurrent() > 0
-                    && (attacker.getFatigue().getCurrent() < 0
+                    && (fatigueKnockout(attacker, mBinding.mKnockoutAnimation)
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[owner]));
                 combat->knockedDown[2] = victim.getHealth().getCurrent() > 0
-                    && (victim.getFatigue().getCurrent() < 0
+                    && (fatigueKnockout(victim, mBinding.mKnockoutAnimation)
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[2]));
                 if (combat->knockedDown[2])
                 {
@@ -3871,7 +3877,7 @@ namespace TES3MP::Native
             if (mBinding.mKnockoutRules)
             {
                 combat->knockedDown[index] = victim.getHealth().getCurrent() > 0
-                    && (victim.getFatigue().getCurrent() < 0
+                    && (fatigueKnockout(victim, mBinding.mKnockoutAnimation)
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[index]));
                 if (index == 2 && combat->knockedDown[2])
                 {
@@ -3951,7 +3957,7 @@ namespace TES3MP::Native
             saveCombatStats(combat->actors[owner], caster, timedEffects, owner);
             if (mBinding.mKnockoutRules)
                 combat->knockedDown[owner] = caster.getHealth().getCurrent() > 0
-                    && (caster.getFatigue().getCurrent() < 0
+                    && (fatigueKnockout(caster, mBinding.mKnockoutAnimation)
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[owner]));
             if (owner == 2 && caster.getHealth().getCurrent() <= 0)
             {
@@ -4363,7 +4369,7 @@ namespace TES3MP::Native
                     saveCombatStats(combat->actors[victimIndex], victim, timedEffects, victimIndex);
                     if (mBinding.mKnockoutRules)
                         combat->knockedDown[victimIndex] = victim.getHealth().getCurrent() > 0
-                            && (victim.getFatigue().getCurrent() < 0
+                            && (fatigueKnockout(victim, mBinding.mKnockoutAnimation)
                                 || (mBinding.mKnockoutAnimation && combat->knockedDown[victimIndex]));
                     hitDamage = damage;
                     hitStat = damagedStat;
@@ -4373,7 +4379,7 @@ namespace TES3MP::Native
                 saveCombatStats(combat->actors[2], attacker, timedEffects, 2);
                 if (mBinding.mKnockoutRules)
                     combat->knockedDown[2] = attacker.getHealth().getCurrent() > 0
-                        && (attacker.getFatigue().getCurrent() < 0
+                        && (fatigueKnockout(attacker, mBinding.mKnockoutAnimation)
                             || (mBinding.mKnockoutAnimation && combat->knockedDown[2]));
                 if (target)
                     actorHit = ActorMeleeCombatEvent{ActorId::fromValue(before.mActor).value(),
