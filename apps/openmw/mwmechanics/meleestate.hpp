@@ -62,6 +62,7 @@ namespace MWMechanics
     // wind-up keys retain the stock random-strength fallback (-1); missing hit
     // keys for attack1..3 retain the stock hit-at-start behavior.
     float attackWindUp(float currentTime, float minimumTime, float maximumTime);
+    float resolveAttackStrength(float windUp, Misc::Rng::Generator& rng);
     float attackReleaseStartPoint(float strength, float minimumAttackTime, float maximumAttackTime,
         float minimumHitTime, float hitTime);
     std::string_view attackFollowStrength(float strength);

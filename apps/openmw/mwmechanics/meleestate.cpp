@@ -204,6 +204,11 @@ namespace MWMechanics
         return std::clamp((currentTime - minimumTime) / (maximumTime - minimumTime), 0.f, 1.f);
     }
 
+    float resolveAttackStrength(float windUp, Misc::Rng::Generator& rng)
+    {
+        return windUp == -1.f ? std::min(1.f, 0.1f + Misc::Rng::rollClosedProbability(rng)) : windUp;
+    }
+
     float attackReleaseStartPoint(float strength, float minimumAttackTime, float maximumAttackTime,
         float minimumHitTime, float hitTime)
     {

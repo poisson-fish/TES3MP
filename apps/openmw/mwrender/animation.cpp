@@ -917,7 +917,7 @@ namespace MWRender
         }
         if (!hasAnimation(group)) return false;
         const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
-        const bool shoot = group == "bowandarrow";
+        const bool shoot = group == "bowandarrow" || group == "crossbow" || group == "throwweapon";
         const std::string prefix = shoot ? "shoot " : std::string(directions[direction]) + ' ';
         const std::string follow = shoot ? "" : std::string(MWMechanics::attackFollowStrength(strength)) + ' ';
         const std::string start = prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + "follow start");

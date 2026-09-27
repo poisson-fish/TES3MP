@@ -40,9 +40,28 @@ namespace TES3MP::Native
 {
     namespace
     {
-        const ESM::ObjectState* equippedArrow(const PlainEquipmentValues& values, const MWWorld::ESMStore& store)
+        bool rangedWeapon(const ESM::Weapon* weapon, bool extended)
         {
-            const auto slot = values.mSlots[MWWorld::InventoryStore::Slot_Ammunition];
+            return weapon && (weapon->mData.mType == ESM::Weapon::MarksmanBow
+                || (extended && (weapon->mData.mType == ESM::Weapon::MarksmanCrossbow
+                    || weapon->mData.mType == ESM::Weapon::MarksmanThrown)));
+        }
+
+        bool rangedSources(const ESM::Weapon& weapon, const ESM::Weapon& ammunition)
+        {
+            const auto* type = MWMechanics::getWeaponType(weapon.mData.mType);
+            return weapon.mScript.empty() && weapon.mEnchant.empty()
+                && ammunition.mScript.empty() && ammunition.mEnchant.empty()
+                && (type->mWeaponClass == ESM::WeaponType::Thrown ? weapon.mId == ammunition.mId
+                    : type->mWeaponClass == ESM::WeaponType::Ranged && type->mAmmoType == ammunition.mData.mType);
+        }
+
+        const ESM::ObjectState* equippedAmmunition(const PlainEquipmentValues& values,
+            const MWWorld::ESMStore& store, const ESM::Weapon& weapon)
+        {
+            const bool thrown = MWMechanics::getWeaponType(weapon.mData.mType)->mWeaponClass == ESM::WeaponType::Thrown;
+            const auto slot = values.mSlots[thrown ? MWWorld::InventoryStore::Slot_CarriedRight
+                : MWWorld::InventoryStore::Slot_Ammunition];
             if (!slot.isSet()) return nullptr;
             const auto item = std::ranges::find(values.mObjects, slot,
                 [](const auto& object) { return object.mRef.mRefNum; });
@@ -50,8 +69,7 @@ namespace TES3MP::Native
                 || store.find(item->mRef.mRefID) != ESM::Weapon::sRecordId) return nullptr;
             const auto* record = store.get<ESM::Weapon>().find(item->mRef.mRefID);
             // Scripted/enchantment behavior belongs to the later impact slice.
-            if (record->mData.mType != ESM::Weapon::Arrow || !record->mScript.empty()
-                || !record->mEnchant.empty()) return nullptr;
+            if (!rangedSources(weapon, *record)) return nullptr;
             return &*item;
         }
 
@@ -634,6 +652,8 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native player swings require complete participant bindings");
         if (mBinding.mBowRelease && !mBinding.mPlayerMelee[0])
             throw std::invalid_argument("Native bow release requires player animation binding");
+        if (mBinding.mRangedRelease && !mBinding.mBowRelease)
+            throw std::invalid_argument("Native ranged release requires the ammunition layout");
         if (mBinding.mBoundHits)
         {
             if (!mBinding.mNpcCastLifecycle || !mBinding.mMeleeDefenseRules)
@@ -1642,8 +1662,7 @@ namespace TES3MP::Native
             || (mBinding.mKnockoutRules && mCombat->knockedDown[owner]))
             return {};
         const auto held = mRuntime.equippedWeaponCondition(owner);
-        if ((held && held->mCondition <= 0)
-            || player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot()))
+        if (player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot()))
             return {};
         const ESM::Weapon* weapon = nullptr;
         if (held)
@@ -1655,10 +1674,13 @@ namespace TES3MP::Native
                 return {};
             weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
         }
-        const bool bow = mBinding.mBowRelease && weapon && weapon->mData.mType == ESM::Weapon::MarksmanBow;
+        if (held && held->mCondition <= 0
+            && (!mBinding.mRangedRelease
+                || (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth))) return {};
+        const bool bow = mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease);
         if (bow && (!attack.commandId.value() || !weapon->mScript.empty() || !weapon->mEnchant.empty()
                 || mCombat->arrows.size() >= MaximumActorProjectiles
-                || !equippedArrow(mRuntime.installedValues(owner), mRuntime.mStore))) return {};
+                || !equippedAmmunition(mRuntime.installedValues(owner), mRuntime.mStore, *weapon))) return {};
         if (mBinding.mPlayerMelee[owner])
         {
             const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
@@ -1734,7 +1756,8 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native projectile campaign version differs from binding");
             if (bool(mBinding.mWeaponMelee) != hasWeaponExecution(magic)
                 || bool(mBinding.mPlayerMelee[0]) != hasPlayerSwings(magic)
-                || mBinding.mBowRelease != (magic == BowReleaseCampaignMagic))
+                || mBinding.mBowRelease != hasRangedRelease(magic)
+                || mBinding.mRangedRelease != (magic == RangedReleaseCampaignMagic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -1902,9 +1925,9 @@ namespace TES3MP::Native
                     const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(arrow.weapon));
                     const auto* ammo = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(arrow.ammoRecord));
                     if (std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) { return id.value() == arrow.caster; })
-                        || arrow.target != mBinding.mNavigatingActor->actorId() || arrow.source == arrow.ammunition
-                        || weapon->mData.mType != ESM::Weapon::MarksmanBow || ammo->mData.mType != ESM::Weapon::Arrow
-                        || !weapon->mScript.empty() || !weapon->mEnchant.empty() || !ammo->mScript.empty() || !ammo->mEnchant.empty())
+                        || arrow.target != mBinding.mNavigatingActor->actorId()
+                        || (arrow.source == arrow.ammunition) != (weapon->mData.mType == ESM::Weapon::MarksmanThrown)
+                        || !rangedWeapon(weapon, mBinding.mRangedRelease) || !rangedSources(*weapon, *ammo))
                         throw std::invalid_argument("Saved bow projectile source invalid");
                 }
                 if (mBinding.mPlayerMelee[0])
@@ -1922,14 +1945,14 @@ namespace TES3MP::Native
                         clip.restore(swing.state);
                         if (mBinding.mBowRelease)
                         {
-                            const bool bow = weapon && weapon->mData.mType == ESM::Weapon::MarksmanBow;
+                            const bool bow = rangedWeapon(weapon, mBinding.mRangedRelease);
                             if (bow != bool(swing.ammunition))
                                 throw std::invalid_argument("Saved bow ammunition binding missing");
                             if (bow)
                             {
                                 const auto* ammo = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing.ammoRecord));
-                                if (ammo->mData.mType != ESM::Weapon::Arrow || !weapon->mScript.empty()
-                                    || !weapon->mEnchant.empty() || !ammo->mScript.empty() || !ammo->mEnchant.empty())
+                                if (!rangedSources(*weapon, *ammo)
+                                    || (swing.source == swing.ammunition) != (weapon->mData.mType == ESM::Weapon::MarksmanThrown))
                                     throw std::invalid_argument("Saved bow source is unsupported");
                             }
                             const auto arrow = std::ranges::find_if(decoded.combat->arrows, [&](const auto& value) {
@@ -1948,7 +1971,7 @@ namespace TES3MP::Native
                             const auto& values = session.mActors[i];
                             if (swing.ammunition)
                             {
-                                const auto* ammo = equippedArrow(values, mRuntime.mStore);
+                                const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon);
                                 if (!ammo || wireId(ammo->mRef.mRefNum).value() != swing.ammunition
                                     || ammo->mRef.mRefID != ESM::RefId::stringRefId(swing.ammoRecord))
                                     throw std::invalid_argument("Saved bow ammunition changed before release");
@@ -2116,7 +2139,7 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mBowRelease ? BowReleaseCampaignMagic
+        putAreaWord(result, mBinding.mRangedRelease ? RangedReleaseCampaignMagic : mBinding.mBowRelease ? BowReleaseCampaignMagic
             : mBinding.mPlayerMelee[0] ? PlayerSwingCampaignMagic
             : mBinding.mWeaponMelee ? WeaponExecutionCampaignMagic
             : mBinding.mNpcCastLifecycle ? CastLifecycleCampaignMagic
@@ -3042,9 +3065,9 @@ namespace TES3MP::Native
                     held ? wireId(held->mItem).value() : 0, life->generation, uint64_t(playerAttack->attackType),
                     PlayerSwing::None, playerAttack->attackStrength,
                     weapon ? std::string(weapon->mId.getRefIdString()) : std::string{}, clip.identity(), clip.snapshot()};
-                if (mBinding.mBowRelease && weapon && weapon->mData.mType == ESM::Weapon::MarksmanBow)
+                if (mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease))
                 {
-                    const auto* ammo = equippedArrow(values, mRuntime.mStore);
+                    const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon);
                     if (!ammo) throw std::invalid_argument("Bow release ammunition missing");
                     combat->swings[owner]->ammunition = wireId(ammo->mRef.mRefNum).value();
                     combat->swings[owner]->ammoRecord = std::string(ammo->mRef.mRefID.getRefIdString());
@@ -3055,6 +3078,8 @@ namespace TES3MP::Native
                 auto& pending = combat->swings[owner];
                 if (!pending || !pending->pending()) continue;
                 auto& swing = *pending;
+                const auto* weapon = swing.weapon.empty() ? nullptr
+                    : mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing.weapon));
                 if (combat->actors[owner][8][2] <= 0 || combat->knockedDown[owner] || combat->hitRecoveryTicks[owner])
                 { swing.interruption = PlayerSwing::Incapacitated; continue; }
                 // Equipment still commits when simulation is paused. Cancel in
@@ -3065,11 +3090,12 @@ namespace TES3MP::Native
                     const auto slot = values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
                     const auto held = mRuntime.equippedWeaponCondition(owner);
                     if (swing.source != (slot.isSet() ? wireId(slot).value() : 0)
-                        || (held && held->mCondition <= 0))
+                        || (held && held->mCondition <= 0 && weapon
+                            && (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth)))
                     { swing.interruption = PlayerSwing::SourceChanged; continue; }
                     if (swing.ammunition)
                     {
-                        const auto* ammo = equippedArrow(values, mRuntime.mStore);
+                        const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon);
                         if (!ammo || wireId(ammo->mRef.mRefNum).value() != swing.ammunition
                             || ammo->mRef.mRefID != ESM::RefId::stringRefId(swing.ammoRecord))
                         { swing.interruption = PlayerSwing::SourceChanged; continue; }
@@ -3087,8 +3113,6 @@ namespace TES3MP::Native
                         return session.playerId() == mBinding.mPlayers[owner];
                     })) { swing.interruption = PlayerSwing::Disconnected; continue; }
                 const auto* player = players.findPlayer(mBinding.mPlayers[owner]);
-                const auto* weapon = swing.weapon.empty() ? nullptr
-                    : mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing.weapon));
                 if (!swing.state.mHit)
                 {
                     if (!player || player->transform().cell() != actorCell(after)
@@ -3105,7 +3129,18 @@ namespace TES3MP::Native
                     continue;
                 auto clip = mBinding.mPlayerMelee[owner](weapon, directions[swing.direction]);
                 clip.restore(swing.state);
-                if (!swing.state.mReleased && clip.windUp() >= swing.strength) clip.release(swing.strength);
+                if (!swing.state.mReleased && (clip.windUp() >= swing.strength
+                        || (clip.windUp() == -1.f && clip.phaseCompletion() == 1.f)))
+                {
+                    if (clip.windUp() == -1.f)
+                    {
+                        Misc::Rng::Generator rng;
+                        Misc::Rng::deserialize(std::to_string(combat->rng), rng);
+                        swing.strength = MWMechanics::resolveAttackStrength(-1.f, rng);
+                        combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                    }
+                    clip.release(swing.strength);
+                }
                 const auto hit = clip.advance(seconds);
                 swing.state = clip.snapshot();
                 if (hit)
@@ -3116,7 +3151,7 @@ namespace TES3MP::Native
                     if (swing.ammunition)
                     {
                         const auto values = combatEquipmentValues(owner, command.get());
-                        const auto* ammo = equippedArrow(values, mRuntime.mStore);
+                        const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon);
                         if (!ammo) throw std::invalid_argument("Bow release lost ammunition");
                         // Temporary server body-center launch proxy, shared with
                         // spell targeting. Flight will replace this with bound geometry.

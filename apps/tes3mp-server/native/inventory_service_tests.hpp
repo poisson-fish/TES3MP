@@ -4,7 +4,7 @@
 #include <string_view>
 namespace TES3MP::Native::Testing
 {
-    void checkBowRelease(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
+    void checkRangedRelease(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&, std::string_view);
     void checkPlayerSwings(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcWeaponExecution(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
         bool generalAttackModes = false);

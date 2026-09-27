@@ -55,7 +55,7 @@ namespace TES3MP::Native::Testing
         Listener listener;
         Pose local(resources), peer(resources), reconnect(resources);
         local.setTextKeyListener(&listener);
-        for (const auto group : {"handtohand", "weapononehand", "weapontwohand", "weapontwowide", "bowandarrow"})
+        for (const auto group : {"handtohand", "weapononehand", "weapontwohand", "weapontwowide", "bowandarrow", "crossbow", "throwweapon"})
             for (unsigned direction = 0; direction < 3; ++direction)
                 for (float strength : {0.f, .5f, 1.f})
                     for (unsigned phase = 1; phase <= 3; ++phase)

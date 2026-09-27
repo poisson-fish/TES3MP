@@ -1223,9 +1223,7 @@ namespace MWMechanics
             return;
 
         auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-        mAttackStrength = calculateWindUp();
-        if (mAttackStrength == -1.f)
-            mAttackStrength = std::min(1.f, 0.1f + Misc::Rng::rollClosedProbability(prng));
+        mAttackStrength = resolveAttackStrength(calculateWindUp(), prng);
         ESM::WeaponType::Class weapclass = getWeaponType(mWeaponType)->mWeaponClass;
         if (weapclass != ESM::WeaponType::Ranged)
         {

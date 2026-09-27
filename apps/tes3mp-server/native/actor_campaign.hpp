@@ -31,8 +31,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t WeaponExecutionCampaignMagic = 0x4a50434154335354;
     inline constexpr uint64_t PlayerSwingCampaignMagic = 0x4b50434154335354;
     inline constexpr uint64_t BowReleaseCampaignMagic = 0x4c50434154335354;
+    inline constexpr uint64_t RangedReleaseCampaignMagic = 0x4d50434154335354;
+    inline constexpr bool hasRangedRelease(uint64_t magic)
+    { return magic == BowReleaseCampaignMagic || magic == RangedReleaseCampaignMagic; }
     inline constexpr bool hasPlayerSwings(uint64_t magic)
-    { return magic == PlayerSwingCampaignMagic || magic == BowReleaseCampaignMagic; }
+    { return magic == PlayerSwingCampaignMagic || hasRangedRelease(magic); }
     inline constexpr bool hasWeaponExecution(uint64_t magic)
     { return magic == WeaponExecutionCampaignMagic || hasPlayerSwings(magic); }
     inline constexpr bool hasCastLifecycle(uint64_t magic)
@@ -75,8 +78,8 @@ namespace TES3MP::Native
         bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
         bool operator==(const PlayerSwing&) const = default;
     };
-    // V47 release records are durable but frozen until physical flight/impact
-    // is wired. The consumed instance may no longer exist in the inventory.
+    // V47 bows and V48 crossbows/thrown releases remain frozen until flight/impact.
+    // The consumed instance may no longer exist; thrown source == ammunition.
     struct BowProjectile
     {
         uint64_t caster = 0, command = 0, source = 0, ammunition = 0;
@@ -544,7 +547,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native player swing state invalid");
                 value.state.mPhase = MeleeAnimation::Phase(phase);
                 value.state.mReleased = bool(released); value.state.mHit = bool(hit);
-                if (magic == BowReleaseCampaignMagic)
+                if (hasRangedRelease(magic))
                 {
                     value.ammunition = getAreaWord(bytes, offset);
                     const auto size = getAreaWord(bytes, offset);
@@ -556,7 +559,7 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native arrow identity invalid");
                 }
             }
-        if (magic == BowReleaseCampaignMagic)
+        if (hasRangedRelease(magic))
         {
             const auto count = getAreaWord(bytes, offset);
             if (count > MaximumActorProjectiles)

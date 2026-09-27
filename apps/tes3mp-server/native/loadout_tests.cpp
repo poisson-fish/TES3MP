@@ -6758,11 +6758,12 @@ int main(int argc, char** argv)
                 std::filesystem::absolute(argv[3]));
             std::cout << "PASS melee-presentation\n"; return 0;
         }
-        if (argc == 5 && std::string_view(argv[1]) == "bow-release")
+        if (argc == 5 && (std::string_view(argv[1]) == "bow-release"
+                || std::string_view(argv[1]) == "crossbow-release" || std::string_view(argv[1]) == "thrown-release"))
         {
-            TES3MP::Native::Testing::checkBowRelease(std::filesystem::absolute(argv[2]),
-                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]));
-            std::cout << "PASS bow-release\n"; return 0;
+            TES3MP::Native::Testing::checkRangedRelease(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]), argv[1]);
+            std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "player-swings")
         {
