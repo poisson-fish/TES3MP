@@ -5254,7 +5254,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -7963,6 +7963,7 @@ namespace TES3MP::Native::Testing
           for (bool physical : {false, true})
           {
             if (zeroBase && physical) continue;
+            if (reconnectCombat && !physical) continue;
             const auto bytes = [](auto& current) { return std::vector(current.inventoryImage().begin(), current.inventoryImage().end()); };
             const auto read = [](const auto& image) { return readActorCampaign(
                 {reinterpret_cast<const char*>(image.data()), image.size()}); };
@@ -7989,6 +7990,106 @@ namespace TES3MP::Native::Testing
                 else if (!physical) word(seed, fatigueOffset + 16, std::bit_cast<uint32_t>(-.001f));
                 word(seed, frameOffset + 3 * 8 + i * 8, physical);
                 word(seed, downOffset + i * 8, 1);
+            }
+            if (reconnectCombat)
+            {
+                // Reproduce live-03's tick 373: a reconnect arrives before a new
+                // pose, retaining Alice's large displacement velocity from tick 314.
+                // Bob's ordinary retained velocity must not drift either.
+                for (size_t i = 0; i < 3; ++i)
+                {
+                    word(seed, downOffset + i * 8, i == 0);
+                    word(seed, frameOffset + 3 * 8 + i * 8, i == 0);
+                    for (size_t stat : {8u, 10u})
+                        for (size_t field : {0u, 2u})
+                            word(seed, statsOffset + (i * ActorCampaignCombat::StatCount * 5 + stat * 5 + field) * 8,
+                                std::bit_cast<uint32_t>(10000.f));
+                }
+                InventoryHost reconnectHost(descriptor, testContentManifest(), *registry, *crypto, seed);
+                auto& current = reconnectHost.service();
+                auto retained = std::vector(authority.players().begin(), authority.players().end());
+                for (size_t i = 0; i < retained.size(); ++i)
+                    retained[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(retained[i],
+                        id<ServerTick>(i ? 371 : 314), Transform(retained[i].transform().cell(),
+                            i ? Position3(60*1024, -80*1024, 1024) : Position3(61440, -307200, 1024),
+                            retained[i].transform().orientation()),
+                        i ? LinearVelocity3(242, -504, 0) : LinearVelocity3(-7486, -211769, 0)));
+                auto connected = std::get<CanonicalServerState>(createCanonicalServerState(retained, authority.activeSessions()));
+                NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+                CanonicalCommandReducer reducer(connected, observability, testContentManifest());
+                struct Port final : CanonicalDurabilityPort
+                {
+                    CanonicalDurabilityResult outcome = CanonicalDurabilityResult::Committed;
+                    std::vector<std::byte> image;
+                    CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
+                        CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+                        const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+                        const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte> data) noexcept override
+                    { image.assign(data.begin(), data.end()); return outcome; }
+                } port;
+                require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &current),
+                    "Reconnect reducer composition failed");
+                auto disconnected = reducer.prepareDisconnect(id<SessionId>(1), id<ServerTick>(372));
+                require(disconnected && reducer.commit(std::move(*disconnected)), "Reconnect disconnect failed");
+                const auto priorSession = authority.activeSessions().front();
+                auto resumed = reducer.prepareResume(CanonicalSessionProgress(priorSession.sessionId(),
+                    id<SessionGeneration>(2), priorSession.playerId(), priorSession.entityId(), {}), id<ServerTick>(373));
+                require(resumed && reducer.commit(std::move(*resumed)), "Reconnect resume failed");
+                current.synchronizeCells(reducer.state());
+                bool hitDuringRecovery = false, recovered = false;
+                for (uint64_t time = 373; time < 573; ++time)
+                {
+                    Clock clock;
+                    ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(time),
+                        IngressOrdinal::initial(), TickEpoch::NextTick);
+                    clock.value = 100'000'000;
+                    const auto pump = intake.pump();
+                    require(pump && !pump.batches().empty(), "Reconnect tick absent");
+                    auto pending = reducer.prepareTick(pump.batches().front());
+                    if (!pending.result())
+                        std::cerr << "reconnect tick=" << time << " preparation=" << unsigned(pending.result().error()) << '\n';
+                    require(bool(pending.result()), "Retained pose velocity invalidated reconnect tick");
+                    require(std::ranges::equal(pending.candidateState().players(), retained),
+                        "Retained client velocity drifted before a fresh pose");
+                    require(reducer.stageNativeDoorStep(pending, id<ServerTick>(time), 1.f/30), "Reconnect combat staging failed");
+                    const auto before = bytes(current);
+                    const auto publication = reducer.latestPublication();
+                    port.outcome = CanonicalDurabilityResult::Rejected;
+                    require(!reducer.commit(std::move(pending)) && bytes(current) == before
+                        && reducer.latestPublication() == publication, "Rejected reconnect leaked state or publication");
+                    const auto candidate = port.image;
+                    port.outcome = CanonicalDurabilityResult::Committed;
+                    require(reducer.commit(std::move(pending)) && bytes(current) == candidate,
+                        "Reconnect retry changed combat outcome");
+                    require(!reducer.commit(std::move(pending)) && bytes(current) == candidate,
+                        "Reconnect candidate committed twice");
+                    const auto after = read(candidate);
+                    const auto prior = read(before);
+                    hitDuringRecovery = hitDuringRecovery || (prior.combat->knockedDown[0]
+                        && after.combat->actors[1][8][2] < prior.combat->actors[1][8][2]);
+                    recovered = recovered || !after.combat->knockedDown[0];
+                    const auto alice = current.projectCombat(reducer.state(), id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                    const auto bob = current.projectCombat(reducer.state(), id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(alice && bob && alice->selfKnockout() == bob->players()[0].knockout
+                        && bob->selfHealth() == alice->players()[0].health, "Reconnect observers diverged");
+                    if (hitDuringRecovery && recovered) break;
+                }
+                require(hitDuringRecovery && recovered, "NPC damage during player get-up missing");
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, bytes(current));
+                require(bytes(restart.service()) == bytes(current), "Reconnect restart changed combat image");
+                CanonicalCommandReducer fresh(reducer.state(), observability, testContentManifest());
+                require(fresh.configureDurability(port, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &restart.service()),
+                    "Restart reducer composition failed");
+                Clock clock;
+                ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(600),
+                    IngressOrdinal::initial(), TickEpoch::NextTick);
+                clock.value = 100'000'000;
+                const auto pump = intake.pump();
+                auto pending = fresh.prepareTick(pump.batches().front());
+                require(pending.result() && std::ranges::equal(pending.candidateState().players(), retained),
+                    "Restart integrated retained pose velocity");
+                std::cout << "reconnect tick=373 retained-velocity=exact damage=concurrent get-up=complete rejected=atomic restart=exact\n";
+                continue;
             }
             const auto checkPoses = [&](auto& host, uint64_t time) {
                 const auto state = read(bytes(host));

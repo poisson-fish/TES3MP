@@ -22,7 +22,7 @@ Inherited inspected fatigue captures: `build/m4-knockout-live-05/result.json`,
 two clients, 10% loss/100 ms delay/jitter, reconnect/restart. Native NPC body
 replacements immediately sample retained combat.
 
-New player physical capture: `build/m4-player-physical-live-08/result.json`.
+Inherited player physical capture: `build/m4-player-physical-live-08/result.json`.
 Stock male player, NPC sword hits; synthetic stats/placement. Both clients'
 self/remote down/get-up/upright images inspected under the same impairment,
 subject reconnect and restart. Damage retention, clocks and hit deduplication pass.
@@ -32,11 +32,19 @@ Focused checks: `build/logs/m4-player-physical-validator.log`, `build/logs/m4-ph
 `build/logs/m4-player-physical-pose-test.log` (four resource layers),
 `build/logs/m4-player-physical-client-build.log`.
 
-**M4 incomplete. Next: diagnose concurrent-hit reconnect failure**, then remaining
-male NPC/creature/custom-body coverage and attribute/resource effects.
-`build/m4-player-physical-live-03/server.stderr.log` records `CandidateStateInvalid`
-(preparation=5, tick 373) while the observer remains under attack during subject
-reconnect; unresolved. NPC wind-up also holds an out-of-reach selected target.
+Tick-373 reconnect failure fixed: disconnect cleared the authority marker, letting
+retained pose velocity enter legacy integration on rejoin. Native campaigns now
+exclude it across reconnect/restart, preserving validation/atomic commits.
+`build/logs/m4-reconnect-before.log` reproduces `CandidateStateInvalid`
+(preparation=5, tick 373) with the saved velocity; `m4-reconnect-test.log` passes
+concurrent NPC damage/get-up, stationary poses, rejected writes, exact retry,
+two-observer projection and restart. `m4-reconnect-getup.log` preserves fatigue/
+physical clocks and uncertain-write failure; `m4-reconnect-pose.log` covers four
+resource layers. Server build: `m4-reconnect-server-build.log`.
+Synthetic checks only; rendered acceptance remains inherited.
+
+**M4 incomplete. Next: fix NPC wind-up holding an out-of-reach selected target**,
+then remaining male NPC/creature/custom-body coverage and attribute/resource effects.
 Accepted player capture stages the observer in reach for selection, then moves
 both players away during recovery. It does not prove overlapping combat.
 
