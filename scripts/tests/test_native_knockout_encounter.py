@@ -3,14 +3,14 @@ import unittest
 
 from scripts.native_knockout_encounter import (
     established_samples, validate_observations, validate_physical_observations, validate_retarget_observations,
-    validate_creature_melee)
+    validate_actor_melee)
 
 
 class KnockoutEvidenceTests(unittest.TestCase):
-    def test_creature_melee_rejects_duplicate_foreign_and_divergent_outcomes(self):
+    def test_actor_melee_rejects_duplicate_foreign_and_divergent_outcomes(self):
         hit = dict(attacker=7, attacker_revision=30, target_revision=30, hit=True, damage=4)
         segment = {r: [dict(actors=[dict(id=7)], actor_hits=[copy.deepcopy(hit)])] for r in ("Alice", "Bob")}
-        self.assertEqual(validate_creature_melee([segment])["shared_outcomes"], 1)
+        self.assertEqual(validate_actor_melee([segment])["shared_outcomes"], 1)
         for mutation in ("duplicate", "foreign", "divergent", "missing"):
             changed = copy.deepcopy(segment)
             if mutation == "duplicate":
@@ -22,7 +22,7 @@ class KnockoutEvidenceTests(unittest.TestCase):
             else:
                 changed["Bob"][0]["actor_hits"] = []
             with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
-                validate_creature_melee([changed])
+                validate_actor_melee([changed])
 
     def test_baseline_trims_startup_but_preserves_later_missing_peers(self):
         joining = dict(self=2, players=[])

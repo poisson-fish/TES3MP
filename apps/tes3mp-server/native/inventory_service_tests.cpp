@@ -5082,22 +5082,26 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool generalAttackModes, bool lostTarget, bool creature)
+        const std::filesystem::path& settings, bool generalAttackModes, bool lostTarget, bool creature, std::string_view customBody)
     {
         // Finish the large shared fixture builder before entering recovery tests.
-        if (creature)
+        if (creature || !customBody.empty())
         {
+            const std::string encounter = customBody.empty() ? "vanilla-knockdown-dremora"
+                : "vanilla-knockdown-custom:" + std::string(customBody);
             checkNpcDoors(scratch, config, settings,
                 true, true, true, true, true, true, true, true,
                 false, false, false, true, false, false, false, true, false, false, true, false, true,
-                true, true, true, "vanilla-knockdown-dremora");
+                true, true, true, encounter);
             std::ofstream out(scratch / "native.txt");
             out << "native-inventory-52\nmanifest ";
             for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
             out
                 << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_knockdown_observer\" \"npc_knockdown_observer\""
-                << "\nloot 1 0\ninterior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\nnpc \"timeline_creature\" "
-                << std::quoted(settings.string()) << "\ndestination 60 -32 1 120\nprocessing 1 2\nmelee \"handtohand\" \"chop\" 1\nrespawn 27000\n";
+                << "\nloot 1 0\ninterior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\nnpc "
+                << std::quoted(creature ? "timeline_creature" : "npc_door_actor") << ' '
+                << std::quoted(settings.string()) << "\ndestination 60 -32 1 120\nprocessing 1 2\nmelee "
+                << std::quoted(creature ? "handtohand" : "weapononehand") << " \"chop\" 1\nrespawn 27000\n";
         }
         else checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
@@ -5111,6 +5115,7 @@ namespace TES3MP::Native::Testing
             descriptor.replace(0, std::string_view("native-inventory-44").size(), lostTarget ? "native-inventory-52" : "native-inventory-45");
             std::ofstream(path) << descriptor;
         }
+        if (!customBody.empty()) checkCustomBodyResources(scratch / "openmw", settings);
         auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "NPC door crypto unavailable");
         struct Identities final : PlayerIdentityPersistence
         { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
@@ -5796,6 +5801,7 @@ namespace TES3MP::Native::Testing
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
             const bool creatureEncounter = encounterProfile == "vanilla-knockdown-dremora";
+            const bool customBody = encounterProfile.starts_with("vanilla-knockdown-custom:");
             const bool physicalKnockdown = encounterProfile.starts_with("vanilla-knockdown-");
             if (encounterProfile == "vanilla-melee" || physicalKnockdown)
             {
@@ -5807,7 +5813,7 @@ namespace TES3MP::Native::Testing
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
                 if (physicalKnockdown)
                 {
-                    const auto body = creatureEncounter ? std::string_view("male") : encounterProfile.substr(std::string_view("vanilla-knockdown-").size());
+                    const auto body = (creatureEncounter || customBody) ? std::string_view("male") : encounterProfile.substr(std::string_view("vanilla-knockdown-").size());
                     require(body == "male" || body == "female" || body == "khajiit" || body == "argonian",
                         "Unknown knockdown body profile");
                     const auto race = ESM::RefId::stringRefId(body == "khajiit" ? "khajiit"
@@ -5825,7 +5831,8 @@ namespace TES3MP::Native::Testing
                     npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
                 }
                 std::ofstream(scratch / "encounter.txt") << "profile " << encounterProfile
-                    << "\nweapon iron longsword\n";
+                    << "\nweapon iron longsword\nmelee-speed "
+                    << (creatureEncounter ? 1.f : base.store().get<ESM::Weapon>().find(weapon)->mData.mSpeed) << '\n';
             }
             else if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
             {
@@ -6035,6 +6042,20 @@ namespace TES3MP::Native::Testing
                     out.startRecord(ESM::Spell::sRecordId, 0); damage.save(out); out.endRecord(ESM::Spell::sRecordId);
                 }
             }
+            const auto observerAppearance = npc;
+            if (customBody)
+            {
+                const auto name = encounterProfile.substr(std::string_view("vanilla-knockdown-custom:").size());
+                const auto& original = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId(name));
+                require(!original.mModel.empty(), "Custom body fixture requires an authored NPC model");
+                npc.mModel = original.mModel; npc.mRace = original.mRace;
+                npc.mHead = original.mHead; npc.mHair = original.mHair;
+                npc.setIsMale(original.isMale());
+                npc.mNpdt.mFatigue = 100;
+                std::ofstream(scratch / "encounter.txt", std::ios::app)
+                    << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
+                    << "\nmelee weapononehand\n";
+            }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6053,8 +6074,8 @@ namespace TES3MP::Native::Testing
             }
             if (physicalKnockdown)
             {
-                auto observer = npc;
-                if (creatureEncounter)
+                auto observer = observerAppearance;
+                if (creatureEncounter || customBody)
                 {
                     ESM::Spell spell; spell.blank(); spell.mId = ESM::RefId::stringRefId("expanded_knockout_touch");
                     spell.mData.mType = ESM::Spell::ST_Spell; spell.mData.mFlags = ESM::Spell::F_Always;

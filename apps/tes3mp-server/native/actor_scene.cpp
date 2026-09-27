@@ -141,11 +141,10 @@ namespace TES3MP::Native
         uint64_t mActorId;
         std::vector<uint64_t> mContacts;
         std::string mFingerprint;
-        std::vector<VFS::Path::Normalized> mMeleeSources;
+        ESM::RefId mActorBase;
         // Stock third-person base, male, female, beast and Argonian swim layers.
         std::array<VFS::Path::Normalized, 5> mHitModels;
         bool mAdditionalHitSources = false;
-        bool mCustomMeleeModel = false;
         DetourNavigator::AgentBounds mAgentBounds;
         std::unique_ptr<DetourNavigator::Navigator> mNavigator;
         MWMechanics::PathFinder mPath;
@@ -338,13 +337,7 @@ namespace TES3MP::Native
                     body->mObject->setActivationState(DISABLE_DEACTIVATION);
                     if (id == actor)
                     {
-                        mMeleeSources.push_back(npc ? base
-                            : VFS::Path::Normalized(Misc::ResourceHelpers::correctActorModelPath(base, &mVfs)));
-                        if (model != base) mMeleeSources.push_back(model);
-                        // The collision slice does not yet construct a custom
-                        // skeleton. Do not silently use default animation keys
-                        // for an NPC whose visual model has its own sources.
-                        mCustomMeleeModel = npc && !ptr.get<ESM::NPC>()->mBase->mModel.empty();
+                        mActorBase = ptr.getCellRef().getRefId();
                         mActorOffset = offset;
                         mAgentBounds = {DetourNavigator::CollisionShapeType::Cylinder, extents * scale};
                         mActor = std::make_unique<MWPhysics::ActorFrameData>(MWPhysics::ActorFrameData{
@@ -590,45 +583,26 @@ namespace TES3MP::Native
     BoundMeleeAnimation InteriorActorScene::bindMeleeAnimation(
         std::string group, std::string attack, float speed)
     {
-        if (!mImpl || mImpl->mCustomMeleeModel)
+        if (!mImpl)
             throw std::invalid_argument("Selected NPC has no supported live melee animation source");
-        // Animation::addAnimSource converts NIF to KF and the last loaded source
-        // wins for a group. A source without controllers is rejected by stock.
-        for (auto source = mImpl->mMeleeSources.rbegin(); source != mImpl->mMeleeSources.rend(); ++source)
+        const auto [sources, identity] = bindAnimationSources(mImpl->mActorBase);
+        for (auto source = sources.rbegin(); source != sources.rend(); ++source)
         {
-            auto kf = *source;
-            kf.changeExtension(VFS::Path::ExtensionView("kf"));
-            if (!mImpl->mVfs.exists(kf)) continue;
-            const auto holder = mImpl->mResources.getKeyframeManager()->get(kf);
-            if (!holder || holder->mTextKeys.empty() || holder->mKeyframeControllers.empty()
-                || !holder->mTextKeys.hasGroupStart(group)) continue;
-            MeleeAnimation animation(holder->mTextKeys, std::move(group), std::move(attack), speed);
-            auto stream = mImpl->mVfs.get(kf);
-            const auto hash = Files::getHash(kf.value(), *stream);
-            std::ostringstream identity;
-            identity << "native-melee-resource-1\n" << kf.value() << ':' << hash[0] << ':' << hash[1] << '\n';
-            return {std::move(animation), identity.str()};
+            if (!(*source)->hasGroupStart(group)) continue;
+            return {MeleeAnimation(**source, std::move(group), std::move(attack), speed), identity};
         }
         throw std::invalid_argument("Selected NPC lacks the requested melee animation group");
     }
 
     BoundCastAnimations InteriorActorScene::bindCastAnimations()
     {
-        if (!mImpl || mImpl->mCustomMeleeModel)
+        if (!mImpl)
             throw std::invalid_argument("Selected NPC has no supported cast animation source");
-        for (auto source = mImpl->mMeleeSources.rbegin(); source != mImpl->mMeleeSources.rend(); ++source)
+        const auto [sources, identity] = bindAnimationSources(mImpl->mActorBase);
+        for (auto source = sources.rbegin(); source != sources.rend(); ++source)
         {
-            auto kf = *source;
-            kf.changeExtension(VFS::Path::ExtensionView("kf"));
-            if (!mImpl->mVfs.exists(kf)) continue;
-            const auto holder = mImpl->mResources.getKeyframeManager()->get(kf);
-            if (!holder || holder->mKeyframeControllers.empty() || !holder->mTextKeys.hasGroupStart("spellcast")) continue;
-            const auto ranges = readCastAnimations(holder->mTextKeys);
-            auto stream = mImpl->mVfs.get(kf);
-            const auto hash = Files::getHash(kf.value(), *stream);
-            std::ostringstream identity;
-            identity << "native-cast-resource-1\n" << kf.value() << ':' << hash[0] << ':' << hash[1] << '\n';
-            return {ranges, identity.str()};
+            if (!(*source)->hasGroupStart("spellcast")) continue;
+            return {readCastAnimations(**source), identity};
         }
         throw std::invalid_argument("Selected NPC lacks spellcast animation keys");
     }

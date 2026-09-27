@@ -63,10 +63,9 @@ namespace TES3MP::Native
         };
         mMinimumAttack = keyTime("min attack");
         mMinimumHit = keyTime("min hit");
-        // Stock crossbow keys have no variable wind-up. Preserve the shared
+        // Crossbows and some custom NPC clips have no variable wind-up. Preserve the shared
         // random-strength fallback while still requiring an authored release.
         if (mMinimumAttack < mWindUp.mStart || mMinimumAttack > mWindUp.mStop
-            || (!mShoot && mMinimumAttack == mWindUp.mStop)
             || mWindUp.mStop != mRelease.mStart || keyTime("max attack") != mRelease.mStart
             || keyTime(hit) != mRelease.mStop || mRelease.mStart >= mRelease.mStop)
             throw std::invalid_argument("Unsupported native melee timing layout " + mGroup + " min="

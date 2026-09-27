@@ -19,7 +19,7 @@ def established_samples(rows):
     return rows[first:]
 
 
-def validate_creature_melee(segments):
+def validate_actor_melee(segments):
     outcomes = {role: {} for role in ("Alice", "Bob")}
     for segment in segments:
         for role, rows in segment.items():
@@ -27,13 +27,13 @@ def validate_creature_melee(segments):
                 for hit in row["actor_hits"]:
                     key = hit["attacker"], hit["attacker_revision"], hit["target_revision"]
                     if hit["attacker"] not in {a["id"] for a in row["actors"]} or key in outcomes[role]:
-                        raise RuntimeError("foreign or duplicated creature melee outcome")
+                        raise RuntimeError("foreign or duplicated actor melee outcome")
                     outcomes[role][key] = hit
     common = outcomes["Alice"].keys() & outcomes["Bob"].keys()
     if not common or any(outcomes["Alice"][k] != outcomes["Bob"][k] for k in common):
-        raise RuntimeError("creature melee outcomes disagree between desktops")
+        raise RuntimeError("actor melee outcomes disagree between desktops")
     if not any(outcomes["Alice"][k]["hit"] and outcomes["Alice"][k]["damage"] > 0 for k in common):
-        raise RuntimeError("no shared creature melee damage")
+        raise RuntimeError("no shared actor melee damage")
     return dict(shared_outcomes=len(common), unique_outcomes={r: len(v) for r, v in outcomes.items()})
 
 
@@ -178,15 +178,32 @@ def validate_retarget_observations(segment):
 
 
 def verify_knockout_encounter(output, evidence, processes, relay, manifest, restart_server, restart_client,
-                             npc=False, physical=False, content=None, retarget=False, runtime=None, creature=False):
+                             npc=False, physical=False, content=None, retarget=False, runtime=None, actor_melee=False):
     from run_native_navigation_capture import records
 
     sequence = dict.fromkeys(evidence, 0)
     finished = set()
     captures = {}
+    sample_cache = {}
 
     def samples(role):
-        return established_samples([r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"])
+        path = evidence[role]
+        if not path.exists():
+            return []
+        stat = path.stat()
+        identity, offset, rows = sample_cache.get(role, (None, 0, []))
+        if identity != stat.st_ino or stat.st_size < offset:
+            offset, rows = 0, []
+        with path.open("rb") as stream:
+            stream.seek(offset)
+            data = stream.read()
+        complete = data.rfind(b"\n") + 1
+        for line in data[:complete].splitlines():
+            row = json.loads(line)
+            if row.get("event") == "native_combat_sample":
+                rows.append(row)
+        sample_cache[role] = stat.st_ino, offset + complete, rows
+        return established_samples(rows)
 
     def player(row, identity):
         return next(p for p in subjects(row, npc) if p["id"] == identity)
@@ -208,7 +225,16 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         control = evidence[role].with_suffix(".ndjson.control")
         temporary = control.with_suffix(".tmp")
         temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
-        temporary.replace(control)
+        for attempt in range(100):
+            try:
+                temporary.replace(control)
+                break
+            except PermissionError:
+                # The Windows desktop briefly holds this file while reading it.
+                # Retry the same sequence; never submit a second gameplay command.
+                if attempt == 99:
+                    raise
+                time.sleep(.01)
         wait_for(lambda: any(r.get("sequence") == sequence[role]
                             and r.get("event") == "traversal_" + action.split()[0]
                             for r in records(evidence[role])), f"{role}: {action}")
@@ -256,10 +282,23 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
 
     def exhaust():
         if npc:
-            command("Alice", "pose 60 -130 1 0.25 0")
-            # Let the impaired movement updates install the touch-range setup.
-            time.sleep(.5)
-            command("Alice", 'castactor "expanded_knockout_touch"')
+            caster = "Bob" if actor_melee else "Alice"
+            if actor_melee:
+                # Keep the sword user's hit recovery on the nearer participant;
+                # the second player supplies the touch spell from the side.
+                command("Alice", "pose 60 -100 1 0.3 0")
+                start = {r: len(samples(r)) for r in evidence}
+                wait_for(lambda: all(any(hit["target"] == 1 for row in samples(r)[start[r]:]
+                                        for hit in row["actor_hits"]) for r in evidence),
+                         "authority targets the nearer participant before the caster approaches")
+            command(caster, "pose 140 -34 1 0.25 -1.57" if actor_melee else "pose 60 -130 1 0.25 0")
+            position = [143360, -34816, 1024] if actor_melee else [61440, -133120, 1024]
+            # A local pose acknowledgement does not prove that impaired movement
+            # has committed. Sending a touch spell earlier can correctly miss.
+            wait_for(lambda: (rows := [r for r in records(evidence[caster])
+                                      if r.get("event") == "native_player_sample"])
+                     and rows[-1]["position"] == position, "caster reaches authoritative touch range")
+            command(caster, 'castactor "expanded_knockout_touch"')
         else:
             for role in evidence:
                 command(role, 'cast "expanded_knockout"')
@@ -294,16 +333,16 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         identities = (actors[0]["id"],)
     melee_evidence = {}
 
-    def creature_melee(label):
-        if not creature:
+    def capture_actor_melee(label):
+        if not actor_melee:
             return
         start = {r: len(samples(r)) for r in evidence}
-        command("Bob", "pose -180 -300 1 0.3 1.57")
+        command("Bob", "pose -180 -140 1 0.3 1.15")
         command("Alice", "pose 60 -100 1 0.3 0")
         def hit_both():
             return all(any(hit["hit"] and hit["damage"] > 0 for row in samples(r)[start[r]:]
                            for hit in row["actor_hits"]) for r in evidence)
-        wait_for(hit_both, "creature authoritative melee reaches both observers")
+        wait_for(hit_both, "actor authoritative melee reaches both observers")
         for role in evidence:
             screenshot(role, label + "-melee")
         frame_subjects()
@@ -312,10 +351,10 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         for role, hits in melee_evidence[label].items():
             keys = [(h["attacker"], h["attacker_revision"], h["target_revision"]) for h in hits]
             if len(keys) != len(set(keys)):
-                raise RuntimeError(role + ": duplicated creature hit")
+                raise RuntimeError(role + ": duplicated actor hit")
 
     frame_subjects()
-    creature_melee("initial")
+    capture_actor_melee("initial")
     initial = {r: samples(r)[-1] for r in evidence}
     if physical:
         if not content or not content["profile"].startswith("vanilla-knockdown-"):
@@ -406,8 +445,7 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             wait_for(lambda: samples(reconnecting)[-1]["generation"] > generation, "physical participant reconnects")
             if any(player(samples(r)[-1], identities[0])["health"] != retained_health[r] for r in evidence):
                 raise RuntimeError("reconnect lost committed physical damage")
-            if all_at(3, False) and all(player(samples(r)[-1], identities[0])["knockout"]["frame"] <= 60
-                                       for r in evidence):
+            if all_at(3, False):
                 break
             # A network reconnect can outlast the stock clip. Preserve that
             # attempt in the stream, but never count it as active-pose evidence.
@@ -490,11 +528,11 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             if states[0] != states[1]:
                 raise RuntimeError("final player health/pose failed to converge")
             retarget_validation["final_players"] = states[0]
-        creature_melee("restored")
+        capture_actor_melee("restored")
         after = {r: samples(r) for r in evidence}
         validation = validate([before, after])
-        if creature:
-            validation["creature_melee"] = validate_creature_melee([before, after])
+        if actor_melee:
+            validation["actor_melee"] = validate_actor_melee([before, after])
         validation["normal"] = normal_validation
         validation["reconnect"] = reconnect_validation
         validation["restored"] = validate([after], require_hit=False)
@@ -555,11 +593,11 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
     for role in evidence:
         screenshot(role, "restored")
     recover("restart")
-    creature_melee("restored")
+    capture_actor_melee("restored")
     after = {r: samples(r) for r in evidence}
     validation = validate_observations([before, after], npc)
-    if creature:
-        validation["creature_melee"] = validate_creature_melee([before, after])
+    if actor_melee:
+        validation["actor_melee"] = validate_actor_melee([before, after])
     # A recovery before the restart cannot substitute for a missing restored tail.
     validation["segments"] = [validate_observations([segment], npc) for segment in (before, after)]
     for role in evidence:

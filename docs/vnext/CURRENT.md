@@ -4,33 +4,33 @@
 one selected NPC or walking bipedal creature/doors at 60 Hz, commits at 30 Hz;
 neighbors freeze. **V52, T3C7/capability 25; fresh campaigns required.**
 
-The shared timeline now presents an unarmed Dremora's melee, hit reactions,
-physical knockdown, exhaustion and get-up. Creature admission requires no known
-spells or equipped weapon; quadrupeds/flying creatures remain unsupported.
-Callbacks stay suppressed; pauses/starvation hold.
+Custom NPCs share layered melee/body resources, including Argonian swim.
+Fixed-windup clips use stock random strength. Hashes changed; fresh campaigns.
+Pauses/callback suppression remain.
 
-Two-desktop evidence with synthetic stats/placements/spell and stock Dremora resources
-(selected screenshots inspected):
-- `build/m4-creature-fatigue-live-01/result.json`: melee, exhaustion,
-  get-up, reconnect/restart.
-- `build/m4-creature-physical-live-01/result.json`: creature melee/hit reactions,
-  falls/get-up, reconnect/restart; 10 shared unique outcomes, four matching
-  health hits, no duplicates.
+Eight synthetic-stat/placement/spell desktop runs use authored Morrowind/TR models.
+Directories: `build/m4-custom-<body>-<mode>-live-<suffix>`, with `result.json` and
+`presentation-validation.json`; both clients' images inspected:
 
-Both include creature-only `presentation-validation.json`: render median ~8.5 ms,
-95th percentile below 16.7 ms; melee/body ~1x stock before/after restart. Snapshot
-gaps: median one tick, 95th percentile three. Impairment:
-100 ms +/-25 ms, 10% loss, periodic extra 125 ms; 120-FPS capture cap.
+| Body | Record | fatigue suffix | physical suffix |
+|---|---|---|---|
+| dancer | yakov | 03 | 02 |
+| khajiit-f | TR_m1_Carajhi | 01 | 03 |
+| khajiit-m | TR_m1_Batharra | 03 | 01 |
+| tsaesci | TR_m7_Qorinue-Najan | 01 | 01 |
 
-Focused evidence in `build/logs`: `m4-creature-native-test.log` (atomic rejection,
-exact retry/restart, two-observer events, retarget/retreat/pause),
-`m4-creature-stock-pose-test.log` (four NPC bodies plus Dremora, callbacks suppressed),
-`m4-creature-npc-regression.log`, `m4-creature-evidence-test.log`,
-`m4-creature-stats-build.log` (client/server) and `m4-creature-final-build.log`.
+Verified melee/falls/get-up, reconnect/restart: 100 ms +/-25 ms, 10% loss,
+periodic extra 125 ms. 32 traces: render p95 <9.5 ms; body ~1x, melee
+0.985-0.998x stock. 64 shared NPC outcomes, 21 health hits; no duplicates.
 
-**Next: bind one custom-body NPC's authoritative melee/body clips through the shared
-timeline; verify matching layered resources and both desktops under impairment,
-reconnect and restart.** Casting presentation and remaining combat scope follow.
+`build/logs/m4-custom-*`: native retry/restart/retarget/pause, 4x3x3 melee
+poses plus hit/falls, creature regression, evidence validators and builds.
+Corpse poses untested. Creatures require walking bipeds,
+no spells/equipped weapon.
+
+**Next: extend authoritative casting release/recovery and interruption through the
+shared timeline; verify resources and both desktops under impairment,
+reconnect/restart.**
 
 100 built-in effects remain outside general native casting:
 

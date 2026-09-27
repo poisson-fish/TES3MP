@@ -10,8 +10,12 @@ def percentile(values, fraction):
     return sorted(values)[min(len(values) - 1, int(len(values) * fraction))]
 
 
-def verify(directory, creature=False):
+def verify(directory, actor=False):
     result = {}
+    content = json.loads(directory.joinpath("result.json").read_text()).get("content", {}) if actor else {}
+    melee_speed = float(content.get("melee-speed", 1))
+    if actor and content.get("custom") and "melee-speed" not in content:
+        raise ValueError("Custom actor trace requires the native fixture's stock weapon speed")
     for path in sorted(directory.glob("*.ndjson")):
         if not path.name.startswith(("Alice", "Bob")):
             continue
@@ -36,7 +40,7 @@ def verify(directory, creature=False):
             cadence.append(seconds * 1000)
             previous = {(p["kind"], p["id"]): p for p in a["actors"]}
             for p in b["actors"]:
-                if creature and p["kind"] != 2:
+                if actor and p["kind"] != 2:
                     continue
                 old = previous.get((p["kind"], p["id"]))
                 if not old or any(old[key] != p[key] for key in
@@ -61,9 +65,9 @@ def verify(directory, creature=False):
             raise ValueError(f"{path.name}: body poses still stepped at snapshot cadence")
         if body_rates and not .9 <= statistics.median(body_rates) <= 1.1:
             raise ValueError(f"{path.name}: body recovery differs from stock clip speed")
-        if creature and (body_samples < 30 or swing_samples < 30 or not swing_rates
-                         or not .9 <= statistics.median(swing_rates) <= 1.1):
-            raise ValueError(f"{path.name}: insufficient creature body/melee progression at stock speed")
+        if actor and (body_samples < 30 or swing_samples < 30 or not swing_rates
+                         or not .9 <= statistics.median(swing_rates) / melee_speed <= 1.1):
+            raise ValueError(f"{path.name}: insufficient actor body/melee progression at stock speed")
         gaps = [b - a for a, b in zip(snapshots, snapshots[1:]) if b > a]
         result[path.name] = dict(
             frames=len(frames), median_frame_ms=statistics.median(cadence),
@@ -73,17 +77,20 @@ def verify(directory, creature=False):
             median_body_speed=statistics.median(body_rates) if body_rates else None,
             swing_samples=swing_samples,
             median_swing_speed=statistics.median(swing_rates) if swing_rates else None,
+            stock_weapon_speed=melee_speed if actor else None,
         )
     if not all(any(name.startswith(role) for name in result) for role in ("Alice", "Bob")):
         raise ValueError("Both desktop traces are required")
+    if actor and not {"Alice-before.ndjson", "Bob-before.ndjson", "Alice.ndjson", "Bob.ndjson"} <= result.keys():
+        raise ValueError("Both desktops require traces before and after restart")
     return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
-    parser.add_argument("--creature", action="store_true", help="Require creature-only body and unarmed melee evidence")
+    parser.add_argument("--actor", "--creature", dest="actor", action="store_true", help="Require selected actor body and melee evidence")
     args = parser.parse_args()
-    report = verify(args.directory, args.creature)
+    report = verify(args.directory, args.actor)
     args.directory.joinpath("presentation-validation.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

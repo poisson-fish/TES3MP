@@ -576,6 +576,26 @@ namespace
         held.advance(0.f);
         near(held.snapshot().mTime, 2.f, "Half-strength swing did not select medium follow-through");
 
+        SceneUtil::TextKeyMap fixedWindup;
+        for (const auto& [time, key] : keys)
+            fixedWindup.emplace(key == "weapononehand: chop min attack" ? .5f : time, std::string(key));
+        MeleeAnimation fixed(fixedWindup, "weapononehand", "chop", 1.f);
+        for (int i = 0; i < 16; ++i) fixed.advance(1.f / 32);
+        near(fixed.windUp(), -1.f, "Custom fixed wind-up lost stock random-strength fallback");
+        require(fixed.phaseCompletion() == 1.f && fixed.release(.5f), "Custom fixed wind-up failed to release");
+        MeleeAnimation resumed(fixedWindup, "weapononehand", "chop", 1.f);
+        resumed.restore(fixed.snapshot());
+        unsigned fixedHits = 0;
+        for (unsigned i = 0; i < 96; ++i)
+        {
+            const auto hit = fixed.advance(1.f / 32);
+            require(resumed.advance(1.f / 32) == hit && resumed.snapshot() == fixed.snapshot(),
+                "Custom fixed wind-up restart changed its clock or hit");
+            fixedHits += hit.has_value();
+        }
+        require(fixedHits == 1 && fixed.snapshot().mPhase == Phase::Complete,
+            "Custom fixed wind-up duplicated its hit or failed to complete");
+
         SceneUtil::TextKeyMap withoutMinimumHit;
         for (const auto& [time, key] : keys)
             if (key != "weapononehand: chop min hit") withoutMinimumHit.emplace(time, std::string(key));

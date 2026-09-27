@@ -277,6 +277,8 @@ namespace MWRender
                     addAnimSource(defaultSkeleton, skeleton);
                 if (customModel)
                     addAnimSource(skeleton, skeleton);
+                if (beast && npc->mRace.contains("argonian"))
+                    addAnimSource(Settings::models().mXargonianswimkna.get().value(), skeleton);
 
                 // Canonical snapshots own horizontal root motion. Reset the animation root each frame.
                 setAccumulation(osg::Vec3f(1.f, 1.f, 0.f));

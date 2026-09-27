@@ -1,3 +1,7 @@
+#include "actor_scene.hpp"
+#include "loadout.hpp"
+#include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <apps/openmw/mwrender/animation.hpp>
 #include <apps/openmw/mwrender/replicatedactor.hpp>
 #include <components/files/collections.hpp>
@@ -53,6 +57,21 @@ namespace TES3MP::Native::Testing
                         addSingleAnimSource(std::string(Settings::models().mXargonianswimknakf.get().value()), "argonian pose test");
                 }
             }
+            void npcSources(const ESM::NPC& npc, bool beast)
+            {
+                clearAnimSources();
+                const auto base = Settings::models().mXbaseanim.get();
+                const auto normal = beast ? Settings::models().mBaseanimkna.get()
+                    : npc.isMale() ? Settings::models().mBaseanim.get() : Settings::models().mBaseanimfemale.get();
+                const std::string defaultSkeleton = Misc::ResourceHelpers::correctActorModelPath(normal, mResourceSystem->getVFS());
+                const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(npc.mModel));
+                const std::string skeleton = Misc::ResourceHelpers::correctActorModelPath(model, mResourceSystem->getVFS());
+                addAnimSource(base, skeleton);
+                if (defaultSkeleton != base.value()) addAnimSource(defaultSkeleton, skeleton);
+                addAnimSource(skeleton, skeleton);
+                if (beast && npc.mRace.contains("argonian"))
+                    addAnimSource(Settings::models().mXargonianswimkna.get(), skeleton);
+            }
             void clearSources() { clearAnimSources(); }
             void useReplicaContext() { mContext = Context::ReplicatedActor; }
             bool listenerIs(TextKeyListener* value) const { return mTextKeyListener == value; }
@@ -63,6 +82,89 @@ namespace TES3MP::Native::Testing
             void handleTextKey(std::string_view, SceneUtil::TextKeyMap::ConstIterator,
                 const SceneUtil::TextKeyMap&) override { ++calls; }
         };
+    }
+
+    void checkCustomBodyResources(const std::filesystem::path& config, const std::filesystem::path& settings)
+    {
+        const auto directory = config.string();
+        const char* arguments[]{"custom-body-resources", "--config", directory.c_str()};
+        Loadout loadout(readLoadoutOptions(3, arguments));
+        const auto& npc = *loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("npc_door_actor"));
+        const auto placed = loadout.placedActors(ESM::RefId::stringRefId("NPC Door Contact Test")).at(0);
+        InteriorActorScene scene(loadout, "NPC Door Contact Test", placed.mIdentity,
+            "meshes/base_anim.nif", "meshes/base_animkna.nif");
+        scene.enableNavigation(settings.string());
+        const auto hits = scene.bindHitAnimations(npc.mId, true);
+        require(hits.resourceIdentity.find("absent") == std::string::npos,
+            "Custom fixture contains a missing animation source");
+        std::cout << hits.resourceIdentity;
+        Settings::SettingsFileParser().loadSettingsFile(settings, Settings::Manager::mDefaultSettings);
+        Settings::StaticValues::initDefaults();
+        Settings::StaticValues::init();
+        Settings::game().mSmoothAnimTransitions.set(false);
+        VFS::Manager vfs;
+        VFS::registerArchives(&vfs, Files::Collections(loadout.options().mDataPaths),
+            loadout.options().mArchives, true, &loadout.encoder());
+        Resource::ResourceSystem resources(&vfs, 0, &loadout.encoder());
+        const bool beast = loadout.store().get<ESM::Race>().find(npc.mRace)->mData.mFlags & ESM::Race::Beast;
+        Pose pose(resources); pose.npcSources(npc, beast);
+        Listener listener; pose.setTextKeyListener(&listener);
+        for (const auto group : {"handtohand", "weapononehand", "weapontwohand", "weapontwowide"})
+            for (const auto direction : {"chop", "slash", "thrust"})
+                for (float strength : {0.f, .5f, 1.f})
+                {
+                    auto bound = scene.bindMeleeAnimation(group, direction, 1.f);
+                    require(bound.mResourceIdentity == hits.resourceIdentity, "Melee/body resource layers differ");
+                    auto& clip = bound.mAnimation;
+                    for (unsigned frame = 0; frame < 600 && clip.snapshot().mPhase != MeleeAnimation::Phase::Complete; ++frame)
+                    {
+                        if (clip.snapshot().mPhase == MeleeAnimation::Phase::WindUp && clip.phaseCompletion() == 1.f)
+                            clip.release(strength);
+                        require(pose.setCommittedMelee(group, unsigned(clip.snapshot().mPhase) + 1,
+                            clip.direction(), clip.snapshot().mStrength, clip.phaseCompletion()), "Custom melee pose missing");
+                        const float time = pose.getCurrentTime(group);
+                        require(std::abs(time - clip.snapshot().mTime) < .001f, "Native/custom stock melee times differ");
+                        pose.runAnimation(.2f);
+                        require(pose.getCurrentTime(group) == time && listener.calls == 0, "Custom pose advanced or replayed keys");
+                        clip.advance(1.f / 120);
+                    }
+                    require(clip.snapshot().mPhase == MeleeAnimation::Phase::Complete, "Custom melee never completed");
+                    pose.setCommittedMelee({}, 0, 0, 0, 0);
+                }
+        for (unsigned body : {2u, 3u})
+        {
+            const std::string group = body == 2 ? "knockout" : "knockdown";
+            const auto& clip = body == 2 ? hits.knockout : hits.knockdown;
+            const float start = pose.getTextKeyTime(group + ": start"), stop = pose.getTextKeyTime(group + ": stop");
+            require(clip.stop == unsigned(std::ceil((stop - start) * 30.f)), "Custom body duration differs");
+            for (float frame = 0; frame < clip.stop; frame += .25f)
+            {
+                require(pose.setCommittedBody(body, frame), "Custom body pose missing");
+                const float time = pose.getCurrentTime(group);
+                require(std::abs(time - std::min(stop, start + frame / 30)) < .001f, "Custom body clock differs");
+                pose.runAnimation(.2f);
+                require(pose.getCurrentTime(group) == time && listener.calls == 0, "Custom body replayed callbacks");
+            }
+            pose.setCommittedBody(1, 0);
+        }
+        for (unsigned i = 0; i < hits.animations.count; ++i)
+        {
+            const std::string group = "hit" + std::to_string(i + 1);
+            const float start = pose.getTextKeyTime(group + ": start"), stop = pose.getTextKeyTime(group + ": stop");
+            require(hits.animations.ticks[i] == std::max(1u, unsigned(std::ceil(
+                (stop - start) * 30.f))),
+                "Custom hit duration differs");
+            for (float frame = 0; frame < hits.animations.ticks[i]; frame += .25f)
+            {
+                require(pose.setCommittedBody(4, frame, i + 1), "Custom hit pose missing");
+                const float time = pose.getCurrentTime(group);
+                require(std::abs(time - std::min(stop, start + frame / 30)) < .001f, "Custom hit clock differs");
+                pose.runAnimation(.2f);
+                require(pose.getCurrentTime(group) == time && listener.calls == 0, "Custom hit replayed callbacks");
+            }
+            pose.setCommittedBody(1, 0);
+        }
+        std::cout << "custom layers=matching melee=4x3 strengths=0+.5+1 body=hit+knockout+knockdown callbacks=none\n";
     }
 
     void checkMeleePresentation(const std::filesystem::path& data, const std::filesystem::path& settings,

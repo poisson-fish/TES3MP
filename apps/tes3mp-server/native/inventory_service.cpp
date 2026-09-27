@@ -4579,7 +4579,7 @@ namespace TES3MP::Native
                 // A retained target blocks the next AI selection. Give up a
                 // fully wound, unreleased swing when that target leaves reach;
                 // released swings keep their target and resolve at the hit key.
-                || (!melee->snapshot().mReleased && melee->windUp() >= 1.f
+                || (!melee->snapshot().mReleased && melee->phaseCompletion() == 1.f
                     && meleeContact(players, after, target, meleeReach()) != target)
                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                     return session.playerId() == mBinding.mPlayers[index];
@@ -4602,10 +4602,22 @@ namespace TES3MP::Native
             && (!combat || (combat->actors[2][8][2] > 0
                 && (!mBinding.mKnockoutRules || (!combat->knockedDown[2] && !hasParalysis(timedEffects, 2))))))
         {
-            if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->windUp() >= 1.f)
+            if (mBinding.mMeleeContact && !melee->snapshot().mReleased && melee->phaseCompletion() == 1.f)
             {
                 const auto selected = meleeContact(players, after, mBinding.mWeaponMelee ? target : 0, meleeReach());
-                if (selected && melee->release(std::clamp(melee->windUp(), 0.f, 1.f))) target = selected;
+                if (selected)
+                {
+                    float strength = melee->windUp();
+                    if (strength == -1.f)
+                    {
+                        if (!combat) throw std::invalid_argument("Fixed-strength NPC clips require durable combat RNG");
+                        Misc::Rng::Generator rng;
+                        Misc::Rng::deserialize(std::to_string(combat->rng), rng);
+                        strength = MWMechanics::resolveAttackStrength(strength, rng);
+                        combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                    }
+                    if (melee->release(strength)) target = selected;
+                }
             }
             const auto hit = melee->advance(seconds);
             if (mBinding.mMeleeContact && hit && target)

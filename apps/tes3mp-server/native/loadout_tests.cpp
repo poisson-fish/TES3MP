@@ -6836,6 +6836,28 @@ int main(int argc, char** argv)
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]));
             std::cout << "PASS player-swings\n"; return 0;
         }
+        if (argc == 3 && std::string_view(argv[1]) == "custom-body-catalog")
+        {
+            const char* arguments[]{"custom-body-catalog", "--config", argv[2]};
+            TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(3, arguments));
+            std::map<std::string, ESM::RefId> models;
+            for (const auto& npc : loadout.store().get<ESM::NPC>())
+                if (!npc.mModel.empty()) models.try_emplace(npc.mModel, npc.mId);
+            for (const auto& [model, npc] : models) std::cout << npc << '\t' << model << '\n';
+            return 0;
+        }
+        if (argc == 6 && std::string_view(argv[1]) == "custom-body-timeline")
+        {
+            TES3MP::Native::Testing::checkNpcWeaponExecution(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]), false, true, false, argv[5]);
+            std::cout << "PASS custom-body-timeline " << argv[5] << '\n'; return 0;
+        }
+        if (argc == 4 && std::string_view(argv[1]) == "custom-body-resources")
+        {
+            TES3MP::Native::Testing::checkCustomBodyResources(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]));
+            std::cout << "PASS custom-body-resources\n"; return 0;
+        }
         if (argc == 5 && (std::string_view(argv[1]) == "npc-weapon-execution"
                 || std::string_view(argv[1]) == "npc-attack-modes"
                 || std::string_view(argv[1]) == "npc-windup-target" || std::string_view(argv[1]) == "creature-timeline"))
