@@ -20,10 +20,10 @@ namespace TES3MP::Native
 
     MeleeAnimation::MeleeAnimation(const SceneUtil::TextKeyMap& keys, std::string group,
         std::string attack, float speed, std::string identity)
-        : mGroup(std::move(group)), mIdentity(std::move(identity)), mSpeed(speed)
+        : mGroup(std::move(group)), mIdentity(std::move(identity)), mShoot(attack == "shoot"), mSpeed(speed)
     {
         if (mGroup.empty() || mGroup.size() > 64 || !std::isfinite(speed) || speed <= 0 || speed > 100
-            || (attack != "chop" && attack != "slash" && attack != "thrust"))
+            || (attack != "chop" && attack != "slash" && attack != "thrust" && !mShoot))
             throw std::invalid_argument("Invalid native melee animation input");
         // Validate before copying external resource data. This bounded slice
         // admits complete directional clips only, not random attacks or loops.
@@ -40,11 +40,13 @@ namespace TES3MP::Native
             return Range{found.mStart->first, found.mStop->first};
         };
         mWindUp = range("start", "max attack");
-        mRelease = range("max attack", "hit");
+        const std::string hit = mShoot ? "release" : "hit";
+        mRelease = range("max attack", hit);
         for (size_t i = 0; i < mFollow.size(); ++i)
         {
             const std::string strength(MWMechanics::attackFollowStrength(static_cast<float>(i) / 2));
-            mFollow[i] = range(strength + " follow start", strength + " follow stop");
+            mFollow[i] = mShoot ? range("follow start", "follow stop")
+                : range(strength + " follow start", strength + " follow stop");
         }
         const std::array sources{&keys};
         const auto hits = readHitAnimations(sources);
@@ -62,9 +64,9 @@ namespace TES3MP::Native
         mMinimumHit = keyTime("min hit");
         if (mMinimumAttack < mWindUp.mStart || mMinimumAttack >= mWindUp.mStop
             || mWindUp.mStop != mRelease.mStart || keyTime("max attack") != mRelease.mStart
-            || keyTime("hit") != mRelease.mStop || mRelease.mStart >= mRelease.mStop)
+            || keyTime(hit) != mRelease.mStop || mRelease.mStart >= mRelease.mStop)
             throw std::invalid_argument("Unsupported native melee timing layout");
-        const std::string hitKey = mGroup + ": " + attack + " hit";
+        const std::string hitKey = mGroup + ": " + attack + ' ' + hit;
         bool hasHit = false;
         for (auto key = keys.lowerBound(mRelease.mStop); key != keys.end() && key->first == mRelease.mStop; ++key)
             hasHit |= key->second == hitKey;
@@ -164,7 +166,9 @@ namespace TES3MP::Native
             {
                 const std::string_view text = key->second;
                 if (!text.starts_with(mGroup) || text.substr(mGroup.size(), 2) != ": ") continue;
-                const int type = MWMechanics::meleeHitType(mGroup, text.substr(mGroup.size() + 2));
+                const auto action = text.substr(mGroup.size() + 2);
+                const int type = mShoot ? (action == "shoot release" ? 0 : -1)
+                    : MWMechanics::meleeHitType(mGroup, action);
                 if (type == -1) continue;
                 hit = type;
                 mState.mHit = true;

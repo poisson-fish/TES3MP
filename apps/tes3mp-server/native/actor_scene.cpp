@@ -690,7 +690,8 @@ namespace TES3MP::Native
     {
         const auto type = weapon ? weapon->mData.mType : ESM::Weapon::HandToHand;
         const auto* info = MWMechanics::getWeaponType(type);
-        if (info->mWeaponClass != ESM::WeaponType::Melee)
+        if (info->mWeaponClass != ESM::WeaponType::Melee
+            && !(type == ESM::Weapon::MarksmanBow && attack == "shoot"))
             throw std::invalid_argument("Native ranged execution is not bound");
         const auto [sources, resourceIdentity] = bindAnimationSources(npc, race);
         std::string group(info->mLongGroup);

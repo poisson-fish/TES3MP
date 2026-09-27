@@ -917,10 +917,11 @@ namespace MWRender
         }
         if (!hasAnimation(group)) return false;
         const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
-        const std::string prefix = std::string(directions[direction]) + ' ';
-        const std::string follow(MWMechanics::attackFollowStrength(strength));
-        const std::string start = prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + " follow start");
-        const std::string stop = prefix + (phase == 1 ? "max attack" : phase == 2 ? "hit" : follow + " follow stop");
+        const bool shoot = group == "bowandarrow";
+        const std::string prefix = shoot ? "shoot " : std::string(directions[direction]) + ' ';
+        const std::string follow = shoot ? "" : std::string(MWMechanics::attackFollowStrength(strength)) + ' ';
+        const std::string start = prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + "follow start");
+        const std::string stop = prefix + (phase == 1 ? "max attack" : phase == 2 ? (shoot ? "release" : "hit") : follow + "follow stop");
         if (mCommittedMeleeGroup == group)
             if (const auto found = mStates.find(group); found != mStates.end()
                 && found->second.mStartKey == start && found->second.mStopKey == stop)

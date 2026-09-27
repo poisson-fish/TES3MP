@@ -30,8 +30,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t CastLifecycleCampaignMagic = 0x4950434154335354;
     inline constexpr uint64_t WeaponExecutionCampaignMagic = 0x4a50434154335354;
     inline constexpr uint64_t PlayerSwingCampaignMagic = 0x4b50434154335354;
+    inline constexpr uint64_t BowReleaseCampaignMagic = 0x4c50434154335354;
+    inline constexpr bool hasPlayerSwings(uint64_t magic)
+    { return magic == PlayerSwingCampaignMagic || magic == BowReleaseCampaignMagic; }
     inline constexpr bool hasWeaponExecution(uint64_t magic)
-    { return magic == WeaponExecutionCampaignMagic || magic == PlayerSwingCampaignMagic; }
+    { return magic == WeaponExecutionCampaignMagic || hasPlayerSwings(magic); }
     inline constexpr bool hasCastLifecycle(uint64_t magic)
     { return magic == CastLifecycleCampaignMagic || hasWeaponExecution(magic); }
     inline constexpr bool hasCasterState(uint64_t magic)
@@ -67,8 +70,21 @@ namespace TES3MP::Native
         float strength = 0;
         std::string weapon, identity;
         MeleeAnimation::Snapshot state;
+        uint64_t ammunition = 0;
+        std::string ammoRecord;
         bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
         bool operator==(const PlayerSwing&) const = default;
+    };
+    // V47 release records are durable but frozen until physical flight/impact
+    // is wired. The consumed instance may no longer exist in the inventory.
+    struct BowProjectile
+    {
+        uint64_t caster = 0, command = 0, source = 0, ammunition = 0;
+        uint64_t target = 0, targetLife = 0, releaseTick = 0;
+        float strength = 0;
+        std::string weapon, ammoRecord;
+        std::array<float, 3> position{}, direction{};
+        bool operator==(const BowProjectile&) const = default;
     };
     struct ActorCampaignCombat
     {
@@ -79,6 +95,7 @@ namespace TES3MP::Native
         // Remaining CPU hit animation frames; paused for inactive actors.
         std::array<uint32_t, 3> hitRecoveryTicks{};
         std::array<std::optional<PlayerSwing>, 2> swings;
+        std::vector<BowProjectile> arrows;
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -490,7 +507,7 @@ namespace TES3MP::Native
                 casting = value;
             }
         }
-        if (magic == PlayerSwingCampaignMagic)
+        if (hasPlayerSwings(magic))
             for (auto& swing : combat->swings)
             {
                 const auto present = getAreaWord(bytes, offset);
@@ -527,7 +544,60 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native player swing state invalid");
                 value.state.mPhase = MeleeAnimation::Phase(phase);
                 value.state.mReleased = bool(released); value.state.mHit = bool(hit);
+                if (magic == BowReleaseCampaignMagic)
+                {
+                    value.ammunition = getAreaWord(bytes, offset);
+                    const auto size = getAreaWord(bytes, offset);
+                    if (size > 256 || size > bytes.size() - offset)
+                        throw std::invalid_argument("Native arrow identity length invalid");
+                    value.ammoRecord.assign(bytes.data() + offset, size_t(size)); offset += size_t(size);
+                    if (bool(value.ammunition) != !value.ammoRecord.empty()
+                        || value.ammoRecord.find('\0') != std::string::npos)
+                        throw std::invalid_argument("Native arrow identity invalid");
+                }
             }
+        if (magic == BowReleaseCampaignMagic)
+        {
+            const auto count = getAreaWord(bytes, offset);
+            if (count > MaximumActorProjectiles)
+                throw std::invalid_argument("Native arrow capacity exceeded");
+            for (uint64_t i = 0; i < count; ++i)
+            {
+                BowProjectile value;
+                for (auto* field : {&value.caster, &value.command, &value.source, &value.ammunition,
+                        &value.target, &value.targetLife, &value.releaseTick})
+                    *field = getAreaWord(bytes, offset);
+                const auto number = [&] {
+                    const auto bits = getAreaWord(bytes, offset);
+                    const float result = std::bit_cast<float>(uint32_t(bits));
+                    if (bits > UINT32_MAX || !std::isfinite(result))
+                        throw std::invalid_argument("Native arrow number invalid");
+                    return result;
+                };
+                value.strength = number();
+                for (auto* text : {&value.weapon, &value.ammoRecord})
+                {
+                    const auto size = getAreaWord(bytes, offset);
+                    if (!size || size > 256 || size > bytes.size() - offset)
+                        throw std::invalid_argument("Native arrow source length invalid");
+                    text->assign(bytes.data() + offset, size_t(size)); offset += size_t(size);
+                    if (text->find('\0') != std::string::npos)
+                        throw std::invalid_argument("Native arrow source invalid");
+                }
+                for (auto& v : value.position) v = number();
+                for (auto& v : value.direction) v = number();
+                float norm = 0; for (float v : value.direction) norm += v * v;
+                if (!value.caster || !value.command || !value.source || !value.ammunition || !value.target
+                    || !value.targetLife || value.targetLife > life->generation
+                    || !value.releaseTick || value.releaseTick > tick || value.strength < 0 || value.strength > 1
+                    || std::abs(norm - 1.f) > .001f
+                    || std::ranges::any_of(value.position, [](float v) { return std::abs(v) > 100'000'000; })
+                    || std::ranges::any_of(combat->arrows, [&](const auto& prior) {
+                        return prior.caster == value.caster && prior.command == value.command;
+                    })) throw std::invalid_argument("Native arrow state invalid");
+                combat->arrows.push_back(std::move(value));
+            }
+        }
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset
             || actorSize != bytes.size()-offset-inventorySize)
             throw std::invalid_argument("Native actor campaign lengths invalid");

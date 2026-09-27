@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 46; ++candidate)
+            for (unsigned candidate = 3; candidate <= 47; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -570,7 +570,8 @@ namespace TES3MP::Native
                         placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
                     }
                 }
-                const bool playerSwings = start.text.starts_with("native-inventory-46");
+                start.binding.mBowRelease = start.text.starts_with("native-inventory-47");
+                const bool playerSwings = start.text.starts_with("native-inventory-46") || start.binding.mBowRelease;
                 start.binding.mGeneralAttackModes = start.text.starts_with("native-inventory-45") || playerSwings;
                 if (start.text.starts_with("native-inventory-44") || start.binding.mGeneralAttackModes)
                 {
@@ -592,10 +593,12 @@ namespace TES3MP::Native
                     {
                         const auto& npc = *loadout.store().get<ESM::NPC>().find(start.binding.mActors[i].mBase);
                         const auto& race = *loadout.store().get<ESM::Race>().find(npc.mRace);
-                        start.binding.mPlayerMelee[i] = [scene, &npc, &race,
+                        start.binding.mPlayerMelee[i] = [scene, &npc, &race, bows = start.binding.mBowRelease,
                             cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
                             (const ESM::Weapon* weapon, std::string_view direction) mutable {
-                            const auto key = std::pair{weapon ? weapon->mId : ESM::RefId{}, std::string(direction)};
+                            const auto key = std::pair{weapon ? weapon->mId : ESM::RefId{},
+                                bows && weapon && weapon->mData.mType == ESM::Weapon::MarksmanBow
+                                    ? std::string("shoot") : std::string(direction)};
                             if (const auto found = cache.find(key); found != cache.end()) return found->second;
                             if (cache.size() >= 3 * (PlainEquipmentValues::MaxItems + 1))
                                 throw std::invalid_argument("Native player animation cache exceeded bound");

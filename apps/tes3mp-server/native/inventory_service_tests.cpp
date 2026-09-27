@@ -4124,6 +4124,234 @@ namespace TES3MP::Native::Testing
         require(completed, "Neighborhood traveler did not complete");
     }
 
+    static void checkPreparedBowRelease(const std::filesystem::path& scratch)
+    {
+        const auto descriptor = scratch / "native.txt";
+        {
+            std::ifstream input(descriptor);
+            std::string text((std::istreambuf_iterator<char>(input)), {}); input.close();
+            text.replace(0, std::string_view("native-inventory-44").size(), "native-inventory-47");
+            std::ofstream(descriptor) << text;
+        }
+        auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "Player swing crypto unavailable");
+        struct Identities final : PlayerIdentityPersistence
+        { bool replace(std::span<const PersistedPlayerIdentity>) noexcept override { return true; } } storage;
+        CharacterDerivedState derived; derived.attributes.fill(40); derived.skills.fill(10);
+        const auto profile = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter, CharacterCreationPhase::Complete,
+            "Swing participant", CharacterAppearance{id<RaceRecordId>(1),id<HeadRecordId>(1),id<HairRecordId>(1),CharacterSex::Male},
+            CharacterClass{id<ClassRecordId>(1)},id<BirthsignRecordId>(1),derived,{},id<CharacterProfileRevision>(2)).value();
+        auto authority = players(SessionGeneration::initial(), 1, 2);
+        {
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            for (auto& entity : nearby)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                    Transform(entity.transform().cell(), Position3(300 * 1024, -64 * 1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+        }
+        std::vector<PersistedPlayerIdentity> records;
+        for (uint64_t i : {1, 2})
+        {
+            CredentialDigest digest; digest.bytes.fill(std::byte(i));
+            records.push_back({{id<PlayerId>(i),id<EntityId>(i == 1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
+                digest, *authority.findPlayer(id<PlayerId>(i)), profile});
+        }
+        auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+        InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+        auto& service = host.service(); service.synchronizeCells(authority);
+        const auto bytes = [](const auto& runtime) {
+            return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end());
+        };
+        const auto state = [&](const auto& runtime) {
+            const auto image = runtime.inventoryImage();
+            return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+        };
+        const auto intent = [&](auto& runtime, const auto& players, uint64_t tick, uint64_t owner,
+                                MeleeAttackType mode, float strength) {
+            const auto* player = players.findPlayer(id<PlayerId>(owner));
+            const auto view = runtime.projectInventory(players, id<SessionId>(owner), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), nullptr);
+            require(view && !view->equipment->motions.empty(), "Player swing NPC projection missing");
+            ClientMeleeAttackCommand attack{id<SessionId>(owner), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(tick),
+                CombatRevision::initial(), CombatRevision::initial(), mode, strength};
+            ServerCommandProposal proposal(id<SessionId>(owner), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MeleeAttackCommandProposal(attack));
+            return runtime.prepareMeleeAttack(players, proposal, id<ServerTick>(tick));
+        };
+        const auto commit = [](auto& pending) {
+            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Player swing commit failed");
+        };
+
+        const auto initialView = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+        const auto& inventory = initialView->playerInventory.front();
+        const auto ammoSlot = std::ranges::find(inventory.equipment, EquipmentSlot::Ammunition, &EquipmentBinding::slot);
+        require(ammoSlot != inventory.equipment.end(), "Bow fixture did not equip arrows");
+        const auto ammo = std::ranges::find(inventory.stacks, ammoSlot->stackId, &CanonicalItemStack::stackId);
+        require(ammo != inventory.stacks.end(), "Bow fixture arrow stack absent");
+        const auto prototype = ammo->prototypeId;
+        const auto count = [&](auto& runtime) {
+            const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+            unsigned total = 0;
+            for (const auto& stack : view->playerInventory.front().stacks)
+                if (stack.prototypeId == prototype) total += stack.count;
+            return total;
+        };
+        require(count(service) == 2, "Bow fixture arrow count invalid");
+        std::vector<std::byte> windup, beforeRelease, released;
+        uint64_t releaseTick = 0;
+        bool restoredWindup = false, restoredRelease = false;
+        std::unique_ptr<InventoryHost> replay;
+        for (uint64_t tick = 1; tick <= 150; ++tick)
+        {
+            auto command = tick == 1 ? intent(service, authority, tick, 1, MeleeAttackType::Chop, .7f) : nullptr;
+            require(tick != 1 || bool(command), "Bow request rejected");
+            const auto before = bytes(service);
+            auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+            require(bool(pending), "Bow tick preparation failed");
+            std::vector<std::byte> proposed;
+            require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && bytes(service) == before, "Failed bow write leaked inventory, fatigue or projectile");
+            if (replay)
+            {
+                auto resumed = replay->service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                require(resumed && resumed->commit([&](auto image) {
+                    require(std::ranges::equal(image, proposed), "Bow restart changed release or inventory");
+                    return CanonicalDurabilityResult::Committed;
+                }) == CanonicalDurabilityResult::Committed, "Resumed bow tick failed");
+            }
+            commit(pending);
+            const auto current = state(service);
+            const auto& swing = *current.combat->swings[0];
+            require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Rejected && bytes(service) == proposed,
+                "Replayed bow transaction consumed twice");
+            require(current.combat->arrows.size() == size_t(swing.state.mHit)
+                && count(service) == (swing.state.mHit ? 1u : 2u), "Arrow expenditure did not match authored release");
+            require(!intent(service, authority, 1, 1, MeleeAttackType::Chop, .7f), "Duplicate bow request admitted");
+            if (tick == 1 || (swing.state.mHit && !restoredRelease))
+            {
+                if (tick == 1) { windup = proposed; restoredWindup = true; }
+                else { beforeRelease = before; released = proposed; releaseTick = tick; restoredRelease = true; }
+                replay.reset();
+                replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                replay->service().synchronizeCells(authority);
+                require(bytes(replay->service()) == proposed, "Bow restore changed coherent image");
+            }
+            if (!swing.pending()) break;
+        }
+        require(restoredWindup && restoredRelease && state(service).combat->arrows.size() == 1,
+            "Bow never released and recovered");
+        {
+            const auto saved = readActorCampaign({reinterpret_cast<const char*>(released.data()), released.size()});
+            const auto& arrow = saved.combat->arrows.front();
+            const size_t arrowSize = 16 * 8 + arrow.weapon.size() + arrow.ammoRecord.size();
+            const size_t countAt = released.size() - saved.inventory.size() - saved.actor.size() - arrowSize - 8;
+            const auto word = [](auto& image, size_t at, uint64_t value) {
+                for (size_t i = 0; i < 8; ++i) image.at(at+i) = std::byte(value >> (i*8));
+            };
+            const auto reject = [&](auto invalid) {
+                bool rejected = false;
+                try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+                catch (const std::exception&) { rejected = true; }
+                require(rejected, "Malformed bow release installed on recovery");
+            };
+            auto invalid = released; word(invalid, countAt, MaximumActorProjectiles + 1); reject(invalid);
+            invalid = released; word(invalid, countAt + 8, 999); reject(invalid); // Unbound caster.
+            invalid = released; word(invalid, countAt + 4 * 8, 0); reject(invalid); // No ammunition identity.
+            invalid = released;
+            invalid.insert(invalid.begin() + countAt + 8 + arrowSize,
+                released.begin() + countAt + 8, released.begin() + countAt + 8 + arrowSize);
+            word(invalid, countAt, 2); reject(invalid); // Same release twice.
+            invalid = released;
+            invalid.erase(invalid.begin() + countAt + 8, invalid.begin() + countAt + 8 + arrowSize);
+            word(invalid, countAt, 0); reject(invalid); // Spent arrow without its projectile.
+        }
+        // A departing source cancels before the key while the peer keeps the area active.
+        {
+            InventoryHost interrupted(descriptor, testContentManifest(), *registry, *crypto, windup);
+            const std::vector survivor{*authority.findActiveSession(id<SessionId>(2))};
+            auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), survivor));
+            interrupted.service().synchronizeCells(disconnected);
+            auto pending = interrupted.service().prepareNativeTick(disconnected, id<ServerTick>(2), 1.f/30, {});
+            commit(pending);
+            require(state(interrupted.service()).combat->swings[0]->interruption == PlayerSwing::Disconnected
+                && state(interrupted.service()).combat->arrows.empty() && count(interrupted.service()) == 2,
+                "Interrupted bow spent ammunition");
+            InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(interrupted.service()));
+            require(count(restored.service()) == 2 && state(restored.service()).combat->arrows.empty(),
+                "Interrupted bow restart changed ammunition");
+        }
+        // Removing ammunition in the wind-up transaction cancels, rather than releasing the old stack.
+        {
+            InventoryHost changed(descriptor, testContentManifest(), *registry, *crypto, windup);
+            auto& runtime = changed.service(); runtime.synchronizeCells(authority);
+            const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2));
+            const auto& inv = view->playerInventory.front();
+            const auto slot = std::ranges::find(inv.equipment, EquipmentSlot::Ammunition, &EquipmentBinding::slot);
+            ClientInventoryTransactionCommand unequip{id<SessionId>(1), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(2), id<CanonicalRevision>(2),
+                InventoryTransactionKind::UnequipItem, {}, prototype, slot->stackId, 1,
+                EquipmentSlot::Ammunition, inv.revision, {}, {}, Position3(0,0,0)};
+            auto command = runtime.prepareInventory(authority, bind(authority, unequip).proposal());
+            require(bool(command), "Arrow unequip rejected");
+            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, std::move(command));
+            commit(pending);
+            require(state(runtime).combat->swings[0]->interruption == PlayerSwing::SourceChanged
+                && state(runtime).combat->arrows.empty() && count(runtime) == 2, "Ammunition change failed to cancel bow");
+            InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+            require(bytes(restored.service()) == bytes(runtime), "Changed arrow source could not recover");
+        }
+        // An uncertain write closes the runtime; either durable outcome restores coherently.
+        {
+            InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, beforeRelease);
+            auto& runtime = uncertain.service(); runtime.synchronizeCells(authority);
+            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(releaseTick), 1.f/30, {});
+            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Failed; })
+                == CanonicalDurabilityResult::Failed && runtime.inventoryImage().empty(),
+                "Uncertain bow write did not fail closed");
+            for (const auto* image : {&beforeRelease, &released})
+            {
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, *image);
+                require(count(restored.service()) + state(restored.service()).combat->arrows.size() == 2,
+                    "Uncertain bow recovery lost or duplicated an arrow");
+            }
+        }
+        // Exhaust the equipped stack. Its last item and slot disappear with the second projectile.
+        const auto completedTick = state(service).tick;
+        for (uint64_t tick = completedTick + 1; tick <= completedTick + 150; ++tick)
+        {
+            auto command = tick == completedTick + 1 ? intent(service, authority, tick, 1, MeleeAttackType::Chop, .3f) : nullptr;
+            require(tick != completedTick + 1 || bool(command), "Second bow request rejected");
+            auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+            commit(pending);
+            if (!state(service).combat->swings[0]->pending()) break;
+        }
+        require(count(service) == 0 && state(service).combat->arrows.size() == 2, "Last arrow expenditure failed");
+        InventoryHost exhausted(descriptor, testContentManifest(), *registry, *crypto, bytes(service));
+        exhausted.service().synchronizeCells(authority);
+        require(count(exhausted.service()) == 0 && state(exhausted.service()).combat->arrows.size() == 2
+            && !intent(exhausted.service(), authority, state(service).tick + 1, 1, MeleeAttackType::Chop, 1.f),
+            "Restart refilled empty ammunition or admitted an empty bow");
+        require(!intent(exhausted.service(), authority, 1, 1, MeleeAttackType::Chop, .7f),
+            "Old bow request was admitted after a later release and restart");
+        std::cout << "bow release=KF arrows=exactly-once interruption=free failed-write=atomic uncertain=closed restart=stable last-arrow=cleared\n";
+    }
+
+    void checkBowRelease(const std::filesystem::path& scratch, const std::filesystem::path& config,
+        const std::filesystem::path& settings)
+    {
+        checkNpcDoors(scratch, config, settings,
+            true, true, true, true, true, false, false, false, false, false, false, false,
+            false, true, false, false, false, false, false, false, false, false, false, false, "bow-release", true, true);
+        checkPreparedBowRelease(scratch);
+    }
+
     static void checkPreparedPlayerSwings(const std::filesystem::path& scratch)
     {
         const auto descriptor = scratch / "native.txt";
@@ -5023,7 +5251,7 @@ namespace TES3MP::Native::Testing
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
                 std::ofstream(scratch / "encounter.txt") << "profile vanilla-melee\nweapon iron longsword\n";
             }
-            else if (!encounterProfile.empty())
+            else if (!encounterProfile.empty() && encounterProfile != "bow-release")
             {
                 const bool tr = encounterProfile.starts_with("tr-");
                 const bool itemProfile = encounterProfile.ends_with("item");
@@ -5120,6 +5348,13 @@ namespace TES3MP::Native::Testing
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
+                if (encounterProfile == "bow-release")
+                    for (auto* participant : {&female, &beast})
+                    {
+                        participant->mInventory.mList = {{1, ESM::RefId::stringRefId("long bow")},
+                            {2, ESM::RefId::stringRefId("iron arrow")}};
+                        participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)] = 100;
+                    }
                 for (const auto& participant : {female, beast})
                 {
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
@@ -5255,7 +5490,7 @@ namespace TES3MP::Native::Testing
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
-        if (!encounterProfile.empty()) return;
+        if (!encounterProfile.empty() && encounterProfile != "bow-release") return;
         {
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};

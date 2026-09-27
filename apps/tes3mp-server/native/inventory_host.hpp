@@ -17,6 +17,11 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V47 also admits a plain equipped bow/arrow through the attack intent.
+    // Bound shoot-release keys consume one arrow and persist its launch record
+    // with fatigue and animation progress. Up to eight frozen launches await
+    // flight/impact; no desktop bow input or projectile rendering is wired yet.
+    // Scripted/enchanted ranged sources reject. Fresh campaign required.
     // V46 schedules both players' melee intents through participant-bound
     // wind-up, release, KF hit and follow-through. Direction, requested strength,
     // weapon instance/record, target life and interruption persist atomically.

@@ -58,6 +58,7 @@ namespace TES3MP::Native
         std::shared_ptr<const SceneUtil::TextKeyMap> mKeys;
         std::string mGroup;
         std::string mIdentity;
+        bool mShoot = false;
         float mSpeed, mMinimumAttack, mMinimumHit;
         Range mWindUp, mRelease;
         std::array<Range, 3> mFollow;
