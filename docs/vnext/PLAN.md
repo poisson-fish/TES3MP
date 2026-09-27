@@ -63,18 +63,21 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    visibility, animation-key release/recovery and interruption. Retain durable
    source/caster/life, RNG, effects, expiry and two concurrent player casts;
    broaden remaining unsupported effects before M4 exit.
-5. Complete physical combat, from weapon selection through durable death/loot and
-   two-client encounters, in connected bounded slices. Equip selected carried
-   weapons; execute repeated melee attacks and all attack modes, bows/crossbows
-   with ammunition, and thrown weapons. Bind each participant's actual animation
-   resources and hit/release keys. Complete unarmed fatigue, knockout, health damage
-   while down, get-up timing, hit recovery, armor, block, resistances and wear.
-   Compose physical attacks, concurrent casting, enchantments, interruption,
-   attributed death, corpse inventory and respawn in one authoritative transaction.
+5. Complete physical combat in ordered bounded slices. First prove swing
+   presentation on both desktops through interruption, loss,
+   reconnect and restart. Next execute bows, crossbows and thrown weapons, with
+   authoritative release, durable ammunition expenditure, flight and impact.
+   Then complete unarmed fatigue, knockout, health damage while down, get-up timing,
+   hit recovery, armor, block, resistances and wear. Unify physical attacks,
+   simultaneous casting, enchantments, interruption, attributed death, corpse
+   inventory and respawn in one authoritative transaction. Finally prove varied
+   vanilla/TR weapons and armor with two players fighting and casting alongside
+   the NPC under network disruption. Preserve weapon selection, repeated melee
+   modes and participant animation/hit/release bindings.
    Persist swings, flight, ammunition expenditure, recovery, knockout, death and
-   loot; failed writes leak no resources, RNG, damage or successful events. Prove
-   varied vanilla/TR weapons and armor with two desktop clients fighting and casting
-   alongside the NPC under loss, disconnect, reconnect and restart.
+   loot; failed writes leak no resources, RNG, damage or successful events.
+   **Finish line:** both clients converge after reconnect/restart without duplicated
+   ammunition costs, damage or loot.
 6. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.

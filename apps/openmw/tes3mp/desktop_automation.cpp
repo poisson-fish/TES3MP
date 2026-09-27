@@ -310,6 +310,16 @@ namespace TES3MP::OpenMWAdapter
         else if (self->transform().position() != *mInitialPosition)
             mMoved = true;
         mSelfCell = self->transform().cell();
+        if (mRole == DesktopAutomationRole::NativeTraversal)
+        {
+            mTraversalPeer.reset();
+            for (const auto& entry : snapshot.view().entries())
+                if (entry.playerId() != snapshot.header().targetPlayerId())
+                {
+                    mTraversalPeer = entry.playerId();
+                    break;
+                }
+        }
         if (*mSelfCell == mExterior && !mExteriorAt)
             mExteriorAt = receivedAt;
         const bool hasPeer = std::ranges::any_of(observedPlayers, [&](const ObservedPlayer& observed) {
@@ -775,7 +785,9 @@ namespace TES3MP::OpenMWAdapter
                     if (!first) mOutput << ',';
                     first = false;
                     mOutput << "{\"attacker\":" << hit.attackerPlayerId.value() << ",\"target\":"
-                        << hit.targetActorId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
+                        << hit.targetActorId.value() << ",\"attacker_revision\":" << hit.attackerCombatRevision.value()
+                        << ",\"target_revision\":" << hit.targetCombatRevision.value()
+                        << ",\"hit\":" << (hit.hit ? "true" : "false")
                         << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat) << ",\"died\":"
                         << (hit.targetDied ? "true" : "false") << '}';
                 }

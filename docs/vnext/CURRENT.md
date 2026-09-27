@@ -33,19 +33,21 @@ source and target life. Source changes, active disconnect, target loss and hit
 recovery cancel; capacity/inactivity pause. Simultaneous hits share armor wear.
 Fresh campaigns required; older domains retain immediate hits.
 
-T3C4 replicates complete player swing identities, phases, direction, strength,
-interruption and section progress to self and peers without gameplay keys or Lua
-animation-ended callbacks. Terminal states survive reconnect. V46 persistence is
-unchanged; local input predicts before admission.
+T3C4 replicates swing identities, phases, direction/strength, interruption and
+section progress to self/peers without gameplay keys or Lua callbacks. Reconnect
+retains terminal states. V46 persistence is unchanged; local input predicts before admission.
 
-`tes3mp_native_loadout_tests player-swings` passed observer agreement, restart,
-durability, armored hits, interruption and malformed saves
-(`build/logs/m4-swing-host-test.log`). `melee-presentation` passed real vanilla KF
-section sampling, all directions/strength tiers, frozen client clocks, reconnect and
-callback suppression (`build/logs/m4-swing-pose-test.log`); this is headless animation
-state, not rendered desktop evidence. Protocol/handshake passed
+Headless `tes3mp_native_loadout_tests player-swings` and `melee-presentation` passed
+transaction/recovery and KF clock/callback checks:
+`build/logs/m4-swing-host-test.log`, `build/logs/m4-swing-pose-test.log`. Protocol/handshake:
 `build/logs/m4-swing-protocol-test.log` and `build/logs/m4-swing-handshake-test.log`.
 
-Next: two-desktop swing presentation/reconnect validation, then ranged/ammunition/
-thrown flight, close-combat completion, physical/casting composition and varied
-vanilla/TR encounters with death/loot as specified in PLAN. Movement remains last.
+Two desktops passed V46 swings with vanilla `iron longsword` under 10% loss/100 ms
+delay/jitter: three directions/strength tiers, disconnect cancellation, reconnect,
+pending-swing restart and duplicate-outcome checks. Peer swing images reviewed.
+`build/m4-swing-vanilla-live-07/result.json`; `build/logs/m4-swing-live-test.log`.
+Actors/placements are synthetic; this isolates presentation, not sustained mixed combat.
+
+Next: ranged release and durable ammunition expenditure, then flight/impact,
+close-combat completion, physical/casting composition and varied vanilla/TR
+death/loot encounters in PLAN. Movement remains last.

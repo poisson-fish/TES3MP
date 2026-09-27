@@ -2866,6 +2866,18 @@ namespace TES3MP::OpenMWAdapter
     {
     }
 
+    std::optional<std::array<float, 3>> DesktopPresentation::renderedPlayerPosition(PlayerId player) const
+    {
+        for (const auto& [entity, remote] : mImpl->remotes)
+            if (remote.actor && remote.lastObserved && remote.lastObserved->playerId() == player
+                && remote.actor->ptr().getRefData().getBaseNode())
+            {
+                const auto& position = remote.actor->ptr().getRefData().getPosition();
+                return std::array{position.pos[0], position.pos[1], position.pos[2]};
+            }
+        return std::nullopt;
+    }
+
     std::vector<NativeActorMotion> DesktopPresentation::nativeActorPresentation() const
     {
         std::vector<NativeActorMotion> result;

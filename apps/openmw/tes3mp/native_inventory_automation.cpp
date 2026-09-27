@@ -344,6 +344,8 @@ namespace TES3MP::OpenMWAdapter
         if (sequence != mTraversalSequence + 1 || action.size() > 16)
             throw std::runtime_error("Traversal control sequence/action invalid");
         float x = 0, y = 0, z = 0, pitch = 0, yaw = 0;
+        unsigned direction = ESM::Weapon::AT_Chop;
+        float strength = 1.f;
         std::string record, trailing;
         if (action == "pose")
         {
@@ -352,6 +354,12 @@ namespace TES3MP::OpenMWAdapter
                 || std::abs(x) > 1048576 || std::abs(y) > 1048576 || std::abs(z) > 1048576
                 || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
                 throw std::runtime_error("Traversal setup pose invalid");
+        }
+        else if (action == "swing")
+        {
+            if (!(file >> direction >> strength) || direction > 2 || !std::isfinite(strength)
+                || strength < 0.f || strength > 1.f)
+                throw std::runtime_error("Traversal swing arguments invalid");
         }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor")
         {
@@ -367,6 +375,18 @@ namespace TES3MP::OpenMWAdapter
             world->moveObject(world->getPlayerPtr(), osg::Vec3f(x,y,z));
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(pitch,0,yaw));
         }
+        else if (action == "facepeer")
+        {
+            auto* desktop = dynamic_cast<DesktopPresentation*>(&mPresentation);
+            const auto peer = desktop && mTraversalPeer
+                ? desktop->renderedPlayerPosition(*mTraversalPeer) : std::nullopt;
+            if (!peer) throw std::runtime_error("Traversal peer is not rendered");
+            const auto& position = world->getPlayerPtr().getRefData().getPosition();
+            const auto dx = (*peer)[0] - position.pos[0];
+            const auto dy = (*peer)[1] - position.pos[1];
+            world->toggleVanityMode(false);
+            world->rotateObject(world->getPlayerPtr(), osg::Vec3f(.1f, 0, std::atan2(dx, dy)));
+        }
         else if (action == "activate")
         {
             if (wm->isGuiMode())
@@ -376,13 +396,13 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal activation focus differs from requested record");
             world->getPlayer().activate();
         }
-        else if (action == "attack")
+        else if (action == "attack" || action == "swing")
         {
             if (wm->isGuiMode()) throw std::runtime_error("Traversal attack requires game focus");
             std::vector<MWWorld::Ptr> targets;
             mPresentation.appendMeleeTargets(targets);
             if ((targets.size() != 1 || targets.front().isEmpty()
-                    || !world->getPlayer().interceptMeleeHit(1.f, ESM::Weapon::AT_Chop, targets.front()))
+                    || !world->getPlayer().interceptMeleeHit(strength, direction, targets.front()))
                 && (!mNativeContainerCount || *mNativeContainerCount == 0))
                 throw std::runtime_error("Traversal attack has no live native actor target");
         }

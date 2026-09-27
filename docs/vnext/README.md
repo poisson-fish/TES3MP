@@ -54,6 +54,4 @@ Keep OpenMW 0.51.0 baseline `f4bec41444214a7903bebd178389ca22ca13f646`.
 [OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json) and existing `proofs/`
 serve dependency tooling, not planning.
 
-Exactly five active documents share 5,000 words. Replace stale prose; add no
-diaries or duplicate roadmaps. Code and tests establish implementation; documents
-establish intended behavior.
+Code and tests establish implementation; documents establish intended behavior.

@@ -5013,7 +5013,17 @@ namespace TES3MP::Native::Testing
                 }
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
-            if (!encounterProfile.empty())
+            if (encounterProfile == "vanilla-melee")
+            {
+                const auto weapon = ESM::RefId::stringRefId("iron longsword");
+                require(base.store().get<ESM::Weapon>().search(weapon), "Encounter weapon missing");
+                npc.mSpells.mList.clear();
+                npc.mInventory.mList = {{1, weapon}, {1, ESM::RefId::stringRefId("common_shirt_01")}};
+                npc.mNpdt.mHealth = 10000; npc.mNpdt.mMana = 10000; npc.mNpdt.mFatigue = 10000;
+                for (auto& skill : npc.mNpdt.mSkills) skill = 100;
+                std::ofstream(scratch / "encounter.txt") << "profile vanilla-melee\nweapon iron longsword\n";
+            }
+            else if (!encounterProfile.empty())
             {
                 const bool tr = encounterProfile.starts_with("tr-");
                 const bool itemProfile = encounterProfile.ends_with("item");

@@ -124,6 +124,7 @@ namespace TES3MP::OpenMWAdapter
         std::uint64_t mTraversalSequence = 0;
         std::uint64_t mTraversalReconnectDelay = 0;
         std::optional<ReliableGroundItemBaseline> mTraversalGround;
+        std::optional<PlayerId> mTraversalPeer;
         std::vector<NativeDoorSnapshot> mPresentedNativeDoors;
         std::optional<std::uint32_t> mNativePlayerCount;
         std::optional<std::uint32_t> mNativeContainerCount;

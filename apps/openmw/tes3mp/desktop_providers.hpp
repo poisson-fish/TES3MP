@@ -186,6 +186,7 @@ namespace TES3MP::OpenMWAdapter
         // Read-only presentation evidence: positions of the actual rendered
         // native actors, in OpenMW units, with their last committed sample tick.
         std::vector<NativeActorMotion> nativeActorPresentation() const;
+        std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
 
     private:
         class Impl;
