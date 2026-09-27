@@ -14,6 +14,18 @@
 
 namespace MWMechanics
 {
+    bool rollHitKnockdown(const MWWorld::ESMStore& store, const CreatureStats& victim,
+        float healthDamage, Misc::Rng::Generator& rng)
+    {
+        if (healthDamage <= 0) return false;
+        const auto& gmst = store.get<ESM::GameSetting>();
+        const float agility = victim.getAttribute(ESM::Attribute::Agility).getModified();
+        const float agilityTerm = agility * gmst.find("fKnockDownMult")->mValue.getFloat();
+        const float knockdownTerm = agility * gmst.find("iKnockDownOddsMult")->mValue.getInteger() * .01f
+            + gmst.find("iKnockDownOddsBase")->mValue.getInteger();
+        return agilityTerm <= healthDamage && knockdownTerm <= Misc::Rng::roll0to99(rng);
+    }
+
     float projectileLaunchSpeed(const MWWorld::ESMStore& store, bool thrown, float strength)
     {
         const auto& gmst = store.get<ESM::GameSetting>();

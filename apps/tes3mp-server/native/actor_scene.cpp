@@ -683,12 +683,14 @@ namespace TES3MP::Native
         return {std::move(sources), identity.str()};
     }
 
-    BoundHitAnimations InteriorActorScene::bindHitAnimations(const ESM::NPC& npc, const ESM::Race& race)
+    BoundHitAnimations InteriorActorScene::bindHitAnimations(const ESM::NPC& npc, const ESM::Race& race, bool knockout)
     {
         const auto [owned, identity] = bindAnimationSources(npc, race);
         std::vector<const SceneUtil::TextKeyMap*> sources;
         for (const auto& source : owned) sources.push_back(source.get());
-        return {readHitAnimations(sources), identity};
+        return {readHitAnimations(sources), identity,
+            knockout ? readKnockoutAnimation(sources) : KnockoutAnimation{},
+            knockout ? readKnockoutAnimation(sources, "knockdown") : KnockoutAnimation{}};
     }
 
     MeleeAnimation InteriorActorScene::bindWeaponMeleeAnimation(const ESM::NPC& npc, const ESM::Race& race,

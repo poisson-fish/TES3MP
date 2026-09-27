@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 49; ++candidate)
+            for (unsigned candidate = 3; candidate <= 50; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -273,6 +273,7 @@ namespace TES3MP::Native
                 binding.mMagicPlayerTarget = descriptorVersion >= 31;
                 binding.mMagicProjectileCollection = descriptorVersion >= 32;
                 binding.mKnockoutRules = descriptorVersion >= 33;
+                binding.mKnockoutAnimation = descriptorVersion >= 50;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -568,11 +569,12 @@ namespace TES3MP::Native
                     for (size_t i = 0; i < participants.size(); ++i)
                     {
                         const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
-                        hits[i] = scene->bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace));
+                        hits[i] = scene->bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace),
+                            start.binding.mKnockoutAnimation);
                         placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
                     }
                 }
-                start.binding.mRangedFlight = start.text.starts_with("native-inventory-49");
+                start.binding.mRangedFlight = start.text.starts_with("native-inventory-49") || start.binding.mKnockoutAnimation;
                 start.binding.mRangedRelease = start.text.starts_with("native-inventory-48") || start.binding.mRangedFlight;
                 start.binding.mBowRelease = start.text.starts_with("native-inventory-47") || start.binding.mRangedRelease;
                 const bool playerSwings = start.text.starts_with("native-inventory-46") || start.binding.mBowRelease;
@@ -621,6 +623,7 @@ namespace TES3MP::Native
                     const auto meleeSpeed = start.navigation->meleeSpeed;
                     start.binding.mNavigationActivity = [scene, createScene, meleeIdentity,
                         meleeGroup, meleeAttack, meleeSpeed, &loadout, hits = start.binding.mBoundHits,
+                        knockout = start.binding.mKnockoutAnimation,
                         participants = std::array{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase}](bool active) {
                         if (active && !scene->loaded())
                         {
@@ -633,9 +636,10 @@ namespace TES3MP::Native
                                 {
                                     const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
                                     const auto rebound = fresh->bindHitAnimations(npc,
-                                        *loadout.store().get<ESM::Race>().find(npc.mRace));
+                                        *loadout.store().get<ESM::Race>().find(npc.mRace), knockout);
                                     if (rebound.resourceIdentity != (*hits)[i].resourceIdentity
-                                        || rebound.animations != (*hits)[i].animations)
+                                        || rebound.animations != (*hits)[i].animations
+                                        || rebound.knockout != (*hits)[i].knockout || rebound.knockdown != (*hits)[i].knockdown)
                                         throw std::invalid_argument("Native hit resource changed after binding");
                                 }
                             scene->reload(*fresh);

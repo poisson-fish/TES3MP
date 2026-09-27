@@ -309,6 +309,58 @@ namespace
         rejects(many);
     }
 
+    void knockoutTiming()
+    {
+        using namespace TES3MP::Native;
+        SceneUtil::TextKeyMap base, override;
+        base.emplace(1.f, "knockout: start");
+        base.emplace(1.5f, "knockout: loop start");
+        base.emplace(2.f, "knockout: loop stop");
+        base.emplace(3.f, "knockout: stop");
+        const auto clip = readKnockoutAnimation(std::array<const SceneUtil::TextKeyMap*, 1>{&base});
+        require(clip.stop == 60 && clip.loopStart == 15 && clip.loopStop == 30,
+            "Knockout keys lost authored timing");
+        unsigned frame = 0;
+        for (unsigned i = 0; i < 30; ++i) frame = clip.advance(frame, true);
+        require(frame == 15, "Exhausted knockout failed to loop");
+        for (unsigned i = 0; i < 44; ++i) frame = clip.advance(frame, false);
+        require(frame == 59, "Restored fatigue skipped authored get-up tail");
+        require(clip.advance(frame, false) == clip.stop, "Get-up failed to finish");
+        override.emplace(4.f, "knockout: start"); override.emplace(5.f, "knockout: stop");
+        const auto layered = readKnockoutAnimation(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &override});
+        require(layered.stop == 30 && !layered.loopStop, "Knockout merged keys from different layers");
+        require(layered.advance(29, true) == 29 && layered.advance(29, false) == 30,
+            "Nonlooping knockout released an exhausted actor");
+        require(readKnockoutAnimation({}).advance(0, true) == 0
+            && readKnockoutAnimation({}).advance(0, false) == 1, "Missing knockout fallback invalid");
+        override.emplace(6.f, "knockout: loop stop");
+        bool rejected = false;
+        try { (void)readKnockoutAnimation(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &override}); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "Knockout loop outside its clip accepted");
+    }
+
+    void hitKnockdown()
+    {
+        MWWorld::ESMStore store; content(store);
+        setting(store, "fKnockDownMult", .5f);
+        for (const auto& [name, value] : {std::pair{"iKnockDownOddsMult", 100}, {"iKnockDownOddsBase", 10}})
+        {
+            ESM::GameSetting record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
+            record.mValue.setType(ESM::VT_Int); record.mValue.setInteger(value); store.insertStatic(record);
+        }
+        MWMechanics::CreatureStats victim(store); initialize(victim);
+        Misc::Rng::Generator actual{17}, expected{17};
+        require(!MWMechanics::rollHitKnockdown(store, victim, 0, actual)
+            && !MWMechanics::rollHitKnockdown(store, victim, 19, actual)
+            && Misc::Rng::serialize(actual) == Misc::Rng::serialize(expected),
+            "Non-health or subthreshold hit consumed knockdown RNG");
+        for (unsigned i = 0; i < 100; ++i)
+            require(MWMechanics::rollHitKnockdown(store, victim, 20, actual)
+                == (50 <= Misc::Rng::roll0to99(expected)), "Knockdown changed stock threshold/odds");
+        require(Misc::Rng::serialize(actual) == Misc::Rng::serialize(expected), "Knockdown RNG stream differs");
+    }
+
     void attackModes()
     {
         ESM::Weapon weapon;
@@ -589,6 +641,8 @@ int main(int argc, char** argv)
         else if (filter == "melee-timing") timing();
         else if (filter == "melee-scheduling") scheduling();
         else if (filter == "hit-resources") hitResources();
+        else if (filter == "knockout-timing") knockoutTiming();
+        else if (filter == "hit-knockdown") hitKnockdown();
         else if (filter == "attack-modes") attackModes();
         else if (filter == "projectile-mechanics") projectileMechanics();
         else throw std::invalid_argument("Unknown melee filter");

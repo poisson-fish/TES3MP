@@ -40,9 +40,6 @@ namespace MWClass
             const ESM::GameSetting* fJumpAcroMultiplier;
             const ESM::GameSetting* fJumpRunMultiplier;
             const ESM::GameSetting* fWereWolfRunMult;
-            const ESM::GameSetting* fKnockDownMult;
-            const ESM::GameSetting* iKnockDownOddsMult;
-            const ESM::GameSetting* iKnockDownOddsBase;
             const ESM::GameSetting* fCombatArmorMinMult;
         };
 

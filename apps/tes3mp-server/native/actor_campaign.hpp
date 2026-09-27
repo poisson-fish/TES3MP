@@ -33,8 +33,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t BowReleaseCampaignMagic = 0x4c50434154335354;
     inline constexpr uint64_t RangedReleaseCampaignMagic = 0x4d50434154335354;
     inline constexpr uint64_t RangedFlightCampaignMagic = 0x4e50434154335354;
+    inline constexpr uint64_t KnockoutAnimationCampaignMagic = 0x4f50434154335354;
+    inline constexpr bool hasRangedFlight(uint64_t magic)
+    { return magic == RangedFlightCampaignMagic || magic == KnockoutAnimationCampaignMagic; }
     inline constexpr bool hasRangedRelease(uint64_t magic)
-    { return magic == BowReleaseCampaignMagic || magic == RangedReleaseCampaignMagic || magic == RangedFlightCampaignMagic; }
+    { return magic == BowReleaseCampaignMagic || magic == RangedReleaseCampaignMagic || hasRangedFlight(magic); }
     inline constexpr bool hasPlayerSwings(uint64_t magic)
     { return magic == PlayerSwingCampaignMagic || hasRangedRelease(magic); }
     inline constexpr bool hasWeaponExecution(uint64_t magic)
@@ -99,6 +102,8 @@ namespace TES3MP::Native
         std::array<std::array<std::array<float, 5>, StatCount>, 3> actors{};
         uint32_t rng = 1;
         std::array<bool, 3> knockedDown{};
+        std::array<uint32_t, 3> knockoutFrame{};
+        std::array<bool, 3> hitKnockdown{};
         // Remaining CPU hit animation frames; paused for inactive actors.
         std::array<uint32_t, 3> hitRecoveryTicks{};
         std::array<std::optional<PlayerSwing>, 2> swings;
@@ -271,7 +276,9 @@ namespace TES3MP::Native
                     const auto value = getAreaWord(bytes, offset);
                     const bool expected = state.actors[actor][8][2] > 0
                         && state.actors[actor][10][2] < 0;
-                    if (value > 1 || bool(value) != expected)
+                    if (value > 1 || (magic == KnockoutAnimationCampaignMagic
+                            ? (expected && !value) || (state.actors[actor][8][2] <= 0 && value)
+                            : bool(value) != expected))
                         throw std::invalid_argument("Native knockout state invalid");
                     state.knockedDown[actor] = value != 0;
                 }
@@ -283,6 +290,23 @@ namespace TES3MP::Native
                     if (value > 1800 || (state.actors[actor][8][2] <= 0 && value))
                         throw std::invalid_argument("Native hit recovery state invalid");
                     state.hitRecoveryTicks[actor] = uint32_t(value);
+                }
+            if (magic == KnockoutAnimationCampaignMagic)
+                for (size_t actor = 0; actor < state.knockoutFrame.size(); ++actor)
+                {
+                    const auto frame = getAreaWord(bytes, offset);
+                    if (frame >= 1800 || (!state.knockedDown[actor] && frame)
+                        || (state.knockedDown[actor] && state.hitRecoveryTicks[actor]))
+                        throw std::invalid_argument("Native knockout animation state invalid");
+                    state.knockoutFrame[actor] = uint32_t(frame);
+                }
+            if (magic == KnockoutAnimationCampaignMagic)
+                for (size_t actor = 0; actor < state.hitKnockdown.size(); ++actor)
+                {
+                    const auto value = getAreaWord(bytes, offset);
+                    if (value > 1 || (value && !state.knockedDown[actor]))
+                        throw std::invalid_argument("Native hit knockdown state invalid");
+                    state.hitKnockdown[actor] = value != 0;
                 }
         }
         std::optional<ActorCampaignLife> life;
@@ -593,7 +617,7 @@ namespace TES3MP::Native
                 }
                 for (auto& v : value.position) v = number();
                 for (auto& v : value.direction) v = number();
-                if (magic == RangedFlightCampaignMagic)
+                if (hasRangedFlight(magic))
                 {
                     for (auto& v : value.velocity) v = number();
                     value.condition = number();

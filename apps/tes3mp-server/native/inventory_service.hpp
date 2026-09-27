@@ -96,6 +96,7 @@ namespace TES3MP::Native
         bool mMagicPlayerTarget = false;
         bool mMagicProjectileCollection = false;
         bool mKnockoutRules = false;
+        bool mKnockoutAnimation = false; // V50 retains the authored get-up tail.
         bool mMeleeDefenseRules = false;
         bool mActorEffectLifecycle = false;
         bool mConstantEffects = false;

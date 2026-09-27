@@ -25,14 +25,11 @@ and present commits. Prediction cannot author damage, rewards or world mutations
 Validate inherited movement for combat. Schedule the player-area union independently
 of individual menus/scenes. NPC authority has no client ownership leases.
 
-**M3 doors:** transactions own activation, reversal, angle, direction and persistence
-through shared OpenMW rules. Clients present complete committed angles independently
-of inventory/equipment revisions, guarded by session/active cell, and report only
-their own contacts. Reports bind session/generation, placement, motion, sequence and
-observed tick; fresh blocks stall. Transient reports expire after ten ticks and
-invalidate on reversal/reconnect. Contacts remain trusted; latency may clip without
-barrier/rewind. Replacing reports with shared NPC physics must preserve transactions,
-persistence and replication.
+**M3 doors:** shared OpenMW rules own durable activation, reversal, angle and
+replication. Player contact reports bind session/generation, placement, sequence
+and observed tick; expire after ten ticks; and invalidate on reconnect/reversal.
+They supplement server physics until movement cutover. No rewind/barrier exists;
+latency may clip. Replacing reports must preserve persistence and replication.
 
 **Presentation is separate.** Route UI, visual animation, audio and graphics to relevant
 clients. Pure visual replacements may vary; collision/bounds and script-affecting
@@ -59,7 +56,6 @@ Bound cells/work; persist destinations, completion, inactivity and stock Travel
 guards. No abstract fast-forward. V20 admission is atomic; saturation pauses both
 substeps without resetting travel. Stable placement IDs suppress duplicate local
 actors. Freeze offline players; exclude client velocity from legacy simulation.
-Only the selected NPC moves; neighbors await multiple-actor simulation.
 
 **Composed ticks.** One isolated transaction owns ordered intents, simulation,
 resources, effects, wear, death/loot, RNG and receipts. Persist before installation
@@ -75,24 +71,20 @@ NPC respawn clears its body effects while attribution on others survives. Truste
 NPC commands never enter client input. Death cancels NPC flights. Older images
 retain their layouts; new descriptor domains require fresh campaigns.
 
-V39-V42 admit actions on committed eight-tick boundaries. Nearest visible living
-player wins, with ID ties. Carried weapons/ammunition compete with equipped WhenUsed
-and spells using stock ratings; unsupported plans never become zero ratings.
-V42 binds spellcast keys/resources and persists selection through recovery with
-payment, RNG and effects. Inactive areas pause; launch revalidates source, life,
-target and visibility. Two distinct player casters share the transaction; repeated
-commands from one cannot. Timed arguments and mixed ranges use the shared resolver.
-T3C4 snapshots require capability 22; T3C2 events retain caster life. V46 player
-swings project complete committed poses, including terminal interruption, for self
-and visible peers. Reconnect samples the bound animation section without replaying
-gameplay keys or Lua animation-ended callbacks; clients never advance that clock.
+V39-V42 admit actions every eight committed ticks, selecting the nearest visible
+living player with ID ties. Stock ratings compare weapons/ammunition, equipped
+WhenUsed and spells; unsupported plans reject. Source/life/target, payment, RNG,
+KF release/recovery, effects and concurrent player casts persist together. Inactive
+areas pause; launch revalidates source/life/target/visibility. T3C4 requires capability
+22; T3C2 events retain caster life. V46 projects committed swing sections/interruption;
+reconnect samples without replaying gameplay keys or Lua completion callbacks.
+Clients never advance the authoritative animation clock.
 
 **Equipped passive sources.** Candidate equipment selects constant effects by item
 instance and effect ordinal before combat. Rolls persist while that instance stays
 equipped; replacement and respawn install new sources in the same transaction.
 Recovery checks arguments, source membership and magnitude bounds without rolling.
 Modifiers overlay detached combat stats and never accumulate in saved base state.
-V37 adds arguments and multiple sources; V36 retains fixed Luck-shirt recovery.
 
 **Combat latency.** Predict local swing/cast presentation only; the server owns
 gameplay consequences. Start with server-time contacts; measure latency before adding
@@ -102,19 +94,21 @@ V31 resolves projectile/player contact against active server player positions
 with a 32-unit sphere at body center, choosing the earliest hit against NPC/world
 collision. This bounded proxy remains until shared player hull physics is bound.
 
-**Melee state.** V33 persists knockout: active actors recover fatigue at OpenMW's
-combat rate, inactive actors pause, negative fatigue prevents attacks and redirects
-unarmed damage to health. Recovery occurs at zero; get-up timing remains pending.
+**Melee state.** Negative fatigue prevents attacks and redirects unarmed damage to
+health. Stock fatigue restoration continues while active. V50 persists authored
+knockout/knockdown clock: exhaustion loops, restored fatigue lets the current clip
+finish its get-up tail. Shared stock health-hit rolls select physical knockdown.
+New hits do not restart an active knockdown; inactive actors pause, and death/respawn
+clear body clocks. Fresh campaigns are required.
 V34 shares carried-left shield visibility and durable CPU hit recovery. V43 binds all three
 participants' layered hit resources independently, including their bytes in the
 campaign fingerprint. Recovery validates each saved timer against its own clips;
 older descriptor domains retain the NPC resource for all participants.
 
-V44 persists melee targets before release in a distinct campaign layout. Selected
-carried weapons equip through the stock detached inventory transaction before
-execution; recovery never auto-equips. NPC clips bind layered weapon groups,
-stock fallback, descriptor direction and record speed. Completed swings return to
-selection; breakage and passive-source removal commit together.
+V44 persists pre-release melee targets and clip recipes. Stock detached transactions
+equip selected carried weapons; recovery never re-equips. NPC clips bind layered
+groups/fallback, direction and speed. Completion resumes selection; breakage and
+passive-source removal commit together.
 
 **Movement smoothness (target).** Cut over after smooth replication and unified
 engine collision. Until then validate inherited combat contacts on the server.
@@ -123,14 +117,14 @@ snapshots with bounded extrapolation, latest-wins motion and reliable events.
 Predict locally with shared fixed steps; restore acknowledged physics and replay
 pending input. Timestamp obstacles, separate collision correction from visual
 blending, and reset on teleport, respawn or cell change. Measure jitter/loss,
-correction size/frequency and overruns. Existing smoothing does not prove replay.
+correction size/frequency and overruns.
 
 ## Cooperative progression design
 
 **Requirement:** characters, including late joiners, can complete campaigns
 independently. Others cannot permanently block opportunities; one's own mutually
 exclusive choices retain consequences. Support content through OpenMW APIs and
-engine rules, without mandatory quest adaptations. This remains a design target.
+engine rules, without mandatory quest adaptations.
 
 ### Shared world, personal progression
 

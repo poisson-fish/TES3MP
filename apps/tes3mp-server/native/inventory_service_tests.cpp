@@ -4132,7 +4132,8 @@ namespace TES3MP::Native::Testing
             std::ifstream input(descriptor);
             std::string text((std::istreambuf_iterator<char>(input)), {}); input.close();
             text.replace(0, std::string_view("native-inventory-44").size(),
-                profile.ends_with("-flight") ? "native-inventory-49"
+                profile.find("combined") != std::string_view::npos ? "native-inventory-50"
+                    : profile.ends_with("-flight") ? "native-inventory-49"
                     : profile == "bow-release" ? "native-inventory-47" : "native-inventory-48");
             std::ofstream(descriptor) << text;
         }
@@ -4148,7 +4149,7 @@ namespace TES3MP::Native::Testing
             std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
             for (auto& entity : nearby)
                 entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
-                    Transform(entity.transform().cell(), Position3(300 * 1024, -64 * 1024, 1024),
+                    Transform(entity.transform().cell(), Position3((profile.find("combined") != std::string_view::npos && entity.playerId() == id<PlayerId>(2) ? 60 : 300) * 1024, -64 * 1024, 1024),
                         entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
         }
@@ -4207,6 +4208,162 @@ namespace TES3MP::Native::Testing
                 if (stack.prototypeId == prototype) total += stack.count;
             return total;
         };
+        if (profile.find("combined") != std::string_view::npos)
+        {
+            bool rangedHit = false, meleeHit = false, modifiers = false, killed = false;
+            uint64_t modifierTick = 0, deathTick = 0;
+            std::unique_ptr<InventoryHost> mirror;
+            for (uint64_t tick = 1; tick < 500 && !killed; ++tick)
+            {
+                const auto prior = state(service);
+                const bool ready = !prior.combat->swings[1]
+                    || prior.combat->swings[1]->state.mPhase == MeleeAnimation::Phase::Complete
+                    || prior.combat->swings[1]->interruption;
+                const int action = tick == 1 ? 1 : !meleeHit && rangedHit && ready
+                    && !prior.combat->knockedDown[1] && !prior.combat->hitRecoveryTicks[1] ? 2
+                    : meleeHit && !modifierTick ? 3 : modifierTick && tick == modifierTick + 65 ? 4 : 0;
+                const auto request = [&](auto& runtime) -> std::unique_ptr<PreparedNativeInventory> {
+                    if (action == 1 || action == 2)
+                        return intent(runtime, authority, tick, uint64_t(action), MeleeAttackType::Chop, .7f);
+                    if (action < 3) return {};
+                    uint64_t source = 14695981039346656037ull;
+                    for (unsigned char c : std::string_view(action == 3 ? "combined_modifier" : "combined_kill"))
+                        source = (source ^ c) * 1099511628211ull;
+                    const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    const auto* player = authority.findPlayer(id<PlayerId>(1));
+                    ClientMagicUseCommand use{id<SessionId>(1), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                        MagicUseSourceKind::Spell, source, action == 3 ? MagicUseTargetKind::Self : MagicUseTargetKind::Actor,
+                        action == 3 ? 0 : view->equipment->motions.front().placement,
+                        id<ServerTick>(tick), CombatRevision::initial(), CombatRevision::initial(), InventoryRevision::initial()};
+                    ServerCommandProposal proposal(id<SessionId>(1), SessionGeneration::initial(), use.commandSequence,
+                        use.commandId, use.observedCanonicalRevision,
+                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+                    return runtime.prepareMagicUse(authority, proposal, id<ServerTick>(tick));
+                };
+                auto command = request(service);
+                if (action && !command) throw std::runtime_error("Combined action " + std::to_string(action)
+                    + " rejected at tick " + std::to_string(tick));
+                const auto before = bytes(service);
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+                require(bool(pending), "Combined combat tick missing");
+                std::vector<std::byte> candidate;
+                require(pending->commit([&](auto data) { candidate.assign(data.begin(), data.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && bytes(service) == before, "Rejected combined combat leaked resources or RNG");
+                const auto events = service.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(tick),
+                    id<CanonicalRevision>(tick), pending.get());
+                if (events) for (const auto& event : events->events())
+                {
+                    if (event.attackerPlayerId == id<PlayerId>(1) && event.hit && event.damage > 0) rangedHit = true;
+                    if (event.attackerPlayerId == id<PlayerId>(2) && event.hit && event.damage > 0) meleeHit = true;
+                }
+                if (mirror)
+                {
+                    auto resumed = mirror->service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                        request(mirror->service()));
+                    commit(resumed);
+                    require(bytes(mirror->service()) == candidate, "Combined combat restart changed tick outcome");
+                }
+                commit(pending);
+                require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Rejected && bytes(service) == candidate,
+                    "Combined combat transaction replay applied twice");
+                const auto after = state(service);
+                if (action == 3)
+                {
+                    modifierTick = tick;
+                    modifiers = std::ranges::count_if(after.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && supportedCombatModifier(ESM::MagicEffect::indexToRefId(int(effect.effectIndex)));
+                    }) == 4;
+                    require(modifiers, "Combined modifier spell lost ordered durable effects");
+                }
+                if (action == 4)
+                    require(std::ranges::none_of(after.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && supportedCombatModifier(ESM::MagicEffect::indexToRefId(int(effect.effectIndex)));
+                    }), "Expired combat modifiers persisted");
+                if ((!mirror && !after.combat->arrows.empty()) || action == 3)
+                {
+                    mirror = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                    mirror->service().synchronizeCells(authority);
+                }
+                killed = after.combat->actors[2][8][2] <= 0;
+                if (killed)
+                {
+                    deathTick = tick;
+                    InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, before);
+                    uncertain.service().synchronizeCells(authority);
+                    auto dying = uncertain.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                        request(uncertain.service()));
+                    require(dying && dying->commit([&](auto data) {
+                        require(std::ranges::equal(data, candidate), "Uncertain death changed staged outcome");
+                        return CanonicalDurabilityResult::Failed;
+                    }) == CanonicalDurabilityResult::Failed && uncertain.service().inventoryImage().empty(),
+                        "Uncertain combined death did not fail closed");
+                }
+            }
+            require(rangedHit && meleeHit && modifiers && killed && count(service) == 1,
+                "Combined encounter did not include melee, ammunition, effects and death");
+            const auto dead = state(service);
+            require(dead.life->deaths.size() == 1 && dead.life->deaths.front().killer == 1
+                && dead.life->deaths.front().killerKind == 1 && dead.life->deaths.front().killerLife == 1,
+                "Combined death lost durable caster attribution");
+            const auto view = service.projectInventory(authority, id<SessionId>(2), id<ServerTick>(deathTick), id<CanonicalRevision>(deathTick));
+            require(view && view->containers.size() == 1 && !view->containers.front().stacks.empty(), "Combined death did not open corpse");
+            const auto corpse = view->containers.front(); const auto loot = corpse.stacks.front();
+            const auto lootCount = [&](const auto& inventory) {
+                uint64_t result = 0;
+                for (const auto& stack : inventory.playerInventory.front().stacks)
+                    if (stack.prototypeId == loot.prototypeId) result += stack.count;
+                return result;
+            };
+            const auto priorCount = lootCount(*view);
+            ClientInventoryTransactionCommand take{id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(deathTick + 1), id<CanonicalRevision>(deathTick + 1), InventoryTransactionKind::TakeFromContainer,
+                corpse.container, loot.prototypeId, loot.stackId, 1, {}, view->playerInventory.front().revision, corpse.revision, {}, corpse.position};
+            auto transfer = service.prepareInventory(authority, bind(authority, take).proposal());
+            require(bool(transfer), "Combined corpse loot rejected");
+            const auto beforeLoot = bytes(service);
+            auto looting = service.prepareNativeTick(authority, id<ServerTick>(deathTick + 1), 1.f/30, std::move(transfer));
+            require(looting && looting->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                == CanonicalDurabilityResult::Rejected && bytes(service) == beforeLoot, "Failed loot leaked into combined life");
+            commit(looting);
+            require(!service.prepareInventory(authority, bind(authority, take).proposal()), "Combined loot retry duplicated reward");
+            InventoryHost looted(descriptor, testContentManifest(), *registry, *crypto, service.inventoryImage());
+            looted.service().synchronizeCells(authority);
+            const auto aliceLoot = looted.service().projectInventory(authority, id<SessionId>(1), id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
+            const auto bobLoot = looted.service().projectInventory(authority, id<SessionId>(2), id<ServerTick>(deathTick + 1), id<CanonicalRevision>(deathTick + 1));
+            require(aliceLoot && bobLoot && aliceLoot->containers.size() == 1 && bobLoot->containers.size() == 1
+                && aliceLoot->containers.front().stacks == bobLoot->containers.front().stacks
+                && bobLoot->containers.front().stacks != corpse.stacks && lootCount(*bobLoot) == priorCount + 1,
+                "Restart duplicated loot or refilled/diverged on corpse contents");
+            for (uint64_t tick = deathTick + 2; tick <= deathTick + 3; ++tick)
+            {
+                const auto before = bytes(looted.service());
+                auto next = looted.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                require(next && next->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(looted.service()) == before,
+                    "Failed combined respawn leaked new life");
+                commit(next);
+            }
+            const auto alive = state(looted.service());
+            require(alive.life->generation == 2 && alive.life->deaths == dead.life->deaths
+                && alive.combat->actors[2][8][2] > 0 && !alive.combat->knockedDown[2] && !alive.combat->knockoutFrame[2]
+                && !looted.service().prepareInventory(authority, bind(authority, take).proposal()),
+                "Respawn lost death history or admitted old corpse loot");
+            InventoryHost finalRestart(descriptor, testContentManifest(), *registry, *crypto, looted.service().inventoryImage());
+            const auto reconnect = players(id<SessionGeneration>(2), 1, 2);
+            finalRestart.service().synchronizeCells(reconnect);
+            const auto a = finalRestart.service().projectCombat(reconnect, id<SessionId>(1), id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3));
+            const auto b = finalRestart.service().projectCombat(reconnect, id<SessionId>(2), id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3));
+            require(a && b && std::ranges::equal(a->actors(), b->actors())
+                && bytes(finalRestart.service()) == bytes(looted.service()), "Combined respawn diverged on reconnect");
+            const auto fresh = finalRestart.service().projectInventory(reconnect, id<SessionId>(2), id<ServerTick>(deathTick + 3), id<CanonicalRevision>(deathTick + 3));
+            require(fresh && fresh->containers.empty() && lootCount(*fresh) == priorCount + 1,
+                "Respawn reopened corpse or changed awarded loot");
+            std::cout << "combined=headless melee+ranged+magic death=attributed loot=once respawn=durable restart=exact observers=converged\n";
+            return;
+        }
         if (profile.find("recycling") != std::string_view::npos)
         {
             require(count(service) == 20 && count(service, 2) == 20, "Sustained ammunition fixture invalid");
@@ -4545,7 +4702,8 @@ namespace TES3MP::Native::Testing
     void checkRangedRelease(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, std::string_view profile)
     {
-        require(profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release"
+        require(profile == "bow-combined-flight" || profile == "crossbow-combined-flight"
+            || profile == "thrown-combined-flight" || profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release"
             || profile == "bow-flight" || profile == "crossbow-flight" || profile == "thrown-flight"
             || profile == "bow-recycling-flight" || profile == "crossbow-recycling-flight" || profile == "thrown-recycling-flight",
             "Unknown ranged release fixture");
@@ -5096,7 +5254,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -5516,6 +5674,8 @@ namespace TES3MP::Native::Testing
                 executionEnchantment.mData.mType = ESM::Enchantment::ConstantEffect;
                 executionEnchantment.mEffects.populate({{ESM::MagicEffect::FortifyAttribute, {},
                     ESM::Attribute::Luck, ESM::RT_Self, 0, 0, 1, 1}});
+                if (encounterProfile.find("combined") != std::string_view::npos)
+                    executionEnchantment.mEffects.populate({{ESM::MagicEffect::Shield, {}, {}, ESM::RT_Self, 0, 0, 5, 5}});
                 npc.mSpells.mList.clear(); npc.mInventory.mList.clear();
                 npc.mNpdt.mHealth = 10000; npc.mNpdt.mFatigue = 10000;
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
@@ -5545,6 +5705,23 @@ namespace TES3MP::Native::Testing
             {
                 out.startRecord(ESM::Weapon::sRecordId, 0); weapon.save(out); out.endRecord(ESM::Weapon::sRecordId);
             }
+            if (encounterProfile.find("combined") != std::string_view::npos)
+            {
+                npc.mNpdt.mHealth = 1000;
+                const ESM::Armor* selected = nullptr;
+                for (bool preferTr : {true, false})
+                {
+                    for (const auto& armor : base.store().get<ESM::Armor>())
+                        if (armor.mData.mType == ESM::Armor::Cuirass && armor.mScript.empty()
+                            && armor.mEnchant.empty() && armor.mData.mHealth > 0
+                            && (!preferTr || (armor.mId.is<ESM::StringRefId>() && armor.mId.getRefIdString().starts_with("T_"))))
+                        { selected = &armor; break; }
+                    if (selected) break;
+                }
+                require(selected, "Combined fixture has no plain cuirass");
+                npc.mInventory.mList.push_back({1, selected->mId});
+                std::cout << "combined armor=" << selected->mId << '\n';
+            }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             if (participantHits)
             {
@@ -5556,11 +5733,19 @@ namespace TES3MP::Native::Testing
                     const int type = encounterProfile.starts_with("crossbow-") ? ESM::Weapon::MarksmanCrossbow
                         : encounterProfile.starts_with("thrown-") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
                     const auto plain = [&](int type) {
-                        for (const auto& record : base.store().get<ESM::Weapon>())
-                            if (record.mData.mType == type && record.mScript.empty() && record.mEnchant.empty()) return record.mId;
-                        throw std::runtime_error("Vanilla plain ranged fixture unavailable");
+                        for (bool preferTr : {true, false})
+                        {
+                            if (preferTr && encounterProfile.find("combined") == std::string_view::npos) continue;
+                            for (const auto& record : base.store().get<ESM::Weapon>())
+                                if (record.mData.mType == type && record.mScript.empty() && record.mEnchant.empty()
+                                    && (!preferTr || (record.mId.is<ESM::StringRefId>() && record.mId.getRefIdString().starts_with("T_"))))
+                                    return record.mId;
+                        }
+                        throw std::runtime_error("Plain ranged fixture unavailable");
                     };
                     const auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
+                    if (encounterProfile.find("combined") != std::string_view::npos)
+                        std::cout << "combined ranged=" << weapon << " melee=iron longsword\n";
                     for (auto* participant : {&female, &beast})
                     {
                         const int ammunitionCount = encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
@@ -5571,6 +5756,27 @@ namespace TES3MP::Native::Testing
                                     : plain(MWMechanics::getWeaponType(type)->mAmmoType)});
                         participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)]
                             = encounterProfile.ends_with("-flight") ? 255 : 100;
+                    }
+                }
+                if (encounterProfile.find("combined") != std::string_view::npos)
+                {
+                    beast.mInventory.mList = {{1, ESM::RefId::stringRefId("iron longsword")}};
+                    female.mNpdt.mHealth = beast.mNpdt.mHealth = 10000;
+                    female.mNpdt.mMana = beast.mNpdt.mMana = 10000;
+                    for (bool lethal : {false, true})
+                    {
+                        ESM::Spell spell; spell.blank();
+                        spell.mId = ESM::RefId::stringRefId(lethal ? "combined_kill" : "combined_modifier");
+                        spell.mData.mType = ESM::Spell::ST_Spell; spell.mData.mFlags = ESM::Spell::F_Always;
+                        spell.mData.mCost = 1;
+                        if (lethal) spell.mEffects.populate({{ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 0, 0, 1000, 1000}});
+                        else spell.mEffects.populate({
+                            {ESM::MagicEffect::Shield, {}, {}, ESM::RT_Self, 0, 2, 20, 20},
+                            {ESM::MagicEffect::Sanctuary, {}, {}, ESM::RT_Self, 0, 2, 15, 15},
+                            {ESM::MagicEffect::FortifyAttack, {}, {}, ESM::RT_Self, 0, 2, 10, 10},
+                            {ESM::MagicEffect::Blind, {}, {}, ESM::RT_Self, 0, 2, 1, 1}});
+                        female.mSpells.mList.push_back(spell.mId); beast.mSpells.mList.push_back(spell.mId);
+                        out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
                     }
                 }
                 for (const auto& participant : {female, beast})
@@ -6876,7 +7082,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -6905,6 +7111,96 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (knockoutAnimation)
+        {
+          for (bool physical : {false, true})
+          {
+            const auto bytes = [](auto& current) { return std::vector(current.inventoryImage().begin(), current.inventoryImage().end()); };
+            const auto read = [](const auto& image) { return readActorCampaign(
+                {reinterpret_cast<const char*>(image.data()), image.size()}); };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            auto seed = bytes(service);
+            const auto original = read(seed);
+            // Synthetic persisted exhaustion for all three participant resources.
+            // Exercise the production transaction/recovery clock with actual KF data.
+            const size_t statsOffset = 56 + 8 + original.melee->identity.size() + 7 * 8 + 8;
+            const size_t downOffset = statsOffset + 3 * ActorCampaignCombat::StatCount * 5 * 8;
+            const size_t frameOffset = downOffset + 6 * 8;
+            const auto word = [](auto& image, size_t offset, uint64_t value) {
+                for (unsigned i = 0; i < 8; ++i) image.at(offset + i) = std::byte((value >> (i * 8)) & 255);
+            };
+            for (size_t i = 0; i < 3; ++i)
+            {
+                if (!physical) word(seed, statsOffset + (i * ActorCampaignCombat::StatCount * 5 + 10 * 5 + 2) * 8,
+                    std::bit_cast<uint32_t>(-.001f));
+                word(seed, frameOffset + 3 * 8 + i * 8, physical);
+                word(seed, downOffset + i * 8, 1);
+            }
+            InventoryHost exhausted(descriptor, testContentManifest(), *registry, *crypto, seed);
+            auto& runtime = exhausted.service(); runtime.synchronizeCells(authority);
+            auto first = runtime.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {});
+            std::vector<std::byte> proposed;
+            require(first && first->commit([&](auto data) { proposed.assign(data.begin(), data.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && bytes(runtime) == seed, "Rejected get-up changed committed animation or fatigue");
+            auto state = read(proposed);
+            for (size_t i = 0; i < 3; ++i)
+                require(state.combat->actors[i][10][2] >= 0 && state.combat->knockedDown[i]
+                    && state.combat->knockoutFrame[i] == 1, "Fatigue recovery skipped authored get-up");
+            require(first->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(runtime) == proposed,
+                "Get-up retry changed its staged result");
+            InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, proposed);
+            restarted.service().synchronizeCells(authority);
+            auto invalid = proposed;
+            word(invalid, frameOffset, 1799);
+            bool rejected = false;
+            try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, "Recovery accepted animation beyond participant clip");
+
+            InventoryHost paused(descriptor, testContentManifest(), *registry, *crypto, proposed);
+            const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            paused.service().synchronizeCells(offline);
+            auto pause = paused.service().prepareNativeTick(offline, id<ServerTick>(2), 1.f/30, {});
+            require(pause && pause->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Offline get-up tick failed");
+            const auto pausedImage = bytes(paused.service());
+            const auto pausedState = read(pausedImage);
+            require(pausedState.combat->knockoutFrame[0] == 1 && pausedState.combat->knockoutFrame[1] == 1,
+                "Disconnected player's get-up advanced");
+
+            std::array<bool, 3> completed{};
+            for (uint64_t time = 2; time <= 1801; ++time)
+            {
+                auto tick = runtime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                auto resumed = restarted.service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                require(tick && resumed && tick->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && resumed->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(runtime) == bytes(restarted.service()), "Mid-get-up restart changed canonical outcome");
+                const auto current = bytes(runtime); const auto after = read(current);
+                for (size_t i = 0; i < 3; ++i)
+                    if (!after.combat->knockedDown[i])
+                    {
+                        completed[i] = true;
+                        require(!after.combat->knockoutFrame[i], "Completed get-up retained stale clock");
+                    }
+                const auto alice = runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                const auto bob = runtime.projectCombat(authority, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(alice && bob && std::ranges::equal(alice->actors(), bob->actors()),
+                    "Get-up outcomes diverged across observers");
+                if (std::ranges::all_of(completed, [](bool done) { return done; })) break;
+            }
+            require(std::ranges::all_of(completed, [](bool done) { return done; }), "Participant get-up did not finish");
+            InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, seed);
+            uncertain.service().synchronizeCells(authority);
+            auto attempt = uncertain.service().prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {});
+            require(attempt && attempt->commit([](auto) { return CanonicalDurabilityResult::Failed; })
+                    == CanonicalDurabilityResult::Failed && uncertain.service().inventoryImage().empty(),
+                "Uncertain get-up did not fail closed");
+            std::cout << "get-up=authored participants=3 rejected=atomic uncertain=closed restart=exact pause=offline observers=converged physical=" << physical << '\n';
+          }
+            return;
+        }
         const auto initialHitImage = participantHits
             ? std::vector(service.inventoryImage().begin(), service.inventoryImage().end()) : std::vector<std::byte>{};
         if (participantHits)

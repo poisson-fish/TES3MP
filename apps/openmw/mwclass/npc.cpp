@@ -131,9 +131,6 @@ namespace MWClass
             gmst.fJumpAcroMultiplier = store.find("fJumpAcroMultiplier");
             gmst.fJumpRunMultiplier = store.find("fJumpRunMultiplier");
             gmst.fWereWolfRunMult = store.find("fWereWolfRunMult");
-            gmst.fKnockDownMult = store.find("fKnockDownMult");
-            gmst.iKnockDownOddsMult = store.find("iKnockDownOddsMult");
-            gmst.iKnockDownOddsBase = store.find("iKnockDownOddsBase");
             gmst.fCombatArmorMinMult = store.find("fCombatArmorMinMult");
 
             return gmst;
@@ -583,7 +580,6 @@ namespace MWClass
             // something, alert the character controller, scripts, etc.
 
             const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
-            const GMST& gmst = getGmst();
 
             int chance = store.get<ESM::GameSetting>().find("iVoiceHitOdds")->mValue.getInteger();
             auto& prng = MWBase::Environment::get().getWorld()->getPrng();
@@ -591,12 +587,7 @@ namespace MWClass
                 MWBase::Environment::get().getDialogueManager()->say(ptr, ESM::RefId::stringRefId("hit"));
 
             // Check for knockdown
-            float agilityTerm
-                = stats.getAttribute(ESM::Attribute::Agility).getModified() * gmst.fKnockDownMult->mValue.getFloat();
-            float knockdownTerm = stats.getAttribute(ESM::Attribute::Agility).getModified()
-                    * gmst.iKnockDownOddsMult->mValue.getInteger() * 0.01f
-                + gmst.iKnockDownOddsBase->mValue.getInteger();
-            if (hasHealthDamage && agilityTerm <= healthDamage && knockdownTerm <= Misc::Rng::roll0to99(prng))
+            if (hasHealthDamage && MWMechanics::rollHitKnockdown(store, stats, healthDamage, prng))
                 stats.setKnockedDown(true);
             else
                 stats.setHitRecovery(true); // Is this supposed to always occur?

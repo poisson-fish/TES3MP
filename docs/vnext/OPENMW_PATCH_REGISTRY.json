@@ -34,7 +34,7 @@
       "id": "M4-006",
       "slice": "explicit melee resources and detached directional animation scheduling",
       "owner": "OpenMW mechanics and native headless checks",
-      "purpose": "Share stock hit chance, fatigue, reach, weapon wear and hit-resource mutation through explicit actor/content inputs; CreatureStats accepts a simulation timestamp for first death. Share wind-up, release skipping, follow-through and melee hit-key interpretation with CharacterController. The bounded app-local scheduler emits proposals for the authoritative host transaction. V45 shares weighted/unarmed direction selection and explicit RNG with AiCombat and CharacterController; repeated NPC swings persist their selected clip and RNG with recovery/rejection coverage. V46 persists player swings. V48 shares the stock random-strength fallback for crossbow clips with coincident wind-up keys; strength and RNG persist with ammunition and release. Mixed live physical encounter proof remains pending. Stock combat/character paths are shared with P16-001; CreatureStats and Npc paths with M2-001; rendered section lookup with P8-004; CMake remains covered by its existing entry. V49 shares physical launch speed, gravity and raw bow/ammunition damage with stock rendering/projectile/combat callers. The bounded native player flight path commits collision, damage and terminal state together; NPC, desktop and live mixed encounters remain pending.",
+      "purpose": "Share stock hit chance, fatigue, reach, weapon wear and hit-resource mutation through explicit actor/content inputs; CreatureStats accepts a simulation timestamp for first death. Share wind-up, release skipping, follow-through and melee hit-key interpretation with CharacterController. The bounded app-local scheduler emits proposals for the authoritative host transaction. V45 shares weighted/unarmed direction selection and explicit RNG with AiCombat and CharacterController; repeated NPC swings persist their selected clip and RNG with recovery/rejection coverage. V46 persists player swings. V48 shares the stock random-strength fallback for crossbow clips with coincident wind-up keys; strength and RNG persist with ammunition and release. Mixed live physical encounter proof remains pending. Stock combat/character paths are shared with P16-001; CreatureStats and Npc paths with M2-001; rendered section lookup with P8-004; CMake remains covered by its existing entry. V49 shares physical launch speed, gravity and raw bow/ammunition damage with stock rendering/projectile/combat callers. The bounded native player flight path commits collision, damage and terminal state together; NPC, desktop and live mixed encounters remain pending. V50 shares stock health-hit knockdown rolls with Npc and persists participant knockout/get-up clocks; headless combined encounters cover physical hits, modifiers, attributed death, corpse loot and respawn. Desktop poses and full effect coverage remain pending.",
       "paths": [
         "apps/openmw/mwmechanics/meleestate.cpp",
         "apps/openmw/mwmechanics/meleestate.hpp",
@@ -53,7 +53,13 @@
         "tes3mp_native_melee_tests projectile-mechanics",
         "tes3mp_native_loadout_tests bow-flight",
         "tes3mp_native_loadout_tests crossbow-flight",
-        "tes3mp_native_loadout_tests thrown-flight"
+        "tes3mp_native_loadout_tests thrown-flight",
+        "tes3mp_native_melee_tests knockout-timing",
+        "tes3mp_native_melee_tests hit-knockdown",
+        "tes3mp_native_loadout_tests knockout-getup",
+        "tes3mp_native_loadout_tests bow-combined-flight",
+        "tes3mp_native_loadout_tests crossbow-combined-flight",
+        "tes3mp_native_loadout_tests thrown-combined-flight"
       ],
       "disposition": "shared engine extraction; authoritative NPC directional execution",
       "removal_condition": "OpenMW supplies equivalent explicit actor/content/clock and gameplay text-key interfaces"

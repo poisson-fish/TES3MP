@@ -1,6 +1,7 @@
 #include "ai_magic.hpp"
 #include "loadout.hpp"
 #include <apps/openmw/mwmechanics/weaponpriority.hpp>
+#include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm3/loadweap.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/spellpriority.hpp>
@@ -85,6 +86,36 @@ namespace
         result.mEffects.mList.push_back(entry);
         return result;
     }
+    void combatModifiers()
+    {
+        MWWorld::ESMStore store; content(store); setting(store, "fCombatInvisoMult", 1.f);
+        MWMechanics::NpcStats caster(store), victim(store); initialize(caster); initialize(victim);
+        const float ordinary = MWMechanics::getHitChance(store, caster, victim, 40, false, false);
+        for (auto effect : {ESM::MagicEffect::Shield, ESM::MagicEffect::Sanctuary,
+                ESM::MagicEffect::FortifyAttack, ESM::MagicEffect::Blind})
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mFlags = effect == ESM::MagicEffect::Blind ? ESM::MagicEffect::Harmful : 0;
+            store.insertStatic(record);
+            auto source = spell("modifier", effect, ESM::RT_Self, 17);
+            require(bool(prepareInstantSpell(source, store, true)), "Timed combat modifier rejected");
+            ESM::Enchantment constant; constant.blank(); constant.mId = effect;
+            constant.mData.mType = ESM::Enchantment::ConstantEffect;
+            constant.mEffects = source.mEffects; constant.mEffects.mList.front().mData.mDuration = 0;
+            store.insertStatic(constant);
+            require(bool(prepareConstantEffects(effect, store)) == (effect != ESM::MagicEffect::Blind),
+                "Passive combat modifier eligibility changed");
+            source.mEffects.mList.front().mData.mDuration = 0;
+            require(!prepareInstantSpell(source, store, true), "Instant modifier silently lost its duration");
+        }
+        caster.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::FortifyAttack), MWMechanics::EffectParam(17));
+        near(MWMechanics::getHitChance(store, caster, victim, 40, false, false), ordinary + 17, "Fortify Attack lost hit modifier");
+        caster.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Blind), MWMechanics::EffectParam(5));
+        victim.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Sanctuary), MWMechanics::EffectParam(7));
+        near(MWMechanics::getHitChance(store, caster, victim, 40, false, false), ordinary + 5,
+            "Blind and Sanctuary failed to compose with Fortify Attack");
+    }
+
     void weapons()
     {
         MWWorld::ESMStore store; content(store);
@@ -429,6 +460,7 @@ int main(int argc, char** argv)
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
         if (filter == "weapons") weapons();
+        else if (filter == "combat-modifiers") combatModifiers();
         else if (filter == "selection") selection();
         else if (filter == "rejection") rejection();
         else if (filter == "launch") launch();

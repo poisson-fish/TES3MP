@@ -17,6 +17,11 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V50 retains participant-bound knockout/knockdown animation clocks through
+    // their authored get-up tails, even after fatigue becomes nonnegative.
+    // Stock health-hit knockdown rolls and recovery gate attacks/casts; inactive
+    // participants pause. Death/respawn clear the body clocks atomically.
+    // Requires a fresh campaign. Desktop knockout poses remain pending.
     // V49 advances player physical projectiles at 60 Hz against the selected NPC
     // and retained world/door collision scene. Velocity, substep age, launch
     // condition and terminal outcome persist with damage, wear, RNG and resources.

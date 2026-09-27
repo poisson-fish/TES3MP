@@ -45,6 +45,8 @@ namespace MWMechanics
     bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical);
     float applyNormalWeaponResistance(const CreatureStats& victim, float damage);
     void restoreCombatFatigue(CreatureStats& actor, const MWWorld::ESMStore& store, float seconds);
+    bool rollHitKnockdown(const MWWorld::ESMStore& store, const CreatureStats& victim,
+        float healthDamage, Misc::Rng::Generator& rng);
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier);
     float getMeleeWeaponReach(const MWWorld::ESMStore& store, const ESM::Weapon* weapon, bool npc);
     bool isInMeleeReach(const osg::Vec3f& attacker, const osg::Vec3f& target,

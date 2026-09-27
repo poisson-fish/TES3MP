@@ -13,6 +13,8 @@ namespace ESM { struct Enchantment; }
 
 namespace TES3MP::Native
 {
+    // Modifiers consumed by shared hit chance/evasion and armor calculations.
+    bool supportedCombatModifier(ESM::RefId effect);
     // Source-neutral bounded effect plan. Spell and enchantment records both
     // carry an ESM::EffectList; non-self targets require authoritative contact.
     // In V35 the composed actor tick installs timed effect instances separately.

@@ -63,25 +63,30 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    visibility, animation-key release/recovery and interruption. Retain durable
    source/caster/life, RNG, effects, expiry and two concurrent player casts;
    broaden remaining unsupported effects before M4 exit.
-5. Complete physical combat in ordered bounded slices. First prove swing
-   presentation on both desktops through interruption, loss,
-   reconnect and restart. Finish ranged acceptance through two live clients:
-   recycle terminal flights with durable retry protection, recover ammunition,
-   validate physical player contacts, execute NPC bows/crossbows/thrown weapons,
-   and add desktop ranged input and projectile presentation. Prove sustained
-   vanilla/TR encounters with both players shooting and casting alongside the NPC
-   under loss, latency, disconnect and restart during flight. Both clients must
-   converge without lost or duplicated ammunition or damage.
-   One combat swathe follows: finish knockout/get-up, unarmed fatigue and health
-   damage while down, hit recovery, armor, block, resistances and wear; broaden
-   remaining enchantments/effects. Prove combined melee/ranged/magic through
-   attributed death, corpse loot and respawn in one authoritative transaction,
-   using varied vanilla/TR weapons and armor under network disruption.
-   Preserve weapon selection, melee modes and participant animation bindings.
-   Persist swings, flight, ammunition expenditure, recovery, knockout, death and
-   loot; failed writes leak no resources, RNG, damage or successful events.
+5. Complete combat before formal acceptance, retaining the verified swing base.
+   First close the review findings: match stock zero-base-fatigue knockout;
+   prove interrupted casts cancel without repeatedly discarding unrelated tick
+   progress; remove the 1,024-death campaign ceiling without losing M5 attribution
+   or admitting duplicate deaths/rewards. Add focused failure/recovery tests.
+   Finish knockout/get-up presentation, unarmed fatigue/health damage while down,
+   hit recovery, armor, block, resistances and wear. Broaden effects/enchantments,
+   including Reflect, Spell Absorption, Paralyze, Dispel and drain/absorb effects.
+   Generalize beyond one selected NPC: simulate neighboring combatants once each
+   and persist player death/respawn generations with stale-life rejection.
+   Then complete ranged execution: durable receipt recycling, ammunition recovery,
+   validated player contacts, NPC bows/crossbows/thrown weapons, and desktop input
+   and projectile presentation. Replace plain-source restrictions with generic
+   loadout support; preserve weapon selection, attack modes and animation bindings.
+   Prove sustained, overlapping melee/ranged/magic from both desktops and NPCs,
+   using varied vanilla/TR weapons, armor and effects under latency/jitter/loss.
+   Cover simultaneous impacts, interruption, death, corpse-loot contention, respawn,
+   disconnect and restart during flight/effects/get-up. Sequential headless actions
+   establish transaction evidence only; they cannot satisfy this live requirement.
+   Persist resources, swings, flight, recovery, knockout, attributed deaths and
+   loot together. Failed writes leak no resources, RNG, damage or successful events.
    **Finish line:** both clients converge after reconnect/restart without duplicated
-   ammunition costs, damage or loot.
+   ammunition costs, damage or loot. Focused acceptance may run incrementally;
+   full M4 sign-off requires all implementation gaps and exit criteria closed.
 6. Switch player movement last, after unified collision/physics and smoothness
    verification, meeting DECISIONS.md's prediction/reconciliation budgets.
    Retain inherited movement until this cutover.

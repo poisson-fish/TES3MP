@@ -17,6 +17,11 @@
 
 namespace TES3MP::Native
 {
+    bool supportedCombatModifier(ESM::RefId effect)
+    {
+        return effect == ESM::MagicEffect::Shield || effect == ESM::MagicEffect::Sanctuary
+            || effect == ESM::MagicEffect::FortifyAttack || effect == ESM::MagicEffect::Blind;
+    }
     namespace
     {
         bool supportedInstantEffect(const ESM::ENAMstruct& effect, bool actorLifecycle)
@@ -28,7 +33,8 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DamageMagicka
                 || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
-            return prior || (actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FortifyAttribute
+            return prior || (actorLifecycle && (supportedCombatModifier(effect.mEffectID)
+                || effect.mEffectID == ESM::MagicEffect::FortifyAttribute
                 || effect.mEffectID == ESM::MagicEffect::FortifySkill
                 || effect.mEffectID == ESM::MagicEffect::FireDamage
                 || effect.mEffectID == ESM::MagicEffect::ShockDamage
@@ -115,7 +121,7 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::ResistFrost
                 || effect.mEffectID == ESM::MagicEffect::ResistShock
                 || effect.mEffectID == ESM::MagicEffect::ResistPoison;
-            if (!magic || (!attribute && !skill && !resistance)
+            if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
                 || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude))
                 || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
                 || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
