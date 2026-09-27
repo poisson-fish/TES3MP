@@ -20,9 +20,10 @@ namespace TES3MP::Native
     // V49 advances player physical projectiles at 60 Hz against the selected NPC
     // and retained world/door collision scene. Velocity, substep age, launch
     // condition and terminal outcome persist with damage, wear, RNG and resources.
-    // Launches survive disconnect/restart; fresh campaigns required. Eight retained
-    // launch records remain the campaign limit; recycling, NPC execution, player
-    // contacts, ammunition recovery and desktop input/rendering remain pending.
+    // Launches survive disconnect/restart; fresh campaigns required. Eight records
+    // bound simultaneous flight/receipts, not campaign shots. Terminal receipts
+    // retire after the 64-tick input window once no saved swing references them.
+    // NPC execution, player contacts, ammunition recovery and desktop remain pending.
     // V48 extends V47 bow/arrow release to crossbow/bolt and thrown weapons.
     // Stock weapon flags distinguish condition from consumable thrown sources;
     // zero-length wind-up uses shared stock random strength, saved with the RNG.

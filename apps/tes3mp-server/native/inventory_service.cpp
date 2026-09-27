@@ -40,6 +40,8 @@ namespace TES3MP::Native
 {
     namespace
     {
+        constexpr uint64_t PhysicalAttackRetryTicks = 64;
+
         bool rangedWeapon(const ESM::Weapon* weapon, bool extended)
         {
             return weapon && (weapon->mData.mType == ESM::Weapon::MarksmanBow
@@ -1651,7 +1653,9 @@ namespace TES3MP::Native
             || (attack.attackType != MeleeAttackType::Chop && attack.attackType != MeleeAttackType::Slash
                 && attack.attackType != MeleeAttackType::Thrust)
             || !std::isfinite(attack.attackStrength) || attack.attackStrength < 0 || attack.attackStrength > 1
-            || attack.sourceServerTick.value() > tick.value() || tick.value() - attack.sourceServerTick.value() > 64
+            || (mBinding.mRangedFlight && tick.value() <= mActorTick)
+            || attack.sourceServerTick.value() > tick.value()
+            || tick.value() - attack.sourceServerTick.value() > PhysicalAttackRetryTicks
             || (mLife && (attack.sourceServerTick.value() < mLife->bornTick
                 || attack.expectedTargetRevision.value() < mLife->bornTick)))
             return {};
@@ -2704,6 +2708,19 @@ namespace TES3MP::Native
         auto after = step ? step->snapshot() : before;
         auto melee = mMelee;
         auto combat = mCombat;
+        if (mBinding.mRangedFlight && combat)
+            std::erase_if(combat->arrows, [&](const auto& arrow) {
+                // Retain a receipt throughout the accepted input window. Once
+                // the release is older than that window, its original intent
+                // is necessarily stale, including after restart. The campaign
+                // tick and removal commit together; rejected writes keep both.
+                if (!arrow.terminal || tick.value() <= arrow.releaseTick
+                    || tick.value() - arrow.releaseTick <= PhysicalAttackRetryTicks) return false;
+                for (size_t owner = 0; owner < combat->swings.size(); ++owner)
+                    if (mBinding.mPlayers[owner].value() == arrow.caster && combat->swings[owner]
+                        && combat->swings[owner]->command == arrow.command) return false;
+                return true;
+            });
         auto life = mLife;
         auto projectiles = mProjectiles;
         auto timedEffects = mTimedEffects;

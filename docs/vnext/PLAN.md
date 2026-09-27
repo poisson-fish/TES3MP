@@ -65,15 +65,19 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    broaden remaining unsupported effects before M4 exit.
 5. Complete physical combat in ordered bounded slices. First prove swing
    presentation on both desktops through interruption, loss,
-   reconnect and restart. Next execute bows, crossbows and thrown weapons, with
-   authoritative release, durable ammunition expenditure, flight and impact.
-   Then complete unarmed fatigue, knockout, health damage while down, get-up timing,
-   hit recovery, armor, block, resistances and wear. Unify physical attacks,
-   simultaneous casting, enchantments, interruption, attributed death, corpse
-   inventory and respawn in one authoritative transaction. Finally prove varied
-   vanilla/TR weapons and armor with two players fighting and casting alongside
-   the NPC under network disruption. Preserve weapon selection, repeated melee
-   modes and participant animation/hit/release bindings.
+   reconnect and restart. Finish ranged acceptance through two live clients:
+   recycle terminal flights with durable retry protection, recover ammunition,
+   validate physical player contacts, execute NPC bows/crossbows/thrown weapons,
+   and add desktop ranged input and projectile presentation. Prove sustained
+   vanilla/TR encounters with both players shooting and casting alongside the NPC
+   under loss, latency, disconnect and restart during flight. Both clients must
+   converge without lost or duplicated ammunition or damage.
+   One combat swathe follows: finish knockout/get-up, unarmed fatigue and health
+   damage while down, hit recovery, armor, block, resistances and wear; broaden
+   remaining enchantments/effects. Prove combined melee/ranged/magic through
+   attributed death, corpse loot and respawn in one authoritative transaction,
+   using varied vanilla/TR weapons and armor under network disruption.
+   Preserve weapon selection, melee modes and participant animation bindings.
    Persist swings, flight, ammunition expenditure, recovery, knockout, death and
    loot; failed writes leak no resources, RNG, damage or successful events.
    **Finish line:** both clients converge after reconnect/restart without duplicated

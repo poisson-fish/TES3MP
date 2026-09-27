@@ -6761,7 +6761,10 @@ int main(int argc, char** argv)
         if (argc == 5 && (std::string_view(argv[1]) == "bow-release"
                 || std::string_view(argv[1]) == "crossbow-release" || std::string_view(argv[1]) == "thrown-release"
                 || std::string_view(argv[1]) == "bow-flight" || std::string_view(argv[1]) == "crossbow-flight"
-                || std::string_view(argv[1]) == "thrown-flight"))
+                || std::string_view(argv[1]) == "thrown-flight"
+                || std::string_view(argv[1]) == "bow-recycling-flight"
+                || std::string_view(argv[1]) == "crossbow-recycling-flight"
+                || std::string_view(argv[1]) == "thrown-recycling-flight"))
         {
             TES3MP::Native::Testing::checkRangedRelease(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]), argv[1]);

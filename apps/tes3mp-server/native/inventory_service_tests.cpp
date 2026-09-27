@@ -4170,7 +4170,7 @@ namespace TES3MP::Native::Testing
             return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
         };
         const auto intent = [&](auto& runtime, const auto& players, uint64_t tick, uint64_t owner,
-                                MeleeAttackType mode, float strength) {
+                                MeleeAttackType mode, float strength, uint64_t processingTick = 0) {
             const auto* player = players.findPlayer(id<PlayerId>(owner));
             const auto view = runtime.projectInventory(players, id<SessionId>(owner), id<ServerTick>(tick),
                 id<CanonicalRevision>(tick), nullptr);
@@ -4183,7 +4183,7 @@ namespace TES3MP::Native::Testing
                 CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
                 EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
                 MeleeAttackCommandProposal(attack));
-            return runtime.prepareMeleeAttack(players, proposal, id<ServerTick>(tick));
+            return runtime.prepareMeleeAttack(players, proposal, id<ServerTick>(processingTick ? processingTick : tick));
         };
         const auto commit = [](auto& pending) {
             require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
@@ -4207,6 +4207,94 @@ namespace TES3MP::Native::Testing
                 if (stack.prototypeId == prototype) total += stack.count;
             return total;
         };
+        if (profile.find("recycling") != std::string_view::npos)
+        {
+            require(count(service) == 20 && count(service, 2) == 20, "Sustained ammunition fixture invalid");
+            std::array<unsigned, 2> launches{};
+            std::array<uint64_t, 2> previousCommand{};
+            unsigned retirements = 0, recoveries = 0;
+            std::unique_ptr<InventoryHost> restored;
+            auto* runtime = &service;
+            for (uint64_t tick = 1; tick <= 2200; ++tick)
+            {
+                const auto before = bytes(*runtime);
+                const auto prior = state(*runtime);
+                const size_t owner = size_t((tick - 1) % 2);
+                std::unique_ptr<PreparedNativeInventory> command;
+                if (launches[owner] < 12 && (!prior.combat->swings[owner]
+                        || !prior.combat->swings[owner]->pending()))
+                {
+                    command = intent(*runtime, authority, tick, owner + 1, MeleeAttackType::Chop, .3f);
+                    if (command) previousCommand[owner] = tick;
+                }
+                const bool admitted = bool(command);
+                auto pending = runtime->prepareNativeTick(authority, id<ServerTick>(tick), 1.f / 30, std::move(command));
+                std::vector<std::byte> proposed;
+                require(pending && pending->commit([&](auto image) {
+                    proposed.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected && bytes(*runtime) == before,
+                    "Rejected recycling tick changed ammunition, flight, damage or retry window");
+                commit(pending);
+                const auto current = state(*runtime);
+                require(current.combat->arrows.size() <= MaximumActorProjectiles, "Flight storage exceeded bound");
+                bool retired = false;
+                for (const auto& arrow : prior.combat->arrows)
+                    if (std::ranges::none_of(current.combat->arrows, [&](const auto& value) {
+                            return value.caster == arrow.caster && value.command == arrow.command;
+                        }))
+                    {
+                        require(arrow.terminal && tick - arrow.releaseTick > 64,
+                            "Recycled a live flight or unexpired retry receipt");
+                        require(!intent(*runtime, authority, arrow.command, arrow.caster,
+                                MeleeAttackType::Chop, .3f, tick + 1), "Retired retry admitted at current tick");
+                        require(!intent(*runtime, authority, arrow.command, arrow.caster,
+                                MeleeAttackType::Chop, .3f), "Backdated retry admitted after retirement");
+                        ++retirements; retired = true;
+                    }
+                for (size_t i = 0; i < launches.size(); ++i)
+                {
+                    launches[i] = 20 - count(*runtime, i + 1);
+                    if (previousCommand[i])
+                        require(!intent(*runtime, authority, previousCommand[i], i + 1,
+                                MeleeAttackType::Chop, .3f, tick + 1), "Repeated release admitted");
+                }
+                if (retired)
+                {
+                    // Uncertain retirement may leave either complete image.
+                    InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, before);
+                    uncertain.service().synchronizeCells(authority);
+                    auto retryCommand = admitted ? intent(uncertain.service(), authority, tick, owner + 1,
+                        MeleeAttackType::Chop, .3f) : nullptr;
+                    require(!admitted || bool(retryCommand), "Pre-retirement recovery lost admitted intent");
+                    auto retry = uncertain.service().prepareNativeTick(authority, id<ServerTick>(tick),
+                        1.f / 30, std::move(retryCommand));
+                    require(retry && retry->commit([&](auto image) {
+                            require(std::ranges::equal(image, proposed),
+                                "Pre-retirement restart changed damage, RNG, ammunition or receipts");
+                            return CanonicalDurabilityResult::Failed;
+                        })
+                            == CanonicalDurabilityResult::Failed && uncertain.service().inventoryImage().empty(),
+                        "Uncertain retirement did not fail closed");
+                    auto replacement = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                    replacement->service().synchronizeCells(authority);
+                    require(bytes(replacement->service()) == proposed, "Retirement recovery changed durable outcomes");
+                    restored = std::move(replacement); runtime = &restored->service(); ++recoveries;
+                    for (const auto& arrow : prior.combat->arrows)
+                        require(!intent(*runtime, authority, arrow.command, arrow.caster,
+                            MeleeAttackType::Chop, .3f, tick + 1), "Restart admitted retired retry");
+                }
+                if (launches[0] == 12 && launches[1] == 12
+                    && !current.combat->swings[0]->pending() && !current.combat->swings[1]->pending()
+                    && std::ranges::all_of(current.combat->arrows, [](const auto& arrow) { return arrow.terminal != 0; })) break;
+            }
+            require(launches[0] == 12 && launches[1] == 12 && retirements >= 16 && recoveries,
+                "Sustained fire did not pass the eight-shot ceiling for both players");
+            require(state(*runtime).combat->actors[2][8][2] < state(*runtime).life->spawnStats[8][2],
+                "Sustained physical flights never damaged the NPC");
+            std::cout << profile << " launches=24 ammunition=exactly-once retirements=" << retirements
+                << " restart=" << recoveries << " rejected=atomic uncertain=closed retries=stale\n";
+            return;
+        }
         require(count(service) == 2, "Bow fixture arrow count invalid");
         std::vector<std::byte> windup, beforeRelease, released, beforeImpact, impacted;
         uint64_t releaseTick = 0, impactTick = 0;
@@ -4441,10 +4529,12 @@ namespace TES3MP::Native::Testing
             commit(pending);
             if (!state(service).combat->swings[0]->pending()) break;
         }
-        require(count(service) == 0 && state(service).combat->arrows.size() == 2, "Last arrow expenditure failed");
+        const auto retained = state(service).combat->arrows.size();
+        require(count(service) == 0 && retained >= (flight ? 1u : 2u) && retained <= 2,
+            "Last arrow expenditure failed");
         InventoryHost exhausted(descriptor, testContentManifest(), *registry, *crypto, bytes(service));
         exhausted.service().synchronizeCells(authority);
-        require(count(exhausted.service()) == 0 && state(exhausted.service()).combat->arrows.size() == 2
+        require(count(exhausted.service()) == 0 && state(exhausted.service()).combat->arrows.size() == retained
             && !intent(exhausted.service(), authority, state(service).tick + 1, 1, MeleeAttackType::Chop, 1.f),
             "Restart refilled empty ammunition or admitted an empty bow");
         require(!intent(exhausted.service(), authority, 1, 1, MeleeAttackType::Chop, .7f),
@@ -4456,7 +4546,8 @@ namespace TES3MP::Native::Testing
         const std::filesystem::path& settings, std::string_view profile)
     {
         require(profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release"
-            || profile == "bow-flight" || profile == "crossbow-flight" || profile == "thrown-flight",
+            || profile == "bow-flight" || profile == "crossbow-flight" || profile == "thrown-flight"
+            || profile == "bow-recycling-flight" || profile == "crossbow-recycling-flight" || profile == "thrown-recycling-flight",
             "Unknown ranged release fixture");
         checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
@@ -5472,9 +5563,10 @@ namespace TES3MP::Native::Testing
                     const auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
                     for (auto* participant : {&female, &beast})
                     {
-                        participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? 2 : 1, weapon}};
+                        const int ammunitionCount = encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
+                        participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? ammunitionCount : 1, weapon}};
                         if (type != ESM::Weapon::MarksmanThrown)
-                            participant->mInventory.mList.push_back({2,
+                            participant->mInventory.mList.push_back({ammunitionCount,
                                 encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("iron arrow")
                                     : plain(MWMechanics::getWeaponType(type)->mAmmoType)});
                         participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)]
