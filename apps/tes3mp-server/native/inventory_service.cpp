@@ -3926,7 +3926,17 @@ namespace TES3MP::Native
             const size_t owner = context.combatIndex;
             if (combat->actors[owner][8][2] <= 0 || combat->knockedDown[owner]
                 || (mBinding.mKnockoutAnimation && combat->hitRecoveryTicks[owner]))
-                throw std::invalid_argument("Native cast became interrupted before launch");
+            {
+                // Earlier effects or combat can incapacitate an admitted caster.
+                // Cancel only this launch: rolling back the tick also erases its
+                // cause and unrelated progress, so retries can stall simulation.
+                if (owner == 2) casting.reset();
+                spellCasts.push_back(MagicUseCombatEvent{wireCaster(context.identity), cast.sourceKind, cast.sourceId,
+                    cast.targetKind, cast.targetId, CombatRevision::fromValue(tick.value()).value(),
+                    CombatRevision::fromValue(tick.value()).value(), false,
+                    0.f, 0.f, 0.f, 0.f, 0.f, 0.f, false, std::max(uint64_t(1), context.identity.life)});
+                continue;
+            }
             auto caster = loadCombatStats(mRuntime.mStore, combat->actors[owner], timedEffects, owner);
             addTimedResistance(caster, timedEffects, owner);
             Misc::Rng::Generator rng;

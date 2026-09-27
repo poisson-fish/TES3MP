@@ -5254,12 +5254,23 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
         writeDoorFixtureModel(scratch);
         auto actorSettings = settings;
+        if (interruptedCasts)
+        {
+            std::ifstream source(settings);
+            std::string altered(std::istreambuf_iterator<char>{source}, {});
+            const std::string prior = "uncapped damage fatigue = false";
+            const auto at = altered.find(prior);
+            require(at != std::string::npos, "Fatigue setting absent from interruption fixture");
+            altered.replace(at, prior.size(), "uncapped damage fatigue = true");
+            actorSettings = scratch / "interrupted-settings.cfg";
+            std::ofstream(actorSettings) << altered;
+        }
         if (effectLifecycle && strike)
         {
             std::ifstream source(settings);
@@ -5721,6 +5732,29 @@ namespace TES3MP::Native::Testing
                 require(selected, "Combined fixture has no plain cuirass");
                 npc.mInventory.mList.push_back({1, selected->mId});
                 std::cout << "combined armor=" << selected->mId << '\n';
+            }
+            if (interruptedCasts)
+            {
+                npc.mNpdt.mHealth = npc.mNpdt.mMana = npc.mNpdt.mFatigue = 100;
+                for (auto& attribute : npc.mNpdt.mAttributes) attribute = 40;
+            }
+            if (interruptedCasts) for (bool lethal : {false, true})
+            {
+                ESM::Spell damage; damage.blank();
+                damage.mId = ESM::RefId::stringRefId(lethal ? "interrupt_health" : "interrupt_fatigue");
+                damage.mData.mType = ESM::Spell::ST_Spell; damage.mData.mFlags = ESM::Spell::F_Always;
+                damage.mData.mCost = 1;
+                damage.mEffects.populate({{lethal ? ESM::MagicEffect::DamageHealth : ESM::MagicEffect::DamageFatigue,
+                    {}, {}, ESM::RT_Self, 0, 1, 1000, 1000}});
+                npc.mSpells.mList.push_back(damage.mId);
+                out.startRecord(ESM::Spell::sRecordId, 0); damage.save(out); out.endRecord(ESM::Spell::sRecordId);
+                if (!lethal)
+                {
+                    damage.mId = ESM::RefId::stringRefId("interrupt_touch");
+                    damage.mEffects.populate({{ESM::MagicEffect::DamageFatigue, {}, {}, ESM::RT_Touch, 0, 0, 1000, 1000}});
+                    npc.mSpells.mList.push_back(damage.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); damage.save(out); out.endRecord(ESM::Spell::sRecordId);
+                }
             }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             if (participantHits)
@@ -7111,6 +7145,176 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (interruptedCasts)
+        {
+            const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };
+            const auto read = [](const auto& image) { return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()}); };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto source = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                return value;
+            };
+            const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t time, std::string_view name, bool item = false) {
+                const auto view = runtime.projectInventory(authority, id<SessionId>(owner), id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(view && !view->playerInventory.empty(), "Interrupted cast inventory missing");
+                const auto& inventory = view->playerInventory.front();
+                uint64_t selected = source(name);
+                if (item)
+                {
+                    const auto stack = std::ranges::find(inventory.stacks,
+                        id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name))), &CanonicalItemStack::prototypeId);
+                    require(stack != inventory.stacks.end(), "Interrupted cast item missing");
+                    selected = stack->stackId.value();
+                }
+                const bool target = item || name == "npc_target_damage" || name == "interrupt_touch";
+                ClientMagicUseCommand use{id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(time), id<CanonicalRevision>(time),
+                    item ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell, selected,
+                    target ? MagicUseTargetKind::Actor : MagicUseTargetKind::Self,
+                    target ? view->equipment->motions.front().placement : 0,
+                    id<ServerTick>(time), CombatRevision::initial(), CombatRevision::initial(), inventory.revision};
+                const auto* player = authority.findPlayer(id<PlayerId>(owner));
+                return ServerCommandProposal(id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(time), id<CanonicalRevision>(time),
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+            };
+            const auto initial = bytes(service);
+            for (bool lethal : {false, true}) for (int kind : {0, 1, 2})
+            {
+                InventoryHost setup(descriptor, testContentManifest(), *registry, *crypto, initial);
+                auto& staging = setup.service(); staging.synchronizeCells(authority);
+                auto damage = staging.prepareMagicUse(authority, proposal(staging, 1, 1,
+                    lethal ? "interrupt_health" : "interrupt_fatigue"), id<ServerTick>(1));
+                require(bool(damage), "Interruption setup spell rejected");
+                auto started = staging.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, std::move(damage));
+                require(started && started->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Interruption setup failed to commit");
+                auto seed = bytes(staging);
+                require(read(seed).timedEffects.size() == 1, "Interruption setup omitted timed damage");
+                // A living, nearly exhausted/injured caster at the next tick boundary.
+                const auto seeded = read(seed);
+                const size_t statsOffset = 56 + 8 + seeded.melee->identity.size() + 7 * 8 + 8;
+                const size_t currentOffset = statsOffset + ((lethal ? 8 : 10) * 5 + 2) * 8;
+                const uint64_t current = std::bit_cast<uint32_t>(1.f);
+                for (unsigned i = 0; i < 8; ++i) seed.at(currentOffset + i) = std::byte((current >> (i * 8)) & 255);
+                InventoryHost interrupted(descriptor, testContentManifest(), *registry, *crypto, seed);
+                InventoryHost control(descriptor, testContentManifest(), *registry, *crypto, seed);
+                auto& runtime = interrupted.service(); runtime.synchronizeCells(authority);
+                control.service().synchronizeCells(authority);
+                const auto attempt = [&](auto& current) {
+                    auto request = current.prepareMagicUse(authority, proposal(current, 1, 2,
+                        kind == 0 ? "npc_target_damage" : kind == 1 ? "npc_used_shirt" : "npc_once_shirt", kind != 0), id<ServerTick>(2));
+                    require(request && current.appendMagicUse(authority, proposal(current, 2, 2, "npc_instant_restore"),
+                        id<ServerTick>(2), *request), "Concurrent casts were not admitted before interruption");
+                    return current.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, std::move(request));
+                };
+                auto pending = attempt(runtime);
+                const auto events = runtime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2), pending.get());
+                const auto other = runtime.projectCombatEvents(authority, id<SessionId>(2), id<ServerTick>(2), id<CanonicalRevision>(2), pending.get());
+                require(events && other && std::ranges::equal(events->magicEvents(), other->magicEvents())
+                    && events->magicEvents().size() == 2 && !events->magicEvents()[0].castSucceeded
+                    && events->magicEvents()[1].castSucceeded, "Interrupted cast did not cancel independently for both observers");
+                const auto& cancelled = events->magicEvents()[0];
+                require(cancelled.selfHealthDelta == 0 && cancelled.selfFatigueDelta == 0 && cancelled.selfMagickaDelta == 0
+                    && cancelled.targetHealthDelta == 0 && cancelled.targetFatigueDelta == 0 && cancelled.targetMagickaDelta == 0,
+                    "Interrupted cast published resource changes");
+                std::vector<std::byte> proposed;
+                require(pending && pending->commit([&](auto data) { proposed.assign(data.begin(), data.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && bytes(runtime) == seed, "Rejected interruption leaked progress");
+                auto survivor = control.service().prepareMagicUse(authority,
+                    proposal(control.service(), 2, 2, "npc_instant_restore"), id<ServerTick>(2));
+                auto expected = control.service().prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, std::move(survivor));
+                require(expected && expected->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(control.service()) == proposed, "Cancelled cast changed RNG, costs, items or unrelated tick progress");
+                const auto next = read(proposed);
+                require(next.tick == 2 && next.projectiles.empty()
+                    && (lethal ? next.combat->actors[0][8][2] <= 0 : next.combat->knockedDown[0]),
+                    "Interruption rolled back its cause or launched a projectile");
+                pending.reset();
+                pending = attempt(runtime);
+                require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(runtime) == proposed, "Retried interruption changed candidate");
+                require(!runtime.prepareMagicUse(authority, proposal(runtime, 1, 2, "npc_target_damage"), id<ServerTick>(3)),
+                    "Incapacitated caster retry admitted");
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == proposed, "Interrupted tick changed on recovery");
+                for (uint64_t time = 3; time <= 32; ++time)
+                {
+                    auto forward = runtime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                    auto resumed = restart.service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                    require(forward && resumed && forward->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && resumed->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bytes(runtime) == bytes(restart.service()), "Interrupted tick restart diverged or stalled");
+                }
+                require(read(bytes(runtime)).timedEffects.empty(), "Interrupted tick stalled effect expiry");
+                InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, seed);
+                uncertain.service().synchronizeCells(authority);
+                auto failed = attempt(uncertain.service());
+                require(failed && failed->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                    && uncertain.service().inventoryImage().empty(), "Uncertain interruption did not fail closed");
+                std::cout << "interruption=" << (lethal ? "death" : "knockout") << " source=" << kind
+                    << " concurrent=preserved rejected=atomic retry=exact restart=exact uncertain=closed observers=converged\n";
+            }
+            // Put the Touch caster in reach, clear of the fixture door.
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            for (auto& entity : nearby)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                    Transform(entity.transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+            InventoryHost npcHost(descriptor, testContentManifest(), *registry, *crypto, initial);
+            auto& npcRuntime = dynamic_cast<InventoryService&>(npcHost.service()); npcRuntime.synchronizeCells(authority);
+            const auto view = npcRuntime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+            const ActorMagicCast npcUse{view->equipment->motions.front().placement, 1, 1,
+                MagicUseSourceKind::Spell, source("npc_instant_restore"), MagicUseTargetKind::Self, 0};
+            auto selected = npcRuntime.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {}, npcUse);
+            require(selected && selected->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "NPC interruption setup did not select a cast");
+            bool npcInterrupted = false;
+            for (uint64_t time = 2; time < 120 && !npcInterrupted; ++time)
+            {
+                auto probe = npcRuntime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                std::vector<std::byte> proposed;
+                require(probe && probe->commit([&](auto data) { proposed.assign(data.begin(), data.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected,
+                    "NPC release probe failed");
+                const auto after = read(proposed);
+                if (after.casting && after.casting->phase == ActorCampaignCast::Released)
+                {
+                    probe.reset();
+                    const auto before = bytes(npcRuntime);
+                    auto request = npcRuntime.prepareMagicUse(authority,
+                        proposal(npcRuntime, 1, time, "interrupt_touch"), id<ServerTick>(time));
+                    require(bool(request), "NPC interruption Touch cast rejected");
+                    auto pending = npcRuntime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(request));
+                    const auto event = npcRuntime.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), pending.get());
+                    require(event && std::ranges::any_of(event->magicEvents(), [](const auto& cast) {
+                        return cast.actorCaster() && !cast.castSucceeded;
+                    }), "Queued NPC launch was not cancelled by the earlier Touch cast");
+                    require(pending->commit([&](auto data) { proposed.assign(data.begin(), data.end());
+                            return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && bytes(npcRuntime) == before, "Rejected NPC interruption leaked progress");
+                    const auto cancelled = read(proposed);
+                    require(!cancelled.casting && cancelled.combat->knockedDown[2]
+                        && cancelled.combat->actors[2][9][2] == read(before).combat->actors[2][9][2],
+                        "Cancelled NPC retained release clock or paid launch cost");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "NPC interruption failed to commit");
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                    require(bytes(restart.service()) == proposed, "Cancelled NPC cast failed exact recovery");
+                    npcInterrupted = true;
+                }
+                else require(probe->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "NPC wind-up did not advance");
+            }
+            require(npcInterrupted, "NPC interruption never reached release");
+            std::cout << "interruption=npc-launch clock=cancelled rejected=atomic restart=exact\n";
+            return;
+        }
         if (knockoutAnimation)
         {
           for (bool physical : {false, true})

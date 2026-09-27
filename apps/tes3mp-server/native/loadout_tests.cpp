@@ -6745,6 +6745,15 @@ int main(int argc, char** argv)
                 true, true, true, true, true, true, true, true, true, true, true);
             std::cout << "PASS concurrent-projectiles\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "interrupted-casts")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true, false, false, true, false,
+                false, true, false, true, false, false, false, false, false, false, false, false,
+                {}, false, false, true, false, true);
+            std::cout << "PASS interrupted-casts\n"; return 0;
+        }
         if (argc == 5 && (std::string_view(argv[1]) == "knockout-getup"
                 || std::string_view(argv[1]) == "zero-base-fatigue"))
         {
