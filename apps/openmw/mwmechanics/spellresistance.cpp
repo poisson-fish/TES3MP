@@ -12,9 +12,33 @@
 
 #include "creaturestats.hpp"
 #include "spellutil.hpp"
+#include "spells.hpp"
 
 namespace MWMechanics
 {
+
+    std::optional<float> getDiseaseContactMultiplier(const ESM::Spell& spell, const MagicEffects& effects)
+    {
+        ESM::RefId resistance, weakness;
+        if (Spells::hasCorprusEffect(&spell))
+        {
+            resistance = ESM::MagicEffect::ResistCorprusDisease;
+            weakness = ESM::MagicEffect::WeaknessToCorprusDisease;
+        }
+        else if (spell.mData.mType == ESM::Spell::ST_Disease)
+        {
+            resistance = ESM::MagicEffect::ResistCommonDisease;
+            weakness = ESM::MagicEffect::WeaknessToCommonDisease;
+        }
+        else if (spell.mData.mType == ESM::Spell::ST_Blight)
+        {
+            resistance = ESM::MagicEffect::ResistBlightDisease;
+            weakness = ESM::MagicEffect::WeaknessToBlightDisease;
+        }
+        else return std::nullopt;
+        return 1.f - .01f * (effects.getOrDefault(resistance).getMagnitude()
+            - effects.getOrDefault(weakness).getMagnitude());
+    }
 
     float getEffectMultiplier(ESM::RefId effectId, const MWWorld::Ptr& actor, const MWWorld::Ptr& caster,
         const ESM::Spell* spell, const MagicEffects* effects)

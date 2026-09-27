@@ -408,6 +408,14 @@ namespace
 
 namespace MWMechanics
 {
+    ESM::RefId curedEffect(ESM::RefId cure)
+    {
+        if (cure == ESM::MagicEffect::CurePoison) return ESM::MagicEffect::Poison;
+        if (cure == ESM::MagicEffect::CureParalyzation) return ESM::MagicEffect::Paralyze;
+        if (cure == ESM::MagicEffect::CureCorprusDisease) return ESM::MagicEffect::Corprus;
+        return {};
+    }
+
     void applyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
         std::optional<float> baseMagickaMultiplier)
     {
@@ -515,15 +523,8 @@ namespace MWMechanics
                 purgePermanent(target, &Spells::purgeBlightDisease, ESM::Spell::ST_Blight);
             else if (effect.mEffectId == ESM::MagicEffect::RemoveCurse)
                 purgePermanent(target, &Spells::purgeCurses, ESM::Spell::ST_Curse);
-            else if (effect.mEffectId == ESM::MagicEffect::CureCorprusDisease)
-                target.getClass().getCreatureStats(target).getActiveSpells().purgeEffect(
-                    target, ESM::MagicEffect::Corprus);
-            else if (effect.mEffectId == ESM::MagicEffect::CurePoison)
-                target.getClass().getCreatureStats(target).getActiveSpells().purgeEffect(
-                    target, ESM::MagicEffect::Poison);
-            else if (effect.mEffectId == ESM::MagicEffect::CureParalyzation)
-                target.getClass().getCreatureStats(target).getActiveSpells().purgeEffect(
-                    target, ESM::MagicEffect::Paralyze);
+            else if (const auto cured = curedEffect(effect.mEffectId); !cured.empty())
+                target.getClass().getCreatureStats(target).getActiveSpells().purgeEffect(target, cured);
             else if (effect.mEffectId == ESM::MagicEffect::Dispel)
                 // Dispel removes entire spells at once
                 target.getClass().getCreatureStats(target).getActiveSpells().purge(

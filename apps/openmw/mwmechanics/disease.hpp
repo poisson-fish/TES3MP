@@ -16,6 +16,7 @@
 #include "actorutil.hpp"
 #include "creaturestats.hpp"
 #include "spells.hpp"
+#include "spellresistance.hpp"
 
 namespace MWMechanics
 {
@@ -42,26 +43,9 @@ namespace MWMechanics
             if (actor.getClass().getCreatureStats(actor).getSpells().hasSpell(spell->mId))
                 continue;
 
-            float resist = 0.f;
-            if (Spells::hasCorprusEffect(spell))
-                resist = 1.f
-                    - 0.01f
-                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistCorprusDisease).getMagnitude()
-                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToCorprusDisease).getMagnitude());
-            else if (spell->mData.mType == ESM::Spell::ST_Disease)
-                resist = 1.f
-                    - 0.01f
-                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistCommonDisease).getMagnitude()
-                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToCommonDisease).getMagnitude());
-            else if (spell->mData.mType == ESM::Spell::ST_Blight)
-                resist = 1.f
-                    - 0.01f
-                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistBlightDisease).getMagnitude()
-                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToBlightDisease).getMagnitude());
-            else
-                continue;
-
-            int x = static_cast<int>(fDiseaseXferChance * 100 * resist);
+            const auto multiplier = getDiseaseContactMultiplier(*spell, actorEffects);
+            if (!multiplier) continue;
+            int x = static_cast<int>(fDiseaseXferChance * 100 * *multiplier);
             auto& prng = MWBase::Environment::get().getWorld()->getPrng();
             if (Misc::Rng::rollDice(10000, prng) < x)
             {

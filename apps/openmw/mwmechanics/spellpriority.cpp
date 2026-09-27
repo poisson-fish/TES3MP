@@ -272,6 +272,9 @@ namespace MWMechanics
         return 1.f;
     }
 
+    float rateCureEffect(int matchingEffects)
+    { return 1001.f * matchingEffects; }
+
     float rateDispelEffect(bool self, int positive, int negative)
     {
         const int diff = self ? negative - positive : positive - negative;
@@ -584,9 +587,9 @@ namespace MWMechanics
 
         // Prefer Cure effects over Dispel, because Dispel also removes positive effects
         else if (effect.mEffectID == ESM::MagicEffect::CureParalyzation)
-            return 1001.f * numEffectsToDispel(actor, ESM::MagicEffect::Paralyze);
+            return rateCureEffect(numEffectsToDispel(actor, ESM::MagicEffect::Paralyze));
         else if (effect.mEffectID == ESM::MagicEffect::CurePoison)
-            return 1001.f * numEffectsToDispel(actor, ESM::MagicEffect::Poison);
+            return rateCureEffect(numEffectsToDispel(actor, ESM::MagicEffect::Poison));
         else if (effect.mEffectID == ESM::MagicEffect::DisintegrateArmor)
         {
             if (enemy.isEmpty())

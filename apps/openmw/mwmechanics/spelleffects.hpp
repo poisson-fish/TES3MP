@@ -22,6 +22,8 @@ namespace MWMechanics
     EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
         bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng);
     bool rollDispel(float magnitude, Misc::Rng::Generator& rng);
+    // Effect-specific cures remove matching applied effects, preserving source siblings.
+    ESM::RefId curedEffect(ESM::RefId cure);
     void absorbDynamicStat(CreatureStats& target, CreatureStats* caster, int stat, float magnitude,
         const MWWorld::TimeStamp* deathTime = nullptr);
     float rollEffectMagnitude(float minimum, float maximum, Misc::Rng::Generator& rng);

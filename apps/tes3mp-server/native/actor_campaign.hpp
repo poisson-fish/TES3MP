@@ -39,8 +39,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t ExpandedEffectsCampaignMagic = 0x5050434154335354;
     inline constexpr uint64_t ActorPresentationCampaignMagic = 0x5150434154335354;
     inline constexpr uint64_t PlayerCastCampaignMagic = 0x5250434154335354;
+    inline constexpr uint64_t PersistentConditionsCampaignMagic = 0x5350434154335354;
+    inline constexpr bool hasPlayerCasts(uint64_t magic)
+    { return magic == PlayerCastCampaignMagic || magic == PersistentConditionsCampaignMagic; }
     inline constexpr bool hasActorPresentation(uint64_t magic)
-    { return magic == ActorPresentationCampaignMagic || magic == PlayerCastCampaignMagic; }
+    { return magic == ActorPresentationCampaignMagic || hasPlayerCasts(magic); }
     inline constexpr bool hasExpandedEffects(uint64_t magic)
     { return magic == ExpandedEffectsCampaignMagic || hasActorPresentation(magic); }
     inline constexpr bool hasKnockoutAnimation(uint64_t magic)
@@ -127,6 +130,13 @@ namespace TES3MP::Native
     }
     struct ActorCampaignCombat
     {
+        struct ConditionSource
+        {
+            uint64_t actor = 0, source = 0;
+            bool operator==(const ConditionSource&) const = default;
+        };
+        static constexpr size_t MaximumConditionSources = 128;
+        std::vector<ConditionSource> conditions;
         static constexpr size_t StatCount = 8 + 3 + 27;
         std::array<std::array<std::array<float, 5>, StatCount>, 3> actors{};
         uint32_t rng = 1;
@@ -187,6 +197,7 @@ namespace TES3MP::Native
         uint64_t expiresTick = 0;
         // V35: ESM effect index and durable launch identity. The old image
         // carries only Resist Magicka; its zero index is decoded as that effect.
+        // sourceKind: 0 cast spell, 1 used item, 2 strike item, 3 equipment, 4 condition.
         uint64_t effectIndex = 0, caster = 0, source = 0, sourceKind = 0;
         float resistance = 0;
         uint64_t startTick = 0, durationTicks = 0;
@@ -540,20 +551,20 @@ namespace TES3MP::Native
                         if (effect.beneficiary > 3) throw std::invalid_argument("Native effect beneficiary invalid");
                     }
                     if (!effect.effectIndex || effect.effectIndex > 255 || !effect.caster || !effect.source
-                        || effect.sourceKind > (hasConstantState(magic) ? 3u : 2u)
+                        || effect.sourceKind > (magic == PersistentConditionsCampaignMagic ? 4u : hasConstantState(magic) ? 3u : 2u)
                         || !std::isfinite(effect.resistance)
                         || effect.resistance < -20000 || effect.resistance > 100
                         || effect.startTick > tick
-                        || (effect.sourceKind == 3
+                        || (effect.sourceKind >= 3
                             ? (!hasConstantState(magic) || effect.durationTicks != 0
                                 || effect.expiresTick != UINT64_MAX)
                             : (!effect.durationTicks || effect.durationTicks > 108000)))
                         throw std::invalid_argument("Native effect identity or duration invalid");
                 }
                 if (effect.actor >= 3 || !std::isfinite(effect.magnitude)
-                    || (effect.magnitude < 0 || (effect.magnitude == 0 && effect.sourceKind != 3)) || effect.magnitude > (hasKnockoutState(magic) && effect.effectIndex ? 100000 : 1000)
+                    || (effect.magnitude < 0 || (effect.magnitude == 0 && effect.sourceKind < 3)) || effect.magnitude > (hasKnockoutState(magic) && effect.effectIndex ? 100000 : 1000)
                     || effect.expiresTick <= tick
-                    || (effect.sourceKind != 3 && effect.expiresTick - tick > 108000))
+                    || (effect.sourceKind < 3 && effect.expiresTick - tick > 108000))
                     throw std::invalid_argument("Native timed effect state invalid");
                 timedEffects.push_back(effect);
             }
@@ -584,7 +595,7 @@ namespace TES3MP::Native
                 casting = value;
             }
         }
-        if (magic == PlayerCastCampaignMagic)
+        if (hasPlayerCasts(magic))
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto size = getAreaWord(bytes, offset);
@@ -607,6 +618,20 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native player cast state invalid");
                 combat->playerCasts[i] = value;
             }
+        if (magic == PersistentConditionsCampaignMagic)
+        {
+            const auto count = getAreaWord(bytes, offset);
+            if (count > ActorCampaignCombat::MaximumConditionSources || count > (bytes.size() - offset) / 16)
+                throw std::invalid_argument("Native condition source count invalid");
+            for (size_t i = 0; i < count; ++i)
+            {
+                ActorCampaignCombat::ConditionSource value{getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (value.actor >= 3 || !value.source
+                    || std::ranges::find(combat->conditions, value) != combat->conditions.end())
+                    throw std::invalid_argument("Native condition source identity invalid");
+                combat->conditions.push_back(value);
+            }
+        }
         if (hasPlayerSwings(magic))
             for (auto& swing : combat->swings)
             {

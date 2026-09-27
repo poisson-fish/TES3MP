@@ -58,6 +58,7 @@ namespace MWMechanics
         ~Spells();
 
         static bool hasCorprusEffect(const ESM::Spell* spell);
+        static bool isRemovedByCure(const ESM::Spell& spell, ESM::RefId cure);
 
         bool canUsePower(const ESM::Spell* spell) const;
         void usePower(const ESM::Spell* spell);

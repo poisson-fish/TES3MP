@@ -1,4 +1,5 @@
 #include "ai_magic.hpp"
+#include <apps/openmw/mwmechanics/spells.hpp>
 #include "loadout.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
 #include <apps/openmw/mwmechanics/spellresistance.hpp>
@@ -91,6 +92,80 @@ namespace
         result.mEffects.mList.push_back(entry);
         return result;
     }
+    void conditionRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        MWMechanics::NpcStats caster(store), victim(store); initialize(caster); initialize(victim);
+        for (bool poison : {true, false})
+        {
+            const auto cure = poison ? ESM::MagicEffect::CurePoison : ESM::MagicEffect::CureParalyzation;
+            require(MWMechanics::curedEffect(cure) == (poison ? ESM::MagicEffect::Poison : ESM::MagicEffect::Paralyze),
+                "Cure mapping changed");
+            ESM::MagicEffect magic; magic.blank(); magic.mId = cure;
+            magic.mData.mSchool = ESM::Skill::Restoration; magic.mData.mBaseCost = 1.f;
+            magic.mData.mFlags = ESM::MagicEffect::NoDuration | ESM::MagicEffect::NoMagnitude;
+            store.insertStatic(magic);
+            auto source = spell("cure", cure, ESM::RT_Self, 0);
+            source.mEffects.mList.front().mData.mDuration = 0;
+            require(!prepareInstantSpell(source, store, true) && bool(prepareInstantSpell(source, store, true, true)),
+                "Cure admission crossed campaign boundary or rejected stock zero magnitude/duration");
+            AiMagicContext context{caster, &victim}; context.expandedEffects = true;
+            const std::array sources{AiMagicSpell{&source}};
+            require(!prepareAiMagicCast(context, sources, {}, store), "AI selected unnecessary cure");
+            context.selfCures[poison ? 0 : 1] = 2;
+            require(bool(prepareAiMagicCast(context, sources, {}, store)), "AI did not select useful cure");
+            near(MWMechanics::rateCureEffect(2), 2002.f, "Stock cure priority changed");
+        }
+        require(MWMechanics::curedEffect(ESM::MagicEffect::Dispel).empty(), "Dispel treated as effect cure");
+        for (int family = 0; family < 3; ++family)
+        {
+            auto disease = spell("disease", ESM::MagicEffect::DamageHealth, ESM::RT_Self);
+            disease.mData.mType = family == 0 ? ESM::Spell::ST_Disease : ESM::Spell::ST_Blight;
+            if (family == 2) disease.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::Corprus;
+            const auto resistance = family == 0 ? ESM::MagicEffect::ResistCommonDisease
+                : family == 1 ? ESM::MagicEffect::ResistBlightDisease : ESM::MagicEffect::ResistCorprusDisease;
+            const auto weakness = family == 0 ? ESM::MagicEffect::WeaknessToCommonDisease
+                : family == 1 ? ESM::MagicEffect::WeaknessToBlightDisease : ESM::MagicEffect::WeaknessToCorprusDisease;
+            MWMechanics::MagicEffects effects;
+            effects.add(MWMechanics::EffectKey(ESM::MagicEffect::ResistMagicka), MWMechanics::EffectParam(100.f));
+            near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), 1.f, "General magic resistance affected disease contact");
+            effects.add(MWMechanics::EffectKey(resistance), MWMechanics::EffectParam(100.f));
+            near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), 0.f, "Disease immunity failed");
+            effects.add(MWMechanics::EffectKey(weakness), MWMechanics::EffectParam(50.f));
+            near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), .5f, "Disease weakness did not offset resistance");
+            effects.add(MWMechanics::EffectKey(weakness), MWMechanics::EffectParam(200.f));
+            near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), 2.5f, "Stock disease susceptibility was clamped");
+            if (family == 2)
+            {
+                disease.mData.mType = ESM::Spell::ST_Disease;
+                near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), 2.5f, "Corprus did not override common disease type");
+            }
+            effects.add(MWMechanics::EffectKey(resistance), MWMechanics::EffectParam(300.f));
+            near(*MWMechanics::getDiseaseContactMultiplier(disease, effects), -.5f, "Stock disease over-resistance was clamped");
+            require(!prepareInstantSpell(disease, store, true, true), "Unowned disease lifecycle admitted as a cast");
+        }
+        for (const auto [type, cure] : {std::pair{ESM::Spell::ST_Disease, ESM::MagicEffect::CureCommonDisease},
+                {ESM::Spell::ST_Blight, ESM::MagicEffect::CureBlightDisease}, {ESM::Spell::ST_Curse, ESM::MagicEffect::RemoveCurse}})
+        {
+            auto condition = spell("persistent", ESM::MagicEffect::DamageHealth, ESM::RT_Target);
+            condition.mData.mType = type;
+            require(MWMechanics::Spells::isRemovedByCure(condition, cure), "Whole-source cure rejected matching type");
+            require(!MWMechanics::Spells::isRemovedByCure(condition, ESM::MagicEffect::CurePoison), "Selective cure removed source");
+            const auto plan = preparePersistentEffects(condition, store);
+            require(plan && plan->hasRange(ESM::RT_Target), "Persistent source lost range/ordinal filtering");
+            condition.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::Corprus;
+            require(!preparePersistentEffects(condition, store), "Corprus admitted without special lifecycle");
+            if (type == ESM::Spell::ST_Blight)
+                require(!MWMechanics::Spells::isRemovedByCure(condition, cure), "Blight cure removed Corprus membership");
+            condition.mEffects.mList.front().mData.mEffectID = ESM::MagicEffect::Vampirism;
+            require(!preparePersistentEffects(condition, store), "Vampirism admitted without special lifecycle");
+            condition.mEffects.mList.resize(9);
+            require(!preparePersistentEffects(condition, store), "Oversized persistent source admitted");
+        }
+        const auto ordinary = spell("ordinary", ESM::MagicEffect::DamageHealth, ESM::RT_Self);
+        require(!MWMechanics::getDiseaseContactMultiplier(ordinary, caster.getMagicEffects()), "Ordinary spell became contagious");
+    }
+
     void expandedEffects()
     {
         MWWorld::ESMStore store; content(store);
@@ -700,7 +775,8 @@ int main(int argc, char** argv)
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "effect-family-rules") effectFamilyRules();
+        if (filter == "condition-rules") conditionRules();
+        else if (filter == "effect-family-rules") effectFamilyRules();
         else if (filter == "interference") interference();
         else if (filter == "weapons") weapons();
         else if (filter == "expanded-effects") expandedEffects();

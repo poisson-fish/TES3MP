@@ -110,6 +110,7 @@ namespace TES3MP::Native
         bool mNpcFullSelection = false;
         bool mNpcCastLifecycle = false;
         bool mPlayerCastLifecycle = false;
+        bool mPersistentConditions = false; // V54 source membership survives selective cures.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.

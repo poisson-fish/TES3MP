@@ -7,6 +7,7 @@
 
 namespace TES3MP::Native
 {
+    // V54 adds durable common disease/blight/curse membership and source effects.
     // V53 persists both players' bound cast resources, source/target life,
     // wind-up/release/recovery and cancellation in the same atomic actor image.
     // Payment occurs only at the release key; inactive scheduling pauses casts.

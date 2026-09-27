@@ -6021,6 +6021,47 @@ namespace TES3MP::Native::Testing
                 spell("expanded_paralyze", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Touch, 1, 0)}, true);
                 spell("expanded_paralyze_self", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Self, 1, 0)});
                 spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
+                if (effectFamily == "persistent-conditions")
+                {
+                    auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
+                    transfer.mValue.setFloat(100.f);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); transfer.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+                    for (const auto [name, type] : {std::pair{"persistent_common", ESM::Spell::ST_Disease},
+                            {"persistent_blight", ESM::Spell::ST_Blight}, {"persistent_curse", ESM::Spell::ST_Curse}})
+                    {
+                        ESM::Spell condition; condition.blank(); condition.mId = ESM::RefId::stringRefId(name);
+                        condition.mData.mType = type;
+                        condition.mEffects.populate({{ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Strength,
+                            ESM::RT_Self, 0, 0, 2, 5}, effect(ESM::MagicEffect::FortifyMagicka, ESM::RT_Self, 0, 3)});
+                        if (type == ESM::Spell::ST_Disease)
+                            condition.mEffects.mList.front().mData = effect(ESM::MagicEffect::Poison, ESM::RT_Self, 0, 1);
+                        npc.mSpells.mList.push_back(condition.mId);
+                        out.startRecord(ESM::Spell::sRecordId, 0); condition.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    }
+                    spell("persistent_selective", {effect(ESM::MagicEffect::CurePoison, ESM::RT_Self, 0, 0)}, true);
+                    spell("whole_common", {effect(ESM::MagicEffect::CureCommonDisease, ESM::RT_Self, 0, 0)}, true);
+                    spell("whole_blight", {effect(ESM::MagicEffect::CureBlightDisease, ESM::RT_Self, 0, 0)}, true);
+                    spell("whole_curse", {effect(ESM::MagicEffect::RemoveCurse, ESM::RT_Self, 0, 1)}, true);
+                    spell("contact_ward", {effect(ESM::MagicEffect::ResistCommonDisease, ESM::RT_Self, 300, 100),
+                        effect(ESM::MagicEffect::ResistBlightDisease, ESM::RT_Self, 300, 100)}, true);
+                    spell("contact_weakness", {effect(ESM::MagicEffect::WeaknessToCommonDisease, ESM::RT_Self, 300, 100),
+                        effect(ESM::MagicEffect::WeaknessToBlightDisease, ESM::RT_Self, 300, 100)}, true);
+                }
+                if (effectFamily == "condition-cures")
+                {
+                    for (const auto condition : {ESM::MagicEffect::Poison, ESM::MagicEffect::Paralyze})
+                    {
+                        const bool poison = condition == ESM::MagicEffect::Poison;
+                        const std::string name = poison ? "cure_poison" : "cure_paralysis";
+                        const auto cure = poison ? ESM::MagicEffect::CurePoison : ESM::MagicEffect::CureParalyzation;
+                        spell(name, {effect(cure, ESM::RT_Touch, 0, 0)}, true);
+                        spell(name + "_source", {effect(condition, ESM::RT_Touch, 10, poison ? 3 : 0),
+                            effect(ESM::MagicEffect::FortifyHealth, ESM::RT_Touch, 10, 12)}, true);
+                        spell(name + "_ordered", {effect(condition, ESM::RT_Touch, 10, poison ? 3 : 0),
+                            effect(cure, ESM::RT_Touch, 0, 0),
+                            effect(condition, ESM::RT_Touch, 10, poison ? 3 : 0)}, true);
+                    }
+                }
                 spell("expanded_dispel", {effect(ESM::MagicEffect::Dispel, ESM::RT_Self, 0, 100)});
                 spell("expanded_damage", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 10)});
                 spell("expanded_lethal", {effect(ESM::MagicEffect::DrainHealth, ESM::RT_Touch, 1, 1000)});
@@ -6100,7 +6141,7 @@ namespace TES3MP::Native::Testing
                     << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
                     << "\nmelee weapononehand\n";
             }
-            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources")
+            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources" && effectFamily != "persistent-conditions")
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6191,15 +6232,20 @@ namespace TES3MP::Native::Testing
                         out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
                     }
                 }
+                if (effectFamily == "persistent-conditions")
+                    std::erase_if(beast.mSpells.mList, [](auto id) { return id.getRefIdString().starts_with("persistent_"); });
                 for (const auto& participant : {female, beast})
                 {
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
                 }
             }
-            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources")
+            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources" || effectFamily == "persistent-conditions")
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
-                npc.mSpells.mList.clear(); npc.mInventory.mList.clear();
+                if (effectFamily == "persistent-conditions")
+                    std::erase_if(npc.mSpells.mList, [](auto id) { return !id.getRefIdString().starts_with("persistent_"); });
+                else npc.mSpells.mList.clear();
+                npc.mInventory.mList.clear();
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Destruction)] = 0;
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
@@ -7502,7 +7548,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7533,6 +7579,15 @@ namespace TES3MP::Native::Testing
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
                     Transform(placed[i].transform().cell(), Position3((i ? (castingInterference ? 100 : -160) : 60)*1024, -400*1024, 1024),
+                        placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
+        }
+        if (effectFamily == "persistent-conditions")
+        {
+            std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
+            for (size_t i = 0; i < placed.size(); ++i)
+                placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
+                    Transform(placed[i].transform().cell(), Position3((i ? -160 : 60)*1024, -400*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
@@ -7605,6 +7660,234 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (effectFamily == "persistent-conditions")
+            {
+                for (bool item : {false, true})
+                {
+                    auto running = make(); auto& runtime = running->service();
+                    auto pending = advance(runtime, 1);
+                    const auto before = bytes(runtime);
+                    std::vector<std::byte> candidate;
+                    require(pending->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "Authored condition rejection leaked state");
+                    auto state = commit(runtime, 1);
+                    require(bytes(runtime) == candidate && state.combat->conditions.size() == 6 && state.timedEffects.size() == 12,
+                        "Persistent sources missing, rerolled or duplicated");
+                    std::vector<std::byte> membership;
+                    for (const auto& entry : state.combat->conditions)
+                        for (const auto value : {entry.actor, entry.source})
+                            for (unsigned i = 0; i < 8; ++i) membership.push_back(std::byte(value >> (i * 8)));
+                    const auto location = std::search(candidate.begin(), candidate.end(), membership.begin(), membership.end());
+                    require(location != candidate.end(), "Condition membership encoding missing");
+                    const auto membershipOffset = size_t(location - candidate.begin());
+                    for (int malformed = 0; malformed < 3; ++malformed)
+                    {
+                        auto invalid = candidate;
+                        if (malformed == 0) // Duplicate identity.
+                            std::copy_n(membership.begin(), 16, invalid.begin() + membershipOffset + 16);
+                        else if (malformed == 1) // Missing source record.
+                            std::fill_n(invalid.begin() + membershipOffset + 8, 8, std::byte{0xff});
+                        else // Reject the count before allocation.
+                            std::fill_n(invalid.begin() + membershipOffset - 8, 8, std::byte{0xff});
+                        bool rejected = false;
+                        try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+                        catch (const std::invalid_argument&) { rejected = true; }
+                        require(rejected && bytes(runtime) == candidate, "Malformed condition save accepted or changed live state");
+                    }
+                    const auto original = state.timedEffects;
+                    require(std::ranges::all_of(original, [](const auto& value) {
+                        return value.sourceKind == 4 && value.durationTicks == 0 && value.expiresTick == UINT64_MAX;
+                    }), "Condition source acquired a temporary deadline");
+                    const auto path = scratch / "persistent-active.bin";
+                    { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(candidate.data()), candidate.size()); }
+                    std::ifstream in(path, std::ios::binary);
+                    const std::vector<char> saved(std::istreambuf_iterator<char>{in}, {});
+                    InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, std::as_bytes(std::span(saved)));
+                    restarted.service().synchronizeCells(authority);
+                    uint64_t tick = 1;
+                    for (; tick < 120;)
+                    {
+                        state = commit(runtime, ++tick); commit(restarted.service(), tick);
+                    }
+                    require(bytes(runtime) == bytes(restarted.service()) && state.timedEffects == original,
+                        "Persistent source expired, rerolled or changed after disk restart");
+                    size_t remaining = 6;
+                    for (const auto [cure, condition] : {std::pair{"whole_common", "persistent_common"},
+                            {"whole_blight", "persistent_blight"}, {"whole_curse", "persistent_curse"}})
+                    {
+                        std::cout << "whole cure start=" << cure << " tick=" << tick << " magicka=" << state.combat->actors[0][9][2]
+                            << " active-cast=" << bool(state.combat->playerCasts[0]) << " conditions=" << state.combat->conditions.size() << '\n';
+                        state = commit(runtime, ++tick, cure, 1, 0, item);
+                        bool removed = false;
+                        for (unsigned frame = 0; frame < 180; ++frame)
+                        {
+                            const auto prior = bytes(runtime);
+                            auto release = advance(runtime, ++tick);
+                            candidate.clear();
+                            require(release->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(runtime) == prior, "Condition cure rejection leaked effects/payment/RNG");
+                            const auto proposed = read(candidate);
+                            const bool curing = proposed.combat->conditions.size() != remaining;
+                            std::unique_ptr<InventoryHost> retry;
+                            if (curing)
+                            {
+                                retry = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, prior);
+                                retry->service().synchronizeCells(authority);
+                            }
+                            state = commit(runtime, tick);
+                            require(bytes(runtime) == candidate, "Condition cure retry changed candidate");
+                            if (curing)
+                            {
+                                commit(retry->service(), tick);
+                                require(bytes(retry->service()) == candidate, "Condition cure restart changed candidate");
+                                --remaining; removed = true;
+                                require(state.combat->conditions.size() == remaining
+                                    && std::ranges::none_of(state.timedEffects, [&](const auto& effect) {
+                                        return effect.actor == 0 && effect.source == source(condition);
+                                    }) && std::ranges::count_if(state.timedEffects, [](const auto& effect) { return effect.actor == 2; }) == 6,
+                                    "Whole cure retained a sibling or removed another actor's source");
+                            }
+                            if (!state.combat->playerCasts[0]) break;
+                        }
+                        require(removed, "Whole-source cure never released");
+                        InventoryHost curedRestart(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                        curedRestart.service().synchronizeCells(authority);
+                        state = commit(runtime, ++tick); commit(curedRestart.service(), tick);
+                        require(bytes(runtime) == bytes(curedRestart.service()) && state.combat->conditions.size() == remaining,
+                            "Cured source was restored from authored records");
+                    }
+                    require(std::abs(state.combat->actors[0][9][2] - (item ? 30.f : 15.f)) < .001f,
+                        "Whole-source cures failed to reverse resource fortification");
+                    std::cout << "persistent conditions item=" << item << " sources=distinct expiry=none cure=whole retry=atomic disk-restart=exact\n";
+                }
+                // Keep unarmed contact checks above the separate fatigue-knockout boundary.
+                const auto fatigueOffset = statsOffset + (ActorCampaignCombat::StatCount * 5 + 10 * 5 + 2) * 8;
+                const uint64_t fatigueBits = std::bit_cast<uint32_t>(1000.f);
+                for (unsigned i = 0; i < 8; ++i) seed.at(fatigueOffset + i) = std::byte(fatigueBits >> (i * 8));
+                // Stock successful NPC melee contacts acquire whole diseases, never curses.
+                auto running = make(); auto& runtime = running->service();
+                uint64_t tick = 1;
+                auto state = commit(runtime, tick);
+                const auto permanent = state.timedEffects;
+                state = commit(runtime, ++tick, "expanded_dispel");
+                for (unsigned frame = 0; frame < 180 && state.combat->playerCasts[0]; ++frame) state = commit(runtime, ++tick);
+                require(state.timedEffects == permanent, "Dispel removed permanent source effects");
+                const auto castItem = [&](std::string_view name) {
+                    state = commit(runtime, ++tick, name, 2, 0, true);
+                    for (unsigned frame = 0; frame < 180 && state.combat->playerCasts[1]; ++frame)
+                        state = commit(runtime, ++tick);
+                    require(!state.combat->playerCasts[1], "Contact ward cast did not finish");
+                };
+                castItem("contact_ward");
+                const auto far = authority;
+                const auto moveBob = [&](bool near) {
+                    std::vector<CanonicalPlayerEntityState> placed(far.players().begin(), far.players().end());
+                    if (near) placed[1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[1], id<ServerTick>(tick),
+                        Transform(placed[1].transform().cell(), Position3(60*1024, -64*1024, 1024), placed[1].transform().orientation()), LinearVelocity3(0,0,0)));
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, far.activeSessions()));
+                };
+                moveBob(true);
+                const float fatigueBefore = state.combat->actors[1][10][2];
+                for (unsigned frame = 0; frame < 180; ++frame) state = commit(runtime, ++tick);
+                require(state.combat->conditions.size() == 6 && state.combat->actors[1][10][2] < fatigueBefore,
+                    "Disease immunity failed or no melee contact occurred");
+                moveBob(false);
+                // Give the next cast a recovered body after the contact sequence.
+                for (unsigned frame = 0; frame < 180 && (state.combat->hitRecoveryTicks[1] || state.combat->knockedDown[1]); ++frame)
+                    state = commit(runtime, ++tick);
+                castItem("contact_weakness");
+                moveBob(true);
+                bool acquired = false;
+                for (unsigned frame = 0; frame < 240 && !acquired; ++frame)
+                {
+                    const auto prior = bytes(runtime);
+                    auto pending = advance(runtime, ++tick);
+                    std::vector<std::byte> candidate;
+                    require(pending->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(runtime) == prior, "Disease acquisition rejection leaked hit/source/RNG");
+                    state = commit(runtime, tick);
+                    require(bytes(runtime) == candidate, "Disease acquisition retry changed candidate");
+                    acquired = state.combat->conditions.size() == 8;
+                    if (acquired)
+                    {
+                        InventoryHost retry(descriptor, testContentManifest(), *registry, *crypto, prior);
+                        retry.service().synchronizeCells(authority); commit(retry.service(), tick);
+                        require(bytes(retry.service()) == candidate, "Disease contact from restart diverged");
+                    }
+                }
+                require(acquired && std::ranges::none_of(state.combat->conditions, [&](const auto& member) {
+                    return member.actor == 1 && member.source == source("persistent_curse"); }),
+                    "Weakness did not offset resistance or a curse became contagious");
+                for (unsigned frame = 0; frame < 60; ++frame) state = commit(runtime, ++tick);
+                require(state.combat->conditions.size() == 8, "Repeated contact duplicated disease membership");
+                moveBob(false);
+                for (unsigned frame = 0; frame < 180 && state.combat->hitRecoveryTicks[1]; ++frame) state = commit(runtime, ++tick);
+                castItem("persistent_selective");
+                require(state.combat->conditions.size() == 8 && std::ranges::none_of(state.timedEffects, [](const auto& effect) {
+                    return effect.actor == 1 && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Poison));
+                }), "Selective cure removed membership or retained poison");
+                InventoryHost selectiveRestart(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                selectiveRestart.service().synchronizeCells(authority);
+                state = commit(runtime, ++tick); commit(selectiveRestart.service(), tick);
+                require(bytes(runtime) == bytes(selectiveRestart.service()), "Selective cure restored permanent effect after restart");
+                moveBob(true);
+                for (unsigned frame = 0; frame < 60; ++frame) state = commit(runtime, ++tick);
+                require(state.combat->conditions.size() == 8 && std::ranges::none_of(state.timedEffects, [](const auto& effect) {
+                    return effect.actor == 1 && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Poison));
+                }), "Repeated contact restored selectively cured effect");
+                authority = far;
+                std::cout << "disease contact immunity=verified weakness=verified curses=excluded duplicates=excluded retry=atomic restart=exact\n";
+                return;
+            }
+            if (effectFamily == "condition-cures")
+            {
+                for (bool poison : {true, false}) for (bool item : {false, true})
+                {
+                    const std::string name = poison ? "cure_poison" : "cure_paralysis";
+                    const auto condition = poison ? ESM::MagicEffect::Poison : ESM::MagicEffect::Paralyze;
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(condition));
+                    auto running = make(); auto& runtime = running->service();
+                    commit(runtime, 1, name + "_source", 1, 2);
+                    auto applied = commit(runtime, 2, name + "_source", 1, 2, true);
+                    require(applied.timedEffects.size() == 4, "Cure setup did not stack spell and item sources");
+                    float health = applied.combat->actors[1][8][2];
+                    // The composed tick advances active effects before applying the cure command.
+                    if (poison) for (const auto& active : applied.timedEffects)
+                        if (active.effectIndex == index) health -= active.magnitude / 30.f;
+                    const auto before = bytes(runtime);
+                    const auto path = scratch / "conditions-active.bin";
+                    { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(before.data()), before.size()); }
+                    std::ifstream in(path, std::ios::binary);
+                    const std::vector<char> saved(std::istreambuf_iterator<char>{in}, {});
+                    InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, std::as_bytes(std::span(saved)));
+                    restarted.service().synchronizeCells(authority);
+                    auto pending = advance(runtime, 3, name, 1, 2, item);
+                    std::vector<std::byte> candidate;
+                    require(pending->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "Cure rejection leaked removal/payment/RNG");
+                    const auto cured = commit(runtime, 3, name, 1, 2, item);
+                    require(bytes(runtime) == candidate, "Cure retry changed candidate");
+                    commit(restarted.service(), 3, name, 1, 2, item);
+                    require(bytes(restarted.service()) == candidate, "Cure from disk restart diverged");
+                    require(cured.timedEffects.size() == 2 && std::ranges::all_of(cured.timedEffects,
+                        [](const auto& active) { return active.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::FortifyHealth)); }),
+                        "Cure removed source siblings or retained a matching effect");
+                    require(std::abs(cured.combat->actors[1][8][2] - health) < .001f, "Cure undid prior poison damage or changed sibling fortification");
+                    const auto view = runtime.projectCombat(authority, id<SessionId>(2), id<ServerTick>(3), id<CanonicalRevision>(3));
+                    require(view && !view->selfKnockout().paralyzed && runtime.allowsPlayerMovement(id<PlayerId>(2)),
+                        "Cure failed to restore authoritative controls/projection");
+                    InventoryHost curedRestart(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                    curedRestart.service().synchronizeCells(authority);
+                    commit(runtime, 4, name, 1, 2, item); // A cure with no matching effect is still a paid cast.
+                    commit(curedRestart.service(), 4, name, 1, 2, item);
+                    require(bytes(runtime) == bytes(curedRestart.service()), "Cured restart restored removed effects");
+                    const auto ordered = commit(runtime, 5, name + "_ordered", 1, 2, true);
+                    require(std::ranges::count_if(ordered.timedEffects, [=](const auto& active) { return active.effectIndex == index; }) == 1,
+                        "Cure removed a later effect or preserved an earlier effect from its own source");
+                    std::cout << name << " item=" << item << " selective-removal=verified retry=atomic disk-restart=exact order=verified\n";
+                }
+                return;
+            }
             if (!effectFamily.empty())
             {
                 const auto connected = authority;

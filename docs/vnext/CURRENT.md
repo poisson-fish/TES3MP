@@ -1,10 +1,10 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-one NPC/walking biped and doors at 60 Hz; commits at 30 Hz; neighbors freeze.
-**V53, T3C8/capability 26; fresh campaigns.**
+NPC/biped/doors: 60 Hz; commits: 30 Hz; neighbors freeze.
+**V54, T3C8/capability 26; fresh campaigns.**
 
-Inherited body evidence:
+Inherited body captures:
 `build/m4-custom-<body>-<mode>-live-<suffix>`:
 
 | Body | Record | fatigue suffix | physical suffix |
@@ -14,31 +14,33 @@ Inherited body evidence:
 | khajiit-m | TR_m1_Batharra | 03 | 01 |
 | tsaesci | TR_m7_Qorinue-Najan | 01 | 01 |
 
-Synthetic fixtures; authored models. Logs: `build/logs/m4-custom-*`.
-Corpse poses untested; creatures require walking bipeds, no spells/equipped weapon.
+Synthetic authored-model fixtures; `build/logs/m4-custom-*`. Corpse poses untested;
+creatures require walking bipeds without spells/equipped weapons.
 
 Player/NPC casts share durable wind-up/release/recovery and fractional presentation.
-Release revalidates before atomic payment. Incapacitation, source/target loss and
-disconnect interrupt independently; inactive/saturated areas pause. Custom casting
-has resource checks only.
-
-Inherited desktop captures: `build/m4-player-cast-vanilla-live-02`,
+Release/payment, interruption and inactivity pauses persist atomically.
+Custom casting checks resources only. Inherited captures: `build/m4-player-cast-vanilla-live-02`,
 `build/m4-player-cast-tr-item-live-01`.
 
 Silence defeats Always; Sound stacks before fatigue and spares Always. Failed
-spells pay once; items remain usable. Inherited evidence: `build/logs/interference-*`.
+spells pay once; items remain usable. Inherited: `build/logs/interference-*`.
 
-Elemental shields share stock resistance/retaliation. Damage/Restore Attribute/Skill
-preserve permanent changes; Fortify Health/Magicka/Fatigue applies once and reverses
-on removal. FortifyMaximumMagicka rescales current magicka. Shared family checks:
-`build/logs/effect-family-{rules,shields-04,stats-03,fortify-02}.log` cover stacking, expiry, atomic retry, disconnect and
-disk restart. Synthetic headless evidence; no new desktop capture.
+Elemental shields, permanent Damage/Restore Attribute/Skill and reversible resource
+fortification: inherited synthetic lifecycle evidence in
+`build/logs/effect-family-{rules,shields-04,stats-03,fortify-02}.log`.
 
-**Next: conditions/cures through shared source removal and disease lifecycle.**
-Follow PLAN's family strategy. General cast/hit/loop VFX integration remains required;
-existing casting animations do not establish effect-specific visuals.
+CurePoison/CureParalyzation remove effects while preserving source membership.
+V54 persists authored common/blight diseases and curses, NPC melee acquisition,
+resistance/weakness and whole-source cures. Dispel preserves these sources;
+selective cures prevent reacquisition until whole-source removal.
+Synthetic spell/item cures, contact, atomic retry, malformed saves and disk restart:
+`build/logs/persistent-conditions-20260927-06.log`. No desktop capture.
+Corpse-contact acquisition, scripted additions and broader passive recipes remain pending.
 
-87 effects remain:
+**Next: Corprus/Vampirism/SunDamage special lifecycles and StuntedMagicka.**
+Corprus resistance/cure IDs await that lifecycle. General VFX remains pending.
+
+78 effects remain:
 
 - Defense/equipment (2): DisintegrateWeapon, DisintegrateArmor.
 - Concealment/detection (7): Invisibility, Chameleon, Light, NightEye,
@@ -48,11 +50,8 @@ existing casting animations do not establish effect-specific visuals.
 - AI/disposition (12): Charm, CalmHumanoid, CalmCreature, FrenzyHumanoid,
   FrenzyCreature, DemoralizeHumanoid, DemoralizeCreature, RallyHumanoid,
   RallyCreature, CommandHumanoid, CommandCreature, TurnUndead.
-- Conditions (16): WeaknessToCommonDisease, WeaknessToBlightDisease,
-  WeaknessToCorprusDisease, ResistCommonDisease, ResistBlightDisease,
-  ResistCorprusDisease, CureCommonDisease, CureBlightDisease, CureCorprusDisease,
-  CurePoison, CureParalyzation, RemoveCurse, Corprus, Vampirism, SunDamage,
-  StuntedMagicka.
+- Conditions (7): WeaknessToCorprusDisease, ResistCorprusDisease,
+  CureCorprusDisease, Corprus, Vampirism, SunDamage, StuntedMagicka.
 - Objects (4): Lock, Open, Telekinesis, Soultrap.
 - Travel (4): Mark, Recall, DivineIntervention, AlmsiviIntervention.
 - Equipment (12): BoundDagger, BoundLongsword, BoundMace, BoundBattleAxe,
@@ -65,7 +64,7 @@ existing casting animations do not establish effect-specific visuals.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-56 implemented + 87 remaining = 143 IDs; bounded gameplay coverage, not visual/source completion.
-Scripts, powers/abilities/diseases,
-multi-NPC/summons/player lives remain unproven. Ranged/overlapping combat precedes
-movement cutover; plain ranged sources/body proxies remain. TR Lua awaits M5.
+65 implemented + 78 remaining = 143 IDs; bounded gameplay, incomplete visuals/sources.
+Scripts, passive sources, multi-NPC/summons/player lives remain unproven.
+Ranged/overlapping combat precedes movement cutover; plain ranged sources/body
+proxies remain. TR Lua awaits M5.

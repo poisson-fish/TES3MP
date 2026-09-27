@@ -61,6 +61,13 @@ namespace TES3MP::Native
                     // This priority needs the complete known-spell domain.
                     if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka && effect.mRange == ESM::RT_Self)
                         return std::nullopt;
+                    if (effect.mEffectID == ESM::MagicEffect::CurePoison
+                        || effect.mEffectID == ESM::MagicEffect::CureParalyzation)
+                    {
+                        damage += MWMechanics::rateCureEffect(context.selfCures[
+                            effect.mEffectID == ESM::MagicEffect::CurePoison ? 0 : 1]);
+                        continue;
+                    }
                     auto priority = MWMechanics::rateCommonEffect(effect, context.caster, 0.f);
                     if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
                     if (!priority) priority = MWMechanics::rateCastingInterferenceEffect(effect, context.enemy,
@@ -132,6 +139,13 @@ namespace TES3MP::Native
             float result = 0.f;
             for (const auto& effect : effects.effects)
             {
+                if (effect.mEffectID == ESM::MagicEffect::CurePoison
+                    || effect.mEffectID == ESM::MagicEffect::CureParalyzation)
+                {
+                    result += MWMechanics::rateCureEffect(context.selfCures[
+                        effect.mEffectID == ESM::MagicEffect::CurePoison ? 0 : 1]) * MWMechanics::effectRatingMultiplier(effect.mRange, content);
+                    continue;
+                }
                 auto priority = MWMechanics::rateCommonEffect(effect, context.caster, magickaPriority);
                 if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
                 if (!priority) priority = MWMechanics::rateCastingInterferenceEffect(effect, context.enemy,

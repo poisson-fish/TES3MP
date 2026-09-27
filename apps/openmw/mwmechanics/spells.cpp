@@ -159,12 +159,12 @@ namespace MWMechanics
 
     void Spells::purgeCommonDisease()
     {
-        purge([](auto spell) { return spell->mData.mType == ESM::Spell::ST_Disease; });
+        purge([](auto spell) { return isRemovedByCure(*spell, ESM::MagicEffect::CureCommonDisease); });
     }
 
     void Spells::purgeBlightDisease()
     {
-        purge([](auto spell) { return spell->mData.mType == ESM::Spell::ST_Blight && !hasCorprusEffect(spell); });
+        purge([](auto spell) { return isRemovedByCure(*spell, ESM::MagicEffect::CureBlightDisease); });
     }
 
     void Spells::purgeCorprusDisease()
@@ -174,7 +174,16 @@ namespace MWMechanics
 
     void Spells::purgeCurses()
     {
-        purge([](auto spell) { return spell->mData.mType == ESM::Spell::ST_Curse; });
+        purge([](auto spell) { return isRemovedByCure(*spell, ESM::MagicEffect::RemoveCurse); });
+    }
+
+    bool Spells::isRemovedByCure(const ESM::Spell& spell, ESM::RefId cure)
+    {
+        if (cure == ESM::MagicEffect::CureCommonDisease) return spell.mData.mType == ESM::Spell::ST_Disease;
+        if (cure == ESM::MagicEffect::CureBlightDisease)
+            return spell.mData.mType == ESM::Spell::ST_Blight && !hasCorprusEffect(&spell);
+        if (cure == ESM::MagicEffect::RemoveCurse) return spell.mData.mType == ESM::Spell::ST_Curse;
+        return false;
     }
 
     bool Spells::hasCorprusEffect(const ESM::Spell* spell)

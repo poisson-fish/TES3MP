@@ -13,10 +13,14 @@ namespace ESM { struct Enchantment; }
 
 namespace TES3MP::Native
 {
+    struct PreparedInstantEffects;
     // Modifiers consumed by shared hit chance/evasion and armor calculations.
     bool expandedCombatEffect(ESM::RefId effect);
     bool supportedCombatModifier(ESM::RefId effect);
     bool permanentStatEffect(ESM::RefId effect);
+    bool wholeSourceCure(ESM::RefId effect);
+    std::optional<PreparedInstantEffects> preparePersistentEffects(const ESM::Spell& spell,
+        const MWWorld::ESMStore& content);
     int fortifyDynamicStat(ESM::RefId effect);
     void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
         float magnitude, const MWWorld::ESMStore& content);

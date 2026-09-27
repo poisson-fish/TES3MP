@@ -17,6 +17,32 @@
 
 namespace TES3MP::Native
 {
+    bool wholeSourceCure(ESM::RefId id)
+    {
+        return id == ESM::MagicEffect::CureCommonDisease || id == ESM::MagicEffect::CureBlightDisease
+            || id == ESM::MagicEffect::RemoveCurse;
+    }
+
+    std::optional<PreparedInstantEffects> preparePersistentEffects(const ESM::Spell& spell,
+        const MWWorld::ESMStore& content)
+    {
+        if (spell.mData.mType != ESM::Spell::ST_Disease && spell.mData.mType != ESM::Spell::ST_Blight
+            && spell.mData.mType != ESM::Spell::ST_Curse) return std::nullopt;
+        if (spell.mEffects.mList.empty() || spell.mEffects.mList.size() > 8) return std::nullopt;
+        auto normalized = spell.mEffects;
+        for (auto& entry : normalized.mList)
+        {
+            auto& effect = entry.mData;
+            // Store sources retain ordinals; the resolver applies only Self entries indefinitely.
+            if (wholeSourceCure(effect.mEffectID) || !MWMechanics::curedEffect(effect.mEffectID).empty()
+                || effect.mEffectID == ESM::MagicEffect::Dispel
+                || effect.mEffectID == ESM::MagicEffect::AbsorbAttribute || effect.mEffectID == ESM::MagicEffect::AbsorbSkill
+                || effect.mEffectID == ESM::MagicEffect::AbsorbHealth || effect.mEffectID == ESM::MagicEffect::AbsorbMagicka
+                || effect.mEffectID == ESM::MagicEffect::AbsorbFatigue) return std::nullopt;
+            effect.mArea = 0; effect.mDuration = 1;
+        }
+        return prepareInstantEffects(normalized, content, true, true);
+    }
     bool permanentStatEffect(ESM::RefId id)
     {
         return id == ESM::MagicEffect::DamageAttribute || id == ESM::MagicEffect::RestoreAttribute
@@ -41,12 +67,15 @@ namespace TES3MP::Native
     }
     bool expandedCombatEffect(ESM::RefId id)
     {
-        return permanentStatEffect(id) || fortifyDynamicStat(id) >= 0
+        return permanentStatEffect(id) || fortifyDynamicStat(id) >= 0 || wholeSourceCure(id)
+            || id == ESM::MagicEffect::ResistCommonDisease || id == ESM::MagicEffect::ResistBlightDisease
+            || id == ESM::MagicEffect::WeaknessToCommonDisease || id == ESM::MagicEffect::WeaknessToBlightDisease
             || id == ESM::MagicEffect::FortifyMaximumMagicka
             || id == ESM::MagicEffect::FireShield || id == ESM::MagicEffect::LightningShield
             || id == ESM::MagicEffect::FrostShield
             || id == ESM::MagicEffect::Reflect || id == ESM::MagicEffect::SpellAbsorption
             || id == ESM::MagicEffect::Paralyze || id == ESM::MagicEffect::ResistParalysis
+            || id == ESM::MagicEffect::CurePoison || id == ESM::MagicEffect::CureParalyzation
             || id == ESM::MagicEffect::Dispel || id == ESM::MagicEffect::DrainHealth
             || id == ESM::MagicEffect::DrainMagicka || id == ESM::MagicEffect::DrainFatigue
             || id == ESM::MagicEffect::AbsorbHealth || id == ESM::MagicEffect::AbsorbMagicka
@@ -161,7 +190,9 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::ResistFrost
                 || effect.mEffectID == ESM::MagicEffect::ResistShock
                 || effect.mEffectID == ESM::MagicEffect::ResistPoison
-                || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::ResistParalysis
+                || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::ResistCommonDisease
+                || effect.mEffectID == ESM::MagicEffect::ResistBlightDisease
+                || effect.mEffectID == ESM::MagicEffect::ResistParalysis
                 || effect.mEffectID == ESM::MagicEffect::Reflect
                 || effect.mEffectID == ESM::MagicEffect::SpellAbsorption
                 || effect.mEffectID == ESM::MagicEffect::FireShield
@@ -215,7 +246,8 @@ namespace TES3MP::Native
                             || effect.mEffectID == ESM::MagicEffect::ResistMagicka)))
                     : (effect.mEffectID == ESM::MagicEffect::ResistMagicka
                         ? effect.mDuration < 1 || effect.mDuration > 3600 : effect.mDuration != 0))
-                || ((magic->mData.mFlags & ESM::MagicEffect::NoDuration) && !(expandedEffects && effect.mEffectID == ESM::MagicEffect::Dispel))
+                || ((magic->mData.mFlags & ESM::MagicEffect::NoDuration) && !(expandedEffects && (effect.mEffectID == ESM::MagicEffect::Dispel
+                    || wholeSourceCure(effect.mEffectID) || !MWMechanics::curedEffect(effect.mEffectID).empty())))
                 || (!actorLifecycle && effect.mEffectID != ESM::MagicEffect::ResistMagicka
                     && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)))
                 return std::nullopt;

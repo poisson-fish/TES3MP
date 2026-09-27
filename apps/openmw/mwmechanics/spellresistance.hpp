@@ -2,6 +2,7 @@
 #define MWMECHANICS_SPELLRESISTANCE_H
 
 #include <components/misc/rng.hpp>
+#include <optional>
 
 namespace ESM
 {
@@ -18,6 +19,10 @@ namespace MWMechanics
 {
     class CreatureStats;
     class MagicEffects;
+
+    // Contact susceptibility; absent for non-diseases. Corprus overrides spell type.
+    // Preserve stock unclamped weakness/resistance and the caller's single contact roll.
+    std::optional<float> getDiseaseContactMultiplier(const ESM::Spell& spell, const MagicEffects& effects);
 
     /// Get an effect multiplier for applying an effect cast by the given actor in the given spell (optional).
     /// @return effect multiplier from 0 to 2.  (100% net resistance to 100% net weakness)
