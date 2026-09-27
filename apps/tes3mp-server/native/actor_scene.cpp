@@ -154,6 +154,7 @@ namespace TES3MP::Native
         bool mAvoidanceEnabled = false;
         bool mSmoothMovement = false;
         bool mEnchantedWeaponsAreMagical = false;
+        bool mOnlyAppropriateAmmunitionBypassesResistance = false;
         bool mUncappedDamageFatigue = false;
         struct Travel
         {
@@ -548,7 +549,7 @@ namespace TES3MP::Native
         } hit(start, end, casterActor == mImpl->mActorId ? mImpl->mActor->mCollisionObject : nullptr);
         hit.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
         hit.m_collisionFilterMask = MWPhysics::CollisionType_World
-            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor;
+            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor | MWPhysics::CollisionType_Door;
         mImpl->mWorld.convexSweepTest(&sphere, startFrame, endFrame, hit);
         if (!hit.hasHit()) return {};
         const auto& point = hit.m_hitPointWorld;
@@ -569,6 +570,11 @@ namespace TES3MP::Native
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         return mImpl->mUncappedDamageFatigue;
+    }
+    bool InteriorActorScene::onlyAppropriateAmmunitionBypassesResistance() const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        return mImpl->mOnlyAppropriateAmmunitionBypassesResistance;
     }
 
     BoundMeleeAnimation InteriorActorScene::bindMeleeAnimation(
@@ -764,6 +770,8 @@ namespace TES3MP::Native
         mImpl->mAdditionalHitSources = Settings::Manager::getBool("use additional anim sources", "Game");
         mImpl->mSmoothMovement = Settings::Manager::getBool("smooth movement", "Game");
         mImpl->mEnchantedWeaponsAreMagical = Settings::Manager::getBool("enchanted weapons are magical", "Game");
+        mImpl->mOnlyAppropriateAmmunitionBypassesResistance
+            = Settings::Manager::getBool("only appropriate ammunition bypasses resistance", "Game");
         mImpl->mUncappedDamageFatigue = Settings::Manager::getBool("uncapped damage fatigue", "Game");
         Settings::Index index;
         Settings::NavigatorCategory category(index);

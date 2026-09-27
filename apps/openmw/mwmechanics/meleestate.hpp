@@ -23,6 +23,10 @@ namespace MWMechanics
     // owns the RNG so a detached transaction can discard or persist the roll.
     std::string_view chooseMeleeAttack(const ESM::Weapon* weapon, Misc::Rng::Generator& rng);
 
+    float projectileLaunchSpeed(const MWWorld::ESMStore& store, bool thrown, float strength);
+    osg::Vec3f advanceProjectileVelocity(const osg::Vec3f& velocity, float seconds);
+    float projectileBaseDamage(const ESM::Weapon& weapon, const ESM::Weapon& ammunition, float strength);
+
     // Shared stock mechanics with explicit actor/content context. These are
     // simulation operations, not command authorization: the caller owns timing,
     // collision selection, staging, RNG and publication. No player/UI lookup.

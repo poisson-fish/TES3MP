@@ -248,16 +248,8 @@ namespace MWMechanics
                 return;
             }
 
-            {
-                const auto& attack = weapon.get<ESM::Weapon>()->mBase->mData.mChop;
-                damage = attack[0] + ((attack[1] - attack[0]) * attackStrength); // Bow/crossbow damage
-            }
-            {
-                // Arrow/bolt damage
-                // NB in case of thrown weapons, we are applying the damage twice since projectile == weapon
-                const auto& attack = projectile.get<ESM::Weapon>()->mBase->mData.mChop;
-                damage += attack[0] + ((attack[1] - attack[0]) * attackStrength);
-            }
+            damage = projectileBaseDamage(*weapon.get<ESM::Weapon>()->mBase,
+                *projectile.get<ESM::Weapon>()->mBase, attackStrength);
             adjustWeaponDamage(damage, weapon, attacker);
         }
 

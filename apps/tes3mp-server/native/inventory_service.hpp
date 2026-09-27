@@ -116,6 +116,8 @@ namespace TES3MP::Native
         std::array<std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)>, 2> mPlayerMelee;
         bool mBowRelease = false;
         bool mRangedRelease = false; // V48 extends the V47 layout to crossbows/thrown.
+        bool mRangedFlight = false; // V49 persists physical flight and terminal outcomes.
+        bool mOnlyAppropriateAmmunitionBypassesResistance = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;
         uint64_t mNpcRespawnDelayTicks = 27'000;

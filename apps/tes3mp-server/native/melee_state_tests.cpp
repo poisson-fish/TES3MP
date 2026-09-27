@@ -4,6 +4,7 @@
 #include <components/esm3/creaturestats.hpp>
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/misc/constants.hpp>
 #include <components/sceneutil/animationkeys.hpp>
 
 #include "melee_animation.hpp"
@@ -64,6 +65,28 @@ namespace
         actor.setHealth(MWMechanics::DynamicStat<float>(health));
         actor.setMagicka(MWMechanics::DynamicStat<float>(30.f));
         actor.setFatigue(MWMechanics::DynamicStat<float>(100.f));
+    }
+
+    void projectileMechanics()
+    {
+        MWWorld::ESMStore store;
+        setting(store, "fProjectileMinSpeed", 600);
+        setting(store, "fProjectileMaxSpeed", 1400);
+        setting(store, "fThrownWeaponMinSpeed", 300);
+        setting(store, "fThrownWeaponMaxSpeed", 1100);
+        near(MWMechanics::projectileLaunchSpeed(store, false, .25f), 800, "Bow speed lost content/strength");
+        near(MWMechanics::projectileLaunchSpeed(store, true, .75f), 900, "Thrown speed used bow settings");
+        ESM::Weapon bow, arrow; bow.blank(); arrow.blank();
+        bow.mData.mChop[0] = 5; bow.mData.mChop[1] = 25;
+        arrow.mData.mChop[0] = 2; arrow.mData.mChop[1] = 6;
+        near(MWMechanics::projectileBaseDamage(bow, arrow, .5f), 19, "Arrow damage omitted");
+        near(MWMechanics::projectileBaseDamage(arrow, arrow, .5f), 8, "Thrown damage must include both stock terms");
+        const osg::Vec3f initial(800, -90, 60);
+        const auto velocity = MWMechanics::advanceProjectileVelocity(initial, 1.f / 60);
+        near(velocity.x(), initial.x(), "Projectile drag changed stock motion");
+        near(velocity.y(), initial.y(), "Projectile lateral velocity changed");
+        near(velocity.z(), 60 - Constants::GravityConst * Constants::UnitsPerMeter * .1f / 60,
+            "Projectile gravity differs from stock units");
     }
 
     void mechanics()
@@ -567,6 +590,7 @@ int main(int argc, char** argv)
         else if (filter == "melee-scheduling") scheduling();
         else if (filter == "hit-resources") hitResources();
         else if (filter == "attack-modes") attackModes();
+        else if (filter == "projectile-mechanics") projectileMechanics();
         else throw std::invalid_argument("Unknown melee filter");
         std::cout << "PASS " << filter << " (synthetic content, shared stock primitives, no Environment)\n";
         return 0;

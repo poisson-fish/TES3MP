@@ -47,6 +47,7 @@
 
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/spellcasting.hpp"
 
@@ -508,8 +509,7 @@ namespace MWWorld
                 continue;
             // gravity constant - must be way lower than the gravity affecting actors, since we're not
             // simulating aerodynamics at all
-            projectileState.mVelocity
-                -= osg::Vec3f(0, 0, Constants::GravityConst * Constants::UnitsPerMeter * 0.1f) * duration;
+            projectileState.mVelocity = MWMechanics::advanceProjectileVelocity(projectileState.mVelocity, duration);
 
             projectile->setVelocity(projectileState.mVelocity);
 

@@ -32,8 +32,9 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerSwingCampaignMagic = 0x4b50434154335354;
     inline constexpr uint64_t BowReleaseCampaignMagic = 0x4c50434154335354;
     inline constexpr uint64_t RangedReleaseCampaignMagic = 0x4d50434154335354;
+    inline constexpr uint64_t RangedFlightCampaignMagic = 0x4e50434154335354;
     inline constexpr bool hasRangedRelease(uint64_t magic)
-    { return magic == BowReleaseCampaignMagic || magic == RangedReleaseCampaignMagic; }
+    { return magic == BowReleaseCampaignMagic || magic == RangedReleaseCampaignMagic || magic == RangedFlightCampaignMagic; }
     inline constexpr bool hasPlayerSwings(uint64_t magic)
     { return magic == PlayerSwingCampaignMagic || hasRangedRelease(magic); }
     inline constexpr bool hasWeaponExecution(uint64_t magic)
@@ -78,7 +79,7 @@ namespace TES3MP::Native
         bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
         bool operator==(const PlayerSwing&) const = default;
     };
-    // V47 bows and V48 crossbows/thrown releases remain frozen until flight/impact.
+    // V47/V48 retain frozen releases. V49 advances durable 60 Hz physical flight.
     // The consumed instance may no longer exist; thrown source == ammunition.
     struct BowProjectile
     {
@@ -87,6 +88,9 @@ namespace TES3MP::Native
         float strength = 0;
         std::string weapon, ammoRecord;
         std::array<float, 3> position{}, direction{};
+        std::array<float, 3> velocity{};
+        float condition = 1;
+        uint64_t steps = 0, terminal = 0; // 0 flying, 1 collided, 2 expired.
         bool operator==(const BowProjectile&) const = default;
     };
     struct ActorCampaignCombat
@@ -589,6 +593,19 @@ namespace TES3MP::Native
                 }
                 for (auto& v : value.position) v = number();
                 for (auto& v : value.direction) v = number();
+                if (magic == RangedFlightCampaignMagic)
+                {
+                    for (auto& v : value.velocity) v = number();
+                    value.condition = number();
+                    value.steps = getAreaWord(bytes, offset);
+                    value.terminal = getAreaWord(bytes, offset);
+                    if (value.condition < 0 || value.condition > 1 || value.steps > 3600 || value.terminal > 2
+                        || (value.steps == 3600 && !value.terminal)
+                        || (value.terminal == 2 && value.steps != 3600)
+                        || std::ranges::any_of(value.position, [](float v) { return std::abs(v) > 10'000'000; })
+                        || std::ranges::any_of(value.velocity, [](float v) { return std::abs(v) > 100000; }))
+                        throw std::invalid_argument("Native physical flight state invalid");
+                }
                 float norm = 0; for (float v : value.direction) norm += v * v;
                 if (!value.caster || !value.command || !value.source || !value.ammunition || !value.target
                     || !value.targetLife || value.targetLife > life->generation

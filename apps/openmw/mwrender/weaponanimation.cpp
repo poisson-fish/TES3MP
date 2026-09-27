@@ -14,6 +14,7 @@
 #include "../mwworld/inventorystore.hpp"
 
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/weapontype.hpp"
 
 #include "animation.hpp"
@@ -113,9 +114,6 @@ namespace MWRender
         osg::Quat orient = osg::Quat(actor.getRefData().getPosition().rot[0], osg::Vec3f(-1, 0, 0))
             * osg::Quat(actor.getRefData().getPosition().rot[2], osg::Vec3f(0, 0, -1));
 
-        const MWWorld::Store<ESM::GameSetting>& gmst
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-
         MWMechanics::applyFatigueLoss(actor, *weapon, attackStrength);
 
         if (MWMechanics::getWeaponType(weapon->get<ESM::Weapon>()->mBase->mData.mType)->mWeaponClass
@@ -130,9 +128,8 @@ namespace MWRender
                 return;
             osg::Vec3f launchPos = osg::computeLocalToWorld(nodepaths[0]).getTrans();
 
-            float fThrownWeaponMinSpeed = gmst.find("fThrownWeaponMinSpeed")->mValue.getFloat();
-            float fThrownWeaponMaxSpeed = gmst.find("fThrownWeaponMaxSpeed")->mValue.getFloat();
-            float speed = fThrownWeaponMinSpeed + (fThrownWeaponMaxSpeed - fThrownWeaponMinSpeed) * attackStrength;
+            float speed = MWMechanics::projectileLaunchSpeed(
+                *MWBase::Environment::get().getESMStore(), true, attackStrength);
 
             MWWorld::Ptr weaponPtr = *weapon;
             MWBase::Environment::get().getWorld()->launchProjectile(
@@ -158,9 +155,8 @@ namespace MWRender
                 return;
             osg::Vec3f launchPos = osg::computeLocalToWorld(nodepaths[0]).getTrans();
 
-            float fProjectileMinSpeed = gmst.find("fProjectileMinSpeed")->mValue.getFloat();
-            float fProjectileMaxSpeed = gmst.find("fProjectileMaxSpeed")->mValue.getFloat();
-            float speed = fProjectileMinSpeed + (fProjectileMaxSpeed - fProjectileMinSpeed) * attackStrength;
+            float speed = MWMechanics::projectileLaunchSpeed(
+                *MWBase::Environment::get().getESMStore(), false, attackStrength);
 
             MWWorld::Ptr weaponPtr = *weapon;
             MWWorld::Ptr ammoPtr = *ammo;

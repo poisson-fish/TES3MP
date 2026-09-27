@@ -14,11 +14,10 @@ under 10% loss/100 ms delay/jitter:
 `build/m4-cast-tr-item-live-04/result.json`.
 Records unchanged; stats/placements synthetic. TR Lua remains disabled until M5.
 
-V34 retains melee defense/knockout; get-up timing remains pending. V37 supports
-multi-slot constant fortification/resistance; other constant effects reject.
-V43 binds participant hit resources/timers. V44–V45 equip carried melee weapons,
-repeat stock weighted chop/slash/thrust and remove passive effects on breakage;
-recovery never re-equips. V43–V45 evidence is synthetic/headless.
+V34 retains defense/knockout; get-up timing remains pending. V37 supports constant
+fortification/resistance only. V43 binds participant hit resources. V44-V45 equip
+carried melee weapons, repeat stock directions and remove broken passive sources.
+Recovery never re-equips; evidence is headless.
 
 V46 persists player swings/identities. Source/target loss, active disconnect and
 hit recovery cancel; inactivity/capacity pause. Simultaneous hits share wear.
@@ -29,24 +28,25 @@ reconnect/restart and duplicate outcomes under 10% loss/100 ms delay/jitter:
 `build/m4-swing-vanilla-live-07/result.json`; `build/logs/m4-swing-live-test.log`.
 Synthetic actors/placements isolate presentation, not sustained mixed combat.
 
-V48 adds crossbow/bolt and thrown release to V47 bows. Participant
-`shoot release` keys commit ammunition, stock fatigue, animation and launch identities.
-Crossbows persist stock random strength/RNG for coincident wind-up keys.
-Thrown weapons consume themselves, clearing exhausted slots without breaking recovery.
-Fresh V48 campaigns required; V47 remains bow-only.
+V49 adds 60 Hz player flight using shared stock speed/gravity/damage and
+NPC/world/door collision. Velocity, age, launch condition, terminal outcome, damage,
+wear and RNG persist atomically. Flight survives disconnect/restart. Fresh V49
+campaigns required; V47/V48 retain frozen launches.
 
-Plain sources only. Eight launches maximum remain frozen. NPC ranged execution,
-desktop ranged input and projectile rendering remain pending.
+Headless `tes3mp_native_loadout_tests` filters `bow-flight`, `crossbow-flight`,
+`thrown-flight` passed concurrent releases, NPC/geometry impacts, rejected/uncertain
+writes, wind-up/flight/terminal restart, malformed recovery, disconnect and exhaustion:
+`build/logs/m4-bow-flight-test.log`, `build/logs/m4-crossbow-flight-test.log`,
+`build/logs/m4-thrown-flight-test.log`.
+Fixtures use unchanged vanilla weapon/KF records with synthetic actors, increased
+marksman skill and placements. `tes3mp_native_melee_tests projectile-mechanics`
+passed: `build/logs/m4-projectile-mechanics-test.log`.
 
-Headless `tes3mp_native_loadout_tests crossbow-release` and `thrown-release` passed
-overlapping participants, interruption/source removal, duplicates, rejected/uncertain
-writes, wind-up/release restart, malformed recovery and exhaustion:
-`build/logs/m4-crossbow-release-test.log`, `build/logs/m4-thrown-release-test.log`.
-Synthetic actors/placements use vanilla records/KF resources. Expanded `bow-release`
-and shared-path `player-swings` passed: `build/logs/m4-ranged-bow-regression.log`,
-`build/logs/m4-ranged-melee-regression.log`. `melee-presentation` passed crossbow/thrown
-sampling without gameplay callbacks: `build/logs/m4-ranged-pose-test.log`.
-`tes3mp_native_melee_tests melee-timing` passed: `build/logs/m4-ranged-timing-test.log`.
+Plain player sources only, against one NPC/world scene using a body-center launch
+proxy. Eight records, including terminal launches, remain the campaign limit.
+NPC ranged execution, player contacts, record recycling, ammunition recovery,
+desktop input/rendering and mixed vanilla/TR live acceptance remain pending.
+**Two-client ranged acceptance is not met.**
+V48 `thrown-release` regression passed: `build/logs/m4-flight-release-regression.log`.
 
-Next: physical flight/collision/impact, NPC ranged execution, desktop input/presentation,
-then close combat and composed mixed vanilla/TR encounters per PLAN. Movement remains last.
+Next: terminal recycling with durable retry protection, then remaining combat per PLAN. Movement last.

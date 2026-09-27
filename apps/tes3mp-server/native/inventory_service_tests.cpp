@@ -4132,7 +4132,8 @@ namespace TES3MP::Native::Testing
             std::ifstream input(descriptor);
             std::string text((std::istreambuf_iterator<char>(input)), {}); input.close();
             text.replace(0, std::string_view("native-inventory-44").size(),
-                profile == "bow-release" ? "native-inventory-47" : "native-inventory-48");
+                profile.ends_with("-flight") ? "native-inventory-49"
+                    : profile == "bow-release" ? "native-inventory-47" : "native-inventory-48");
             std::ofstream(descriptor) << text;
         }
         auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "Player swing crypto unavailable");
@@ -4191,7 +4192,8 @@ namespace TES3MP::Native::Testing
 
         const auto initialView = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
         const auto& inventory = initialView->playerInventory.front();
-        const bool thrown = profile == "thrown-release";
+        const bool flight = profile.ends_with("-flight");
+        const bool thrown = profile.starts_with("thrown-");
         const auto consumedSlot = thrown ? EquipmentSlot::CarriedRight : EquipmentSlot::Ammunition;
         const auto ammoSlot = std::ranges::find(inventory.equipment, consumedSlot, &EquipmentBinding::slot);
         require(ammoSlot != inventory.equipment.end(), "Bow fixture did not equip arrows");
@@ -4206,8 +4208,8 @@ namespace TES3MP::Native::Testing
             return total;
         };
         require(count(service) == 2, "Bow fixture arrow count invalid");
-        std::vector<std::byte> windup, beforeRelease, released;
-        uint64_t releaseTick = 0;
+        std::vector<std::byte> windup, beforeRelease, released, beforeImpact, impacted;
+        uint64_t releaseTick = 0, impactTick = 0;
         bool restoredWindup = false, restoredRelease = false;
         std::unique_ptr<InventoryHost> replay;
         for (uint64_t tick = 1; tick <= 150; ++tick)
@@ -4232,6 +4234,8 @@ namespace TES3MP::Native::Testing
             commit(pending);
             const auto current = state(service);
             const auto& swing = *current.combat->swings[0];
+            if (flight && !impactTick && !current.combat->arrows.empty() && current.combat->arrows.front().terminal)
+            { beforeImpact = before; impacted = proposed; impactTick = tick; }
             require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                 == CanonicalDurabilityResult::Rejected && bytes(service) == proposed,
                 "Replayed bow transaction consumed twice");
@@ -4251,13 +4255,40 @@ namespace TES3MP::Native::Testing
         }
         require(restoredWindup && restoredRelease && state(service).combat->arrows.size() == 1,
             "Bow never released and recovered");
+        if (flight)
+        {
+            const auto resolved = state(service);
+            require(resolved.combat->arrows.front().terminal == 1 && resolved.combat->arrows.front().steps > 0,
+                "Physical projectile did not collide");
+            const auto& shot = resolved.combat->arrows.front();
+            std::cout << "physical-flight record=" << shot.weapon << " steps=" << shot.steps
+                << " position=" << shot.position[0] << ',' << shot.position[1] << ',' << shot.position[2]
+                << " npc-health=" << resolved.combat->actors[2][8][2]
+                << " spawn-health=" << resolved.life->spawnStats[8][2] << '\n';
+            require(resolved.combat->actors[2][8][2] < resolved.life->spawnStats[8][2],
+                "Physical impact did not damage the NPC");
+            // Restart after release, then disconnect the caster while the peer observes.
+            InventoryHost offline(descriptor, testContentManifest(), *registry, *crypto, released);
+            const std::vector survivor{*authority.findActiveSession(id<SessionId>(2))};
+            const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), survivor));
+            offline.service().synchronizeCells(disconnected);
+            for (uint64_t tick = releaseTick + 1; tick <= resolved.tick; ++tick)
+            {
+                auto pending = offline.service().prepareNativeTick(disconnected, id<ServerTick>(tick), 1.f / 30, {});
+                commit(pending);
+            }
+            const auto continued = state(offline.service());
+            require(continued.combat->arrows == resolved.combat->arrows
+                && continued.combat->actors[2][8][2] == resolved.combat->actors[2][8][2]
+                && count(offline.service()) == 1, "Disconnect lost or duplicated physical impact");
+        }
         {
             const auto saved = readActorCampaign({reinterpret_cast<const char*>(released.data()), released.size()});
             const auto& arrow = saved.combat->arrows.front();
             require((arrow.source == arrow.ammunition) == thrown
                 && (arrow.weapon == arrow.ammoRecord) == thrown,
                 "Thrown source identity must be the consumed projectile identity");
-            const size_t arrowSize = 16 * 8 + arrow.weapon.size() + arrow.ammoRecord.size();
+            const size_t arrowSize = (flight ? 22 : 16) * 8 + arrow.weapon.size() + arrow.ammoRecord.size();
             const size_t countAt = released.size() - saved.inventory.size() - saved.actor.size() - arrowSize - 8;
             const auto word = [](auto& image, size_t at, uint64_t value) {
                 for (size_t i = 0; i < 8; ++i) image.at(at+i) = std::byte(value >> (i*8));
@@ -4289,6 +4320,36 @@ namespace TES3MP::Native::Testing
             invalid = released;
             invalid.erase(invalid.begin() + countAt + 8, invalid.begin() + countAt + 8 + arrowSize);
             word(invalid, countAt, 0); reject(invalid); // Spent arrow without its projectile.
+            if (flight)
+            {
+                const auto flightAt = countAt + 8 + arrowSize - 6 * 8;
+                invalid = released; word(invalid, flightAt, std::bit_cast<uint32_t>(123.f)); reject(invalid);
+                invalid = released; word(invalid, flightAt + 3 * 8, std::bit_cast<uint32_t>(1.1f)); reject(invalid);
+                invalid = released; word(invalid, flightAt + 4 * 8, 3601); reject(invalid);
+                invalid = released; word(invalid, flightAt + 5 * 8, 1); reject(invalid); // Impact before any flight.
+                // Rotate the initial X/Z components toward the fixture floor. The
+                // same bound speed/strength now produces a geometry miss, not NPC damage.
+                auto down = released;
+                const auto directionAt = flightAt - 3 * 8;
+                word(down, directionAt, std::bit_cast<uint32_t>(arrow.direction[2]));
+                word(down, directionAt + 2 * 8, std::bit_cast<uint32_t>(arrow.direction[0]));
+                word(down, flightAt, std::bit_cast<uint32_t>(arrow.velocity[2]));
+                word(down, flightAt + 2 * 8, std::bit_cast<uint32_t>(arrow.velocity[0]));
+                InventoryHost floor(descriptor, testContentManifest(), *registry, *crypto, down);
+                floor.service().synchronizeCells(authority);
+                for (uint64_t tick = releaseTick + 1; tick <= releaseTick + 100; ++tick)
+                {
+                    auto pending = floor.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f / 30, {});
+                    commit(pending);
+                    if (state(floor.service()).combat->arrows.front().terminal) break;
+                }
+                const auto stopped = state(floor.service());
+                require(stopped.combat->arrows.front().terminal == 1
+                    && stopped.combat->actors[2][8][2] == saved.combat->actors[2][8][2]
+                    && count(floor.service()) == 1, "Geometry impact damaged NPC or returned spent ammunition");
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(floor.service()));
+                require(bytes(restored.service()) == bytes(floor.service()), "Geometry outcome changed on restart");
+            }
         }
         // Both participant resource sets can release in the same encounter,
         // with the peer's inventory and identity preserved through restart.
@@ -4350,18 +4411,23 @@ namespace TES3MP::Native::Testing
             InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
             require(bytes(restored.service()) == bytes(runtime), "Changed arrow source could not recover");
         }
-        // An uncertain write closes the runtime; either durable outcome restores coherently.
+        // An uncertain release or impact closes the runtime. Both possible durable
+        // outcomes recover exactly; retrying an impact cannot apply damage twice.
+        for (unsigned phase = 0; phase < (flight ? 2u : 1u); ++phase)
         {
-            InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, beforeRelease);
+            const auto& prior = phase ? beforeImpact : beforeRelease;
+            const auto& next = phase ? impacted : released;
+            InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, prior);
             auto& runtime = uncertain.service(); runtime.synchronizeCells(authority);
-            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(releaseTick), 1.f/30, {});
+            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(phase ? impactTick : releaseTick), 1.f/30, {});
             require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Failed; })
                 == CanonicalDurabilityResult::Failed && runtime.inventoryImage().empty(),
                 "Uncertain bow write did not fail closed");
-            for (const auto* image : {&beforeRelease, &released})
+            for (const auto* image : {&prior, &next})
             {
                 InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, *image);
-                require(count(restored.service()) + state(restored.service()).combat->arrows.size() == 2,
+                require(bytes(restored.service()) == *image
+                    && count(restored.service()) + state(restored.service()).combat->arrows.size() == 2,
                     "Uncertain bow recovery lost or duplicated an arrow");
             }
         }
@@ -4389,7 +4455,8 @@ namespace TES3MP::Native::Testing
     void checkRangedRelease(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, std::string_view profile)
     {
-        require(profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release",
+        require(profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release"
+            || profile == "bow-flight" || profile == "crossbow-flight" || profile == "thrown-flight",
             "Unknown ranged release fixture");
         checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
@@ -5296,7 +5363,7 @@ namespace TES3MP::Native::Testing
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
                 std::ofstream(scratch / "encounter.txt") << "profile vanilla-melee\nweapon iron longsword\n";
             }
-            else if (!encounterProfile.empty() && !encounterProfile.ends_with("-release"))
+            else if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
             {
                 const bool tr = encounterProfile.starts_with("tr-");
                 const bool itemProfile = encounterProfile.ends_with("item");
@@ -5393,24 +5460,25 @@ namespace TES3MP::Native::Testing
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
-                if (encounterProfile.ends_with("-release"))
+                if ((encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
                 {
-                    const int type = encounterProfile == "crossbow-release" ? ESM::Weapon::MarksmanCrossbow
-                        : encounterProfile == "thrown-release" ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
+                    const int type = encounterProfile.starts_with("crossbow-") ? ESM::Weapon::MarksmanCrossbow
+                        : encounterProfile.starts_with("thrown-") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
                     const auto plain = [&](int type) {
                         for (const auto& record : base.store().get<ESM::Weapon>())
                             if (record.mData.mType == type && record.mScript.empty() && record.mEnchant.empty()) return record.mId;
                         throw std::runtime_error("Vanilla plain ranged fixture unavailable");
                     };
-                    const auto weapon = encounterProfile == "bow-release" ? ESM::RefId::stringRefId("long bow") : plain(type);
+                    const auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
                     for (auto* participant : {&female, &beast})
                     {
                         participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? 2 : 1, weapon}};
                         if (type != ESM::Weapon::MarksmanThrown)
                             participant->mInventory.mList.push_back({2,
-                                encounterProfile == "bow-release" ? ESM::RefId::stringRefId("iron arrow")
+                                encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("iron arrow")
                                     : plain(MWMechanics::getWeaponType(type)->mAmmoType)});
-                        participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)] = 100;
+                        participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)]
+                            = encounterProfile.ends_with("-flight") ? 255 : 100;
                     }
                 }
                 for (const auto& participant : {female, beast})
@@ -5548,7 +5616,7 @@ namespace TES3MP::Native::Testing
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
-        if (!encounterProfile.empty() && !encounterProfile.ends_with("-release")) return;
+        if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))) return;
         {
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};

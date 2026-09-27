@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 48; ++candidate)
+            for (unsigned candidate = 3; candidate <= 49; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -546,6 +546,8 @@ namespace TES3MP::Native
                 };
                 auto scene = createScene();
                 start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
+                start.binding.mOnlyAppropriateAmmunitionBypassesResistance
+                    = scene->onlyAppropriateAmmunitionBypassesResistance();
                 start.binding.mUncappedDamageFatigue = scene->uncappedDamageFatigue();
                 if (!start.navigation->meleeGroup.empty())
                 {
@@ -570,7 +572,8 @@ namespace TES3MP::Native
                         placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
                     }
                 }
-                start.binding.mRangedRelease = start.text.starts_with("native-inventory-48");
+                start.binding.mRangedFlight = start.text.starts_with("native-inventory-49");
+                start.binding.mRangedRelease = start.text.starts_with("native-inventory-48") || start.binding.mRangedFlight;
                 start.binding.mBowRelease = start.text.starts_with("native-inventory-47") || start.binding.mRangedRelease;
                 const bool playerSwings = start.text.starts_with("native-inventory-46") || start.binding.mBowRelease;
                 start.binding.mGeneralAttackModes = start.text.starts_with("native-inventory-45") || playerSwings;

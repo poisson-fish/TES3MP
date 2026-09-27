@@ -17,12 +17,17 @@ namespace TES3MP::Native
     // loot LEVEL SEED (trusted fresh-campaign leveled-loot inputs)
     // interior "INTERIOR_NAME"
     // cell interior:SPACE_ID
+    // V49 advances player physical projectiles at 60 Hz against the selected NPC
+    // and retained world/door collision scene. Velocity, substep age, launch
+    // condition and terminal outcome persist with damage, wear, RNG and resources.
+    // Launches survive disconnect/restart; fresh campaigns required. Eight retained
+    // launch records remain the campaign limit; recycling, NPC execution, player
+    // contacts, ammunition recovery and desktop input/rendering remain pending.
     // V48 extends V47 bow/arrow release to crossbow/bolt and thrown weapons.
     // Stock weapon flags distinguish condition from consumable thrown sources;
     // zero-length wind-up uses shared stock random strength, saved with the RNG.
     // Bound shoot-release keys consume one projectile and persist its launch record
-    // with fatigue and animation progress. Up to eight frozen launches await
-    // flight/impact; no desktop ranged input or projectile rendering is wired yet.
+    // with fatigue and animation progress. V47/V48 retain their eight frozen launches.
     // Scripted/enchanted ranged sources reject. Fresh campaign required.
     // V46 schedules both players' melee intents through participant-bound
     // wind-up, release, KF hit and follow-through. Direction, requested strength,

@@ -6,6 +6,7 @@
 
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/misc/constants.hpp>
 #include <tes3mp/melee_combat.hpp>
 
 #include "../mwworld/esmstore.hpp"
@@ -13,6 +14,27 @@
 
 namespace MWMechanics
 {
+    float projectileLaunchSpeed(const MWWorld::ESMStore& store, bool thrown, float strength)
+    {
+        const auto& gmst = store.get<ESM::GameSetting>();
+        const float minimum = gmst.find(thrown ? "fThrownWeaponMinSpeed" : "fProjectileMinSpeed")->mValue.getFloat();
+        const float maximum = gmst.find(thrown ? "fThrownWeaponMaxSpeed" : "fProjectileMaxSpeed")->mValue.getFloat();
+        return minimum + (maximum - minimum) * strength;
+    }
+
+    osg::Vec3f advanceProjectileVelocity(const osg::Vec3f& velocity, float seconds)
+    {
+        return velocity - osg::Vec3f(0, 0, Constants::GravityConst * Constants::UnitsPerMeter * .1f) * seconds;
+    }
+
+    float projectileBaseDamage(const ESM::Weapon& weapon, const ESM::Weapon& ammunition, float strength)
+    {
+        const auto& bow = weapon.mData.mChop;
+        const auto& arrow = ammunition.mData.mChop;
+        // Stock thrown weapons contribute both terms, even though the records are identical.
+        return (bow[0] + (bow[1] - bow[0]) * strength) + (arrow[0] + (arrow[1] - arrow[0]) * strength);
+    }
+
     std::string_view chooseMeleeAttack(const ESM::Weapon* weapon, Misc::Rng::Generator& rng)
     {
         if (weapon)

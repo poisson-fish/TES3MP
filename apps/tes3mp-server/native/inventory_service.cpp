@@ -654,6 +654,8 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native bow release requires player animation binding");
         if (mBinding.mRangedRelease && !mBinding.mBowRelease)
             throw std::invalid_argument("Native ranged release requires the ammunition layout");
+        if (mBinding.mRangedFlight && !mBinding.mRangedRelease)
+            throw std::invalid_argument("Native flight requires extended ranged release");
         if (mBinding.mBoundHits)
         {
             if (!mBinding.mNpcCastLifecycle || !mBinding.mMeleeDefenseRules)
@@ -838,6 +840,8 @@ namespace TES3MP::Native
             // Demand is a union, not another simulation loop. An unavailable
             // path remains travel demand; only stock path completion releases it.
             active[index] = active[index] || !mProjectiles.empty()
+                || (mBinding.mRangedFlight && mCombat && std::ranges::any_of(mCombat->arrows,
+                    [](const auto& flight) { return !flight.terminal; }))
                 || (!mBinding.mNavigatingActor->arrived()
                     && (!mCombat || mCombat->actors[2][8][2] > 0));
             bool navigationActive = active[index];
@@ -1757,7 +1761,8 @@ namespace TES3MP::Native
             if (bool(mBinding.mWeaponMelee) != hasWeaponExecution(magic)
                 || bool(mBinding.mPlayerMelee[0]) != hasPlayerSwings(magic)
                 || mBinding.mBowRelease != hasRangedRelease(magic)
-                || mBinding.mRangedRelease != (magic == RangedReleaseCampaignMagic))
+                || mBinding.mRangedRelease != (magic == RangedReleaseCampaignMagic || magic == RangedFlightCampaignMagic)
+                || mBinding.mRangedFlight != (magic == RangedFlightCampaignMagic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -1929,6 +1934,21 @@ namespace TES3MP::Native
                         || (arrow.source == arrow.ammunition) != (weapon->mData.mType == ESM::Weapon::MarksmanThrown)
                         || !rangedWeapon(weapon, mBinding.mRangedRelease) || !rangedSources(*weapon, *ammo))
                         throw std::invalid_argument("Saved bow projectile source invalid");
+                    if (mBinding.mRangedFlight)
+                    {
+                        const float speed = MWMechanics::projectileLaunchSpeed(mRuntime.mStore,
+                            weapon->mData.mType == ESM::Weapon::MarksmanThrown, arrow.strength);
+                        if (!std::isfinite(speed) || speed <= 0 || speed > 50000
+                            || arrow.steps / 2 + arrow.steps % 2 > decoded.tick - arrow.releaseTick
+                            || (arrow.terminal && !arrow.steps))
+                            throw std::invalid_argument("Saved physical flight clock invalid");
+                        osg::Vec3f velocity(arrow.direction[0] * speed, arrow.direction[1] * speed, arrow.direction[2] * speed);
+                        for (uint64_t i = 0; i < arrow.steps; ++i)
+                            velocity = MWMechanics::advanceProjectileVelocity(velocity, 1.f / 60);
+                        for (size_t axis = 0; axis < 3; ++axis)
+                            if (velocity[axis] != arrow.velocity[axis])
+                                throw std::invalid_argument("Saved physical projectile velocity changed");
+                    }
                 }
                 if (mBinding.mPlayerMelee[0])
                     for (size_t i = 0; i < decoded.combat->swings.size(); ++i)
@@ -2130,7 +2150,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native arrow capacity exceeded");
             swingSize += 8;
             for (const auto& arrow : combat->arrows)
-                swingSize += 16 * 8 + arrow.weapon.size() + arrow.ammoRecord.size();
+                swingSize += (mBinding.mRangedFlight ? 22 : 16) * 8 + arrow.weapon.size() + arrow.ammoRecord.size();
         }
         if (core.empty() || actor.empty() || actor.size() > 65536
             || timedEffects.size() > (mBinding.mGeneralConstants ? MaximumActorTimedEffects : 16)
@@ -2139,7 +2159,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mRangedRelease ? RangedReleaseCampaignMagic : mBinding.mBowRelease ? BowReleaseCampaignMagic
+        putAreaWord(result, mBinding.mRangedFlight ? RangedFlightCampaignMagic
+            : mBinding.mRangedRelease ? RangedReleaseCampaignMagic : mBinding.mBowRelease ? BowReleaseCampaignMagic
             : mBinding.mPlayerMelee[0] ? PlayerSwingCampaignMagic
             : mBinding.mWeaponMelee ? WeaponExecutionCampaignMagic
             : mBinding.mNpcCastLifecycle ? CastLifecycleCampaignMagic
@@ -2285,6 +2306,13 @@ namespace TES3MP::Native
                 { putAreaWord(result, text->size()); result.insert(result.end(), text->begin(), text->end()); }
                 for (float v : arrow.position) putAreaWord(result, std::bit_cast<uint32_t>(v));
                 for (float v : arrow.direction) putAreaWord(result, std::bit_cast<uint32_t>(v));
+                if (mBinding.mRangedFlight)
+                {
+                    for (float v : arrow.velocity) putAreaWord(result, std::bit_cast<uint32_t>(v));
+                    putAreaWord(result, std::bit_cast<uint32_t>(arrow.condition));
+                    putAreaWord(result, arrow.steps);
+                    putAreaWord(result, arrow.terminal);
+                }
             }
         }
         result.insert(result.end(), core.begin(), core.end()); result.insert(result.end(), actor.begin(), actor.end());
@@ -2389,7 +2417,8 @@ namespace TES3MP::Native
     EquipmentBytes InventoryService::stagedWeaponCore(std::span<const WeaponWear> wear,
         const PreparedNativeInventory* command, std::span<const ItemCharge> charges) const
     {
-        if (wear.size() > 4 || charges.size() > 2 || (wear.empty() && charges.empty())
+        if (wear.size() > (mBinding.mRangedFlight ? 3 * MWWorld::InventoryStore::Slots : 4)
+            || charges.size() > 2 || (wear.empty() && charges.empty())
             || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - wear.size() - charges.size())
             throw std::invalid_argument("Native melee weapon wear candidate invalid");
         command = areaDoorCommand(command);
@@ -2891,7 +2920,7 @@ namespace TES3MP::Native
             const MWMechanics::NpcStats& attacker, const ESM::Weapon* weapon, float strength,
             float attackerWeight, float attackerSkill, const std::array<float, 3>& attackerPosition,
             const std::array<float, 3>& defenderPosition, float defenderYaw, bool movingForward,
-            float& damage, Misc::Rng::Generator& rng) {
+            float& damage, Misc::Rng::Generator& rng, bool projectile = false) {
             if (!std::isfinite(damage) || damage < 0 || damage > 1'000'000)
                 throw std::invalid_argument("Native melee damage invalid before defense");
             if (MWMechanics::isNormalWeapon(weapon, mBinding.mEnchantedWeaponsAreMagical))
@@ -2916,7 +2945,7 @@ namespace TES3MP::Native
                     readyToBlock = carriedLeftVisibleForWeapon(equipped.mType);
                 }
             }
-            if (shield && shield->mCondition > 0 && !victim.getKnockedDown()
+            if (!projectile && shield && shield->mCondition > 0 && !victim.getKnockedDown()
                 && readyToBlock && (!mBinding.mMeleeDefenseRules || !combat->hitRecoveryTicks[defender])
                 && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() <= 0)
             {
@@ -3042,7 +3071,11 @@ namespace TES3MP::Native
             life->bornTick = tick.value();
             life->respawnTick = 0;
         }
-        struct PlayerHitRequest { size_t owner; MeleeAttackType direction; float strength; bool contact; };
+        struct PlayerHitRequest
+        {
+            size_t owner; MeleeAttackType direction; float strength; bool contact;
+            std::optional<BowProjectile> projectile;
+        };
         std::vector<PlayerHitRequest> playerContacts;
         if (mBinding.mPlayerMelee[0] && combat)
         {
@@ -3163,6 +3196,19 @@ namespace TES3MP::Native
                             swing.strength, swing.weapon, swing.ammoRecord,
                             {origin.x(), origin.y(), origin.z() + 110.f},
                             {direction.x(), direction.y(), direction.z()}});
+                        if (mBinding.mRangedFlight)
+                        {
+                            auto& arrow = combat->arrows.back();
+                            const float speed = MWMechanics::projectileLaunchSpeed(mRuntime.mStore,
+                                weapon->mData.mType == ESM::Weapon::MarksmanThrown, swing.strength);
+                            if (!std::isfinite(speed) || speed <= 0 || speed > 50000)
+                                throw std::invalid_argument("Native projectile launch speed invalid");
+                            for (size_t axis = 0; axis < 3; ++axis) arrow.velocity[axis] = arrow.direction[axis] * speed;
+                            const auto held = mRuntime.equippedWeaponCondition(owner);
+                            arrow.condition = (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth)
+                                && weapon->mData.mHealth && held
+                                ? std::clamp(float(held->mCondition) / weapon->mData.mHealth, 0.f, 1.f) : 1.f;
+                        }
                         charges.push_back({owner, ammo->mRef.mRefNum, ammo->mRef.mEnchantmentCharge, 0, true});
                         auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[owner], timedEffects, owner);
                         const float capacity = attacker.getAttribute(ESM::Attribute::Strength).getModified()
@@ -3182,6 +3228,38 @@ namespace TES3MP::Native
         }
         else if (playerAttack && combat)
             playerContacts.push_back({actor(playerAttacker), playerAttack->attackType, playerAttack->attackStrength, true});
+        if (mBinding.mRangedFlight && combat
+            && (!mBinding.mTravelerNeighborhood || (mBinding.worldDomains().size() <= mBinding.mTravelerCellBudget
+                && mBinding.mTravelerStepBudget >= 2)))
+            for (auto& arrow : combat->arrows)
+            {
+                if (arrow.terminal || arrow.releaseTick == tick.value()) continue;
+                // The collision scene is retained by flight demand, including after disconnect.
+                // Age counts simulated substeps, never wall-clock downtime.
+                for (unsigned substep = 0; substep < 2 && !arrow.terminal; ++substep)
+                {
+                    const auto velocity = MWMechanics::advanceProjectileVelocity(
+                        {arrow.velocity[0], arrow.velocity[1], arrow.velocity[2]}, 1.f / 60);
+                    std::array<float, 3> endpoint;
+                    for (size_t axis = 0; axis < 3; ++axis)
+                    {
+                        arrow.velocity[axis] = velocity[axis];
+                        endpoint[axis] = arrow.position[axis] + velocity[axis] / 60;
+                    }
+                    const auto hit = mBinding.mNavigatingActor->projectileContact(arrow.position, endpoint);
+                    ++arrow.steps;
+                    arrow.position = hit ? hit->position : endpoint;
+                    if (hit)
+                    {
+                        arrow.terminal = 1;
+                        playerContacts.push_back({actor(PlayerId::fromValue(arrow.caster).value()),
+                            MeleeAttackType::Chop, arrow.strength,
+                            hit->actor == arrow.target && arrow.targetLife == life->generation
+                                && combat->actors[2][8][2] > 0, arrow});
+                    }
+                    else if (arrow.steps == 3600) arrow.terminal = 2;
+                }
+            }
         for (const auto& request : playerContacts)
         {
             const size_t owner = request.owner;
@@ -3197,10 +3275,12 @@ namespace TES3MP::Native
             addTimedResistance(attacker, timedEffects, owner);
             addTimedResistance(victim, timedEffects, 2);
             const auto held = mRuntime.equippedWeaponCondition(owner);
-            if ((held && held->mCondition <= 0) || victim.getHealth().getCurrent() <= 0)
+            if ((!request.projectile && held && held->mCondition <= 0) || victim.getHealth().getCurrent() <= 0)
                 throw std::invalid_argument("Native player attack became stale before tick composition");
             const ESM::Weapon* weapon = nullptr;
-            if (held)
+            if (request.projectile)
+                weapon = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->weapon));
+            else if (held)
             {
                 const auto values = mRuntime.installedValues(owner);
                 const auto item = std::ranges::find(values.mObjects, held->mItem,
@@ -3210,11 +3290,13 @@ namespace TES3MP::Native
                 weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
             }
             const float strength = request.strength;
+            const bool hasWeaponHealth = weapon && weapon->mData.mHealth
+                && (!request.projectile || (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth));
             const float capacity = attacker.getAttribute(ESM::Attribute::Strength).getModified()
                 * mRuntime.mStore.get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
             const float weight = std::max(0.f, mRuntime.storage(owner).getWeight());
             const float encumbrance = weight == 0 ? 0.f : capacity == 0 ? 1.f + 1e-6f : weight / capacity;
-            MWMechanics::applyFatigueLoss(attacker, mRuntime.mStore,
+            if (!request.projectile) MWMechanics::applyFatigueLoss(attacker, mRuntime.mStore,
                 weapon ? weapon->mData.mWeight : 0.f, strength, encumbrance);
             const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
                 : ESM::Skill::HandToHand;
@@ -3236,14 +3318,17 @@ namespace TES3MP::Native
                 const auto& range = request.direction == MeleeAttackType::Chop ? weapon->mData.mChop
                     : request.direction == MeleeAttackType::Slash ? weapon->mData.mSlash : weapon->mData.mThrust;
                 damage = range[0] + (range[1] - range[0]) * strength;
+                if (request.projectile) damage = MWMechanics::projectileBaseDamage(*weapon,
+                    *mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->ammoRecord)), strength);
                 TES3MP::OpenMwMeleeSettings settings;
                 const auto& gmst = mRuntime.mStore.get<ESM::GameSetting>();
                 settings.damageStrengthBase = gmst.find("fDamageStrengthBase")->mValue.getFloat();
                 settings.damageStrengthMultiplier = gmst.find("fDamageStrengthMult")->mValue.getFloat();
                 damage = TES3MP::openMwAdjustedWeaponDamage(settings,
                     attacker.getAttribute(ESM::Attribute::Strength).getModified(),
-                    weapon->mData.mHealth ? float(held->mCondition) / weapon->mData.mHealth : 1.f,
-                    weapon->mData.mHealth != 0, damage);
+                    request.projectile ? request.projectile->condition
+                        : weapon->mData.mHealth ? float(held->mCondition) / weapon->mData.mHealth : 1.f,
+                    hasWeaponHealth, damage);
             }
             else if (success)
             {
@@ -3254,6 +3339,10 @@ namespace TES3MP::Native
                         attacker.getSkill(ESM::Skill::HandToHand).getModified(), strength);
             }
             const float weaponDamage = damage;
+            if (success && request.projectile && victim.isWerewolf()
+                && (mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->ammoRecord))
+                    ->mData.mFlags & ESM::Weapon::Silver))
+                damage *= gmst.find("fWereWolfSilverWeaponDamageMult")->mValue.getFloat();
             if (success && (!std::isfinite(damage) || damage < 0 || damage > 1'000'000))
                 throw std::invalid_argument("Native player melee damage invalid");
             if (success && mBinding.mKnockoutRules)
@@ -3262,29 +3351,44 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native player knockout damage invalid");
             if (success && damage > 0)
             {
-                const auto* player = players.findPlayer(playerAttacker);
-                const auto position = player->transform().position();
-                const std::array<float, 3> attackerPosition{float(double(position.x()) / 1024),
-                    float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
-                blocked = defendHit(2, victim, attacker, weapon, strength,
+                std::array<float, 3> attackerPosition;
+                if (request.projectile) attackerPosition = request.projectile->position;
+                else
+                {
+                    const auto* player = players.findPlayer(playerAttacker);
+                    const auto position = player->transform().position();
+                    attackerPosition = {float(double(position.x()) / 1024),
+                        float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                }
+                const auto* resistanceWeapon = request.projectile
+                    && (mBinding.mOnlyAppropriateAmmunitionBypassesResistance
+                        || MWMechanics::isNormalWeapon(weapon, mBinding.mEnchantedWeaponsAreMagical))
+                    ? mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->ammoRecord)) : weapon;
+                blocked = defendHit(2, victim, attacker, resistanceWeapon, strength,
                     weapon ? weapon->mData.mWeight : 0.f, attacker.getSkill(skill).getModified(),
                     attackerPosition, after.mPosition, after.mYaw,
                     (after.mPosition[0] - before.mPosition[0]) * -std::sin(after.mYaw)
                         + (after.mPosition[1] - before.mPosition[1]) * std::cos(after.mYaw) > 0,
-                    damage, rng);
+                    damage, rng, bool(request.projectile));
                 MWMechanics::applyHitDamage(victim, {{damagedStat == MeleeDamageStat::Health ? "health" : "fatigue",
                     damage}}, MWWorld::TimeStamp{});
                 if (victim.getHealth().getCurrent() > 0) startHitRecovery(2, damage, blocked, rng);
                 else combat->hitRecoveryTicks[2] = 0;
             }
-            if (weapon && weapon->mData.mHealth)
+            if (hasWeaponHealth && held
+                && (!request.projectile || wireId(held->mItem).value() == request.projectile->source))
             {
                 const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
                     .find("fWeaponDamageMult")->mValue.getFloat();
-                wear.push_back({owner, *held,
-                    MWMechanics::weaponConditionAfterHit(held->mCondition, weaponDamage, success, multiplier)});
+                const auto previous = std::ranges::find_if(wear, [&](const auto& entry) {
+                    return entry.owner == owner && entry.slot == MWWorld::InventoryStore::Slot_CarriedRight;
+                });
+                const int condition = MWMechanics::weaponConditionAfterHit(
+                    previous == wear.end() ? held->mCondition : previous->condition, weaponDamage, success, multiplier);
+                if (previous == wear.end()) wear.push_back({owner, *held, condition});
+                else previous->condition = condition;
             }
-            if (success && weapon) applyStrike(magicCaster(owner), *held, *weapon, attacker, victim, 2, rng);
+            if (success && weapon && !request.projectile) applyStrike(magicCaster(owner), *held, *weapon, attacker, victim, 2, rng);
             saveCombatStats(combat->actors[owner], attacker, timedEffects, owner);
             saveCombatStats(combat->actors[2], victim, timedEffects, 2);
             if (mBinding.mKnockoutRules)
