@@ -64,10 +64,10 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    source/caster/life, RNG, effects, expiry and two concurrent player casts;
    broaden remaining unsupported effects before M4 exit.
 5. Complete combat before formal acceptance, retaining the verified swing base.
-   First close the review findings: match stock zero-base-fatigue knockout;
-   prove interrupted casts cancel without repeatedly discarding unrelated tick
-   progress; remove the 1,024-death campaign ceiling without losing M5 attribution
-   or admitting duplicate deaths/rewards. Add focused failure/recovery tests.
+   Retain stock zero-base-fatigue knockout, interrupted-cast cancellation without
+   unrelated tick rollback, and complete life-indexed death attribution within the
+   save byte budget. Preserve focused failure/recovery and death/loot deduplication
+   checks; M5 owns personal quest credit and rewards.
    Finish knockout/get-up presentation, unarmed fatigue/health damage while down,
    hit recovery, armor, block, resistances and wear. Broaden effects/enchantments,
    including Reflect, Spell Absorption, Paralyze, Dispel and drain/absorb effects.

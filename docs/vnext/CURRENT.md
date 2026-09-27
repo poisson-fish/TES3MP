@@ -11,18 +11,16 @@ Inherited two-desktop evidence under 10% loss/100 ms delay/jitter:
   `build/m4-swing-vanilla-live-07/result.json`.
 Records unchanged; actors/placements synthetic. TR Lua awaits M5.
 
-V49 persists flight/collision/resources/RNG and recycles expired receipts. Inherited
-24-launch/failure/recovery checks:
+V49 persists flight/collision/resources/RNG and recycles receipts. Inherited checks:
 `build/logs/m4-bow-recycling-test.log`, `build/logs/m4-crossbow-recycling-test.log`,
 `build/logs/m4-thrown-recycling-test.log`.
 V49 `bow-flight` regression: `build/logs/m4-v50-bow-regression.log`.
 
-V50 binds CPU knockout/get-up clocks and stock hit-knockdown rolls per participant.
-Positive fatigue cannot skip get-up. Inactivity pauses clocks; death/respawn clears
-them. Casts respect hit recovery. Fresh campaign required; older layouts retain
-behavior. Timed/constant Shield, Sanctuary, Blind and Fortify Attack feed combat.
+V50 binds participant knockout/get-up clocks and stock knockdown rolls. Positive
+fatigue cannot skip get-up; inactivity pauses clocks. Fresh campaign required.
+Timed/constant Shield, Sanctuary, Blind and Fortify Attack feed combat.
 
-New headless checks:
+Inherited headless checks:
 - `tes3mp_native_melee_tests knockout-timing`, `hit-knockdown`:
   `build/logs/m4-knockout-timing-test.log`, `build/logs/m4-hit-knockdown-test.log`.
 - `tes3mp_native_ai_magic_tests combat-modifiers`: `build/logs/m4-combat-modifiers-test.log`.
@@ -41,20 +39,23 @@ contacts/NPC execution/input/rendering, movement/collision cutover.
 Plain ranged sources and body-center proxies remain limitations.
 
 V50 zero-base-fatigue knockout shares stock rules; older formats retain behavior.
-`tes3mp_native_loadout_tests zero-base-fatigue`
-failed before (`build/logs/m4-zero-base-before.log`), passes after
-(`build/logs/m4-zero-base-test.log`): three synthetic participants on vanilla content,
-positive current fatigue, looping/restart, offline pause, rejected/uncertain writes,
-get-up after base restoration. Regression passes: `knockout-getup`
-(`build/logs/m4-zero-base-getup-regression.log`),
-`tes3mp_native_melee_tests knockout-timing` (`build/logs/m4-zero-base-knockout-timing.log`).
+Inherited synthetic vanilla `tes3mp_native_loadout_tests zero-base-fatigue`:
+`build/logs/m4-zero-base-test.log`; get-up regression:
+`build/logs/m4-zero-base-getup-regression.log`.
 
-Interrupted casts cancel without tick rollback or launch costs; NPC release clocks
-clear. `tes3mp_native_loadout_tests interrupted-casts` fails before
-(`build/logs/m4-interrupted-before.log`), passes after (`build/logs/m4-interrupted-test.log`).
-Synthetic vanilla headless evidence: timed death/knockout (uncapped fatigue),
-spells/WhenUsed/CastOnce, concurrent casts, control-state equality, rejected/uncertain
-writes, retry/restart, expiry, observer convergence and Touch-interrupted NPC release.
+Interrupted casts cancel without tick rollback/costs; NPC release clocks clear.
+Inherited synthetic vanilla `tes3mp_native_loadout_tests interrupted-casts`:
+`build/logs/m4-interrupted-test.log` covers spells/items, concurrent casts,
+rejected/uncertain writes, retry/restart and observer convergence.
 
-Next: reproduce/fix the 1,024-death ceiling, preserving attribution and death/reward
-deduplication. No reproducer yet.
+Damage/recovery no longer cap history at 1,024 deaths. Complete attribution remains
+atomic within the existing 16 MiB image budget. Recovery bounds counts before allocation.
+`tes3mp_native_loadout_tests death-history` fails before
+(`build/logs/m4-death-history-before.log`), passes after
+(`build/logs/m4-death-history-test.log`). Synthetic V50/vanilla seeded histories exercise
+deaths 1,024/1,025/2,049: competing lethal effects, old-life NPC
+attribution, rejected/uncertain writes, retries, malformed recovery, corpse loot once,
+respawn, exact restart and convergent observers. M5 quest credit remains unimplemented.
+
+Next: knockout/get-up presentation, then remaining defenses and broader
+enchantments/effects per PLAN.

@@ -2833,9 +2833,8 @@ namespace TES3MP::Native
                         if (effect.actor == 2 && victim.getHealth().getCurrent() <= 0 && life
                             && !life->respawnTick)
                         {
-                            if (life->deaths.size() >= ActorCampaignLife::MaximumDeaths
-                                || tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
-                                throw std::invalid_argument("NPC effect death history or deadline exhausted");
+                            if (tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
+                                throw std::invalid_argument("NPC effect death deadline exhausted");
                             life->deaths.push_back({life->generation, tick.value(), effect.caster, effect.casterKind, effect.casterLife});
                             life->respawnTick = tick.value() + mBinding.mNpcRespawnDelayTicks;
                             step.reset(); after = before; report.status = Diagnostics::Status::Idle;
@@ -3479,9 +3478,8 @@ namespace TES3MP::Native
             {
                 if (life)
                 {
-                    if (life->deaths.size() >= ActorCampaignLife::MaximumDeaths
-                        || tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
-                        throw std::invalid_argument("NPC death history or deadline exhausted");
+                    if (tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
+                        throw std::invalid_argument("NPC death deadline exhausted");
                     life->deaths.push_back({life->generation, tick.value(), playerAttacker.value(),
                         mBinding.mDurableCasters ? 1u : 0u, mBinding.mDurableCasters ? 1u : 0u});
                     life->respawnTick = tick.value() + mBinding.mNpcRespawnDelayTicks;
@@ -3889,9 +3887,8 @@ namespace TES3MP::Native
             const bool died = victim.getHealth().getCurrent() <= 0;
             if (died && index == 2 && life)
             {
-                if (life->deaths.size() >= ActorCampaignLife::MaximumDeaths
-                    || tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
-                    throw std::invalid_argument("NPC spell death history or deadline exhausted");
+                if (tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
+                    throw std::invalid_argument("NPC spell death deadline exhausted");
                 life->deaths.push_back({life->generation, tick.value(), identity.id, identity.kind, identity.life});
                 life->respawnTick = tick.value() + mBinding.mNpcRespawnDelayTicks;
                 step.reset(); after = before; report.status = Diagnostics::Status::Idle;
@@ -3971,9 +3968,8 @@ namespace TES3MP::Native
                         || (mBinding.mKnockoutAnimation && combat->knockedDown[owner]));
             if (owner == 2 && caster.getHealth().getCurrent() <= 0)
             {
-                if (life->deaths.size() >= ActorCampaignLife::MaximumDeaths
-                    || tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
-                    throw std::invalid_argument("NPC self-cast death history or deadline exhausted");
+                if (tick.value() > UINT64_MAX - mBinding.mNpcRespawnDelayTicks)
+                    throw std::invalid_argument("NPC self-cast death deadline exhausted");
                 life->deaths.push_back({life->generation, tick.value(), context.identity.id,
                     context.identity.kind, context.identity.life});
                 life->respawnTick = tick.value() + mBinding.mNpcRespawnDelayTicks;

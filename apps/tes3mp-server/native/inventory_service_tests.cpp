@@ -5254,7 +5254,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -7145,6 +7145,174 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (deathHistory)
+        {
+            const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };
+            const auto read = [](const auto& image) { return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()}); };
+            const auto word = [](auto& image, size_t offset, uint64_t value) {
+                for (unsigned i = 0; i < 8; ++i) image.at(offset + i) = std::byte(value >> (i * 8));
+            };
+            const auto append = [&](auto& image, uint64_t value) {
+                const auto offset = image.size(); image.resize(offset + 8); word(image, offset, value);
+            };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            uint64_t source = 14695981039346656037ull;
+            for (unsigned char c : std::string_view("npc_elemental_damage")) source = (source ^ c) * 1099511628211ull;
+            const auto initial = bytes(service);
+            const auto original = read(initial);
+            const auto directory = (scratch / "openmw").string();
+            const char* arguments[]{"death-history", "--config", directory.c_str()};
+            Loadout content(readLoadoutOptions(3, arguments));
+            std::vector<ESM::RefId> references{ESM::RefId::stringRefId("npc_door_actor")};
+            for (const auto& [id, record] : MWWorld::inventoryRecords(content.store())) references.push_back(record);
+            for (const auto& [id, record] : MWWorld::inventorySoulRecords(content.store())) references.push_back(record);
+            const auto npc = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1),
+                id<CanonicalRevision>(1))->equipment->motions.front().placement;
+            const size_t statsOffset = 56 + 8 + original.melee->identity.size() + 7 * 8 + 8;
+            const size_t lifeOffset = statsOffset + 3 * ActorCampaignCombat::StatCount * 5 * 8 + 12 * 8;
+            const size_t countOffset = lifeOffset + (5 + ActorCampaignCombat::StatCount * 5) * 8
+                + original.life->spawnActor.size() + original.life->spawnInventory.size();
+            // Seed only the historical prefix; actual composed deaths cross the old ceiling.
+            // Include both players and NPC lives, so truncation/aggregation loses observable data.
+            for (uint64_t priorDeaths : {1024u, 1023u, 2048u})
+            {
+                const uint64_t time = priorDeaths * 4;
+                auto seed = initial;
+                word(seed, 24, time);
+                word(seed, lifeOffset, priorDeaths + 1);
+                word(seed, lifeOffset + 8, time);
+                word(seed, statsOffset + (2 * ActorCampaignCombat::StatCount * 5 + 8 * 5 + 2) * 8,
+                    std::bit_cast<uint32_t>(1.f));
+                std::vector<ActorDeathEvent> history;
+                std::vector<std::byte> encoded;
+                for (uint64_t life = 1; life <= priorDeaths; ++life)
+                {
+                    const ActorDeathEvent event{life, life * 4 - 3, life % 3 ? life % 3 : npc,
+                        life % 3 ? 1u : 2u, life % 3 ? 1u : life};
+                    history.push_back(event);
+                    for (auto value : {event.life, event.tick, event.killer, event.killerKind, event.killerLife}) append(encoded, value);
+                }
+                word(seed, countOffset, priorDeaths);
+                seed.insert(seed.begin() + countOffset + 8, encoded.begin(), encoded.end());
+                const size_t effectsOffset = countOffset + 8 + encoded.size() + 8;
+                encoded.clear();
+                const auto effect = [&](uint64_t actor, uint64_t caster, uint64_t kind, uint64_t life, uint64_t start) {
+                    for (uint64_t value : {actor, uint64_t(std::bit_cast<uint32_t>(6.f)), start + 60,
+                            uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::FireDamage)), caster, source,
+                            uint64_t(0), uint64_t(0), start, uint64_t(60), uint64_t(0), uint64_t(0), kind, life})
+                        append(encoded, value);
+                };
+                effect(2, 1, 1, 1, time);
+                effect(2, 2, 1, 1, time); // Competing lethal damage must not add a second death.
+                effect(0, npc, 2, priorDeaths, time - 4); // An old NPC life still affects a player.
+                word(seed, effectsOffset, 3);
+                seed.insert(seed.begin() + effectsOffset + 8, encoded.begin(), encoded.end());
+                InventoryHost seeded(descriptor, testContentManifest(), *registry, *crypto, seed);
+                auto& runtime = seeded.service(); runtime.synchronizeCells(authority);
+                require(read(bytes(runtime)).life->deaths == history, "Historical attribution changed on recovery");
+                auto dying = runtime.prepareNativeTick(authority, id<ServerTick>(time + 1), 1.f/30, {});
+                std::vector<std::byte> candidate;
+                require(dying && dying->commit([&](auto image) { candidate.assign(image.begin(), image.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected,
+                    "Death beyond history boundary did not stage");
+                const auto dead = read(candidate);
+                history.push_back({priorDeaths + 1, time + 1, 1, 1, 1});
+                require(dead.life->deaths == history && dead.combat->actors[2][8][2] <= 0
+                    && dead.life->respawnTick == time + 4 && bytes(runtime) == seed,
+                    "Death beyond history boundary stalled, lost attribution, duplicated death or leaked on rejection");
+                dying.reset();
+                dying = runtime.prepareNativeTick(authority, id<ServerTick>(time + 1), 1.f/30, {});
+                require(dying && dying->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(runtime) == candidate,
+                    "Retried death changed history or composed state");
+                InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, seed);
+                uncertain.service().synchronizeCells(authority);
+                auto failed = uncertain.service().prepareNativeTick(authority, id<ServerTick>(time + 1), 1.f/30, {});
+                require(failed && failed->commit([&](auto image) {
+                        require(std::ranges::equal(image, candidate), "Uncertain death changed candidate");
+                        return CanonicalDurabilityResult::Failed; })
+                    == CanonicalDurabilityResult::Failed && uncertain.service().inventoryImage().empty(),
+                    "Uncertain death did not fail closed");
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                auto& resumed = restarted.service(); resumed.synchronizeCells(authority);
+                require(bytes(resumed) == candidate, "Death history failed exact restart");
+                // Corruption must reject without replacing the installed image, even at the tail.
+                const auto reject = [&](auto invalid) {
+                    bool rejected = false;
+                    try { dynamic_cast<InventoryService&>(resumed).recover(invalid, references); }
+                    catch (const std::invalid_argument& error)
+                    {
+                        const std::string_view reason(error.what());
+                        rejected = reason.starts_with("Native NPC death history")
+                            || reason.starts_with("Native caster kind or life")
+                            || reason.starts_with("Native death caster");
+                    }
+                    require(rejected && bytes(resumed) == candidate, "Malformed death history changed installed state");
+                };
+                for (uint64_t count : {UINT64_MAX, priorDeaths, priorDeaths + 2})
+                {
+                    auto invalid = candidate; word(invalid, countOffset, count); reject(std::move(invalid));
+                }
+                const size_t lastDeath = countOffset + 8 + priorDeaths * 40;
+                for (const auto [offset, value] : std::array<std::pair<size_t, uint64_t>, 5>{
+                        {{0, priorDeaths}, {8, 1}, {16, 999999}, {24, 3}, {32, priorDeaths + 2}}})
+                {
+                    auto invalid = candidate; word(invalid, lastDeath + offset, value); reject(std::move(invalid));
+                }
+                auto truncated = candidate; truncated.resize(countOffset + 8 + 40); reject(std::move(truncated));
+                const auto view = resumed.projectInventory(authority, id<SessionId>(2), id<ServerTick>(time + 1), id<CanonicalRevision>(time + 1));
+                require(view && view->containers.size() == 1 && !view->containers.front().stacks.empty(), "Historical death did not open corpse");
+                const auto corpse = view->containers.front(); const auto loot = corpse.stacks.front();
+                const auto lootCount = [&](const auto& inventory) {
+                    uint64_t count = 0;
+                    for (const auto& stack : inventory.playerInventory.front().stacks)
+                        if (stack.prototypeId == loot.prototypeId) count += stack.count;
+                    return count;
+                };
+                const auto beforeLoot = lootCount(*view);
+                ClientInventoryTransactionCommand take{id<SessionId>(2), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(time + 2), id<CanonicalRevision>(time + 2), InventoryTransactionKind::TakeFromContainer,
+                    corpse.container, loot.prototypeId, loot.stackId, 1, {}, view->playerInventory.front().revision, corpse.revision, {}, corpse.position};
+                auto transfer = resumed.prepareInventory(authority, bind(authority, take).proposal());
+                require(bool(transfer), "Historical corpse loot was not admitted");
+                auto looting = resumed.prepareNativeTick(authority, id<ServerTick>(time + 2), 1.f/30, std::move(transfer));
+                require(looting && looting->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(resumed) == candidate,
+                    "Rejected historical corpse loot leaked");
+                require(looting->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && !resumed.prepareInventory(authority, bind(authority, take).proposal()), "Corpse retry duplicated reward");
+                InventoryHost looted(descriptor, testContentManifest(), *registry, *crypto, resumed.inventoryImage());
+                auto& final = looted.service(); final.synchronizeCells(authority);
+                require(!final.prepareInventory(authority, bind(authority, take).proposal()), "Restart admitted rewarded corpse request");
+                for (uint64_t tick = time + 3; tick <= time + 4; ++tick)
+                {
+                    const auto before = bytes(final);
+                    auto step = final.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {});
+                    require(step && step->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(final) == before,
+                        "Rejected corpse/respawn tick leaked");
+                    require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "Historical corpse/respawn tick stalled");
+                }
+                const auto alive = read(bytes(final));
+                require(alive.life->generation == priorDeaths + 2 && !alive.life->respawnTick
+                    && alive.life->deaths == history && alive.combat->actors[2][8][2] > 0
+                    && alive.timedEffects.size() == 1 && alive.timedEffects.front().caster == npc
+                    && alive.timedEffects.front().casterLife == priorDeaths
+                    && !final.prepareInventory(authority, bind(authority, take).proposal()),
+                    "Respawn lost history/old-life attribution or admitted stale loot");
+                InventoryHost finalRestart(descriptor, testContentManifest(), *registry, *crypto, final.inventoryImage());
+                finalRestart.service().synchronizeCells(authority);
+                require(bytes(finalRestart.service()) == bytes(final), "Respawn history changed on restart");
+                const auto rewards = finalRestart.service().projectInventory(authority, id<SessionId>(2),
+                    id<ServerTick>(time + 4), id<CanonicalRevision>(time + 4));
+                require(rewards && rewards->containers.empty() && lootCount(*rewards) == beforeLoot + 1,
+                    "Respawn/restart duplicated reward or reopened corpse");
+                const auto a = finalRestart.service().projectCombat(authority, id<SessionId>(1), id<ServerTick>(time + 4), id<CanonicalRevision>(time + 4));
+                const auto b = finalRestart.service().projectCombat(authority, id<SessionId>(2), id<ServerTick>(time + 4), id<CanonicalRevision>(time + 4));
+                require(a && b && std::ranges::equal(a->actors(), b->actors()), "History boundary observers diverged");
+                std::cout << "death=" << priorDeaths + 1 << " attribution=complete competing=once loot=once rejected=atomic uncertain=closed restart=exact respawn=durable\n";
+            }
+            return;
+        }
         if (interruptedCasts)
         {
             const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };

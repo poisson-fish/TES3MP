@@ -128,13 +128,14 @@ namespace TES3MP::Native
     };
     struct ActorCampaignLife
     {
-        static constexpr size_t MaximumDeaths = 1024;
         uint64_t generation = 1;
         uint64_t bornTick = 0;
         uint64_t respawnTick = 0;
         std::array<std::array<float, 5>, ActorCampaignCombat::StatCount> spawnStats{};
         std::vector<char> spawnActor;
         std::vector<char> spawnInventory;
+        // Complete life-indexed attribution, bounded by the enclosing save's byte
+        // budget rather than a gameplay death count. Never evict reward identities.
         std::vector<ActorDeathEvent> deaths;
     };
     struct ActorCampaignProjectile
@@ -342,8 +343,13 @@ namespace TES3MP::Native
             state.spawnInventory.assign(bytes.data() + offset, bytes.data() + offset + inventoryLength);
             offset += size_t(inventoryLength);
             const auto count = getAreaWord(bytes, offset);
-            if (count > ActorCampaignLife::MaximumDeaths
-                || count > (bytes.size() - offset) / (hasCasterState(magic) ? 40 : 24))
+            // Validate count and backing bytes before reserve; the inventory and
+            // actor payloads cannot supply bytes for alleged historical deaths.
+            const auto remaining = bytes.size() - offset;
+            if (count > state.generation
+                || (hasCasterState(magic) && count != state.generation - (state.respawnTick ? 0 : 1))
+                || inventorySize > remaining || actorSize > remaining - inventorySize
+                || count > (remaining - inventorySize - actorSize) / (hasCasterState(magic) ? 40 : 24))
                 throw std::invalid_argument("Native NPC death history bound invalid");
             state.deaths.reserve(size_t(count));
             for (size_t i = 0; i < count; ++i)
@@ -363,9 +369,6 @@ namespace TES3MP::Native
             }
             if ((state.respawnTick != 0) != (state.deaths.size() == state.generation))
                 throw std::invalid_argument("Native NPC life/death deadline inconsistent");
-            if (hasCasterState(magic)
-                && state.deaths.size() != state.generation - (state.respawnTick ? 0 : 1))
-                throw std::invalid_argument("Native caster life history incomplete");
             if (!state.deaths.empty() && (state.respawnTick
                     ? state.respawnTick <= state.deaths.back().tick
                     : state.bornTick <= state.deaths.back().tick))
