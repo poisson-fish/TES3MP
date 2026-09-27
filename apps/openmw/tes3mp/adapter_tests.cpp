@@ -888,38 +888,49 @@ int main(int argc, char** argv)
         std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
         for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = ReplicatedCombatSkill(i);
         auto observe = [&](uint64_t tick, uint64_t generation = 1) {
+            auto player = pose;
+            player.kind = 1; player.id = 1; player.cast = actor.castId;
+            player.castPhase = actor.castPhase; player.castRange = actor.castRange;
+            player.castElapsed = actor.castElapsed; player.castRelease = actor.castRelease; player.castStop = actor.castStop;
+            const std::array presentation{player, pose};
             const auto snapshot = std::get<LatestWinsCombatSnapshot>(LatestWinsCombatSnapshot::create(
                 *SessionId::fromValue(1), *SessionGeneration::fromValue(generation), *ServerTick::fromValue(tick),
                 *CanonicalRevision::fromValue(tick), *PlayerId::fromValue(1), CombatRevision::initial(),
-                100, 100, 100, 100, 100, 100, false, std::span(&actor, 1), skills, {}, {}, {}, {}, std::span(&pose, 1)));
+                100, 100, 100, 100, 100, 100, false, std::span(&actor, 1), skills, {}, {}, {}, {}, presentation));
             timeline.observe(std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(snapshot))));
+        };
+        const auto sample = [&] {
+            const auto npc = timeline.sample(2,9), player = timeline.sample(1,1);
+            require(npc && player && npc->cast == player->cast && npc->castFrame == player->castFrame
+                && npc->castPhase == player->castPhase && npc->life == player->life && npc->bodyState == player->bodyState);
+            return npc;
         };
         const auto advance = [&](uint64_t ns) { timeline.advance(MonotonicInstant::fromNanoseconds(ns)); };
         observe(100); advance(0);
         actor.castElapsed = 12; actor.castPhase = 5; observe(104);
         advance(50'000'000);
-        require(timeline.sample(2,9)->castFrame == 9.5f && timeline.sample(2,9)->castPhase == 3);
+        require(sample()->castFrame == 9.5f && sample()->castPhase == 3);
         advance(100'000'000);
-        require(timeline.sample(2,9)->castFrame == 11 && timeline.sample(2,9)->castPhase == 5);
+        require(sample()->castFrame == 11 && sample()->castPhase == 5);
         advance(1'000'000'000);
-        require(timeline.sample(2,9)->castFrame == 12); // Starvation cannot finish recovery.
+        require(sample()->castFrame == 12); // Starvation cannot finish recovery.
         observe(108); advance(1'050'000'000);
-        require(timeline.sample(2,9)->castFrame == 12); // Inactive simulation pauses.
+        require(sample()->castFrame == 12); // Inactive simulation pauses.
         actor.castId = 0; actor.castPhase = actor.castRange = 0;
         actor.castElapsed = actor.castRelease = actor.castStop = 0;
         pose.bodyState = 4; pose.bodyAction = 110; pose.hitGroup = 1; pose.bodyStop = 10;
         observe(110); advance(2'000'000'000);
-        require(!timeline.sample(2,9)->cast && timeline.sample(2,9)->bodyState == 4);
+        require(!sample()->cast && sample()->bodyState == 4);
         pose.bodyState = 1; pose.bodyAction = 0; pose.hitGroup = 0; pose.bodyStop = 0;
         actor.castId = 111; actor.castPhase = 5; actor.castElapsed = 15;
         actor.castRelease = 10; actor.castStop = 20;
         observe(120, 2);
-        require(timeline.sample(2,9)->cast == 111 && timeline.sample(2,9)->castFrame == 15);
+        require(sample()->cast == 111 && sample()->castFrame == 15);
         pose.life = 2; actor.castId = 121; actor.castPhase = 3; actor.castElapsed = 1;
         observe(124, 2); advance(3'000'000'000); advance(3'050'000'000);
-        require(timeline.sample(2,9)->life == 1 && timeline.sample(2,9)->castFrame == 15);
+        require(sample()->life == 1 && sample()->castFrame == 15);
         advance(4'000'000'000);
-        require(timeline.sample(2,9)->life == 2 && timeline.sample(2,9)->castFrame == 1);
+        require(sample()->life == 2 && sample()->castFrame == 1);
         std::cout << "PASS cast-presentation: release/recovery, loss, pause, interruption, generation and life\n";
         return 0;
     }

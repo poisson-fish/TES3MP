@@ -10,7 +10,7 @@ def percentile(values, fraction):
     return sorted(values)[min(len(values) - 1, int(len(values) * fraction))]
 
 
-def verify(directory, actor=False, casting=False):
+def verify(directory, actor=False, casting=False, player_casting=False):
     result = {}
     content = json.loads(directory.joinpath("result.json").read_text()).get("content", {}) if actor else {}
     melee_speed = float(content.get("melee-speed", 1))
@@ -34,6 +34,7 @@ def verify(directory, actor=False, casting=False):
         cadence, body_rates, swing_rates, cast_rates = [], [], [], []
         cast_samples = cast_fractional = 0
         cast_phases = set()
+        player_casts = {i: dict(samples=0, fractional=0, phases=set(), rates=[]) for i in (1, 2)}
         fractional, body_samples, swing_samples = 0, 0, 0
         for a, b in zip(frames, frames[1:]):
             seconds = (b["time_ns"] - a["time_ns"]) / 1e9
@@ -45,8 +46,10 @@ def verify(directory, actor=False, casting=False):
                 if actor and p["kind"] != 2:
                     continue
                 old = previous.get((p["kind"], p["id"]))
-                if casting and p["kind"] == 2 and p.get("cast_phase", 0) >= 3 and p["body"] == 1:
+                if (casting or player_casting) and (p["kind"] == 2 or player_casting) and p.get("cast_phase", 0) >= 3 and p["body"] == 1:
                     cast_phases.add(p["cast_phase"])
+                    player_cast = player_casts.get(p["id"]) if p["kind"] == 1 else None
+                    if player_cast is not None: player_cast["phases"].add(p["cast_phase"])
                     if p["cast_frame"] >= p["cast_stop"]:
                         raise ValueError(f"{path.name}: cast passed committed recovery")
                     if old and old.get("cast") == p["cast"] and old["life"] == p["life"] and old["body"] == 1:
@@ -55,6 +58,10 @@ def verify(directory, actor=False, casting=False):
                         if frames_delta < -.001 or delta < -.002 or (frames_delta == 0 and abs(delta) > .002):
                             raise ValueError(f"{path.name}: cast regressed or advanced through a pause")
                         if frames_delta > .001:
+                            if player_cast is not None:
+                                player_cast["samples"] += 1
+                                player_cast["fractional"] += abs(p["cast_frame"] - round(p["cast_frame"])) > .001
+                                if delta > .002 and seconds < .05: player_cast["rates"].append(delta / seconds)
                             cast_samples += 1
                             cast_fractional += abs(p["cast_frame"] - round(p["cast_frame"])) > .001
                             if delta > .002 and seconds < .05:
@@ -87,6 +94,13 @@ def verify(directory, actor=False, casting=False):
         if casting and (cast_samples < 60 or cast_fractional < 30 or not {3, 5} <= cast_phases
                         or not cast_rates or not .9 <= statistics.median(cast_rates) <= 1.1):
             raise ValueError(f"{path.name}: insufficient fractional cast release/recovery at stock speed")
+        if player_casting:
+            for player, values in player_casts.items():
+                if (values["samples"] < 60 or values["fractional"] < 30 or not {3, 5} <= values["phases"]
+                        or not values["rates"] or not .9 <= statistics.median(values["rates"]) <= 1.1):
+                    raise ValueError(f"{path.name}: player {player} lacks fractional cast/recovery at stock speed")
+        player_cast_report = {player: dict(samples=v["samples"], fractional=v["fractional"], phases=sorted(v["phases"]),
+            median_speed=statistics.median(v["rates"]) if v["rates"] else None) for player, v in player_casts.items()}
         gaps = [b - a for a, b in zip(snapshots, snapshots[1:]) if b > a]
         result[path.name] = dict(
             frames=len(frames), median_frame_ms=statistics.median(cadence),
@@ -97,12 +111,13 @@ def verify(directory, actor=False, casting=False):
             swing_samples=swing_samples,
             median_swing_speed=statistics.median(swing_rates) if swing_rates else None,
             stock_weapon_speed=melee_speed if actor else None,
+            player_casts=player_cast_report,
             cast_samples=cast_samples, fractional_cast_samples=cast_fractional,
             cast_phases=sorted(cast_phases), median_cast_speed=statistics.median(cast_rates) if cast_rates else None,
         )
     if not all(any(name.startswith(role) for name in result) for role in ("Alice", "Bob")):
         raise ValueError("Both desktop traces are required")
-    if (actor or casting) and not {"Alice-before.ndjson", "Bob-before.ndjson", "Alice.ndjson", "Bob.ndjson"} <= result.keys():
+    if (actor or casting or player_casting) and not {"Alice-before.ndjson", "Bob-before.ndjson", "Alice.ndjson", "Bob.ndjson"} <= result.keys():
         raise ValueError("Both desktops require traces before and after restart")
     return result
 
@@ -112,7 +127,8 @@ if __name__ == "__main__":
     parser.add_argument("directory", type=Path)
     parser.add_argument("--actor", "--creature", dest="actor", action="store_true", help="Require selected actor body and melee evidence")
     parser.add_argument("--casting", action="store_true", help="Require fractional cast release/recovery on both desktops across restart")
+    parser.add_argument("--player-casting", action="store_true", help="Require each player on both desktops before/after restart")
     args = parser.parse_args()
-    report = verify(args.directory, args.actor, args.casting)
+    report = verify(args.directory, args.actor, args.casting, args.player_casting)
     args.directory.joinpath("presentation-validation.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

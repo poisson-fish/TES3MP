@@ -594,11 +594,11 @@ namespace TES3MP::Native
         throw std::invalid_argument("Selected NPC lacks the requested melee animation group");
     }
 
-    BoundCastAnimations InteriorActorScene::bindCastAnimations()
+    BoundCastAnimations InteriorActorScene::bindCastAnimations(ESM::RefId actor)
     {
         if (!mImpl)
             throw std::invalid_argument("Selected NPC has no supported cast animation source");
-        const auto [sources, identity] = bindAnimationSources(mImpl->mActorBase);
+        const auto [sources, identity] = bindAnimationSources(actor.empty() ? mImpl->mActorBase : actor);
         for (auto source = sources.rbegin(); source != sources.rend(); ++source)
         {
             if (!(*source)->hasGroupStart("spellcast")) continue;

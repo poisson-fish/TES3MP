@@ -5440,7 +5440,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -7449,7 +7449,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7473,6 +7473,15 @@ namespace TES3MP::Native::Testing
                 << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
+        }
+        if (playerCastLifecycle)
+        {
+            std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
+            for (size_t i = 0; i < placed.size(); ++i)
+                placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
+                    Transform(placed[i].transform().cell(), Position3((i ? -160 : 60)*1024, -400*1024, 1024),
+                        placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
         if (weaponExecution) return;
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
@@ -8050,6 +8059,123 @@ namespace TES3MP::Native::Testing
                     EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
             };
             const auto initial = bytes(service);
+            if (playerCastLifecycle)
+            {
+                for (int kind : {0, 1, 2})
+                {
+                    InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, initial);
+                    auto& runtime = campaign.service(); runtime.synchronizeCells(authority);
+                    std::array<bool, 6> stages{};
+                    size_t releases = 0;
+                    std::vector<std::byte> windup;
+                    for (uint64_t time = 1; time <= 90; ++time)
+                    {
+                        const auto before = bytes(runtime);
+                        const auto prior = read(before);
+                        std::unique_ptr<PreparedNativeInventory> request;
+                        if (time == 1)
+                        {
+                            request = runtime.prepareMagicUse(authority, proposal(runtime, 1, time,
+                                kind == 0 ? "npc_target_damage" : kind == 1 ? "npc_used_shirt" : "npc_once_shirt", kind != 0), id<ServerTick>(time));
+                            require(request && runtime.appendMagicUse(authority, proposal(runtime, 2, time, "npc_instant_restore"),
+                                id<ServerTick>(time), *request), "Concurrent player wind-ups not admitted");
+                        }
+                        auto step = runtime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(request));
+                        require(bool(step), "Player cast tick missing");
+                        const auto a = runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        const auto b = runtime.projectCombat(authority, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        require(a && b && std::ranges::equal(a->presentation(), b->presentation()), "Player cast observers differ");
+                        const auto decoded = decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(*a));
+                        require(std::holds_alternative<LatestWinsCombatSnapshot>(decoded)
+                            && std::get<LatestWinsCombatSnapshot>(decoded) == *a, "Player cast wire lost phase");
+                        std::vector<std::byte> proposed;
+                        require(step->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                                return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                            && bytes(runtime) == before, "Rejected player cast leaked resources or phase");
+                        const auto state = read(proposed);
+                        bool restart = false;
+                        if (const auto& cast = state.combat->playerCasts[0])
+                        {
+                            restart = !stages[cast->phase]; stages[cast->phase] = true;
+                            if (cast->phase < ActorCampaignCast::Released)
+                            {
+                                require(state.combat->actors[0][9][2] == prior.combat->actors[0][9][2]
+                                    && std::ranges::equal(state.inventory, prior.inventory), "Wind-up spent magicka or items");
+                                if (cast->phase == ActorCampaignCast::WindUp && windup.empty()) windup = proposed;
+                            }
+                            if (cast->phase == ActorCampaignCast::Released) ++releases;
+                        }
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(runtime) == proposed,
+                            "Player cast retry changed durable candidate");
+                        if (restart)
+                        {
+                            InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, proposed);
+                            auto& other = restored.service(); other.synchronizeCells(authority);
+                            require(bytes(other) == proposed, "Player phase restart changed state");
+                            auto next = other.prepareNativeTick(authority, id<ServerTick>(time + 1), 1.f/30, {});
+                            auto expected = runtime.prepareNativeTick(authority, id<ServerTick>(time + 1), 1.f/30, {});
+                            std::vector<std::byte> left, right;
+                            require(next && expected, "Restart continuation missing");
+                            next->commit([&](auto data) { left.assign(data.begin(), data.end()); return CanonicalDurabilityResult::Rejected; });
+                            expected->commit([&](auto data) { right.assign(data.begin(), data.end()); return CanonicalDurabilityResult::Rejected; });
+                            require(left == right, "Restart changed next cast cost/RNG/effect");
+                        }
+                    }
+                    require(stages[ActorCampaignCast::Prepared] && stages[ActorCampaignCast::WindUp]
+                        && stages[ActorCampaignCast::Released] && stages[ActorCampaignCast::Recovery]
+                        && releases == 1 && !read(bytes(runtime)).combat->playerCasts[0], ("Player cast did not finish exactly once: source=" + std::to_string(kind) + " releases=" + std::to_string(releases)
+                            + " prepared=" + std::to_string(stages[2]) + " windup=" + std::to_string(stages[3])
+                            + " recovery=" + std::to_string(stages[5])).c_str());
+                    require(!windup.empty(), "Player wind-up image missing");
+                    const auto saved = read(windup);
+                    const auto& cast = *saved.combat->playerCasts[0];
+                    std::vector<std::byte> castWords;
+                    for (uint64_t value : {cast.actor, cast.life, cast.cast, cast.sourceKind, cast.source,
+                            cast.targetKind, cast.target, cast.range, cast.elapsed, cast.phase, cast.targetLife})
+                        for (unsigned byte = 0; byte < 8; ++byte) castWords.push_back(std::byte(value >> (byte * 8)));
+                    const auto found = std::search(windup.begin(), windup.end(), castWords.begin(), castWords.end());
+                    require(found != windup.end(), "Player cast encoding not found");
+                    const size_t offset = size_t(found - windup.begin());
+                    for (size_t field : {size_t(0), size_t(4), size_t(7), size_t(8), size_t(9), size_t(10)})
+                    {
+                        auto invalid = windup;
+                        for (unsigned byte = 0; byte < 8; ++byte) invalid[offset + field * 8 + byte] = std::byte(uint64_t(999999) >> (byte * 8));
+                        bool rejected = false;
+                        try { InventoryHost bad(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+                        catch (const std::invalid_argument&) { rejected = true; }
+                        require(rejected, "Malformed player cast admitted on recovery");
+                    }
+                    InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, windup);
+                    uncertain.service().synchronizeCells(authority);
+                    auto failed = uncertain.service().prepareNativeTick(authority, id<ServerTick>(saved.tick + 1), 1.f/30, {});
+                    require(failed && failed->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                        && uncertain.service().inventoryImage().empty(), "Uncertain player wind-up did not fail closed");
+                    InventoryHost paused(descriptor, testContentManifest(), *registry, *crypto, windup);
+                    auto nobody = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+                    paused.service().synchronizeCells(nobody);
+                    auto pause = paused.service().prepareNativeTick(nobody, id<ServerTick>(saved.tick + 1), 1.f/30, {});
+                    require(pause && pause->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && read(bytes(paused.service())).combat->playerCasts == saved.combat->playerCasts,
+                        "Offline restart advanced player wind-up");
+                    // One departing caster cancels while the other retains its cast and pays only at release.
+                    std::vector<CanonicalSessionProgress> sessions(authority.activeSessions().begin(), authority.activeSessions().end());
+                    sessions.erase(sessions.begin());
+                    auto remaining = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), sessions));
+                    paused.service().synchronizeCells(remaining);
+                    auto interrupted = paused.service().prepareNativeTick(remaining, id<ServerTick>(saved.tick + 2), 1.f/30, {});
+                    require(interrupted && interrupted->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Disconnect interruption tick missing");
+                    const auto cancelledBytes = bytes(paused.service()); const auto cancelled = read(cancelledBytes);
+                    require(!cancelled.combat->playerCasts[0] && cancelled.combat->playerCasts[1]
+                        && cancelled.combat->actors[0][9][2] == saved.combat->actors[0][9][2]
+                        && std::ranges::equal(cancelled.inventory, saved.inventory), "Disconnect paid or cancelled the wrong cast");
+                    InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, cancelledBytes);
+                    require(bytes(restored.service()) == cancelledBytes, "Interrupted player cast restart changed state");
+                    std::cout << "player-cast source=" << kind << " phases=durable releases=once concurrent=independent rejected=atomic restart=exact disconnect=unpaid\n";
+                }
+                return;
+            }
+
             for (bool lethal : {false, true}) for (int kind : {0, 1, 2})
             {
                 InventoryHost setup(descriptor, testContentManifest(), *registry, *crypto, initial);

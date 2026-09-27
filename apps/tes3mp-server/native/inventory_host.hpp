@@ -7,6 +7,11 @@
 
 namespace TES3MP::Native
 {
+    // V53 persists both players' bound cast resources, source/target life,
+    // wind-up/release/recovery and cancellation in the same atomic actor image.
+    // Payment occurs only at the release key; inactive scheduling pauses casts.
+    // T3C8/capability 26 samples all casters through one presentation timeline.
+    // Fresh campaigns required; V52 and older retain their layouts.
     // V52 persists NPC action IDs and body action/clip identities for timestamped
     // actor presentation. Requires a fresh campaign; older domains retain their layouts.
     // Owns loaded content/readers before the persistent inventory service.

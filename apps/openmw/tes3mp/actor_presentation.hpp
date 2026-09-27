@@ -11,10 +11,7 @@ namespace TES3MP::OpenMWAdapter
 {
     struct ActorPresentationPose : ActorPresentationSnapshot
     {
-        uint64_t cast = 0;
-        uint8_t castPhase = 0, castRange = 0;
         float castFrame = 0;
-        uint16_t castRelease = 0, castStop = 0;
     };
 
     // One render-time cursor for actor motion and animation. Only committed
@@ -45,7 +42,8 @@ namespace TES3MP::OpenMWAdapter
             {
                 ActorPresentationPose pose;
                 static_cast<ActorPresentationSnapshot&>(pose) = actor;
-                if (actor.kind == 2)
+                pose.castFrame = float(actor.castElapsed);
+                if (actor.kind == 2 && !actor.cast)
                     for (const auto& combat : snapshot.actors())
                         if (combat.actorId.value() == actor.id)
                         {

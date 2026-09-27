@@ -117,6 +117,12 @@ table ActorPresentationSnapshot {
   loop_stop:ushort;
   group:string;
   dead:bool;
+  cast:ulong;
+  cast_phase:ubyte;
+  cast_range:ubyte;
+  cast_elapsed:ushort;
+  cast_release:ushort;
+  cast_stop:ushort;
 }
 
 table LatestWinsCombatSnapshot {
@@ -130,5 +136,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C7";
+file_identifier "T3C8";
 file_extension "t3cs";

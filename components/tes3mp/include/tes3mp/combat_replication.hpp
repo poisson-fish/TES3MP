@@ -29,6 +29,9 @@ namespace TES3MP
         std::uint16_t bodyStop = 0, loopStart = 0, loopStop = 0;
         std::string group;
         bool dead = false;
+        std::uint64_t cast = 0;
+        std::uint8_t castPhase = 0, castRange = 0;
+        std::uint16_t castElapsed = 0, castRelease = 0, castStop = 0;
         friend bool operator==(const ActorPresentationSnapshot&, const ActorPresentationSnapshot&) = default;
     };
     inline constexpr std::size_t MaximumCombatSnapshotActors = 248;

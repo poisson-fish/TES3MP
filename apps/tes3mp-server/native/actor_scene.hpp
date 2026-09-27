@@ -96,7 +96,7 @@ namespace TES3MP::Native
         // source priority. The returned identity must join a combat campaign's
         // content binding before a swing can become authoritative.
         BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
-        BoundCastAnimations bindCastAnimations();
+        BoundCastAnimations bindCastAnimations(ESM::RefId actor = {});
         BoundHitAnimations bindHitAnimations(ESM::RefId actor, bool knockout = false);
         MeleeAnimation bindWeaponMeleeAnimation(ESM::RefId actor, const ESM::Weapon* weapon, const std::string& attack);
         bool loaded() const noexcept { return bool(mImpl); }

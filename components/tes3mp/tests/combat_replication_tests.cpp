@@ -331,6 +331,50 @@ namespace
         return std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(create());
     }
 
+    bool player_cast_timeline_rejects_invalid_values()
+    {
+        TES3MP::ActorPresentationSnapshot p;
+        p.id = 1; p.kind = 1; p.cast = 9; p.castPhase = 3; p.castRange = 2;
+        p.castElapsed = 3; p.castRelease = 10; p.castStop = 20;
+        const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+            value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 100, 100, false,
+            {}, skills(), {}, {}, {}, {}, std::span(&p, 1)); };
+        const auto valid = p;
+        for (unsigned field = 0; field < 9; ++field)
+        {
+            p = valid;
+            switch (field)
+            {
+                case 0: p.cast = 0; break;
+                case 1: p.castPhase = 6; break;
+                case 2: p.castRange = 3; break;
+                case 3: p.castElapsed = 10; break;
+                case 4: p.castRelease = 0; break;
+                case 5: p.castStop = 1801; break;
+                case 6: p.dead = true; break;
+                case 7: p.castPhase = 1; break;
+                case 8: p.castPhase = 4; break;
+            }
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        }
+        p = valid;
+        for (uint8_t phase = 1; phase <= 5; ++phase)
+        {
+            p.castPhase = phase; p.castElapsed = phase <= 2 ? 0 : phase == 3 ? 3 : 12;
+            auto made = create();
+            if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+            const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+            auto wire = TES3MP::encodeLatestWinsCombatSnapshot(snapshot);
+            const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(wire);
+            if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+                || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
+            wire[11] = std::byte('7');
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(TES3MP::decodeLatestWinsCombatSnapshot(wire))) return false;
+        }
+        return true;
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -344,13 +388,15 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "player-casts")
+        return player_cast_timeline_rejects_invalid_values() ? 0 : 1;
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
             && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing()
             && swing_states_round_trip_and_reject_invalid_values()
-            && knockout_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()
+            && player_cast_timeline_rejects_invalid_values() && knockout_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()
         ? 0
         : 1;
 }

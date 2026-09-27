@@ -115,6 +115,10 @@ history without gameplay callbacks. Persist swing/body identities and selected h
 clips; preserve life boundaries, pauses and starvation holds. T3C7/capability 25;
 fresh campaigns. Budget all four latest-state streams per pump, retaining backpressure.
 
+V53 adds participant-bound player casts to this clock. Release revalidation/payment
+and interruption commit atomically; offline casts pause. T3C8/capability 26;
+fresh campaigns.
+
 **Movement smoothness (target).** Cut over after smooth replication and unified
 engine collision. Until then validate inherited combat contacts on the server.
 Start with stock physics; tune snapshot frequency separately. Interpolate remote

@@ -10,7 +10,7 @@ class ActorPresentationEvidenceTests(unittest.TestCase):
     def test_cast_clock_requires_fractional_release_recovery_and_restart(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            def write(speed=1, stepped=False):
+            def write(speed=1, stepped=False, players=False, missing=False):
                 rows = []
                 for i in range(240):
                     frame = i // 4 if stepped else i / 4
@@ -21,11 +21,17 @@ class ActorPresentationEvidenceTests(unittest.TestCase):
                                 clip_time=frame / 30 * speed)
                     rows.extend([dict(event="native_combat_sample", tick=i),
                                  dict(event="actor_presentation_frame", time_ns=round((i + 1) * 1e9 / 120),
-                                      actors=[pose])])
+                                      actors=([dict(pose, kind=1, id=1)] + ([] if missing else [dict(pose, kind=1, id=2)]))
+                                      if players else [pose])])
                 for name in ("Alice-before", "Bob-before", "Alice", "Bob"):
                     root.joinpath(name + ".ndjson").write_text("\n".join(map(json.dumps, rows)))
             write()
             self.assertEqual(len(verify(root, casting=True)), 4)
+            write(players=True)
+            self.assertEqual(len(verify(root, player_casting=True)), 4)
+            write(players=True, missing=True)
+            with self.assertRaisesRegex(ValueError, "player 2"):
+                verify(root, player_casting=True)
             write(speed=2)
             with self.assertRaisesRegex(ValueError, "stock speed"):
                 verify(root, casting=True)

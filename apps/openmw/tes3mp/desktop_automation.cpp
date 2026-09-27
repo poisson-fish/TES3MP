@@ -805,6 +805,18 @@ namespace TES3MP::OpenMWAdapter
                 writeKnockout(player.knockout);
                 mOutput << '}';
             }
+            mOutput << "],\"casts\":[";
+            first = true;
+            for (const auto& pose : snapshot.presentation())
+            {
+                if (pose.kind != 1) continue;
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"id\":" << pose.id << ",\"cast_id\":" << pose.cast
+                    << ",\"cast_phase\":" << unsigned(pose.castPhase) << ",\"cast_range\":" << unsigned(pose.castRange)
+                    << ",\"cast_elapsed\":" << pose.castElapsed << ",\"cast_release\":" << pose.castRelease
+                    << ",\"cast_stop\":" << pose.castStop << '}';
+            }
             mOutput << "],\"swings\":[";
             first = true;
             for (const auto& swing : snapshot.swings())

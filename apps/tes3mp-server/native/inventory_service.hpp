@@ -109,6 +109,8 @@ namespace TES3MP::Native
         bool mNpcWeaponCompetition = false;
         bool mNpcFullSelection = false;
         bool mNpcCastLifecycle = false;
+        bool mPlayerCastLifecycle = false;
+        std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
         std::optional<std::array<BoundHitAnimations, 3>> mBoundHits;
@@ -164,6 +166,9 @@ namespace TES3MP::Native
         class ActorTransaction;
         class AttackTransaction;
         class SpellTransaction;
+        std::unique_ptr<SpellTransaction> preparePlayerMagicSource(PlayerId player,
+            const ClientMagicUseCommand& use, const ActorCampaignCombat& combat,
+            std::span<const ActorCampaignTimedEffect> effects, const PreparedNativeInventory* inventory = nullptr);
         // Combat slots and inventory owners belong to different domains: the
         // selected NPC is combat slot 2 but may follow many shared containers.
         struct MagicCasterContext

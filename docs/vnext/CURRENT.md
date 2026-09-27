@@ -2,9 +2,9 @@
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 one NPC/walking biped and doors at 60 Hz; commits at 30 Hz; neighbors freeze.
-**V52, T3C7/capability 25; fresh campaigns.**
+**V53, T3C8/capability 26; fresh campaigns.**
 
-Inherited custom-body melee/falls/get-up evidence:
+Inherited body evidence:
 `build/m4-custom-<body>-<mode>-live-<suffix>`:
 
 | Body | Record | fatigue suffix | physical suffix |
@@ -14,27 +14,26 @@ Inherited custom-body melee/falls/get-up evidence:
 | khajiit-m | TR_m1_Batharra | 03 | 01 |
 | tsaesci | TR_m7_Qorinue-Najan | 01 | 01 |
 
-Synthetic stats/placements/spells; authored models. Logs: `build/logs/m4-custom-*`.
+Synthetic fixtures; authored models. Logs: `build/logs/m4-custom-*`.
 Corpse poses untested; creatures require walking bipeds, no spells/equipped weapon.
 
-NPC casting now samples frozen release/recovery sections through the shared timeline,
-including interruption, pauses, starvation and life/session boundaries; no callbacks.
-Save/wire unchanged. All three ranges match vanilla/dancer/custom Khajiit/Tsaesci
-resources. Custom casting has resource checks only.
+Player/NPC casts share durable wind-up/release/recovery and fractional presentation
+without callbacks. Bound resources, source/target life and concurrent casts persist. Revalidation
+precedes atomic magicka/charge/CastOnce payment. Incapacitation, source/target loss
+and disconnect interrupt; inactive/saturated areas pause. Recovery outlives targets.
+Custom casting has resource checks only.
 
-New captures: `build/m4-cast-timeline-vanilla-live-02` and
-`build/m4-cast-timeline-tr-item-live-01`: `result.json`, `presentation-validation.json`.
-Synthetic actors/placements; unchanged Fireball/TR spell/WhenUsed.
-Both desktops inspected; eight traces: p95 <9.1 ms, casting ~1x stock.
-Both capture groups use 100 ms +/-25 ms, 10% loss, extra 125 ms delays,
-reconnect/restart. New captures prove pre-payment cancellation, retained wind-up,
-converged resources and no duplicate outcomes. `build/logs/cast-*`: timeline,
-resources, lifecycle/interruption, validators/builds. Player casting remains immediate.
+New: `build/m4-player-cast-vanilla-live-02`, `build/m4-player-cast-tr-item-live-01`:
+`result.json`, `presentation-validation.json`, TR `payment-validation.json`.
+Synthetic actors/placements, unchanged Fireball/TR spell/WhenUsed; both desktops
+inspected. Eight 60-FPS traces: player casts ~1x stock.
+100 ms +/-25 ms, 10% loss, extra 125 ms delays, reconnect/restart during concurrent
+wind-up. Unpaid interruption; converged unique payment totals; no duplicate outcomes.
+`build/logs/player-cast-*`: focused checks/builds.
 
-**Next: persist player wind-up/release/recovery and interruption through this timeline,
-preserving concurrent casts and atomic payment.**
+**Next: implement Silence/Sound interference through this casting lifecycle.**
 
-100 effects remain outside general native casting:
+100 effects remain:
 
 - Attribute/resources (8): DamageAttribute, DamageSkill, RestoreAttribute,
   RestoreSkill, FortifyHealth, FortifyMagicka, FortifyFatigue, FortifyMaximumMagicka.

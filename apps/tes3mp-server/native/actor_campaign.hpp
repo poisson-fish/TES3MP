@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #include "actor_spawns.hpp"
 #include "melee_animation.hpp"
+#include "cast_animation.hpp"
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <algorithm>
 #include <array>
@@ -37,8 +38,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t KnockoutAnimationCampaignMagic = 0x4f50434154335354;
     inline constexpr uint64_t ExpandedEffectsCampaignMagic = 0x5050434154335354;
     inline constexpr uint64_t ActorPresentationCampaignMagic = 0x5150434154335354;
+    inline constexpr uint64_t PlayerCastCampaignMagic = 0x5250434154335354;
+    inline constexpr bool hasActorPresentation(uint64_t magic)
+    { return magic == ActorPresentationCampaignMagic || magic == PlayerCastCampaignMagic; }
     inline constexpr bool hasExpandedEffects(uint64_t magic)
-    { return magic == ExpandedEffectsCampaignMagic || magic == ActorPresentationCampaignMagic; }
+    { return magic == ExpandedEffectsCampaignMagic || hasActorPresentation(magic); }
     inline constexpr bool hasKnockoutAnimation(uint64_t magic)
     { return magic == KnockoutAnimationCampaignMagic || hasExpandedEffects(magic); }
     inline constexpr bool hasRangedFlight(uint64_t magic)
@@ -103,6 +107,24 @@ namespace TES3MP::Native
         uint64_t steps = 0, terminal = 0; // 0 flying, 1 collided, 2 expired.
         bool operator==(const BowProjectile&) const = default;
     };
+    struct ActorCampaignCast
+    {
+        enum Phase : uint64_t { Selected = 1, Prepared, WindUp, Released, Recovery };
+        uint64_t actor = 0, life = 0, cast = 0, sourceKind = 0, source = 0;
+        uint64_t targetKind = 0, target = 0, range = 0, elapsed = 0, phase = Selected;
+        uint64_t targetLife = 0; // V53 player target generation.
+        bool operator==(const ActorCampaignCast&) const = default;
+    };
+    inline bool advanceCast(ActorCampaignCast& cast, const CastAnimation& timing)
+    {
+        if (cast.phase >= ActorCampaignCast::Released)
+        { ++cast.elapsed; cast.phase = ActorCampaignCast::Recovery; }
+        else if (cast.phase == ActorCampaignCast::Selected) cast.phase = ActorCampaignCast::Prepared;
+        else if (cast.phase == ActorCampaignCast::Prepared) cast.phase = ActorCampaignCast::WindUp;
+        else if (++cast.elapsed >= timing.releaseTicks)
+        { cast.phase = ActorCampaignCast::Released; return true; }
+        return false;
+    }
     struct ActorCampaignCombat
     {
         static constexpr size_t StatCount = 8 + 3 + 27;
@@ -115,6 +137,8 @@ namespace TES3MP::Native
         std::array<uint32_t, 3> hitRecoveryTicks{};
         std::array<std::optional<PlayerSwing>, 2> swings;
         std::vector<BowProjectile> arrows;
+        std::array<std::optional<ActorCampaignCast>, 2> playerCasts;
+        std::array<std::string, 2> playerCastResources;
         uint64_t npcAction = 0;
         std::array<uint64_t, 3> bodyAction{}, hitGroup{};
         bool operator==(const ActorCampaignCombat&) const = default;
@@ -173,13 +197,6 @@ namespace TES3MP::Native
         bool operator==(const ActorCampaignTimedEffect&) const = default;
     };
     inline constexpr size_t MaximumActorTimedEffects = 512;
-    struct ActorCampaignCast
-    {
-        enum Phase : uint64_t { Selected = 1, Prepared, WindUp, Released, Recovery };
-        uint64_t actor = 0, life = 0, cast = 0, sourceKind = 0, source = 0;
-        uint64_t targetKind = 0, target = 0, range = 0, elapsed = 0, phase = Selected;
-        bool operator==(const ActorCampaignCast&) const = default;
-    };
     struct ActorCampaign
     {
         std::span<const char> inventory, actor;
@@ -321,7 +338,7 @@ namespace TES3MP::Native
                     state.hitKnockdown[actor] = value != 0;
                 }
         }
-        if (magic == ActorPresentationCampaignMagic)
+        if (hasActorPresentation(magic))
         {
             auto& state = *combat;
             state.npcAction = getAreaWord(bytes, offset);
@@ -567,6 +584,29 @@ namespace TES3MP::Native
                 casting = value;
             }
         }
+        if (magic == PlayerCastCampaignMagic)
+            for (size_t i = 0; i < 2; ++i)
+            {
+                const auto size = getAreaWord(bytes, offset);
+                if (!size || size > 1024 || size > bytes.size() - offset)
+                    throw std::invalid_argument("Native player cast resource invalid");
+                combat->playerCastResources[i].assign(bytes.data() + offset, size_t(size)); offset += size_t(size);
+                const auto present = getAreaWord(bytes, offset);
+                if (present > 1) throw std::invalid_argument("Native player cast presence invalid");
+                if (!present) continue;
+                ActorCampaignCast value;
+                for (auto* field : {&value.actor, &value.life, &value.cast, &value.sourceKind, &value.source,
+                        &value.targetKind, &value.target, &value.range, &value.elapsed, &value.phase, &value.targetLife})
+                    *field = getAreaWord(bytes, offset);
+                if (!value.actor || value.life != 1 || !value.cast || !value.source || value.sourceKind > 1
+                    || value.targetKind > 2 || ((value.targetKind == 0) != (value.target == 0))
+                    || (value.targetKind == 2 ? (!life || !value.targetLife || value.targetLife > life->generation
+                        || (value.phase < ActorCampaignCast::Released && value.targetLife != life->generation)) : value.targetLife != 1)
+                    || value.range > 2 || value.elapsed > 1800 || value.phase < 1 || value.phase > 5
+                    || (value.phase <= ActorCampaignCast::Prepared && value.elapsed))
+                    throw std::invalid_argument("Native player cast state invalid");
+                combat->playerCasts[i] = value;
+            }
         if (hasPlayerSwings(magic))
             for (auto& swing : combat->swings)
             {

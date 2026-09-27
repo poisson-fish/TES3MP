@@ -1,8 +1,34 @@
-"""Observed V52 casting timeline; uses normal desktop intents over impaired UDP."""
+"""Observed V53 casting timeline; uses normal desktop intents over impaired UDP."""
 
 from dataclasses import asdict
 import json
 import time
+
+
+def verify_player_payments(report):
+    """Compare both observers with unique committed payment outcomes across restart."""
+    paid = {}
+    for segment in ("pre_restart_events", "post_restart_events"):
+        for events in report[segment].values():
+            for event in events:
+                if event["caster_kind"] != 1 or event["magicka_delta"] >= 0:
+                    continue
+                key = (event["caster"], event["caster_revision"])
+                if key in paid and paid[key] != event:
+                    raise RuntimeError("observers disagree on a player payment")
+                paid[key] = event
+    result = {}
+    for role, player in (("Alice", 1), ("Bob", 2)):
+        payments = [e for (caster, _), e in paid.items() if caster == player]
+        expected = report["initial"][role]["magicka"] + sum(e["magicka_delta"] for e in payments)
+        observed = []
+        for sample in report["final"].values():
+            resource = sample if sample["self"] == player else next(p for p in sample["players"] if p["id"] == player)
+            observed.append(resource["magicka"])
+        if not payments or any(abs(value - expected) > .01 for value in observed):
+            raise RuntimeError(f"player {player} payment/resources did not converge: {observed}, expected {expected}")
+        result[role] = dict(payments=len(payments), magicka=expected, observers=observed)
+    return result
 
 
 def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
@@ -69,9 +95,24 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
         # pre-crash visual instead of letting the final screenshot replace it.
         evidence[role].with_suffix(f".ndjson.control.{sequence[role]}.png").rename(
             output / f"{role}-windup.png")
+    for role in evidence:
+        command(role, "thirdperson")
+        command(role, "facepeer")
     # Submit without waiting between clients: both intentions race the same NPC cast.
     for role in evidence:
         submit(role, f'castactor "{content["spell"]}"')
+    player_windup = wait_for(lambda: next((samples(role)[-1] for role in evidence
+        if sum(1 for c in samples(role)[-1]["casts"] if c["cast_phase"] == 3) == 2), None),
+        "concurrent player wind-ups")
+    def rendered_windup(role):
+        frames = [r for r in records(evidence[role]) if r.get("event") == "actor_presentation_frame"]
+        return frames and sum(p["kind"] == 1 and p.get("cast_phase") == 3
+            and 10 <= p["cast_frame"] < p["cast_release"] - 4 for p in frames[-1]["actors"]) == 2
+    wait_for(lambda: all(rendered_windup(role) for role in evidence), "both desktops render concurrent mid-wind-up poses")
+    for role in evidence:
+        command(role, "screenshot")
+        evidence[role].with_suffix(f".ndjson.control.{sequence[role]}.png").rename(
+            output / f"{role}-player-windup.png")
     wait_for(both_outcomes, "both clients observe both player casts")
     wait_for(lambda: all(any(e["success"] for e in events(role, 2)) for role in evidence),
              "both clients observe autonomous NPC release")
@@ -105,12 +146,30 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
              "NPC independently damages the remaining player")
     wait_for(lambda: samples("Alice")[-1]["generation"] > initial["Alice"]["generation"],
              "Alice returns after the controlled disconnect interval", 25)
-    returned_tick = samples("Alice")[-1]["tick"]
     command("Bob", "screenshot")
-    # Crash at a visible wind-up, preserving the authoritative campaign file.
+    # Interrupt a player before payment while a peer keeps the area active.
+    wait_for(lambda: all(not c["cast_id"] for role in evidence for c in samples(role)[-1]["casts"]),
+             "player recovery completes")
+    submit("Alice", f'castactor "{content["spell"]}"')
+    player_interruption = wait_for(lambda: next((r for r in samples("Alice")[-1:]
+        if any(c["id"] == 1 and c["cast_phase"] == 3 and c["cast_elapsed"] < c["cast_release"] - 12
+               for c in r["casts"])), None), "player wind-up before disconnect")
+    interrupted_player = next(c for c in player_interruption["casts"] if c["id"] == 1)
+    command("Alice", "disconnectbrief")
+    player_cancelled = wait_for(lambda: next((r for r in samples("Bob")[-1:]
+        if r["tick"] > player_interruption["tick"] and any(c["id"] == 1 and not c["cast_id"] for c in r["casts"])), None),
+        "player cast interrupted independently")
+    alice_resource = next(p for p in player_cancelled["players"] if p["id"] == 1)
+    if abs(alice_resource["magicka"] - player_interruption["magicka"]) > .01:
+        raise RuntimeError("interrupted player wind-up paid magicka")
+    wait_for(lambda: samples("Alice")[-1]["generation"] > player_interruption["generation"],
+             "player returns after interrupted wind-up", 25)
+    for role in evidence:
+        submit(role, f'castactor "{content["spell"]}"')
+    # Crash while both casts are pending. Offline time cannot consume the release.
     windup = wait_for(lambda: next((r for r in samples("Alice")[-1:]
-                                   if any(a["cast_id"] > returned_tick and a["cast_phase"] == 3 and a["cast_elapsed"] < a["cast_release"] - 3
-                                          for a in r["actors"])), None), "restart during NPC wind-up")
+        if all(c["cast_phase"] == 3 and c["cast_elapsed"] < c["cast_release"] - 3 for c in r["casts"])
+        and len(r["casts"]) == 2), None), "restart during concurrent player wind-up")
     processes["server"].terminate()
     processes["server"].wait(timeout=15)
     finished.add("server")
@@ -125,9 +184,7 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
         path.with_suffix(".ndjson.control").unlink(missing_ok=True)
         sequence[role] = 0
     restart_server()
-    # Alice is now the nearest target and this cast began after her return.
-    # Bring its intended target back first; another player arriving first must
-    # legitimately cancel a cast aimed at an absent player before payment.
+    # Bring Alice back first to retain her cast; Bob may cancel while absent.
     restart_clients("Alice")
     finished.discard("Alice")
     wait_for(lambda: samples("Alice"), "cast target returns after restart", 75)
@@ -135,17 +192,24 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
     finished.discard("Bob")
     wait_for(lambda: all(len(samples(role)) >= 3 for role in evidence), "two desktops return after process restart", 75)
     restored = {role: samples(role)[0] for role in evidence}
-    saved_cast = windup["actors"][0]["cast_id"]
-    if not any(a["cast_id"] == saved_cast for role in evidence for r in samples(role) for a in r["actors"]):
-        raise RuntimeError("restart did not retain the observed pending cast identity")
+    for role in evidence:
+        command(role, "thirdperson")
+        command(role, "facepeer")
+    saved_cast = next(c["cast_id"] for c in windup["casts"] if c["id"] == 1)
+    if not any(c["id"] == 1 and c["cast_id"] == saved_cast for role in evidence for r in samples(role) for c in r["casts"]):
+        raise RuntimeError("restart did not retain the player's pending cast identity")
     for role in evidence:
         if restored[role]["actors"][0]["health"] > concurrent[role]["actors"][0]["health"] + .01:
             raise RuntimeError("restart lost committed NPC damage")
     wait_for(lambda: all(any(e["success"] for e in events(role, 2)) for role in evidence),
              "NPC casting resumes after restart")
+    wait_for(lambda: all(not c["cast_id"] for role in evidence for c in samples(role)[-1]["casts"]),
+             "retained player cast completes recovery")
     for role in evidence:
         submit(role, f'castactor "{content["spell"]}"')
     wait_for(both_outcomes, "both players cast after restart")
+    wait_for(lambda: all(not c["cast_id"] for role in evidence for c in samples(role)[-1]["casts"]),
+             "new player casts complete recovery")
     wait_for(lambda: samples("Alice")[-1]["actors"][0]["health"] < restored["Alice"]["actors"][0]["health"],
              "new damage survives resumed encounter")
     final = {role: samples(role)[-1] for role in evidence}
@@ -207,12 +271,14 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
         finished.add(role)
         if processes[role].returncode:
             raise RuntimeError(f"{role} did not finish cleanly")
-    report = dict(success=True, scenario="V52 shared cast timeline and concurrent real-record casting",
+    report = dict(success=True, scenario="V53 shared cast timeline and concurrent real-record casting",
                   synthetic_actor_and_placements=True, unchanged_gameplay_records=content,
                   manifest=manifest, initial=initial, concurrent=concurrent, windup=windup, observed_windup=observed_windup,
                   restored=restored, final=final, interruption=interruption, cancelled=cancelled,
+                  player_windup=player_windup, player_interruption=player_interruption, player_cancelled=player_cancelled,
                   observed_phases=sorted(phases), matching_ticks=matched, aligned_samples=aligned, matching_animation_clocks=timing_matches,
                   pre_restart_events=before_events, post_restart_events={role: events(role) for role in evidence},
                   relay=asdict(relay.stop()), screenshots=[p.name for p in output.glob("*.png")])
+    report["player_payments"] = verify_player_payments(report)
     output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: report[k] for k in ("success", "scenario", "unchanged_gameplay_records", "matching_ticks", "relay")}), flush=True)
