@@ -6835,11 +6835,13 @@ int main(int argc, char** argv)
             std::cout << "PASS player-swings\n"; return 0;
         }
         if (argc == 5 && (std::string_view(argv[1]) == "npc-weapon-execution"
-                || std::string_view(argv[1]) == "npc-attack-modes"))
+                || std::string_view(argv[1]) == "npc-attack-modes"
+                || std::string_view(argv[1]) == "npc-windup-target"))
         {
             TES3MP::Native::Testing::checkNpcWeaponExecution(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
-                std::string_view(argv[1]) == "npc-attack-modes");
+                std::string_view(argv[1]) == "npc-attack-modes",
+                std::string_view(argv[1]) == "npc-windup-target");
             std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "npc-hit-resources")

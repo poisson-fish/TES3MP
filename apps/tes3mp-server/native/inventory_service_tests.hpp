@@ -7,7 +7,7 @@ namespace TES3MP::Native::Testing
     void checkRangedRelease(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&, std::string_view);
     void checkPlayerSwings(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcWeaponExecution(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
-        bool generalAttackModes = false);
+        bool generalAttackModes = false, bool lostTarget = false);
     void checkTravelerNeighborhood(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&);
     void checkNpcDoors(const std::filesystem::path&, const std::filesystem::path&, const std::filesystem::path&,
         bool avoidance = false, bool traveler = false, bool melee = false, bool combat = false,

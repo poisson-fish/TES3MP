@@ -5082,7 +5082,7 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool generalAttackModes)
+        const std::filesystem::path& settings, bool generalAttackModes, bool lostTarget)
     {
         // Finish the large shared fixture builder before entering recovery tests.
         checkNpcDoors(scratch, config, settings,
@@ -5127,6 +5127,166 @@ namespace TES3MP::Native::Testing
         const auto bytes = [](const auto& runtime) {
             return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end());
         };
+        if (lostTarget)
+        {
+            const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto state = [&](const auto& runtime) {
+                const auto image = bytes(runtime);
+                return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            };
+            uint64_t time = 0;
+            while ((!state(service).melee->target || state(service).melee->state.mReleased) && time < 64)
+            {
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(++time), 1.f/30, {});
+                require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Wind-up selection did not commit");
+            }
+            const auto selected = state(service);
+            require(selected.melee->target && !selected.melee->state.mReleased,
+                "Wind-up fixture did not select a target before release");
+            const auto seed = bytes(service);
+            const auto start = time;
+            const auto original = selected.melee->target;
+            const auto other = original == 1 ? 2u : 1u;
+            const auto retreat = [&](bool both) {
+                std::vector<CanonicalPlayerEntityState> entities(authority.players().begin(), authority.players().end());
+                for (auto& entity : entities)
+                    if (both || entity.playerId().value() == original)
+                        entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity,
+                            id<ServerTick>(start + 1), Transform(entity.transform().cell(),
+                                Position3(600 * 1024, -64 * 1024, 1024), entity.transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                return std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
+            };
+            // Every candidate is rejected, prepared again, and retried exactly;
+            // a separately recovered host must produce the same bytes and events.
+            const auto advance = [&](auto& runtime, auto& replay, const auto& players, uint64_t tick) {
+                const auto prior = bytes(runtime);
+                auto pending = runtime.prepareNativeTick(players, id<ServerTick>(tick), 1.f/30, {});
+                require(bool(pending), "Wind-up continuation did not prepare");
+                const auto events = runtime.projectCombatEvents(players, id<SessionId>(1),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                const auto peer = runtime.projectCombatEvents(players, id<SessionId>(2),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                require(bool(events) == bool(peer)
+                    && (!events || std::ranges::equal(events->actorEvents(), peer->actorEvents())),
+                    "Wind-up observers disagree");
+                std::vector<std::byte> proposed;
+                require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                    return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && bytes(runtime) == prior, "Rejected wind-up leaked state, resources or RNG");
+                pending.reset();
+                pending = runtime.prepareNativeTick(players, id<ServerTick>(tick), 1.f/30, {});
+                auto recovered = replay.prepareNativeTick(players, id<ServerTick>(tick), 1.f/30, {});
+                require(pending && recovered, "Wind-up retry/recovery did not prepare");
+                const auto recoveredEvents = replay.projectCombatEvents(players, id<SessionId>(1),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick), recovered.get());
+                require(bool(events) == bool(recoveredEvents) && (!events
+                    || std::ranges::equal(events->actorEvents(), recoveredEvents->actorEvents())),
+                    "Recovered wind-up replayed or changed hit events");
+                const NativeInventoryCommit exact = [&](auto image) {
+                    require(std::ranges::equal(image, proposed), "Wind-up retry/restart changed candidate bytes");
+                    return CanonicalDurabilityResult::Committed;
+                };
+                require(pending->commit(exact) == CanonicalDurabilityResult::Committed
+                    && recovered->commit(exact) == CanonicalDurabilityResult::Committed,
+                    "Wind-up exact retry did not commit");
+                return events;
+            };
+            for (const bool both : {false, true})
+            {
+                InventoryHost encounter(descriptor, testContentManifest(), *registry, *crypto, seed);
+                auto replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, seed);
+                auto& runtime = encounter.service();
+                const auto moved = retreat(both);
+                runtime.synchronizeCells(moved); replay->service().synchronizeCells(moved);
+                time = start;
+                bool cancelled = false, hitOther = false;
+                for (; time < start + 128 && !hitOther;)
+                {
+                    const auto prior = state(runtime);
+                    const auto events = advance(runtime, replay->service(), moved, ++time);
+                    const auto after = state(runtime);
+                    if (!cancelled && !after.melee->target)
+                    {
+                        require(!after.melee->state.mReleased && !after.melee->contact
+                            && (!events || events->actorEvents().empty()) && after.combat == prior.combat,
+                            "Out-of-reach cancellation released a hit or changed combat resources/RNG");
+                        cancelled = true;
+                        replay.reset();
+                        replay = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                        replay->service().synchronizeCells(moved);
+                        if (both) break;
+                    }
+                    if (events && !events->actorEvents().empty())
+                    {
+                        require(cancelled && after.melee->target == other && after.melee->contact,
+                            "Retreated target was hit or the nearby player was not selected anew");
+                        hitOther = true;
+                    }
+                }
+                require(cancelled, "NPC wind-up remained locked onto an out-of-reach selected target");
+                if (both)
+                {
+                    // No candidate remains in reach. Pause/reconnect without
+                    // resetting combat, then let the original target return.
+                    const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(moved.players(), {}));
+                    const auto prior = state(runtime);
+                    runtime.synchronizeCells(offline); replay->service().synchronizeCells(offline);
+                    advance(runtime, replay->service(), offline, ++time);
+                    require(state(runtime).combat == prior.combat
+                        && state(runtime).melee->state == prior.melee->state,
+                        "Inactive wind-up advanced combat or animation");
+                    const auto sessions = players(*SessionGeneration::initial().next(), 1, 2);
+                    const auto rejoined = std::get<CanonicalServerState>(createCanonicalServerState(
+                        authority.players(), sessions.activeSessions()));
+                    runtime.synchronizeCells(rejoined); replay->service().synchronizeCells(rejoined);
+                    bool hit = false;
+                    for (const auto limit = time + 128; time < limit && !hit;)
+                    {
+                        const auto events = advance(runtime, replay->service(), rejoined, ++time);
+                        hit = events && !events->actorEvents().empty();
+                    }
+                    require(hit && state(runtime).melee->target == original && state(runtime).melee->contact,
+                        "Returning player did not resume combat after cancelled wind-up");
+                }
+                else require(hitOther, "NPC did not resume against the nearby player");
+            }
+            // Once released, preserve the selected target and complete a miss.
+            InventoryHost released(descriptor, testContentManifest(), *registry, *crypto, seed);
+            auto& runtime = released.service(); runtime.synchronizeCells(authority);
+            time = start;
+            while (!state(runtime).melee->state.mReleased && time < start + 128)
+            {
+                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(++time), 1.f/30, {});
+                require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "In-reach wind-up failed to release");
+            }
+            require(state(runtime).melee->state.mReleased && !state(runtime).melee->state.mHit,
+                "Fixture missed the released pre-hit window");
+            InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+            const auto moved = retreat(false);
+            runtime.synchronizeCells(moved); replay.service().synchronizeCells(moved);
+            bool missed = false;
+            for (const auto limit = time + 64; time < limit && !missed;)
+            {
+                const auto events = advance(runtime, replay.service(), moved, ++time);
+                const auto after = state(runtime);
+                require(after.melee->target == original && after.melee->state.mReleased,
+                    "Released attack cancelled or redirected to the nearby player");
+                if (events && !events->actorEvents().empty())
+                {
+                    require(!after.melee->contact && after.melee->state.mHit
+                        && std::ranges::all_of(events->actorEvents(), [](const auto& hit) { return !hit.hit && hit.damage == 0; }),
+                        "Released out-of-reach swing dealt damage");
+                    missed = true;
+                }
+            }
+            require(missed, "Released out-of-reach attack never completed its hit key");
+            std::cout << "wind-up retreat=cancel reselection=nearby return=resume released=miss"
+                << " rejection=atomic retry=exact restart=exact reconnect=two inactive=pause\n";
+            return;
+        }
         auto& native = dynamic_cast<InventoryService&>(service);
         require(native.selectedNpcWeaponCondition() == 1000,
             "Repeat fixture did not start with the stock auto-equipped spear");

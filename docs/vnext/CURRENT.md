@@ -23,32 +23,35 @@ two clients, 10% loss/100 ms delay/jitter, reconnect/restart. Native NPC body
 replacements immediately sample retained combat.
 
 Inherited player physical capture: `build/m4-player-physical-live-08/result.json`.
-Stock male player, NPC sword hits; synthetic stats/placement. Both clients'
-self/remote down/get-up/upright images inspected under the same impairment,
-subject reconnect and restart. Damage retention, clocks and hit deduplication pass.
-Remote player creation/equipment replacement samples retained combat; local
-POV/skeleton rebuilds retain knockout frames. Camera setup waits for server positions.
-Focused checks: `build/logs/m4-player-physical-validator.log`, `build/logs/m4-physical-validator.log`,
-`build/logs/m4-player-physical-pose-test.log` (four resource layers),
-`build/logs/m4-player-physical-client-build.log`.
+Stock male player/NPC sword hits, synthetic stats/placement; self/remote get-up
+inspected under impairment/reconnect/restart. Remote creation/equipment and local POV/skeleton
+rebuilds retain combat poses; camera setup waits for server positions.
+Inherited checks: `build/logs/m4-player-physical-validator.log`, `build/logs/m4-physical-validator.log`,
+`build/logs/m4-player-physical-pose-test.log` (four layers), `build/logs/m4-player-physical-client-build.log`.
 
-Tick-373 reconnect failure fixed: disconnect cleared the authority marker, letting
-retained pose velocity enter legacy integration on rejoin. Native campaigns now
-exclude it across reconnect/restart, preserving validation/atomic commits.
-`build/logs/m4-reconnect-before.log` reproduces `CandidateStateInvalid`
-(preparation=5, tick 373) with the saved velocity; `m4-reconnect-test.log` passes
-concurrent NPC damage/get-up, stationary poses, rejected writes, exact retry,
-two-observer projection and restart. `m4-reconnect-getup.log` preserves fatigue/
-physical clocks and uncertain-write failure; `m4-reconnect-pose.log` covers four
-resource layers. Server build: `m4-reconnect-server-build.log`.
-Synthetic checks only; rendered acceptance remains inherited.
+Tick-373 reconnect fixed: native campaigns exclude retained pose velocity from
+legacy integration across disconnect/rejoin/restart. Inherited reproduction:
+`build/logs/m4-reconnect-before.log` (`CandidateStateInvalid`, preparation=5).
+`m4-reconnect-pose.log` covers four presentation layers.
 
-**M4 incomplete. Next: fix NPC wind-up holding an out-of-reach selected target**,
-then remaining male NPC/creature/custom-body coverage and attribute/resource effects.
-Accepted player capture stages the observer in reach for selection, then moves
-both players away during recovery. It does not prove overlapping combat.
+NPC wind-up lock fixed: out-of-reach targets cancel unreleased swings at full
+wind-up; normal selection resumes. Released swings retain targets and recheck
+reach at the hit key. No save/protocol change.
+`build/logs/m4-windup-before.log` reproduces the 128-tick lock;
+`m4-windup-test.log` passes nearby-player reselection, both players retreating,
+return/reconnect, inactive pause, released misses, atomic rejection, exact retry/restart
+and two-observer events.
+`m4-windup-reconnect.log`, `m4-windup-getup.log` and `m4-windup-weapons.log`
+preserve tick-373 recovery, player fatigue/physical get-up, weapon replacement
+and uncertain-write failure. Server build: `m4-windup-server-build.log`.
+New evidence is synthetic; rendered acceptance remains inherited.
 
-The following 100 built-in effects remain outside general native casting:
+**M4 incomplete. Next: capture stock male NPC combat on both desktops**, exercising
+retreat/retargeting during player get-up under loss/delay/jitter and reconnect/restart.
+Then finish creature/custom-body coverage and the eight attribute/resource effects below.
+Inherited player capture moves both players away during recovery; overlapping combat remains unproven.
+
+100 built-in effects remain outside general native casting:
 
 - Attribute/resources (8): DamageAttribute, DamageSkill, RestoreAttribute,
   RestoreSkill, FortifyHealth, FortifyMagicka, FortifyFatigue, FortifyMaximumMagicka.
@@ -78,7 +81,7 @@ The following 100 built-in effects remain outside general native casting:
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-Existing 43 plus these 100 cover 143 IDs, not arbitrary scripted/mod support.
+43 implemented + 100 remaining = 143 IDs; arbitrary scripted/mod support unproven.
 Allowlisting is insufficient: PLAN's applicable integration and live acceptance
 remain required. Powers/abilities/diseases remain outside general casting; preserve
 stock restrictions. Resolve multi-NPC/summon/player-life prerequisites as needed.

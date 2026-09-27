@@ -4527,6 +4527,11 @@ namespace TES3MP::Native
             if (combat->actors[2][8][2] <= 0 || combat->knockedDown[2] || hasParalysis(timedEffects, 2) || combat->hitRecoveryTicks[2]
                 || combat->actors[index][8][2] <= 0 || !victim || victim->transform().cell() != actorCell(after)
                 || !visible()
+                // A retained target blocks the next AI selection. Give up a
+                // fully wound, unreleased swing when that target leaves reach;
+                // released swings keep their target and resolve at the hit key.
+                || (!melee->snapshot().mReleased && melee->windUp() >= 1.f
+                    && meleeContact(players, after, target, meleeReach()) != target)
                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                     return session.playerId() == mBinding.mPlayers[index];
                 }))
