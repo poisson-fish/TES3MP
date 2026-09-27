@@ -111,12 +111,12 @@ namespace TES3MP
     {
         const auto validKnockout = [](KnockoutSnapshot pose, bool dead) {
             return pose.state <= 3 && pose.frame < 1800
-                && (pose.state >= 2 || !pose.frame) && (!dead || pose.state < 2);
+                && (pose.state >= 2 || !pose.frame) && (!dead || (pose.state < 2 && !pose.paralyzed));
         };
         if (!validKnockout(selfKnockout, selfDead)) return error(Code::InvalidFloat);
         if (!std::isfinite(selfHealth) || !std::isfinite(selfMaximumHealth) || !std::isfinite(selfFatigue)
             || !std::isfinite(selfMaximumFatigue) || !std::isfinite(selfMagicka) || !std::isfinite(selfMaximumMagicka)
-            || selfMaximumHealth <= 0.f || selfMaximumFatigue < 0.f || selfMaximumMagicka < 0.f || selfMagicka < 0.f
+            || selfMaximumHealth <= 0.f || selfMaximumFatigue < 0.f || selfMaximumMagicka < 0.f || selfMagicka < -1e6f
             || selfMagicka > selfMaximumMagicka)
             return error(Code::InvalidFloat);
         if (actors.size() > MaximumCombatSnapshotActors)
@@ -127,7 +127,7 @@ namespace TES3MP
                 || !std::isfinite(actors[i].fatigue) || !std::isfinite(actors[i].maximumFatigue)
                 || !std::isfinite(actors[i].magicka) || !std::isfinite(actors[i].maximumMagicka)
                 || actors[i].maximumHealth < 0.f || actors[i].maximumFatigue < 0.f || actors[i].maximumMagicka < 0.f
-                || actors[i].magicka < 0.f || actors[i].magicka > actors[i].maximumMagicka)
+                || actors[i].magicka < -1e6f || actors[i].magicka > actors[i].maximumMagicka)
                 return error(Code::InvalidFloat, 0, 0, i);
             if (!validKnockout(actors[i].knockout, actors[i].dead)) return error(Code::InvalidFloat, 0, 0, i);
             const auto& cast = actors[i];
@@ -150,7 +150,7 @@ namespace TES3MP
             if (!std::isfinite(player.health) || !std::isfinite(player.maximumHealth) || !std::isfinite(player.fatigue)
                 || !std::isfinite(player.maximumFatigue) || !std::isfinite(player.magicka)
                 || !std::isfinite(player.maximumMagicka) || player.maximumHealth <= 0.f || player.maximumFatigue < 0.f
-                || player.maximumMagicka < 0.f || player.magicka < 0.f || player.magicka > player.maximumMagicka)
+                || player.maximumMagicka < 0.f || player.magicka < -1e6f || player.magicka > player.maximumMagicka)
                 return error(Code::InvalidFloat, 0, 0, i);
             if (player.playerId == self || (i && players[i - 1].playerId >= player.playerId))
                 return error(Code::EntriesNotStrictlySorted, player.playerId.value(), 0, i);
@@ -162,7 +162,7 @@ namespace TES3MP
             if (static_cast<std::size_t>(skills[i].skill) != i)
                 return error(Code::InvalidSkill, static_cast<std::size_t>(skills[i].skill), i, i);
             if (!std::isfinite(skills[i].value) || !std::isfinite(skills[i].progress) || skills[i].value < 0.f
-                || skills[i].value > 100.f || skills[i].progress < 0.f || skills[i].progress >= 1.f)
+                || skills[i].value > 1e6f || skills[i].progress < 0.f || skills[i].progress >= 1.f)
                 return error(Code::InvalidFloat, 0, 0, i);
         }
         if (activeEffects.size() > MaximumReplicatedActiveMagicEffects)
@@ -292,13 +292,13 @@ namespace TES3MP
             input.targetSessionGeneration().value(), input.serverTick().value(), input.canonicalRevision().value(),
             input.selfPlayerId().value(), input.selfCombatRevision().value(), input.selfFatigue(), input.selfHealth(),
             input.selfDead(), input.selfMaximumHealth(), input.selfMaximumFatigue(), input.selfMagicka(),
-            input.selfMaximumMagicka(), input.selfKnockout().state, input.selfKnockout().frame);
+            input.selfMaximumMagicka(), input.selfKnockout().state, input.selfKnockout().frame, input.selfKnockout().paralyzed);
         std::vector<Snapshot::ActorCombatSnapshot> actors;
         actors.reserve(input.actors().size());
         for (const auto& actor : input.actors())
             actors.emplace_back(actor.actorId.value(), actor.combatRevision.value(), actor.health, actor.maximumHealth,
                 actor.fatigue, actor.maximumFatigue, actor.magicka, actor.maximumMagicka, actor.dead,
-                actor.castId, actor.castPhase, actor.castRange, actor.castElapsed, actor.castRelease, actor.castStop, actor.knockout.state, actor.knockout.frame);
+                actor.castId, actor.castPhase, actor.castRange, actor.castElapsed, actor.castRelease, actor.castStop, actor.knockout.state, actor.knockout.frame, actor.knockout.paralyzed);
         std::vector<Snapshot::CombatSkillSnapshot> skills;
         skills.reserve(input.selfSkills().size());
         for (const auto& skill : input.selfSkills())
@@ -308,7 +308,7 @@ namespace TES3MP
         for (const auto& player : input.players())
             players.emplace_back(player.playerId.value(), player.combatRevision.value(), player.health,
                 player.maximumHealth, player.fatigue, player.maximumFatigue, player.magicka, player.maximumMagicka,
-                player.dead, player.knockout.state, player.knockout.frame);
+                player.dead, player.knockout.state, player.knockout.frame, player.knockout.paralyzed);
         std::vector<Snapshot::ActiveMagicEffectSnapshot> activeEffects;
         activeEffects.reserve(input.activeEffects().size());
         for (const auto& effect : input.activeEffects())
@@ -471,7 +471,7 @@ namespace TES3MP
             actors.push_back(
                 { *value(actor), *value(revision), current.health(), current.maximum_health(), current.fatigue(),
                     current.maximum_fatigue(), current.magicka(), current.maximum_magicka(), current.dead(),
-                    current.cast_id(), current.cast_phase(), current.cast_range(), current.cast_elapsed(), current.cast_release(), current.cast_stop(), {current.knockout_state(), current.knockout_frame()} });
+                    current.cast_id(), current.cast_phase(), current.cast_range(), current.cast_elapsed(), current.cast_release(), current.cast_stop(), {current.knockout_state(), current.knockout_frame(), current.paralyzed()} });
         }
         const auto* encodedSkills = root->self_skills();
         const std::size_t skillCount = encodedSkills ? encodedSkills->size() : 0;
@@ -505,7 +505,7 @@ namespace TES3MP
             players.push_back(
                 { *value(player), *value(revision), current.health(), current.maximum_health(), current.fatigue(),
                     current.maximum_fatigue(), current.magicka(), current.maximum_magicka(), current.dead(),
-                    {current.knockout_state(), current.knockout_frame()} });
+                    {current.knockout_state(), current.knockout_frame(), current.paralyzed()} });
         }
         const auto* encodedEffects = root->active_effects();
         const std::size_t effectCount = encodedEffects ? encodedEffects->size() : 0;
@@ -554,7 +554,7 @@ namespace TES3MP
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
             root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
-            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame()});
+            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()});
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(

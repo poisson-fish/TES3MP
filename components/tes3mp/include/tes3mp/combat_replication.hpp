@@ -98,6 +98,7 @@ namespace TES3MP
     {
         std::uint8_t state = 0;
         std::uint16_t frame = 0;
+        bool paralyzed = false;
         friend constexpr bool operator==(KnockoutSnapshot, KnockoutSnapshot) noexcept = default;
     };
 

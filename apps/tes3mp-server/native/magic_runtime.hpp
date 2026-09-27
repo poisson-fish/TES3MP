@@ -14,6 +14,7 @@ namespace ESM { struct Enchantment; }
 namespace TES3MP::Native
 {
     // Modifiers consumed by shared hit chance/evasion and armor calculations.
+    bool expandedCombatEffect(ESM::RefId effect);
     bool supportedCombatModifier(ESM::RefId effect);
     // Source-neutral bounded effect plan. Spell and enchantment records both
     // carry an ESM::EffectList; non-self targets require authoritative contact.
@@ -60,14 +61,14 @@ namespace TES3MP::Native
 
     std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
         const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
-        bool actorLifecycle = false);
+        bool actorLifecycle = false, bool expandedEffects = false);
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
-        const MWWorld::ESMStore& content);
+        const MWWorld::ESMStore& content, bool expandedEffects = false);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
-        const MWWorld::ESMStore& content, bool actorLifecycle = false);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool actorLifecycle = false);
+        const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);

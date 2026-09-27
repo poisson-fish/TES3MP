@@ -16,6 +16,7 @@ table CombatSnapshotHeader {
   self_maximum_magicka:float = 0 (id: 12);
   self_knockout_state:ubyte (id: 13);
   self_knockout_frame:ushort (id: 14);
+  self_paralyzed:bool (id: 15);
 }
 
 struct ActorCombatSnapshot {
@@ -36,6 +37,7 @@ struct ActorCombatSnapshot {
   cast_stop:ushort;
   knockout_state:ubyte;
   knockout_frame:ushort;
+  paralyzed:bool;
 }
 
 struct PlayerCombatSnapshot {
@@ -50,6 +52,7 @@ struct PlayerCombatSnapshot {
   dead:bool;
   knockout_state:ubyte;
   knockout_frame:ushort;
+  paralyzed:bool;
 }
 
 struct CombatSkillSnapshot {
@@ -105,5 +108,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C5";
+file_identifier "T3C6";
 file_extension "t3cs";

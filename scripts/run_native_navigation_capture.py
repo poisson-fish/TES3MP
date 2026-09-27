@@ -723,12 +723,13 @@ def run(args):
     binary = args.build.resolve()
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
-    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.player_swings
+    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.player_swings or args.knockout
     encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings else {}
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
     if args.npc_casting: spell_name = encounter["spell"]
+    if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 46 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 51 if args.knockout else 46 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     destination = "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
@@ -752,7 +753,7 @@ def run(args):
         common["spawn_positions"] = "-563200:-307200:394240"
     if spell_capture:
         common["spawn_positions"] = "61440:-32768:1024"
-    if args.npc_casting or args.player_swings:
+    if args.npc_casting or args.player_swings or args.knockout:
         common["spawn_positions"] = "61440:-409600:1024"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
                                  tick_interval_ms=33, disconnect_grace_ms=30000,
@@ -776,7 +777,7 @@ def run(args):
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         if spell_capture:
             tokens[10:13] = [str((60 + 25 * index) * 1024), "-32768", "1024"]
-        if args.npc_casting or args.player_swings:
+        if args.npc_casting or args.player_swings or args.knockout:
             tokens[10:13] = [str((60 - 220 * index) * 1024), "-409600", "1024"]
         name = tokens[-1]
         tokens = [role.encode().hex() if token == name else token for token in tokens]
@@ -786,7 +787,9 @@ def run(args):
         shutil.copyfile(config / "openmw.cfg", user / "openmw.cfg")
         user.joinpath("settings.cfg").write_text(
             "[Video]\nresolution x = 1000\nresolution y = 700\nwindow mode = 2\nwindow border = true\n"
-            "minimize on focus loss = false\nframerate limit = 30\n", encoding="utf-8")
+            "minimize on focus loss = false\nframerate limit = 30\n"
+            + ("[Shaders]\nclassic falloff = false\nminimum interior brightness = 0.7\n" if args.knockout else ""),
+            encoding="utf-8")
     output.joinpath("players.txt").write_text("TES3MP_PLAYER_IDENTITIES_V5\n" + "\n".join(identities) + "\n",
                                             encoding="utf-8", newline="\n")
     startup = output / "startup.txt"
@@ -835,6 +838,13 @@ def run(args):
                 command.append(f"--tes3mp-content-spell-map={spell_id}={spell_name}")
             start(role, command)
             client_commands[role] = command
+        if args.knockout:
+            from native_knockout_encounter import verify_knockout_encounter
+            verify_knockout_encounter(output, evidence, processes, relay, manifest,
+                                     lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
+                                     lambda selected: start(selected, client_commands[selected]),
+                                     npc=args.knockout_target == "npc")
+            return
         if args.player_swings:
             from native_swing_encounter import verify_swing_encounter
             verify_swing_encounter(output, evidence, processes, relay, manifest, encounter,
@@ -981,13 +991,18 @@ if __name__ == "__main__":
                         help="V35 active timed effect through server restart and two returning desktops")
     parser.add_argument("--npc-casting", action="store_true", help="V42 concurrent real-record NPC/player casting, disconnect and restart")
     parser.add_argument("--player-swings", action="store_true", help="V46 two-client swing presentation, interruption, reconnect and restart")
+    parser.add_argument("--knockout", action="store_true", help="V51 fatigue knockout/get-up on two desktops, reconnect and restart")
+    parser.add_argument("--knockout-target", choices=("players", "npc"), default="players",
+                        help="Subject of the --knockout capture")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
+    if args.knockout_target != "players" and not args.knockout:
+        parser.error("--knockout-target requires --knockout")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
-            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings)) > 1:
+            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings, args.knockout)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.player_swings and not args.leave:
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.player_swings and not args.knockout and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

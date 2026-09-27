@@ -119,7 +119,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   uint8_t knockout_state_;
   int8_t padding3__;
   uint16_t knockout_frame_;
-  int32_t padding4__;
+  uint8_t paralyzed_;
+  int8_t padding4__;  int16_t padding5__;
 
  public:
   ActorCombatSnapshot()
@@ -144,14 +145,17 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
         knockout_state_(0),
         padding3__(0),
         knockout_frame_(0),
-        padding4__(0) {
+        paralyzed_(0),
+        padding4__(0),
+        padding5__(0) {
     (void)padding0__;
     (void)padding1__;
     (void)padding2__;
     (void)padding3__;
     (void)padding4__;
+    (void)padding5__;
   }
-  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead, uint64_t _cast_id, uint8_t _cast_phase, uint8_t _cast_range, uint16_t _cast_elapsed, uint16_t _cast_release, uint16_t _cast_stop, uint8_t _knockout_state, uint16_t _knockout_frame)
+  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead, uint64_t _cast_id, uint8_t _cast_phase, uint8_t _cast_range, uint16_t _cast_elapsed, uint16_t _cast_release, uint16_t _cast_stop, uint8_t _knockout_state, uint16_t _knockout_frame, bool _paralyzed)
       : actor_id_(::flatbuffers::EndianScalar(_actor_id)),
         combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
         health_(::flatbuffers::EndianScalar(_health)),
@@ -173,12 +177,15 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
         knockout_state_(::flatbuffers::EndianScalar(_knockout_state)),
         padding3__(0),
         knockout_frame_(::flatbuffers::EndianScalar(_knockout_frame)),
-        padding4__(0) {
+        paralyzed_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_paralyzed))),
+        padding4__(0),
+        padding5__(0) {
     (void)padding0__;
     (void)padding1__;
     (void)padding2__;
     (void)padding3__;
     (void)padding4__;
+    (void)padding5__;
   }
   uint64_t actor_id() const {
     return ::flatbuffers::EndianScalar(actor_id_);
@@ -231,6 +238,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   uint16_t knockout_frame() const {
     return ::flatbuffers::EndianScalar(knockout_frame_);
   }
+  bool paralyzed() const {
+    return ::flatbuffers::EndianScalar(paralyzed_) != 0;
+  }
 };
 FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 72);
 
@@ -247,7 +257,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CL
   uint8_t dead_;
   uint8_t knockout_state_;
   uint16_t knockout_frame_;
-  int32_t padding0__;
+  uint8_t paralyzed_;
+  int8_t padding0__;  int16_t padding1__;
 
  public:
   PlayerCombatSnapshot()
@@ -262,10 +273,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CL
         dead_(0),
         knockout_state_(0),
         knockout_frame_(0),
-        padding0__(0) {
+        paralyzed_(0),
+        padding0__(0),
+        padding1__(0) {
     (void)padding0__;
+    (void)padding1__;
   }
-  PlayerCombatSnapshot(uint64_t _player_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead, uint8_t _knockout_state, uint16_t _knockout_frame)
+  PlayerCombatSnapshot(uint64_t _player_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead, uint8_t _knockout_state, uint16_t _knockout_frame, bool _paralyzed)
       : player_id_(::flatbuffers::EndianScalar(_player_id)),
         combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
         health_(::flatbuffers::EndianScalar(_health)),
@@ -277,8 +291,11 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CL
         dead_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_dead))),
         knockout_state_(::flatbuffers::EndianScalar(_knockout_state)),
         knockout_frame_(::flatbuffers::EndianScalar(_knockout_frame)),
-        padding0__(0) {
+        paralyzed_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_paralyzed))),
+        padding0__(0),
+        padding1__(0) {
     (void)padding0__;
+    (void)padding1__;
   }
   uint64_t player_id() const {
     return ::flatbuffers::EndianScalar(player_id_);
@@ -312,6 +329,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CL
   }
   uint16_t knockout_frame() const {
     return ::flatbuffers::EndianScalar(knockout_frame_);
+  }
+  bool paralyzed() const {
+    return ::flatbuffers::EndianScalar(paralyzed_) != 0;
   }
 };
 FLATBUFFERS_STRUCT_END(PlayerCombatSnapshot, 48);
@@ -447,7 +467,8 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
     VT_SELF_MAGICKA = 26,
     VT_SELF_MAXIMUM_MAGICKA = 28,
     VT_SELF_KNOCKOUT_STATE = 30,
-    VT_SELF_KNOCKOUT_FRAME = 32
+    VT_SELF_KNOCKOUT_FRAME = 32,
+    VT_SELF_PARALYZED = 34
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -494,6 +515,9 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
   uint16_t self_knockout_frame() const {
     return GetField<uint16_t>(VT_SELF_KNOCKOUT_FRAME, 0);
   }
+  bool self_paralyzed() const {
+    return GetField<uint8_t>(VT_SELF_PARALYZED, 0) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -512,6 +536,7 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
            VerifyField<float>(verifier, VT_SELF_MAXIMUM_MAGICKA, 4) &&
            VerifyField<uint8_t>(verifier, VT_SELF_KNOCKOUT_STATE, 1) &&
            VerifyField<uint16_t>(verifier, VT_SELF_KNOCKOUT_FRAME, 2) &&
+           VerifyField<uint8_t>(verifier, VT_SELF_PARALYZED, 1) &&
            verifier.EndTable();
   }
 };
@@ -565,6 +590,9 @@ struct CombatSnapshotHeaderBuilder {
   void add_self_knockout_frame(uint16_t self_knockout_frame) {
     fbb_.AddElement<uint16_t>(CombatSnapshotHeader::VT_SELF_KNOCKOUT_FRAME, self_knockout_frame, 0);
   }
+  void add_self_paralyzed(bool self_paralyzed) {
+    fbb_.AddElement<uint8_t>(CombatSnapshotHeader::VT_SELF_PARALYZED, static_cast<uint8_t>(self_paralyzed), 0);
+  }
   explicit CombatSnapshotHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -592,7 +620,8 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
     float self_magicka = 0.0f,
     float self_maximum_magicka = 0.0f,
     uint8_t self_knockout_state = 0,
-    uint16_t self_knockout_frame = 0) {
+    uint16_t self_knockout_frame = 0,
+    bool self_paralyzed = false) {
   CombatSnapshotHeaderBuilder builder_(_fbb);
   builder_.add_self_combat_revision(self_combat_revision);
   builder_.add_self_player_id(self_player_id);
@@ -607,6 +636,7 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
   builder_.add_self_health(self_health);
   builder_.add_self_fatigue(self_fatigue);
   builder_.add_self_knockout_frame(self_knockout_frame);
+  builder_.add_self_paralyzed(self_paralyzed);
   builder_.add_self_knockout_state(self_knockout_state);
   builder_.add_self_dead(self_dead);
   return builder_.Finish();
@@ -903,7 +933,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3C5";
+  return "T3C6";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

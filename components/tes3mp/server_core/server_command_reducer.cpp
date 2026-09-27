@@ -1306,6 +1306,12 @@ namespace TES3MP
                                                 disposition = CommandDisposition::CombatRejected;
                                         }
                                     }
+                                    if (requiresSpatialAdvance && mNativeInventory
+                                        && !mNativeInventory->allowsPlayerMovement(player->playerId()))
+                                    {
+                                        disposition = CommandDisposition::CombatRejected;
+                                        requiresSpatialAdvance = false;
+                                    }
                                     if (requiresSpatialAdvance && mNativeInventory)
                                     {
                                         const auto cell = mNativeInventory->movementCell(
@@ -1490,6 +1496,8 @@ namespace TES3MP
                 if (std::find(prepared.mClientAuthoritativePlayers.begin(), prepared.mClientAuthoritativePlayers.end(),
                         current.playerId())
                     != prepared.mClientAuthoritativePlayers.end())
+                    continue;
+                if (mNativeInventory && !mNativeInventory->allowsPlayerMovement(current.playerId()))
                     continue;
                 auto kernel = advanceMovementKernel(mContentManifest.id(), mContentManifest.movementProfile(),
                     current.locomotionMode(), current.entityId(), tick, current.transform(), velocity, *mCollision);

@@ -293,18 +293,19 @@ namespace
         bool dead = false;
         auto create = [&] {
             const std::array actors{TES3MP::ActorCombatSnapshot{value<TES3MP::ActorId>(1),
-                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, 0, 0, dead, 0, 0, 0, 0, 0, 0, pose}};
+                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, -50, 40, dead, 0, 0, 0, 0, 0, 0, pose}};
             const std::array players{TES3MP::PlayerCombatSnapshot{value<TES3MP::PlayerId>(2),
-                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, 0, 0, dead, pose}};
+                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, -50, 40, dead, pose}};
             return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
                 TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
-                value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 10, 100, 0, 0, dead,
-                actors, skills(), players, {}, {}, pose);
+                value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 10, 100, -50, 40, dead,
+                actors, [] { auto values = skills(); values[0].value = 115.f; return values; }(), players, {}, {}, pose);
         };
+        for (bool paralyzed : {false, true})
         for (auto state : {0, 1, 2, 3})
             for (auto frame : {0, 17, 1799})
             {
-                pose = {static_cast<std::uint8_t>(state), static_cast<std::uint16_t>(state >= 2 ? frame : 0)};
+                pose = {static_cast<std::uint8_t>(state), static_cast<std::uint16_t>(state >= 2 ? frame : 0), paralyzed};
                 auto made = create();
                 if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
                 const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
@@ -312,7 +313,7 @@ namespace
                 auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(wire);
                 if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
                     || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
-                wire[11] = std::byte('4'); // The previous struct layout must not decode.
+                wire[11] = std::byte('5'); // The previous struct layout must not decode.
                 if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(
                         TES3MP::decodeLatestWinsCombatSnapshot(wire))) return false;
             }
@@ -323,6 +324,8 @@ namespace
             if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         }
         dead = true; pose = {2, 0};
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        pose = {1, 0, true};
         if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         pose = {1, 0};
         return std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(create());

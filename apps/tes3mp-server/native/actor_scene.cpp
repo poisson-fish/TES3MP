@@ -156,6 +156,7 @@ namespace TES3MP::Native
         bool mEnchantedWeaponsAreMagical = false;
         bool mOnlyAppropriateAmmunitionBypassesResistance = false;
         bool mUncappedDamageFatigue = false;
+        bool mClassicReflectedAbsorb = true;
         struct Travel
         {
             osg::Vec3f destination;
@@ -566,6 +567,11 @@ namespace TES3MP::Native
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         return mImpl->mEnchantedWeaponsAreMagical;
     }
+    bool InteriorActorScene::classicReflectedAbsorb() const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        return mImpl->mClassicReflectedAbsorb;
+    }
     bool InteriorActorScene::uncappedDamageFatigue() const
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
@@ -775,6 +781,7 @@ namespace TES3MP::Native
         mImpl->mOnlyAppropriateAmmunitionBypassesResistance
             = Settings::Manager::getBool("only appropriate ammunition bypasses resistance", "Game");
         mImpl->mUncappedDamageFatigue = Settings::Manager::getBool("uncapped damage fatigue", "Game");
+        mImpl->mClassicReflectedAbsorb = Settings::Manager::getBool("classic reflected absorb spells behavior", "Game");
         Settings::Index index;
         Settings::NavigatorCategory category(index);
         auto settings = DetourNavigator::makeSettings(category, Debug::Error);

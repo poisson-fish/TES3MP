@@ -1,5 +1,6 @@
 #include "ai_magic.hpp"
 #include "loadout.hpp"
+#include <apps/openmw/mwmechanics/spelleffects.hpp>
 #include <apps/openmw/mwmechanics/weaponpriority.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm3/loadweap.hpp>
@@ -9,6 +10,8 @@
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadmgef.hpp>
+#include <components/misc/rng.hpp>
+#include <apps/openmw/mwworld/timestamp.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -86,6 +89,123 @@ namespace
         result.mEffects.mList.push_back(entry);
         return result;
     }
+    void expandedEffects()
+    {
+        MWWorld::ESMStore store; content(store);
+        MWMechanics::NpcStats caster(store), victim(store); initialize(caster); initialize(victim);
+        for (const auto id : {ESM::MagicEffect::Reflect, ESM::MagicEffect::SpellAbsorption,
+                ESM::MagicEffect::Paralyze, ESM::MagicEffect::ResistParalysis, ESM::MagicEffect::Dispel,
+                ESM::MagicEffect::DrainHealth, ESM::MagicEffect::DrainMagicka, ESM::MagicEffect::DrainFatigue,
+                ESM::MagicEffect::AbsorbHealth, ESM::MagicEffect::AbsorbMagicka, ESM::MagicEffect::AbsorbFatigue,
+                ESM::MagicEffect::AbsorbAttribute, ESM::MagicEffect::AbsorbSkill})
+        {
+            ESM::MagicEffect effect; effect.blank(); effect.mId = id;
+            effect.mData.mSchool = ESM::Skill::Mysticism; effect.mData.mBaseCost = 1.f;
+            const bool defense = id == ESM::MagicEffect::Reflect || id == ESM::MagicEffect::SpellAbsorption
+                || id == ESM::MagicEffect::ResistParalysis || id == ESM::MagicEffect::Dispel;
+            effect.mData.mFlags = defense ? 0 : ESM::MagicEffect::Harmful;
+            if (id == ESM::MagicEffect::Paralyze) effect.mData.mFlags |= ESM::MagicEffect::NoMagnitude;
+            if (id == ESM::MagicEffect::Dispel) effect.mData.mFlags |= ESM::MagicEffect::NoDuration;
+            if (id == ESM::MagicEffect::AbsorbAttribute) effect.mData.mFlags |= ESM::MagicEffect::TargetAttribute;
+            if (id == ESM::MagicEffect::AbsorbSkill) effect.mData.mFlags |= ESM::MagicEffect::TargetSkill;
+            store.insertStatic(effect);
+            auto record = spell("expanded", id, defense ? ESM::RT_Self : ESM::RT_Touch, id == ESM::MagicEffect::Paralyze ? 0 : 10);
+            auto& entry = record.mEffects.mList[0].mData;
+            if (id == ESM::MagicEffect::Dispel) entry.mDuration = 0;
+            if (id == ESM::MagicEffect::AbsorbAttribute) entry.mAttribute = ESM::Attribute::Strength;
+            if (id == ESM::MagicEffect::AbsorbSkill) entry.mSkill = ESM::Skill::ShortBlade;
+            require(!prepareInstantSpell(record, store, true), "Expanded effect leaked into older campaign");
+            require(bool(prepareInstantSpell(record, store, true, true)), "Expanded spell not prepared");
+            AiMagicContext context{caster, &victim}; context.expandedEffects = true;
+            context.selfDispel = {0, 3};
+            const std::array spells{AiMagicSpell{&record}};
+            require(bool(prepareAiMagicCast(context, spells, {}, store)) == (!defense || id == ESM::MagicEffect::Dispel),
+                ("Expanded NPC rating differs from stock: " + id.toDebugString()).c_str());
+            if (id == ESM::MagicEffect::Paralyze)
+            {
+                caster.getMagicEffects().add(MWMechanics::EffectKey(id), MWMechanics::EffectParam(1.f));
+                require(!prepareAiMagicCast(context, spells, {}, store), "Paralyzed NPC selected a spell");
+                caster.getMagicEffects().add(MWMechanics::EffectKey(id), MWMechanics::EffectParam(-1.f));
+            }
+        }
+        Misc::Rng::Generator rng{17}, unchanged{17};
+        require(MWMechanics::rollEffectProtection(ESM::MagicEffect::Reflect, 100.f, false, false, rng)
+            == MWMechanics::EffectProtection::None && Misc::Rng::serialize(rng) == Misc::Rng::serialize(unchanged),
+            "Disabled protection consumed RNG");
+        require(MWMechanics::rollEffectProtection(ESM::MagicEffect::Reflect, 100.f, true, true, rng)
+            == MWMechanics::EffectProtection::Reflect, "Full reflection failed");
+        require(MWMechanics::rollEffectProtection(ESM::MagicEffect::SpellAbsorption, 100.f, true, true, rng)
+            == MWMechanics::EffectProtection::Absorb, "Full absorption failed");
+        require(!MWMechanics::rollDispel(0.f, rng) && MWMechanics::rollDispel(100.f, rng), "Dispel boundary changed");
+        for (int stat = 0; stat < 3; ++stat)
+        {
+            auto value = victim.getDynamic(stat); value.setCurrent(2.f); victim.setDynamic(stat, value);
+            value = caster.getDynamic(stat); value.setCurrent(50.f); caster.setDynamic(stat, value);
+            const MWWorld::TimeStamp deathTime{};
+            MWMechanics::absorbDynamicStat(victim, &caster, stat, 10.f, &deathTime);
+            near(victim.getDynamic(stat).getCurrent(), 0.f, "Absorb exceeded target floor");
+            near(caster.getDynamic(stat).getCurrent(), 60.f, "Absorb did not credit full stock magnitude");
+        }
+    }
+
+    void statDrains()
+    {
+        MWWorld::ESMStore store; content(store);
+        setting(store, "fNPCbaseMagickaMult", 2.f);
+        MWMechanics::NpcStats caster(store), victim(store); initialize(caster); initialize(victim);
+        for (const bool attribute : {true, false})
+        {
+            const auto effect = attribute ? ESM::MagicEffect::DrainAttribute : ESM::MagicEffect::DrainSkill;
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mFlags = ESM::MagicEffect::Harmful | ESM::MagicEffect::AppliedOnce;
+            record.mData.mSchool = ESM::Skill::Destruction; record.mData.mBaseCost = 1.f;
+            store.insertStatic(record);
+            auto source = spell("drain", effect, ESM::RT_Touch, 30);
+            auto& entry = source.mEffects.mList.front().mData;
+            if (attribute) entry.mAttribute = ESM::Attribute::Strength;
+            else entry.mSkill = ESM::Skill::ShortBlade;
+            require(bool(prepareInstantSpell(source, store, true)), "Timed drain rejected");
+            require(!prepareInstantSpell(source, store, false), "Drain entered legacy instant resolver");
+            const std::array spells{AiMagicSpell{&source}};
+            require(bool(prepareAiMagicCast({caster, &victim}, spells, {}, store)), "NPC failed to select drain");
+            ESM::Enchantment enchantment; enchantment.blank(); enchantment.mId = effect;
+            enchantment.mData.mCost = 1; enchantment.mData.mCharge = 20;
+            enchantment.mEffects = source.mEffects;
+            for (const int type : {ESM::Enchantment::WhenUsed, ESM::Enchantment::WhenStrikes, ESM::Enchantment::CastOnce})
+            {
+                enchantment.mData.mType = type;
+                require(bool(prepareEnchantmentCast(enchantment, caster, -1.f, store, true)), "Drain enchantment rejected");
+            }
+            enchantment.mData.mType = ESM::Enchantment::WhenUsed; store.insertStatic(enchantment);
+            const std::array items{AiMagicItem{{1, -1}, enchantment.mId, -1.f, true}};
+            require(bool(prepareAiMagicCast({caster, &victim}, {}, items, store)), "NPC failed to select drain item");
+            entry.mDuration = 0;
+            require(!prepareInstantSpell(source, store, true), "Zero-duration drain admitted without lifecycle");
+            entry.mDuration = 1;
+            entry.mAttribute = {}; entry.mSkill = {};
+            require(!prepareInstantSpell(source, store, true), "Drain with missing argument accepted");
+            if (attribute) entry.mSkill = ESM::Skill::ShortBlade;
+            else entry.mAttribute = ESM::Attribute::Strength;
+            require(!prepareInstantSpell(source, store, true), "Drain with wrong argument kind accepted");
+        }
+        // Drain may exceed a stat's modified value; expiry must retain earlier damage.
+        MWMechanics::modifyAttributeDamage(victim, ESM::Attribute::Strength, 7.f, 2.f);
+        MWMechanics::modifyAttributeDamage(victim, ESM::Attribute::Strength, 90.f, 2.f);
+        near(victim.getAttribute(ESM::Attribute::Strength).getModified(), 0, "Drain did not floor attribute");
+        MWMechanics::modifyAttributeDamage(victim, ESM::Attribute::Strength, -90.f, 2.f);
+        near(victim.getAttribute(ESM::Attribute::Strength).getModified(), 33, "Drain expiry erased attribute damage");
+        MWMechanics::modifySkillDamage(victim, ESM::Skill::ShortBlade, 9.f);
+        MWMechanics::modifySkillDamage(victim, ESM::Skill::ShortBlade, 120.f);
+        near(victim.getSkill(ESM::Skill::ShortBlade).getModified(), 0, "Drain did not floor skill");
+        MWMechanics::modifySkillDamage(victim, ESM::Skill::ShortBlade, -120.f);
+        near(victim.getSkill(ESM::Skill::ShortBlade).getModified(), 91, "Drain expiry erased skill damage");
+        ESM::ENAMstruct entry{}; entry.mEffectID = ESM::MagicEffect::DrainAttribute;
+        entry.mAttribute = ESM::Attribute::Intelligence;
+        near(*MWMechanics::rateStatDamageEffect(entry, &victim, &victim), .5f, "Stock attribute priority changed");
+        entry.mEffectID = ESM::MagicEffect::DrainSkill; entry.mAttribute = {}; entry.mSkill = ESM::Skill::ShortBlade;
+        near(*MWMechanics::rateStatDamageEffect(entry, &victim, nullptr), 0, "Creature rated Drain Skill");
+    }
+
     void combatModifiers()
     {
         MWWorld::ESMStore store; content(store); setting(store, "fCombatInvisoMult", 1.f);
@@ -460,6 +580,8 @@ int main(int argc, char** argv)
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
         if (filter == "weapons") weapons();
+        else if (filter == "expanded-effects") expandedEffects();
+        else if (filter == "stat-drains") statDrains();
         else if (filter == "combat-modifiers") combatModifiers();
         else if (filter == "selection") selection();
         else if (filter == "rejection") rejection();

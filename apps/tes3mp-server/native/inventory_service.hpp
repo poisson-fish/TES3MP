@@ -96,6 +96,8 @@ namespace TES3MP::Native
         bool mMagicPlayerTarget = false;
         bool mMagicProjectileCollection = false;
         bool mKnockoutRules = false;
+        bool mExpandedEffects = false; // V51 cross-actor effects and defenses.
+        bool mClassicReflectedAbsorb = false;
         bool mKnockoutAnimation = false; // V50 retains the authored get-up tail.
         bool mMeleeDefenseRules = false;
         bool mActorEffectLifecycle = false;
@@ -346,6 +348,7 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast);
+        bool allowsPlayerMovement(PlayerId player) const override;
         std::optional<CellId> movementCell(CellId current, Position3 position) const override;
         bool allowsCellTransition(CellId current, CellId requested, Position3 position) const override;
         std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(

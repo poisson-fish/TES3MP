@@ -65,6 +65,13 @@ namespace TES3MP::OpenMWAdapter
 {
     namespace
     {
+        void setParalyzed(MWMechanics::CreatureStats& stats, bool paralyzed)
+        {
+            auto& effects = stats.getMagicEffects();
+            effects.add(MWMechanics::EffectKey(ESM::MagicEffect::Paralyze),
+                MWMechanics::EffectParam((paralyzed ? 1.f : 0.f)
+                    - effects.getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude()));
+        }
         constexpr double PositionScale = 1024.0;
         constexpr double TurnScale = 4294967296.0;
 
@@ -978,6 +985,7 @@ namespace TES3MP::OpenMWAdapter
                         animation->setCommittedMelee({}, 0, 0, 0, 0);
                         animation->setCommittedKnockout(0, 0);
                         const auto ptr = world->getPlayerPtr();
+                        setParalyzed(ptr.getClass().getCreatureStats(ptr), false);
                         animation->showWeapons(ptr.getClass().getCreatureStats(ptr).getDrawState()
                             == MWMechanics::DrawState::Weapon);
                     }
@@ -1778,6 +1786,7 @@ namespace TES3MP::OpenMWAdapter
             if (!animation || !animation->setCommittedKnockout(knockout.state, knockout.frame))
                 return ProviderResult::PresentationFailed;
             if (knockout.state) playerStats.setKnockedDown(knockout.state >= 2);
+            setParalyzed(playerStats, knockout.paralyzed);
             auto sound = MWBase::Environment::get().getSoundManager();
             if (!snapshot.selfDead() && playerStats.isDead())
                 MWBase::Environment::get().getMechanicsManager()->resurrect(player);
@@ -1835,6 +1844,7 @@ namespace TES3MP::OpenMWAdapter
                 actorMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(actorMagicka);
                 if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                setParalyzed(stats, combat->knockout.paralyzed);
                 if (!replicatedActorResultAccepted(remote.actor->setKnockout(
                         combat->knockout.state, combat->knockout.frame)))
                     return ProviderResult::PresentationFailed;
@@ -1873,6 +1883,7 @@ namespace TES3MP::OpenMWAdapter
                 magicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(magicka);
                 if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                setParalyzed(stats, combat->knockout.paralyzed);
                 if (!replicatedActorResultAccepted(remote.actor->setKnockout(
                         combat->knockout.state, combat->knockout.frame)))
                     return ProviderResult::PresentationFailed;
@@ -1908,6 +1919,7 @@ namespace TES3MP::OpenMWAdapter
                 remoteMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(remoteMagicka);
                 if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                setParalyzed(stats, combat->knockout.paralyzed);
                 if (!replicatedActorResultAccepted(remote.actor->setKnockout(
                         combat->knockout.state, combat->knockout.frame)))
                     return ProviderResult::PresentationFailed;

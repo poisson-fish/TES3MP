@@ -4,6 +4,7 @@
 #include "magic_runtime.hpp"
 #include <components/esm3/refnum.hpp>
 #include <span>
+#include <array>
 
 namespace ESM { struct Weapon; }
 
@@ -33,12 +34,15 @@ namespace TES3MP::Native
     struct AiMagicContext
     {
         const MWMechanics::NpcStats& caster;
-        const MWMechanics::CreatureStats* enemy = nullptr;
+        // This runtime currently binds NPC stats for both players and opponents.
+        const MWMechanics::NpcStats* enemy = nullptr;
         bool casterUnderwater = false;
         bool enemyUnderwater = false;
         float weaponRating = 0.f;
         bool enemyWerewolf = false;
         bool outsideEnemyReach = false;
+        bool expandedEffects = false;
+        std::array<int, 2> selfDispel{}, enemyDispel{}; // Beneficial/harmful temporary spell effects.
     };
 
     struct AiMagicPayment

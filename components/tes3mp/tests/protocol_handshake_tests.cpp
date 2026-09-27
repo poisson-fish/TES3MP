@@ -177,7 +177,7 @@ namespace
     bool actor_cast_layout_requires_capability()
     {
         for (const auto required : {TES3MP::actorCastLifecycleCapability().value(),
-                TES3MP::playerSwingPresentationCapability().value(), TES3MP::knockoutPresentationCapability().value()})
+                TES3MP::playerSwingPresentationCapability().value(), TES3MP::knockoutPresentationCapability().value(), TES3MP::expandedCombatEffectsCapability().value()})
         {
             const auto server = offer(versionRange(1, 10, 10), {}, {required});
             const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required - 1}, {}));

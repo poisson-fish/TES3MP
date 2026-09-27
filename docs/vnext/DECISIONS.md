@@ -282,6 +282,12 @@ reject. Living appearance exposes only owner and equipped record IDs; private
 stacks/counts stay server-side. Presentation copies never become command identities.
 Ground baselines suppress the entire bound placement domain, including absent loot.
 
+**Cross-actor effects (V51).** Absorb benefits bind the original caster life;
+respawn never inherits them. Persist effects, benefits, resources and RNG together.
+Dispel groups temporary spells by source/caster/life/launch, leaving enchanted
+items and constants intact. T3C6/capability 24 carries authoritative paralysis;
+inherited movement cannot bypass it. Existing campaigns do not silently upgrade.
+
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve
 authentication/session separation, stable identities, stale/retry rejection,

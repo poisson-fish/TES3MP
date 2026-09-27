@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 50; ++candidate)
+            for (unsigned candidate = 3; candidate <= 51; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -274,6 +274,7 @@ namespace TES3MP::Native
                 binding.mMagicProjectileCollection = descriptorVersion >= 32;
                 binding.mKnockoutRules = descriptorVersion >= 33;
                 binding.mKnockoutAnimation = descriptorVersion >= 50;
+                binding.mExpandedEffects = descriptorVersion >= 51;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -550,6 +551,7 @@ namespace TES3MP::Native
                 start.binding.mOnlyAppropriateAmmunitionBypassesResistance
                     = scene->onlyAppropriateAmmunitionBypassesResistance();
                 start.binding.mUncappedDamageFatigue = scene->uncappedDamageFatigue();
+                start.binding.mClassicReflectedAbsorb = scene->classicReflectedAbsorb();
                 if (!start.navigation->meleeGroup.empty())
                 {
                     auto bound = scene->bindMeleeAnimation(start.navigation->meleeGroup,

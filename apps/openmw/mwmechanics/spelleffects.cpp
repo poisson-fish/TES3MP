@@ -88,17 +88,14 @@ namespace
         auto attr = creatureStats.getAttribute(attribute);
         if (effect.mEffectId == ESM::MagicEffect::DamageAttribute)
             magnitude = std::min(attr.getModified(), magnitude);
-        attr.damage(magnitude);
-        creatureStats.setAttribute(attribute, attr);
+        MWMechanics::modifyAttributeDamage(creatureStats, attribute, magnitude);
     }
 
     void restoreAttribute(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
     {
         auto& creatureStats = target.getClass().getCreatureStats(target);
         auto attribute = effect.getSkillOrAttribute();
-        auto attr = creatureStats.getAttribute(attribute);
-        attr.restore(magnitude);
-        creatureStats.setAttribute(attribute, attr);
+        MWMechanics::modifyAttributeDamage(creatureStats, attribute, -magnitude);
     }
 
     void fortifyAttribute(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
@@ -112,14 +109,13 @@ namespace
         auto& skill = npcStats.getSkill(effect.getSkillOrAttribute());
         if (effect.mEffectId == ESM::MagicEffect::DamageSkill)
             magnitude = std::min(skill.getModified(), magnitude);
-        skill.damage(magnitude);
+        MWMechanics::modifySkillDamage(npcStats, effect.getSkillOrAttribute(), magnitude);
     }
 
     void restoreSkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
     {
         auto& npcStats = target.getClass().getNpcStats(target);
-        auto& skill = npcStats.getSkill(effect.getSkillOrAttribute());
-        skill.restore(magnitude);
+        MWMechanics::modifySkillDamage(npcStats, effect.getSkillOrAttribute(), -magnitude);
     }
 
     void fortifySkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
@@ -335,20 +331,14 @@ namespace
                     {
                         if (!(activeEffect.mFlags & ESM::ActiveEffect::Flag_Applied))
                             continue;
-                        if (activeEffect.mEffectId == ESM::MagicEffect::Reflect)
+                        const auto protection = MWMechanics::rollEffectProtection(activeEffect.mEffectId,
+                            activeEffect.mMagnitude, canReflect, canAbsorb, prng);
+                        if (protection == MWMechanics::EffectProtection::Reflect)
+                            return MWMechanics::MagicApplicationResult::Type::REFLECTED;
+                        if (protection == MWMechanics::EffectProtection::Absorb)
                         {
-                            if (canReflect && Misc::Rng::roll0to99(prng) < activeEffect.mMagnitude)
-                            {
-                                return MWMechanics::MagicApplicationResult::Type::REFLECTED;
-                            }
-                        }
-                        else if (activeEffect.mEffectId == ESM::MagicEffect::SpellAbsorption)
-                        {
-                            if (canAbsorb && Misc::Rng::roll0to99(prng) < activeEffect.mMagnitude)
-                            {
-                                absorbSpell(spellParams, caster, target);
-                                return MWMechanics::MagicApplicationResult::Type::REMOVED;
-                            }
+                            absorbSpell(spellParams, caster, target);
+                            return MWMechanics::MagicApplicationResult::Type::REMOVED;
                         }
                     }
                 }
@@ -420,6 +410,43 @@ namespace
 
 namespace MWMechanics
 {
+    EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
+        bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng)
+    {
+        if (defense == ESM::MagicEffect::Reflect && canReflect && Misc::Rng::roll0to99(rng) < magnitude)
+            return EffectProtection::Reflect;
+        if (defense == ESM::MagicEffect::SpellAbsorption && canAbsorb && Misc::Rng::roll0to99(rng) < magnitude)
+            return EffectProtection::Absorb;
+        return EffectProtection::None;
+    }
+
+    bool rollDispel(float magnitude, Misc::Rng::Generator& rng)
+    { return Misc::Rng::roll0to99(rng) < magnitude; }
+
+    void absorbDynamicStat(CreatureStats& target, CreatureStats* caster, int stat, float magnitude,
+        const MWWorld::TimeStamp* deathTime)
+    {
+        adjustDynamicStatValue(target, stat, -magnitude, false, false, deathTime);
+        if (caster) adjustDynamicStatValue(*caster, stat, magnitude, false, false, deathTime);
+    }
+
+    void modifyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
+        std::optional<float> baseMagickaMultiplier)
+    {
+        auto value = stats.getAttribute(attribute);
+        if (magnitude >= 0) value.damage(magnitude);
+        else value.restore(-magnitude);
+        if (baseMagickaMultiplier) stats.setAttribute(attribute, value, *baseMagickaMultiplier);
+        else stats.setAttribute(attribute, value);
+    }
+
+    void modifySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude)
+    {
+        auto& value = stats.getSkill(skill);
+        if (magnitude >= 0) value.damage(magnitude);
+        else value.restore(-magnitude);
+    }
+
     void restoreHealth(CreatureStats& stats, float magnitude)
     {
         restoreDynamicStat(stats, Stats::Health, magnitude);
@@ -498,7 +525,7 @@ namespace MWMechanics
                             if (spell && spell->mData.mType == ESM::Spell::ST_Spell)
                             {
                                 auto& prng = MWBase::Environment::get().getWorld()->getPrng();
-                                return Misc::Rng::roll0to99(prng) < magnitude;
+                                return MWMechanics::rollDispel(magnitude, prng);
                             }
                         }
                         return false;
@@ -894,11 +921,9 @@ namespace MWMechanics
                     return ESM::ActiveEffect::Flag_Remove;
                 else
                 {
-                    adjustDynamicStat(target, Stats::Health, -effect.mMagnitude);
-                    if (!caster.isEmpty())
-                    {
-                        adjustDynamicStat(caster, Stats::Health, effect.mMagnitude);
-                    }
+                    absorbDynamicStat(target.getClass().getCreatureStats(target),
+                        caster.isEmpty() ? nullptr : &caster.getClass().getCreatureStats(caster),
+                        Stats::Health, effect.mMagnitude);
                     receivedMagicDamage = affectedHealth = true;
                 }
             }
@@ -908,9 +933,9 @@ namespace MWMechanics
                     return ESM::ActiveEffect::Flag_Remove;
                 else
                 {
-                    adjustDynamicStat(target, Stats::Magicka, -effect.mMagnitude);
-                    if (!caster.isEmpty())
-                        adjustDynamicStat(caster, Stats::Magicka, effect.mMagnitude);
+                    absorbDynamicStat(target.getClass().getCreatureStats(target),
+                        caster.isEmpty() ? nullptr : &caster.getClass().getCreatureStats(caster),
+                        Stats::Magicka, effect.mMagnitude);
                 }
             }
             else if (effect.mEffectId == ESM::MagicEffect::AbsorbFatigue)
@@ -919,9 +944,9 @@ namespace MWMechanics
                     return ESM::ActiveEffect::Flag_Remove;
                 else
                 {
-                    adjustDynamicStat(target, Stats::Fatigue, -effect.mMagnitude);
-                    if (!caster.isEmpty())
-                        adjustDynamicStat(caster, Stats::Fatigue, effect.mMagnitude);
+                    absorbDynamicStat(target.getClass().getCreatureStats(target),
+                        caster.isEmpty() ? nullptr : &caster.getClass().getCreatureStats(caster),
+                        Stats::Fatigue, effect.mMagnitude);
                 }
             }
             else if (effect.mEffectId == ESM::MagicEffect::AbsorbAttribute)

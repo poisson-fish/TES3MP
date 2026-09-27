@@ -54,14 +54,23 @@ namespace TES3MP::Native
             {
                 const auto plan = prepareEnchantmentCast(*enchantment, context.caster,
                     weaponClass == ESM::WeaponType::Thrown || weaponClass == ESM::WeaponType::Ammo ? -1.f : charge,
-                    content, true);
+                    content, true, context.expandedEffects);
                 if (!plan) return std::nullopt;
                 if (plan->affordable) for (const auto& effect : plan->effects.effects)
                 {
                     // This priority needs the complete known-spell domain.
                     if (effect.mEffectID == ESM::MagicEffect::RestoreMagicka && effect.mRange == ESM::RT_Self)
                         return std::nullopt;
-                    const auto priority = MWMechanics::rateCommonEffect(effect, context.caster, 0.f);
+                    auto priority = MWMechanics::rateCommonEffect(effect, context.caster, 0.f);
+                    if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
+                    if (!priority && effect.mEffectID == ESM::MagicEffect::AbsorbMagicka)
+                        priority = MWMechanics::rateAbsorbMagicka(context.enemy, 0.f);
+                    if (!priority && effect.mEffectID == ESM::MagicEffect::Dispel)
+                    {
+                        const bool self = effect.mRange == ESM::RT_Self;
+                        const auto counts = self ? context.selfDispel : context.enemyDispel;
+                        priority = MWMechanics::rateDispelEffect(self, counts[0], counts[1]);
+                    }
                     if (!priority) return std::nullopt;
                     // Stock on-strike rating omits the spell range multiplier.
                     damage += MWMechanics::adjustEffectRating(effect, *priority, context.caster,
@@ -110,7 +119,7 @@ namespace TES3MP::Native
         for (const auto& source : spells)
             // Validate effects before autocalc; unsupported sources cannot be
             // made usable by restoring magicka in this bounded runtime.
-            if (const auto prepared = prepareInstantSpell(*source.record, content, true))
+            if (const auto prepared = prepareInstantSpell(*source.record, content, true, context.expandedEffects))
             {
                 const int cost = prepared->cost;
                 if (cost > context.caster.getMagicka().getCurrent()
@@ -121,7 +130,16 @@ namespace TES3MP::Native
             float result = 0.f;
             for (const auto& effect : effects.effects)
             {
-                const auto priority = MWMechanics::rateCommonEffect(effect, context.caster, magickaPriority);
+                auto priority = MWMechanics::rateCommonEffect(effect, context.caster, magickaPriority);
+                if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
+                if (!priority && effect.mEffectID == ESM::MagicEffect::AbsorbMagicka)
+                    priority = MWMechanics::rateAbsorbMagicka(context.enemy, magickaPriority);
+                if (!priority && effect.mEffectID == ESM::MagicEffect::Dispel)
+                {
+                    const bool self = effect.mRange == ESM::RT_Self;
+                    const auto counts = self ? context.selfDispel : context.enemyDispel;
+                    priority = MWMechanics::rateDispelEffect(self, counts[0], counts[1]);
+                }
                 if (!priority) return std::nullopt;
                 result += MWMechanics::adjustEffectRating(effect, *priority, context.caster,
                     context.enemy, content, context.casterUnderwater, context.enemyUnderwater)
@@ -135,7 +153,7 @@ namespace TES3MP::Native
         {
             const auto* enchantment = content.get<ESM::Enchantment>().search(item.enchantment);
             if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenUsed) continue;
-            auto prepared = prepareEnchantmentCast(*enchantment, context.caster, item.charge, content, true);
+            auto prepared = prepareEnchantmentCast(*enchantment, context.caster, item.charge, content, true, context.expandedEffects);
             if (!prepared || !prepared->affordable) continue;
             const int cost = MWMechanics::getEffectiveEnchantmentCastCost(
                 MWMechanics::getEnchantmentCastCost(*enchantment, content),
@@ -151,7 +169,7 @@ namespace TES3MP::Native
         }
         for (const auto& source : spells)
         {
-            auto prepared = prepareInstantSpell(*source.record, content, true);
+            auto prepared = prepareInstantSpell(*source.record, content, true, context.expandedEffects);
             if (!prepared) continue;
             const float multiplier = MWMechanics::spellRatingMultiplier(*source.record,
                 MWMechanics::getSpellSuccessChance(*source.record, context.caster, content),

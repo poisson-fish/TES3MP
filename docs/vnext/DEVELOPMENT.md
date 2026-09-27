@@ -2,57 +2,45 @@
 
 ## Working loop
 
-1. Read [CURRENT.md](CURRENT.md), then this file, [README.md](README.md) and the
-   active milestone in [PLAN.md](PLAN.md). Read [DECISIONS.md](DECISIONS.md) for
-   authority, architecture, compatibility, persistence or scripting changes.
-2. Inspect owning source/tests and `git status`. Code/tests establish implemented
-   behavior; product decisions establish the target. Do not reconstruct retired
-   roadmaps or search history without a specific unanswered question.
-3. Advance connected behavior across the active milestone. Preserve the working
-   migration base and one canonical writer. Resolve routine details without
-   another implementation plan.
-4. Run the smallest affected check individually, stopping on failure. Fix its
-   cause and rerun before proceeding. Do not broaden testing just to end a session.
-5. Review the diff and retire superseded callers/code only after replacement
-   behavior and failure tests work. Replace CURRENT's handoff when behavior,
-   limitations, milestone or evidence changes. Update decisions for durable
-   rule changes. Commit only when authorized; never claim unrun verification.
+1. Read [CURRENT.md](CURRENT.md), this file, [README.md](README.md), active
+   [PLAN.md](PLAN.md), and [DECISIONS.md](DECISIONS.md) for boundary/persistence changes.
+2. Inspect owning code/tests and `git status`; they establish behavior. Search
+   history/retired documents only for specific unanswered questions.
+3. Advance bounded connected behavior, preserving the migration base and one
+   canonical writer. Do not create another plan.
+4. Run the smallest affected check individually; stop, fix and rerun on failure.
+5. Review the diff. Retire superseded code only after replacement/failure checks.
+   Replace CURRENT's handoff for changed behavior, limitations or evidence;
+   record durable decisions. Commit only when authorized; report only run checks.
 
 Use ignored `build/` for measurements/logs. Never track game/mod assets, credentials,
 tokens, user saves or machine-local content paths. Git is the development archive.
 
 ## Dependency and migration rules
 
-`components/tes3mp` remains independently buildable, using owned protocol/session/
-transport/coordination interfaces: no OpenMW, rendering, OpenXR, OS or public
-third-party transport types. Preserve explicit boundary checks.
+Keep `components/tes3mp` independently buildable behind owned interfaces; no OpenMW,
+rendering, OpenXR, OS or public transport-library types. Preserve boundary checks.
 
-A separately named app-local runtime target under `apps/tes3mp-server` may depend
-on OpenMW. Expose owned commands, IDs, results, snapshots and persistence operations
-at its integration boundary. Declare CMake dependencies explicitly. A broad probe
-link does not prove an acceptable production headless dependency graph.
+App-local `apps/tes3mp-server` runtime targets may depend on OpenMW. Expose owned
+commands/IDs/results/snapshots/persistence; declare CMake dependencies explicitly.
+Broad probe links do not establish production headless boundaries.
 
-Refactor actual engine behavior, separating player/service context and presentation
-at the owning source. Stock single-player and multiplayer share extracted logic.
-Null UI/listener stubs must not remove gameplay; plain-item probes do not prove
-scripts or constant enchantments.
+Refactor owning engine code to separate context/presentation; share logic with
+single-player. Null UI/listeners must preserve gameplay. Plain items do not prove
+scripts/constants.
 
-Old/new paths may coexist for migration/testing but cannot mutate the same live
-subsystem. After replacement callers and failure tests work, remove obsolete
-implementations, build entries, schemas, configuration, hooks and architectural
-assertions. Redirect useful behavioral tests. Do not fix every retired gameplay
-discrepancy before advancing the native runtime.
+Migration paths cannot share live mutation. After replacement/failure checks,
+remove obsolete implementations, build entries, schemas, configuration, hooks and
+assertions; redirect useful tests. Do not polish retired gameplay before advancing.
 
-Existing proof sources and JSON registries remain tooling inputs. Update touched
-entries; repair whole-baseline provenance only when a specific check requires it.
-Baseline/patch comparisons are permitted for that purpose, not routine discovery.
+Update touched proof/JSON tooling inputs. Repair whole-baseline provenance and
+compare baseline patches only when a specific check requires it.
 
 ## Narrow verification
 
-No complete suites, expensive full gates or upstream baseline tests by default.
-Broad release/platform runs require a requested scope. Source-contract failures
-report compact mismatches, never entire source files. Redirect output to
-`build/logs`; inspect the exit code and a short failure tail before proceeding.
+No complete suites, expensive gates or baseline tests by default; broad runs need
+requested scope. Log to `build/logs`; inspect exit codes and short failure tails.
+Source-contract failures report compact mismatches, never source files.
 
 For documentation, run these methods separately, stopping at the first failure:
 
@@ -63,10 +51,9 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTests.test_active_local_links_resolve *> build/logs/docs-links.log
 ```
 
-For C++, inspect the owning CMake target/test framework. Build the individual target
-in a suitable existing tree, then run one executable/filter. Establish only missing
-dependencies needed for that slice. Never substitute aggregate `_tests_run` targets.
-Name the target/filter, log and result in CURRENT when evidence changes.
+For C++, inspect the owning target/framework, build that target in an existing
+tree, then run one executable/filter. Add only required missing dependencies;
+never aggregate `_tests_run` targets. Record changed evidence in CURRENT.
 
 `build_windows.bat -Target server`, `client` and `desktop-evidence` initialize MSVC
 and log to `build/logs`; inspect build cost first. Builds do not prove gameplay.
@@ -75,10 +62,9 @@ groups; `baseline`, `checks`, `full`, unfiltered unittest discovery and default
 standalone presets are not narrow defaults. Linux/macOS presets remain in
 root CMakePresets.json.
 
-Use captures only for exercised paths. Old recipe-backed desktop captures cannot
-prove a new runtime. Evidence needs bounded logs, loadout identity, outcomes and
-failure conditions. Label synthetic fixtures, real-loadout tests and live clients
-accurately; real mod data is external input.
+Captures prove only exercised paths. Record bounded logs, loadout, outcomes and
+failures; distinguish synthetic, real-loadout and live evidence. Old captures
+cannot prove new runtimes. Treat mod data as external input.
 
 ## Documentation contract
 
@@ -92,9 +78,7 @@ Exactly five active Markdown files live directly under `docs/vnext`:
 | DEVELOPMENT.md | Session, dependency, migration and verification workflow |
 | DECISIONS.md | Durable constraints and cooperative design, with proposals labeled |
 
-Combined ceiling: 5,000 words, enforced by the documentation guard. Existing
-dependency-proof Markdown is a fixed exception. No new nested planning files,
-diaries, discovery reports, transcripts or duplicate trackers may bypass the limit.
-Replace superseded prose, preserve local links, and distinguish inherited evidence
-from new verification. Design-only changes do not change CURRENT's implementation
-status or active next action.
+Combined ceiling: 5,000 words; existing dependency proofs are a fixed exception.
+No nested plans, diaries, reports, transcripts or duplicate trackers. Replace stale
+prose, preserve links, distinguish inherited/new evidence. Design changes alone
+do not change CURRENT's implementation status or next action.

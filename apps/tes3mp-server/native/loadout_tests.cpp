@@ -6754,6 +6754,24 @@ int main(int argc, char** argv)
                 {}, false, false, true, false, false, true);
             std::cout << "PASS death-history\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "expanded-effects")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true, false, false, true, false,
+                false, true, false, true, false, false, false, false, false, false, false, false,
+                {}, true, false, true, false, false, false, false, true);
+            std::cout << "PASS expanded-effects\n"; return 0;
+        }
+        if (argc == 5 && std::string_view(argv[1]) == "stat-drains")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true, false, false, true, false,
+                false, true, false, true, false, false, false, false, false, false, false, false,
+                {}, true, false, true, false, false, false, true);
+            std::cout << "PASS stat-drains\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "interrupted-casts")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),

@@ -42,6 +42,7 @@ namespace TES3MP
     inline constexpr std::uint32_t ActorCastLifecycleCapabilityValue = 21;
     inline constexpr std::uint32_t PlayerSwingPresentationCapabilityValue = 22;
     inline constexpr std::uint32_t KnockoutPresentationCapabilityValue = 23;
+    inline constexpr std::uint32_t ExpandedCombatEffectsCapabilityValue = 24;
 
     class CapabilityId
     {
@@ -75,6 +76,8 @@ namespace TES3MP
     inline constexpr CapabilityId playerSwingPresentationCapability() noexcept
     { return *CapabilityId::fromValue(PlayerSwingPresentationCapabilityValue); }
 
+    inline constexpr CapabilityId expandedCombatEffectsCapability() noexcept
+    { return *CapabilityId::fromValue(ExpandedCombatEffectsCapabilityValue); }
     inline constexpr CapabilityId knockoutPresentationCapability() noexcept
     { return *CapabilityId::fromValue(KnockoutPresentationCapabilityValue); }
 

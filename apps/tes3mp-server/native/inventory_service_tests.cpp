@@ -5254,7 +5254,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -5288,6 +5288,7 @@ namespace TES3MP::Native::Testing
         std::array<BoundHitAnimations, 3> expectedHits;
         ESM::Weapon defenseWeapon;
         float defenseStrengthBase = 0, defenseStrengthMultiplier = 0;
+        float drainMagickaMultiplier = 0;
         TES3MP::OpenMwMeleeSettings passiveSettings;
         float passiveMagickaMultiplier = 0;
         // Synthetic room/placements on the retained real loadout. NPC hull and
@@ -5737,6 +5738,81 @@ namespace TES3MP::Native::Testing
             {
                 npc.mNpdt.mHealth = npc.mNpdt.mMana = npc.mNpdt.mFatigue = 100;
                 for (auto& attribute : npc.mNpdt.mAttributes) attribute = 40;
+            }
+            if (statDrains || expandedEffects)
+            {
+                // Synthetic records exercise generic argument handling using real MGEF/KF resources.
+                drainMagickaMultiplier = base.store().get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat();
+                npc.mSpells.mList.clear(); npc.mInventory.mList.clear();
+                for (auto& attribute : npc.mNpdt.mAttributes) attribute = 40;
+                npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower)] = 0;
+                npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)] = 0;
+                npc.mNpdt.mHealth = npc.mNpdt.mMana = npc.mNpdt.mFatigue = 100;
+                ESM::Spell drain; drain.blank(); drain.mId = ESM::RefId::stringRefId("stat_drain");
+                drain.mData.mType = ESM::Spell::ST_Spell; drain.mData.mFlags = ESM::Spell::F_Always;
+                drain.mData.mCost = 1;
+                drain.mEffects.populate({
+                    {ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 0, 1, 30, 30},
+                    {ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Intelligence, ESM::RT_Self, 0, 2, 10, 10},
+                    {ESM::MagicEffect::DrainSkill, ESM::Skill::ShortBlade, {}, ESM::RT_Self, 0, 2, 70, 70},
+                    {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 0, 2, 5, 5}});
+                npc.mSpells.mList.push_back(drain.mId);
+                out.startRecord(ESM::Spell::sRecordId, 0); drain.save(out); out.endRecord(ESM::Spell::sRecordId);
+                ESM::Enchantment enchantment; enchantment.blank(); enchantment.mId = ESM::RefId::stringRefId("stat_drain_item");
+                enchantment.mData.mType = ESM::Enchantment::WhenUsed;
+                enchantment.mData.mCost = 1; enchantment.mData.mCharge = 20; enchantment.mEffects = drain.mEffects;
+                out.startRecord(ESM::Enchantment::sRecordId, 0); enchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                ESM::Clothing item; item.blank(); item.mId = enchantment.mId;
+                item.mData.mType = ESM::Clothing::Shirt; item.mEnchant = enchantment.mId;
+                out.startRecord(ESM::Clothing::sRecordId, 0); item.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                npc.mInventory.mList.push_back({1, item.mId});
+                drain.mId = ESM::RefId::stringRefId("stat_drain_warded");
+                drain.mEffects.mList.pop_back(); // All remaining effects are resistible drains.
+                drain.mEffects.mList.insert(drain.mEffects.mList.begin(),
+                    {{ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 0, 1, 100, 100}});
+                npc.mSpells.mList.push_back(drain.mId);
+                out.startRecord(ESM::Spell::sRecordId, 0); drain.save(out); out.endRecord(ESM::Spell::sRecordId);
+            }
+            if (expandedEffects)
+            {
+                const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
+                    ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
+                    record.mData.mType = ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
+                    record.mData.mCost = 5; record.mEffects.populate(effects);
+                    npc.mSpells.mList.push_back(record.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); record.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    if (!item) return;
+                    ESM::Enchantment enchantment; enchantment.blank(); enchantment.mId = record.mId;
+                    enchantment.mData.mType = ESM::Enchantment::WhenUsed;
+                    enchantment.mData.mCost = 5; enchantment.mData.mCharge = 100; enchantment.mEffects = record.mEffects;
+                    out.startRecord(ESM::Enchantment::sRecordId, 0); enchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                    ESM::Clothing clothing; clothing.blank(); clothing.mId = record.mId;
+                    clothing.mData.mType = ESM::Clothing::Shirt; clothing.mEnchant = record.mId;
+                    out.startRecord(ESM::Clothing::sRecordId, 0); clothing.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                    npc.mInventory.mList.push_back({1, clothing.mId});
+                };
+                const auto effect = [](ESM::RefId id, int range, int duration, int magnitude) {
+                    return ESM::ENAMstruct{id, {}, {}, range, 0, duration, magnitude, magnitude};
+                };
+                spell("expanded_drain", {effect(ESM::MagicEffect::DrainHealth, ESM::RT_Self, 1, 10),
+                    effect(ESM::MagicEffect::DrainMagicka, ESM::RT_Self, 1, 120),
+                    effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Self, 1, 10)}, true);
+                spell("expanded_absorb", {effect(ESM::MagicEffect::AbsorbHealth, ESM::RT_Touch, 1, 6),
+                    effect(ESM::MagicEffect::AbsorbMagicka, ESM::RT_Touch, 1, 6),
+                    effect(ESM::MagicEffect::AbsorbFatigue, ESM::RT_Touch, 1, 6),
+                    {ESM::MagicEffect::AbsorbAttribute, {}, ESM::Attribute::Strength, ESM::RT_Touch, 0, 1, 10, 10},
+                    {ESM::MagicEffect::AbsorbSkill, ESM::Skill::ShortBlade, {}, ESM::RT_Touch, 0, 1, 15, 15}}, true);
+                spell("expanded_reflect", {effect(ESM::MagicEffect::Reflect, ESM::RT_Self, 2, 100)});
+                spell("expanded_absorption", {effect(ESM::MagicEffect::SpellAbsorption, ESM::RT_Self, 2, 100)});
+                spell("expanded_paralyze", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Touch, 1, 0)}, true);
+                spell("expanded_paralyze_self", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Self, 1, 0)});
+                spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
+                spell("expanded_dispel", {effect(ESM::MagicEffect::Dispel, ESM::RT_Self, 0, 100)});
+                spell("expanded_damage", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 10)});
+                spell("expanded_lethal", {effect(ESM::MagicEffect::DrainHealth, ESM::RT_Touch, 1, 1000)});
+                // Live presentation fixture: expiry restores fatigue and permits the authored get-up tail.
+                spell("expanded_knockout", {effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Self, 10, 1000)});
+                spell("expanded_knockout_touch", {effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Touch, 10, 1000)});
             }
             if (interruptedCasts) for (bool lethal : {false, true})
             {
@@ -7116,7 +7192,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7145,6 +7221,375 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (expandedEffects)
+        {
+            const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };
+            const auto read = [](const auto& image) { return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()}); };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto source = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                return value;
+            };
+            auto seed = bytes(service);
+            const auto initial = read(seed);
+            const size_t statsOffset = 56 + 8 + initial.melee->identity.size() + 7 * 8 + 8;
+            for (size_t owner : {0u, 1u}) for (const auto [stat, value] :
+                {std::pair<size_t, float>{8, 40.f}, {9, 30.f}, {10, 60.f}})
+            {
+                const auto offset = statsOffset + (owner * ActorCampaignCombat::StatCount * 5 + stat * 5 + 2) * 8;
+                const uint64_t bits = std::bit_cast<uint32_t>(value);
+                for (unsigned i = 0; i < 8; ++i) seed.at(offset + i) = std::byte(bits >> (i * 8));
+            }
+            const auto make = [&]() {
+                auto result = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, seed);
+                result->service().synchronizeCells(authority); return result;
+            };
+            const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t tick, std::string_view name,
+                uint64_t target = 0, bool item = false, bool npc = false) {
+                const auto view = runtime.projectInventory(authority, id<SessionId>(owner), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                const auto& inventory = view->playerInventory.front();
+                uint64_t selected = source(name);
+                if (item)
+                {
+                    const auto stack = std::ranges::find(inventory.stacks,
+                        id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name))), &CanonicalItemStack::prototypeId);
+                    require(stack != inventory.stacks.end(), "Expanded effect item missing"); selected = stack->stackId.value();
+                }
+                ClientMagicUseCommand use{id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(tick), id<CanonicalRevision>(tick),
+                    item ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell, selected,
+                    npc ? MagicUseTargetKind::Actor : target ? MagicUseTargetKind::Player : MagicUseTargetKind::Self,
+                    target, id<ServerTick>(tick), CombatRevision::initial(), CombatRevision::initial(), inventory.revision};
+                const auto* player = authority.findPlayer(id<PlayerId>(owner));
+                return ServerCommandProposal(id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(tick), id<CanonicalRevision>(tick),
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+            };
+            const auto advance = [&](auto& runtime, uint64_t tick, std::string_view name = {}, uint64_t owner = 1,
+                uint64_t target = 0, bool item = false, bool npc = false) {
+                std::unique_ptr<PreparedNativeInventory> command;
+                if (!name.empty())
+                {
+                    command = runtime.prepareMagicUse(authority, proposal(runtime, owner, tick, name, target, item, npc), id<ServerTick>(tick));
+                    require(bool(command), ("Expanded effect rejected: " + std::string(name)).c_str());
+                }
+                auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+                require(bool(pending), "Expanded effect tick absent"); return pending;
+            };
+            const auto commit = [&](auto& runtime, uint64_t tick, std::string_view name = {}, uint64_t owner = 1,
+                uint64_t target = 0, bool item = false, bool npc = false) {
+                auto pending = advance(runtime, tick, name, owner, target, item, npc);
+                const auto result = pending->commit(accepted);
+                require(result == CanonicalDurabilityResult::Committed,
+                    ("Expanded effect commit failed: tick=" + std::to_string(tick) + " source=" + std::string(name)
+                        + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
+                return read(bytes(runtime));
+            };
+            // Negative dynamic resources, one-time drains, independent item lifetimes, exact restart and expiry.
+            {
+                auto running = make(); auto& runtime = running->service();
+                const auto before = bytes(runtime);
+                auto pending = advance(runtime, 1, "expanded_drain"); std::vector<std::byte> staged;
+                require(pending->commit([&](auto image) { staged.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "Rejected drain leaked state");
+                auto retry = advance(runtime, 1, "expanded_drain");
+                require(retry->commit([&](auto image) { require(std::ranges::equal(image, staged), "Expanded retry changed RNG/state");
+                    return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed, "Expanded retry failed");
+                const auto drained = read(bytes(runtime));
+                require(drained.timedEffects.size() == 3 && drained.combat->actors[0][8][2] == 30.f
+                    && drained.combat->actors[0][9][2] == -95.f, "Dynamic drain was not applied once");
+                require(runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1))->selfMagicka() == -95.f,
+                    "Negative magicka projection failed");
+                commit(runtime, 2, "expanded_drain", 2, 0, true);
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                restarted.service().synchronizeCells(authority);
+                for (uint64_t tick = 3; tick <= 31; ++tick)
+                {
+                    const auto current = commit(runtime, tick);
+                    commit(restarted.service(), tick);
+                    require(bytes(runtime) == bytes(restarted.service()), "Expanded expiry restart diverged");
+                    if (tick < 31) require(current.combat->actors[0][8][2] == 30.f, "Drain reapplied every tick");
+                }
+                const auto expired = commit(runtime, 32);
+                require(expired.timedEffects.empty() && expired.combat->actors[0][8][2] == 40.f
+                    && expired.combat->actors[0][9][2] == 25.f && expired.combat->actors[1][9][2] == 30.f,
+                    "Dynamic drain expiry did not restore resources");
+            }
+            // Absorb transfers on both sides and strips temporary stat changes from saved bases.
+            for (bool item : {false, true})
+            {
+                auto running = make(); auto& runtime = running->service();
+                const auto absorbed = commit(runtime, 1, "expanded_absorb", 1, 2, item);
+                require(absorbed.timedEffects.size() == 5, "Absorb lost mixed effects");
+                for (const auto& effect : absorbed.timedEffects)
+                    require(effect.actor == 1 && effect.beneficiary == 1 && effect.casterLife == 1, "Absorb ownership lost");
+                const size_t skill = 11 + ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade);
+                for (size_t actor : {0u, 1u}) for (size_t index : {size_t(0), skill})
+                    require(absorbed.combat->actors[actor][index] == read(seed).combat->actors[actor][index], "Absorb polluted base stats");
+                const auto view = runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+                require(view && view->selfSkills()[1].value == read(seed).combat->actors[0][skill][0] + 15.f,
+                    "Absorb Skill benefit not projected");
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime)); restored.service().synchronizeCells(authority);
+                for (uint64_t tick = 2; tick <= 31; ++tick)
+                { commit(runtime, tick); commit(restored.service(), tick); require(bytes(runtime) == bytes(restored.service()), "Absorb restart diverged"); }
+                const auto expired = read(bytes(runtime));
+                require(expired.timedEffects.empty() && std::abs(expired.combat->actors[0][8][2] - 46.f) < .001f
+                    && std::abs(expired.combat->actors[1][8][2] - 34.f) < .001f
+                    && std::abs(expired.combat->actors[1][9][2] - 24.f) < .001f, "Absorb transfer or expiry incorrect");
+            }
+            // Full defenses resolve in source order and reflected effects cannot bounce again.
+            for (std::string_view defenseName : {"expanded_reflect", "expanded_absorption"})
+            {
+                auto running = make(); auto& runtime = running->service();
+                commit(runtime, 1, defenseName, 2);
+                commit(runtime, 2, "expanded_reflect", 1);
+                const auto hit = commit(runtime, 3, "expanded_damage", 1, 2);
+                require(hit.combat->actors[1][8][2] == 40.f, "Defense failed to block incoming damage");
+                if (defenseName == "expanded_reflect") require(hit.combat->actors[0][8][2] == 30.f, "Reflection bounced or lost damage");
+                else require(hit.combat->actors[0][8][2] == 40.f && hit.combat->actors[1][9][2] == 30.f,
+                    "Spell absorption failed to restore source cost");
+            }
+            // NoMagnitude effects, resistance, blocked controls, latest-wins projection and exact expiry.
+            for (bool ward : {false, true})
+            {
+                auto running = make(); auto& runtime = running->service();
+                commit(runtime, 1, ward ? "expanded_ward" : "", 2);
+                const auto applied = commit(runtime, 2, "expanded_paralyze", 1, 2, true);
+                const auto view = runtime.projectCombat(authority, id<SessionId>(2), id<ServerTick>(2), id<CanonicalRevision>(2));
+                require(view && view->selfKnockout().paralyzed == !ward && runtime.allowsPlayerMovement(id<PlayerId>(2)) == ward,
+                    "Paralysis resistance, controls or projection failed");
+                require(bool(runtime.prepareMagicUse(authority, proposal(runtime, 2, 3, "expanded_reflect"), id<ServerTick>(3))) == ward,
+                    "Paralysis cast admission failed");
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime)); restored.service().synchronizeCells(authority);
+                for (uint64_t tick = 3; tick <= 32; ++tick)
+                { commit(runtime, tick); commit(restored.service(), tick); require(bytes(runtime) == bytes(restored.service()), "Paralysis restart diverged"); }
+                require(runtime.allowsPlayerMovement(id<PlayerId>(2)), "Expired paralysis still blocks movement");
+            }
+            // Dispel removes a whole temporary spell; item enchantments survive.
+            {
+                auto running = make(); auto& runtime = running->service();
+                commit(runtime, 1, "stat_drain"); commit(runtime, 2, "stat_drain_item", 1, 0, true);
+                const auto dispelled = commit(runtime, 3, "expanded_dispel");
+                require(dispelled.timedEffects.size() == 4 && std::ranges::all_of(dispelled.timedEffects,
+                    [](const auto& effect) { return effect.sourceKind == 1; }), "Dispel removed enchantments or left a partial spell");
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime)); restored.service().synchronizeCells(authority);
+                require(bytes(runtime) == bytes(restored.service()), "Dispel did not restart exactly");
+            }
+            // A dead NPC's absorb target persists, but its new life must not receive the old benefit.
+            {
+                auto running = make(); auto& runtime = dynamic_cast<InventoryService&>(running->service());
+                const auto npc = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1))
+                    ->equipment->motions.front().placement;
+                const auto motion = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1))
+                    ->equipment->motions.front();
+                std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+                for (auto& player : nearby)
+                    player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player, id<ServerTick>(1),
+                        Transform(player.transform().cell(), Position3(int64_t(motion.position[0] * 1024),
+                            int64_t((motion.position[1] - 60) * 1024), int64_t(motion.position[2] * 1024)),
+                            player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+                runtime.synchronizeCells(authority);
+                const ActorMagicCast cast{npc, 1, 1, MagicUseSourceKind::Spell, source("expanded_absorb"), MagicUseTargetKind::Player, 1};
+                uint64_t tick = 1;
+                bool applied = false;
+                for (; tick < 90 && !applied; ++tick)
+                {
+                    auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {},
+                        tick == 1 ? std::optional(cast) : std::nullopt);
+                    require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC absorb launch failed");
+                    const auto state = read(bytes(runtime));
+                    applied = std::ranges::any_of(state.timedEffects, [](const auto& effect) { return effect.beneficiary == 3; });
+                }
+                require(applied, "NPC absorb never launched");
+                const auto dying = commit(runtime, tick, "expanded_lethal", 2, npc, false, true);
+                require(dying.life->deaths.size() == 1 && dying.life->deaths[0].killer == 2
+                    && dying.life->respawnTick == tick + 3, "Lethal drain attribution/death duplicated");
+                InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime)); restored.service().synchronizeCells(authority);
+                const auto deathTick = tick;
+                for (++tick; tick <= deathTick + 4; ++tick)
+                {
+                    commit(runtime, tick); commit(restored.service(), tick);
+                    require(bytes(runtime) == bytes(restored.service()), "NPC absorb death/respawn restart diverged");
+                }
+                const auto respawned = read(bytes(runtime));
+                require(respawned.life->generation == 2 && respawned.life->deaths.size() == 1
+                    && std::ranges::none_of(respawned.timedEffects, [](const auto& effect) { return effect.beneficiary == 3; }),
+                    "Old NPC absorb transferred to respawned life");
+            }
+            std::cout << "effects=reflect+absorption+paralyze+dispel+dynamic-drain+dynamic/stat-absorb spell+item controls=authoritative expiry=exact restart=exact rollback=atomic\n";
+            return;
+        }
+        if (statDrains)
+        {
+            const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };
+            const auto read = [](const auto& image) { return readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()}); };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto source = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
+                return value;
+            };
+            const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t time, std::string_view name, bool item = false) {
+                const auto view = runtime.projectInventory(authority, id<SessionId>(owner), id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(view && !view->playerInventory.empty(), "Drain inventory missing");
+                const auto& inventory = view->playerInventory.front();
+                uint64_t selected = source(name);
+                if (item)
+                {
+                    const auto stack = std::ranges::find(inventory.stacks,
+                        id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name))), &CanonicalItemStack::prototypeId);
+                    require(stack != inventory.stacks.end(), "Drain item missing"); selected = stack->stackId.value();
+                }
+                ClientMagicUseCommand use{id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(time), id<CanonicalRevision>(time),
+                    item ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell, selected,
+                    MagicUseTargetKind::Self, 0, id<ServerTick>(time), CombatRevision::initial(), CombatRevision::initial(), inventory.revision};
+                const auto* player = authority.findPlayer(id<PlayerId>(owner));
+                return ServerCommandProposal(id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(time), id<CanonicalRevision>(time),
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+            };
+            auto seed = bytes(service);
+            const auto original = read(seed);
+            const size_t statsOffset = 56 + 8 + original.melee->identity.size() + 7 * 8 + 8;
+            const size_t skillIndex = 11 + ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade);
+            // Existing permanent damage must survive temporary drains and expiry.
+            for (size_t owner : {0u, 1u}) for (const auto [stat, damage] :
+                {std::pair<size_t, float>{0, 7.f}, {1, 3.f}, {skillIndex, 9.f}})
+            {
+                const auto offset = statsOffset + (owner * ActorCampaignCombat::StatCount * 5 + stat * 5 + 3) * 8;
+                const uint64_t value = std::bit_cast<uint32_t>(damage);
+                for (unsigned i = 0; i < 8; ++i) seed.at(offset + i) = std::byte(value >> (i * 8));
+            }
+            InventoryHost running(descriptor, testContentManifest(), *registry, *crypto, seed);
+            auto& runtime = running.service(); runtime.synchronizeCells(authority);
+            const auto baseline = read(seed).combat->actors;
+            std::unique_ptr<InventoryHost> restored;
+            const auto attempt = [&](auto& current, uint64_t time) {
+                std::unique_ptr<PreparedNativeInventory> command;
+                if (time <= 2 || time == 64)
+                {
+                    command = current.prepareMagicUse(authority, proposal(current, 1, time,
+                        time == 64 ? "stat_drain_warded" : "stat_drain"), id<ServerTick>(time));
+                    require(bool(command), "Drain spell rejected");
+                    if (time == 1) require(current.appendMagicUse(authority,
+                        proposal(current, 2, time, "stat_drain_item", true), id<ServerTick>(time), *command),
+                        "Concurrent drain enchantment rejected");
+                }
+                return current.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(command));
+            };
+            for (uint64_t time = 1; time <= 95; ++time)
+            {
+                const auto before = bytes(runtime);
+                auto pending = attempt(runtime, time);
+                require(bool(pending), "Drain tick missing");
+                std::vector<std::byte> candidate;
+                require(pending->commit([&](auto data) { candidate.assign(data.begin(), data.end()); return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "Rejected drain/expiry leaked state");
+                auto retry = attempt(runtime, time);
+                require(retry && retry->commit([&](auto data) {
+                    require(std::ranges::equal(data, candidate), "Drain retry changed RNG, charge or stats");
+                    return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected, "Drain retry committed");
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Drain commit failed");
+                if (restored)
+                {
+                    auto replay = attempt(restored->service(), time);
+                    require(replay && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bytes(restored->service()) == bytes(runtime), "Drain restart diverged through expiry");
+                }
+                const auto state = read(bytes(runtime));
+                for (size_t owner : {0u, 1u})
+                {
+                    for (size_t stat = 0; stat < ActorCampaignCombat::StatCount; ++stat)
+                        if (stat < 8 || stat >= 11)
+                            require(state.combat->actors[owner][stat] == baseline[owner][stat],
+                                "Temporary drain/fortify accumulated in saved base stats");
+                    const auto view = runtime.projectCombat(authority, id<SessionId>(owner + 1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                    require(bool(view), "Drain projection rejected");
+                    float skill = baseline[owner][skillIndex][0] + baseline[owner][skillIndex][1] - baseline[owner][skillIndex][3];
+                    for (const auto& effect : state.timedEffects)
+                        if (effect.actor == owner && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::DrainSkill)))
+                            skill -= effect.magnitude;
+                    require(std::abs(view->selfSkills()[1].value - std::max(0.f, skill)) < .001f,
+                        "Drain Skill projection lost stacked or expired effects");
+                    const auto attribute = [&](size_t index) {
+                        float value = baseline[owner][index][0] + baseline[owner][index][1] - baseline[owner][index][3];
+                        for (const auto& effect : state.timedEffects)
+                            if (effect.actor == owner && effect.argument == index + 1)
+                                value += effect.magnitude * (effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(
+                                    ESM::MagicEffect::DrainAttribute)) ? -1.f : 1.f);
+                        return std::max(0.f, value);
+                    };
+                    require(std::abs(view->selfMaximumFatigue() - (attribute(0) + attribute(2) + attribute(3) + attribute(5))) < .001f,
+                        "Attribute drain/expiry lost derived fatigue maximum");
+                    require(std::abs(view->selfMaximumMagicka() - drainMagickaMultiplier * attribute(1)) < .001f,
+                        ("Intelligence drain/expiry lost derived magicka maximum: tick=" + std::to_string(time)
+                            + " owner=" + std::to_string(owner) + " actual=" + std::to_string(view->selfMaximumMagicka())
+                            + " expected=" + std::to_string(drainMagickaMultiplier * attribute(1))).c_str());
+                }
+                if (time == 2) require(state.timedEffects.size() == 12, "Concurrent/overlapping drains did not compose");
+                if (time == 31) require(state.timedEffects.size() == 10, "First attribute drain expiry lost other effects");
+                if (time == 32) require(state.timedEffects.size() == 9, "Overlapping attribute drain did not expire independently");
+                if (time == 62) require(state.timedEffects.empty(), "Drain effects survived final expiry");
+                if (time == 64) require(state.timedEffects.size() == 1
+                    && state.timedEffects.front().effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::ResistMagicka)),
+                    "Resist Magicka failed to prevent attribute/skill drain in record order");
+                if (time == 5 || time == 31)
+                {
+                    restored = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, bytes(runtime));
+                    restored->service().synchronizeCells(authority);
+                    require(bytes(restored->service()) == bytes(runtime), "Drain restart changed persisted image");
+                }
+            }
+            InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, seed);
+            uncertain.service().synchronizeCells(authority);
+            auto failed = attempt(uncertain.service(), 1);
+            require(failed && failed->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                && uncertain.service().inventoryImage().empty(), "Uncertain drain durability did not fail closed");
+            // The same effects must survive the NPC animation-key launch and expiry.
+            InventoryHost npcHost(descriptor, testContentManifest(), *registry, *crypto, seed);
+            auto& npcRuntime = dynamic_cast<InventoryService&>(npcHost.service()); npcRuntime.synchronizeCells(authority);
+            const auto inventory = npcRuntime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+            const ActorMagicCast npcCast{inventory->equipment->motions.front().placement, 1, 1,
+                MagicUseSourceKind::Spell, source("stat_drain"), MagicUseTargetKind::Self, 0};
+            std::unique_ptr<InventoryHost> npcRestart;
+            bool launched = false, expired = false;
+            for (uint64_t time = 1; time <= 180 && !expired; ++time)
+            {
+                auto pending = npcRuntime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {},
+                    time == 1 ? std::optional(npcCast) : std::nullopt);
+                require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC drain tick failed");
+                if (npcRestart)
+                {
+                    auto replay = npcRestart->service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                    require(replay && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && bytes(npcRestart->service()) == bytes(npcRuntime), "NPC drain restart diverged");
+                }
+                const auto state = read(bytes(npcRuntime));
+                if (!state.timedEffects.empty())
+                {
+                    for (const auto& effect : state.timedEffects)
+                        require(effect.actor == 2 && effect.casterKind == 2 && effect.casterLife == 1,
+                            "NPC drain lost actor/life ownership");
+                    for (size_t stat = 0; stat < ActorCampaignCombat::StatCount; ++stat)
+                        if (stat < 8 || stat >= 11)
+                            require(state.combat->actors[2][stat] == baseline[2][stat], "NPC drain accumulated in base state");
+                    if (!launched)
+                    {
+                        require(state.timedEffects.size() == 4, "NPC drain lost mixed effects");
+                        npcRestart = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, bytes(npcRuntime));
+                        npcRestart->service().synchronizeCells(authority); launched = true;
+                    }
+                }
+                else if (launched) expired = true;
+            }
+            require(launched && expired, "NPC drain never completed its lifecycle");
+            std::cout << "drain=attribute+skill spell+item+npc overlap=independent resistance=ordered base=preserved resources=derived rejection=atomic restart=exact expiry=restored uncertain=closed\n";
+            return;
+        }
         if (deathHistory)
         {
             const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };

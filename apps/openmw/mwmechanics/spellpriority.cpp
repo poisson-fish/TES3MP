@@ -1,4 +1,5 @@
 #include "spellpriority.hpp"
+#include "npcstats.hpp"
 #include "weaponpriority.hpp"
 
 #include <cmath>
@@ -190,7 +191,13 @@ namespace MWMechanics
                 rating = priority;
             }
         }
-        else if (effect.mEffectID != ESM::MagicEffect::DamageHealth
+        else if (effect.mEffectID != ESM::MagicEffect::Paralyze
+            && effect.mEffectID != ESM::MagicEffect::DrainHealth
+            && effect.mEffectID != ESM::MagicEffect::DrainMagicka
+            && effect.mEffectID != ESM::MagicEffect::DrainFatigue
+            && effect.mEffectID != ESM::MagicEffect::AbsorbHealth
+            && effect.mEffectID != ESM::MagicEffect::AbsorbFatigue
+            && effect.mEffectID != ESM::MagicEffect::DamageHealth
             && effect.mEffectID != ESM::MagicEffect::DamageMagicka
             && effect.mEffectID != ESM::MagicEffect::DamageFatigue
             && effect.mEffectID != ESM::MagicEffect::FireDamage
@@ -206,6 +213,54 @@ namespace MWMechanics
             return std::nullopt;
         return rating;
     }
+
+    std::optional<float> rateStatDamageEffect(const ESM::ENAMstruct& effect,
+        const CreatureStats* enemy, const NpcStats* enemyNpc)
+    {
+        float rating = 1.f;
+        if (effect.mEffectID == ESM::MagicEffect::AbsorbAttribute
+            || effect.mEffectID == ESM::MagicEffect::DamageAttribute
+            || effect.mEffectID == ESM::MagicEffect::DrainAttribute)
+        {
+            if (enemy && enemy->getAttribute(effect.mAttribute).getModified() <= 0)
+                return 0.f;
+            {
+                int attributeIdx = ESM::Attribute::refIdToIndex(effect.mAttribute);
+                if (attributeIdx >= 0 && attributeIdx < ESM::Attribute::Length)
+                {
+                    const float attributePriorities[ESM::Attribute::Length] = {
+                        1.0f, // Strength
+                        0.5f, // Intelligence
+                        0.6f, // Willpower
+                        0.7f, // Agility
+                        0.5f, // Speed
+                        0.8f, // Endurance
+                        0.7f, // Personality
+                        0.3f // Luck
+                    };
+                    rating *= attributePriorities[attributeIdx];
+                }
+            }
+        }
+        else if (effect.mEffectID == ESM::MagicEffect::AbsorbSkill || effect.mEffectID == ESM::MagicEffect::DamageSkill
+            || effect.mEffectID == ESM::MagicEffect::DrainSkill)
+        {
+            if (!enemyNpc)
+                return 0.f;
+            if (enemyNpc->getSkill(effect.mSkill).getModified() <= 0)
+                return 0.f;
+        }
+        else return std::nullopt;
+        return rating;
+    }
+
+    float rateDispelEffect(bool self, int positive, int negative)
+    {
+        const int diff = self ? negative - positive : positive - negative;
+        return diff <= 0 ? 0.f : (self ? 1.f : -1.f) * diff / 5.f;
+    }
+    float rateAbsorbMagicka(const CreatureStats* enemy, float restoreMagickaPriority)
+    { return enemy && enemy->getMagicka().getCurrent() <= 0.f ? .5f * restoreMagickaPriority : 1.f; }
 
     float adjustEffectRating(const ESM::ENAMstruct& effect, float rating,
         const CreatureStats& actor, const CreatureStats* enemy, const MWWorld::ESMStore& store,
@@ -529,44 +584,15 @@ namespace MWMechanics
                 return 0.f;
         }
         else if (effect.mEffectID == ESM::MagicEffect::AbsorbMagicka)
-        {
-            if (!enemy.isEmpty() && enemy.getClass().getCreatureStats(enemy).getMagicka().getCurrent() <= 0.f)
-            {
-                rating = 0.5f;
-                rating *= getRestoreMagickaPriority(actor);
-            }
-        }
+            rating = rateAbsorbMagicka(enemy.isEmpty() ? nullptr : &enemy.getClass().getCreatureStats(enemy),
+                getRestoreMagickaPriority(actor));
         else if (effect.mEffectID == ESM::MagicEffect::Dispel)
         {
-            int numPositive = 0;
-            int numNegative = 0;
-            int diff = 0;
-
-            if (effect.mRange == ESM::RT_Self)
-            {
-                numPositive = numEffectsToDispel(actor, ESM::RefId(), false);
-                numNegative = numEffectsToDispel(actor);
-
-                diff = numNegative - numPositive;
-            }
-            else
-            {
-                if (enemy.isEmpty())
-                    return 0.f;
-
-                numPositive = numEffectsToDispel(enemy, ESM::RefId(), false);
-                numNegative = numEffectsToDispel(enemy);
-
-                diff = numPositive - numNegative;
-
-                // if rating < 0 here, the spell will be considered as negative later
-                rating *= -1;
-            }
-
-            if (diff <= 0)
-                return 0.f;
-
-            rating *= (diff) / 5.f;
+            const bool self = effect.mRange == ESM::RT_Self;
+            const auto& target = self ? actor : enemy;
+            if (target.isEmpty()) return 0.f;
+            rating = rateDispelEffect(self, numEffectsToDispel(target, {}, false), numEffectsToDispel(target));
+            if (rating == 0.f) return 0.f;
         }
 
         // Prefer Cure effects over Dispel, because Dispel also removes positive effects
@@ -631,39 +657,10 @@ namespace MWMechanics
             if (item == inv.end() || (item.getType() != MWWorld::ContainerStore::Type_Weapon))
                 return 0.f;
         }
-        else if (effect.mEffectID == ESM::MagicEffect::AbsorbAttribute
-            || effect.mEffectID == ESM::MagicEffect::DamageAttribute
-            || effect.mEffectID == ESM::MagicEffect::DrainAttribute)
-        {
-            if (!enemy.isEmpty()
-                && enemy.getClass().getCreatureStats(enemy).getAttribute(effect.mAttribute).getModified() <= 0)
-                return 0.f;
-            {
-                int attributeIdx = ESM::Attribute::refIdToIndex(effect.mAttribute);
-                if (attributeIdx >= 0 && attributeIdx < ESM::Attribute::Length)
-                {
-                    const float attributePriorities[ESM::Attribute::Length] = {
-                        1.0f, // Strength
-                        0.5f, // Intelligence
-                        0.6f, // Willpower
-                        0.7f, // Agility
-                        0.5f, // Speed
-                        0.8f, // Endurance
-                        0.7f, // Personality
-                        0.3f // Luck
-                    };
-                    rating *= attributePriorities[attributeIdx];
-                }
-            }
-        }
-        else if (effect.mEffectID == ESM::MagicEffect::AbsorbSkill || effect.mEffectID == ESM::MagicEffect::DamageSkill
-            || effect.mEffectID == ESM::MagicEffect::DrainSkill)
-        {
-            if (enemy.isEmpty() || !enemy.getClass().isNpc())
-                return 0.f;
-            if (enemy.getClass().getSkill(enemy, effect.mSkill) <= 0)
-                return 0.f;
-        }
+        else if (const auto statRating = rateStatDamageEffect(effect,
+                     enemy.isEmpty() ? nullptr : &enemy.getClass().getCreatureStats(enemy),
+                     enemy.isEmpty() || !enemy.getClass().isNpc() ? nullptr : &enemy.getClass().getNpcStats(enemy)))
+            rating *= *statRating;
 
         // Allow only one summoned creature at time
         if (isSummoningEffect(effect.mEffectID))

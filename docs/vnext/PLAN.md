@@ -6,45 +6,38 @@ adding phase plans or diaries.
 
 ## M1 - Prove the native loadout and runtime seam
 
-**Outcome:** an app-local headless probe reuses OpenMW configuration/content loading,
-winning records and inventory behavior, including plain and scripted/enchanted cases.
-Retain engine records; export bounded owned diagnostics with atomic rejection.
+**Outcome/exit:** a headless probe reuses OpenMW loading, winning records and
+plain/scripted/enchanted inventories, exporting bounded diagnostics atomically.
+Narrow checks prove real-loadout operations and stock calculation parity under
+changed skills/settings. Keep startup/RSS, dependencies, player assumptions,
+broad-link removal conditions and missing TR evidence in ignored `build/`.
+Loading alone is insufficient; refactor unresolved coupling.
 
-**Exit:** named narrow checks reproduce real-loadout enumeration, inventory operations
-and independent stock calculation parity with changed skills/settings. Record startup,
-RSS, dependency/service initialization and player assumptions under ignored `build/`;
-identify temporary broad-link removal conditions and missing TR evidence. Loading
-alone does not prove gameplay; unresolved coupling requires engine refactoring.
-
-**Retire:** replaced raw baker semantics after consumer coverage; retain hash/pack
-selection and malformed-input tests.
+**Retire:** replaced baker semantics after consumer coverage; retain hash/pack and
+malformed-input checks.
 
 ## M2 - Make engine mutations safe for two player contexts
 
-**Outcome:** two explicit player contexts share native take, split/drop, equip and
-enchanted/scripted item mechanics. Preserve instance identity, locals, soul, condition,
-charge, equipment and dynamic records; separate presentation effects.
+**Outcome/exit:** two explicit players share native take/split/drop/equip and
+enchanted/scripted mechanics. Preserve identity, locals, soul, condition, charge,
+equipment and dynamic records; separate presentation. Narrow checks prove actor
+isolation, coherent save/restore and durable acknowledgments. Stale input,
+contention and failed writes leak no mutation, script effects or success;
+object copies alone are insufficient.
 
-**Exit:** narrow headless checks prove intended-actor mutation, isolated staging,
-coherent engine/identity save/restore and acknowledgment durability. Stale input,
-contention or durability failure cannot leak mutation, script effects or success;
-object copies alone do not establish isolation.
-
-**Retire:** replaced independent inventory writers/client rebuilds after production
-cutover; retain identity, validation and failure tests. General persistence follows M6.
+**Retire:** independent inventory writers/client rebuilds after cutover; retain
+identity, validation and failure tests. M6 generalizes persistence.
 
 ## M3 - Connect two clients to a shared modded world
 
-**Outcome:** two desktop clients share native references, actors, containers, doors,
-time/weather through authentication, transport and interest. Bound player-area activity;
-preserve identities/revisions, baselines, committed updates and unload semantics.
+**Outcome/exit:** two authenticated desktops share native references, actors,
+containers, doors and time/weather with bounded interest, identities/revisions,
+baselines, commits and unload semantics. Named TR graphical evidence covers
+containers/doors/weather, late join/reconnect, contact expiry, reversal, disconnect
+and latency before M4. M4 adds server physics/NPC obstruction.
 
-**Exit:** named TR loadout and observed client presentation prove shared container/door
-changes, weather, late join/reconnect. Doors cover contact expiry, reversal, disconnect
-and latency; server physics/NPC obstruction follows M4. Graphical acceptance precedes M4.
-
-**Retire:** replaced hand-enumerated cells/references and fixture-only production
-bootstrap; retain small test fixtures.
+**Retire:** hand-enumerated cells/references and fixture-only production bootstrap;
+retain small fixtures.
 
 ## M4 - Fight together using OpenMW mechanics
 
@@ -70,8 +63,12 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    checks; M5 owns personal quest credit and rewards.
    Retain committed knockout/get-up presentation and prove it on both desktops.
    Finish unarmed fatigue/health damage while down,
-   hit recovery, armor, block, resistances and wear. Broaden effects/enchantments,
-   including Reflect, Spell Absorption, Paralyze, Dispel and drain/absorb effects.
+   hit recovery, armor, block, resistances and wear. Complete the 143 built-in
+   effect IDs (remaining inventory in CURRENT), including stock ExtraSpell.
+   Cover applicable spells/powers/abilities/diseases/enchantments, AI and targets,
+   ranges/areas/order, stacking, defenses/cures/expiry, derived stats, equipment,
+   controls, visuals, life ownership, atomic retry and reconnect/restart.
+   Preserve stock restrictions; allowlisting alone is insufficient.
    Generalize beyond one selected NPC: simulate neighboring combatants once each
    and persist player death/respawn generations with stale-life rejection.
    Then complete ranged execution: durable receipt recycling, ammunition recovery,
@@ -171,16 +168,10 @@ make any required reset explicit rather than silently discarding progress.
 
 ## M7 - Establish the supported modded release
 
-**Outcome:** repeatable cooperative play across representative TR locations,
-quests, combat, and OpenMW-compatible graphical mods.
-
-Finish gameplay-resource identity and visual-only classification; test exterior/
-interior transitions, separate player regions, late joins, loadout mismatch, and
-save continuation. Measure content size, active-cell work, memory, network queues,
-and long-session stability. Validate affected desktop platforms deliberately.
-Publish measured compatibility and remaining exceptions, not arbitrary-mod claims.
-
-**Exit:** the end-to-end scenario remains playable after restart with a graphical
-replacement installed, with agreed server performance/player limits. Remove all
-unused old-path code, switches, content files, schemas, and obsolete tests after
-checking callers; keep the same compact documentation set.
+**Outcome/exit:** repeatable TR exploration/quests/combat with graphical mods,
+including restart. Finish gameplay/visual resource classification. Test cell
+transitions, separate regions, late joins, mismatched loadouts and save continuation.
+Measure content size, active-cell work, memory, queues and long-session stability
+on affected platforms; agree performance/player limits. Publish evidenced
+compatibility/exceptions. Remove unused old code, switches, content, schemas and
+tests after checking callers; retain compact documentation.

@@ -52,6 +52,7 @@ namespace TES3MP
         // Resolve inherited player motion against the native area domain. This
         // never grants interior travel; the engine adapter may permit contiguous
         // exterior crossings while explicit relocations remain transactional.
+        virtual bool allowsPlayerMovement(PlayerId) const { return true; }
         virtual std::optional<CellId> movementCell(CellId current, Position3) const { return current; }
         virtual bool allowsCellTransition(CellId, CellId, Position3) const { return false; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareDoorActivation(

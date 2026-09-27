@@ -724,12 +724,18 @@ namespace TES3MP::OpenMWAdapter
         if (mRole == DesktopAutomationRole::NativeTraversal && mOutput
             && mEvidenceEvents < MaximumEvidenceEvents)
         {
+            const auto writeKnockout = [&](const KnockoutSnapshot& pose) {
+                mOutput << "{\"state\":" << unsigned(pose.state) << ",\"frame\":" << pose.frame
+                    << ",\"paralyzed\":" << (pose.paralyzed ? "true" : "false") << '}';
+            };
             mOutput << "{\"event\":\"native_combat_sample\",\"tick\":" << snapshot.serverTick().value()
                 << ",\"generation\":" << snapshot.targetSessionGeneration().value()
                 << ",\"self\":" << snapshot.selfPlayerId().value()
                 << ",\"health\":" << snapshot.selfHealth() << ",\"fatigue\":" << snapshot.selfFatigue()
                 << ",\"magicka\":" << snapshot.selfMagicka() << ",\"dead\":"
-                << (snapshot.selfDead() ? "true" : "false") << ",\"actors\":[";
+                << (snapshot.selfDead() ? "true" : "false") << ",\"knockout\":";
+            writeKnockout(snapshot.selfKnockout());
+            mOutput << ",\"actors\":[";
             bool first = true;
             for (const auto& actor : snapshot.actors())
             {
@@ -741,7 +747,10 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"dead\":" << (actor.dead ? "true" : "false")
                     << ",\"cast_id\":" << actor.castId << ",\"cast_phase\":" << unsigned(actor.castPhase)
                     << ",\"cast_range\":" << unsigned(actor.castRange) << ",\"cast_elapsed\":" << actor.castElapsed
-                    << ",\"cast_release\":" << actor.castRelease << ",\"cast_stop\":" << actor.castStop << '}';
+                    << ",\"cast_release\":" << actor.castRelease << ",\"cast_stop\":" << actor.castStop
+                    << ",\"knockout\":";
+                writeKnockout(actor.knockout);
+                mOutput << '}';
             }
             mOutput << "],\"players\":[";
             first = true;
@@ -752,7 +761,9 @@ namespace TES3MP::OpenMWAdapter
                 mOutput << "{\"id\":" << player.playerId.value() << ",\"revision\":"
                     << player.combatRevision.value() << ",\"health\":" << player.health
                     << ",\"fatigue\":" << player.fatigue << ",\"magicka\":" << player.magicka
-                    << ",\"dead\":" << (player.dead ? "true" : "false") << '}';
+                    << ",\"dead\":" << (player.dead ? "true" : "false") << ",\"knockout\":";
+                writeKnockout(player.knockout);
+                mOutput << '}';
             }
             mOutput << "],\"swings\":[";
             first = true;

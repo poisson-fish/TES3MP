@@ -91,6 +91,7 @@ namespace TES3MP::Native
         bool enchantedWeaponsAreMagical() const;
         bool onlyAppropriateAmmunitionBypassesResistance() const;
         bool uncappedDamageFatigue() const;
+        bool classicReflectedAbsorb() const;
         // Resolve the selected NPC's third-person animation source using stock
         // source priority. The returned identity must join a combat campaign's
         // content binding before a swing can become authoritative.

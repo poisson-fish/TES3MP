@@ -20,11 +20,16 @@ namespace MWWorld
 namespace MWMechanics
 {
     class CreatureStats;
+    class NpcStats;
 
     // Common combat effects can be rated without World, player or presentation
     // services. Unhandled effects require the richer stock actor context.
     std::optional<float> rateCommonEffect(const ESM::ENAMstruct& effect,
         const CreatureStats& actor, float restoreMagickaPriority);
+    std::optional<float> rateStatDamageEffect(const ESM::ENAMstruct& effect,
+        const CreatureStats* enemy, const NpcStats* enemyNpc);
+    float rateDispelEffect(bool self, int positive, int negative);
+    float rateAbsorbMagicka(const CreatureStats* enemy, float restoreMagickaPriority);
     float adjustEffectRating(const ESM::ENAMstruct& effect, float rating,
         const CreatureStats& actor, const CreatureStats* enemy, const MWWorld::ESMStore& store,
         bool actorUnderwater, bool enemyUnderwater);

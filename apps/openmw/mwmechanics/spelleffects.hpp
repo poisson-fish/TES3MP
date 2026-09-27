@@ -18,8 +18,19 @@ namespace MWMechanics
 {
     class CreatureStats;
     class NpcStats;
+    enum class EffectProtection { None, Reflect, Absorb };
+    EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
+        bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng);
+    bool rollDispel(float magnitude, Misc::Rng::Generator& rng);
+    void absorbDynamicStat(CreatureStats& target, CreatureStats* caster, int stat, float magnitude,
+        const MWWorld::TimeStamp* deathTime = nullptr);
     float rollEffectMagnitude(float minimum, float maximum, Misc::Rng::Generator& rng);
     void modifyFortifySkill(NpcStats& stats, ESM::RefId skill, float magnitude);
+    // Positive damage applies Drain; negative damage removes it. Stock Damage
+    // and Restore callers use the same mutation after their own magnitude cap.
+    void modifyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
+        std::optional<float> baseMagickaMultiplier = {});
+    void modifySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude);
     // The stat mutation used by Restore Health. Explicit stats let a server
     // stage the same OpenMW effect before publishing it to a live actor.
     void restoreHealth(CreatureStats& stats, float magnitude);
