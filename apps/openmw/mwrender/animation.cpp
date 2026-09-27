@@ -961,6 +961,7 @@ namespace MWRender
             mCommittedKnockoutGroup.clear();
         }
         mCommittedKnockoutState = pose;
+        mCommittedKnockoutFrame = frame;
         if (group.empty()) return true;
         setCommittedMelee({}, 0, 0, 0, 0);
         // Missing bound clips retain incapacity on the server and use no visual clip.

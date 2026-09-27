@@ -230,6 +230,7 @@ namespace MWRender
         std::string mCommittedMeleeGroup;
         std::string mCommittedKnockoutGroup;
         unsigned mCommittedKnockoutState = 0;
+        unsigned mCommittedKnockoutFrame = 0;
 
         osg::ref_ptr<RotateController> mHeadController;
         osg::ref_ptr<RotateController> mSpineController;
@@ -417,6 +418,8 @@ namespace MWRender
         // 0 releases authority, 1 upright, 2 knockout, 3 knockdown; frame is at 30 Hz.
         bool setCommittedKnockout(unsigned state, unsigned frame);
         unsigned committedKnockoutState() const { return mCommittedKnockoutState; }
+        // Rebind the retained sample after animation resources or the POV skeleton change.
+        bool restoreCommittedKnockout() { return setCommittedKnockout(mCommittedKnockoutState, mCommittedKnockoutFrame); }
 
         /** Adjust the speed multiplier of an already playing animation.
          */

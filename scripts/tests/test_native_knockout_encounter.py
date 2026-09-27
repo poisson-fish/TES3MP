@@ -5,6 +5,53 @@ from scripts.native_knockout_encounter import validate_observations, validate_ph
 
 
 class KnockoutEvidenceTests(unittest.TestCase):
+    def test_player_physical_compares_self_and_remote_and_deduplicates_npc_hits(self):
+        hit = dict(attacker=7, target=1, attacker_revision=2, target_revision=3,
+                   hit=True, damage=12, stat=0, died=False)
+        segment = {role: [] for role in ("Alice", "Bob")}
+        for tick, state, frame in ((1, 3, 10), (2, 3, 55), (3, 1, 0)):
+            target = dict(id=1, health=88, fatigue=100, dead=False,
+                          knockout=dict(state=state, frame=frame, paralyzed=False))
+            observer = dict(id=2, health=100, fatigue=100, dead=False,
+                            knockout=dict(state=1, frame=0, paralyzed=False))
+            for role, own, peer in (("Alice", target, observer), ("Bob", observer, target)):
+                row = dict(tick=tick, self=own["id"], players=[copy.deepcopy(peer)],
+                           actor_hits=[copy.deepcopy(hit)] if tick == 1 else [], player_hits=[])
+                row.update({k: copy.deepcopy(v) for k, v in own.items() if k != "id"})
+                segment[role].append(row)
+        valid = [segment]
+        self.assertEqual(validate_physical_observations(valid, player_id=1)["matching_health_hits"], 1)
+        restored = copy.deepcopy(valid)
+        for rows in restored[0].values():
+            rows[0]["actor_hits"] = []
+        validate_physical_observations(restored, require_hit=False, player_id=1)
+        for mutation in ("duplicate", "missing_target", "wrong_target", "remote_health", "self_dead",
+                         "self_rewind", "no_recovery", "no_hit", "player_hit"):
+            changed = copy.deepcopy(valid)
+            alice, bob = changed[0]["Alice"], changed[0]["Bob"]
+            if mutation == "duplicate":
+                bob[1]["actor_hits"] = [copy.deepcopy(hit)]
+            elif mutation == "missing_target":
+                bob[1]["players"] = []
+            elif mutation == "wrong_target":
+                for rows in changed[0].values():
+                    rows[0]["actor_hits"][0]["target"] = 2
+            elif mutation == "remote_health":
+                bob[1]["players"][0]["health"] += 1
+            elif mutation == "self_dead":
+                alice[1]["dead"] = True
+            elif mutation == "self_rewind":
+                alice[1]["knockout"]["frame"] = 1
+            elif mutation == "no_recovery":
+                alice.pop()
+            else:
+                for rows in changed[0].values():
+                    rows[0]["actor_hits"] = []
+                    if mutation == "player_hit":
+                        rows[0]["player_hits"] = [copy.deepcopy(hit)]
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                validate_physical_observations(changed, player_id=1)
+
     def test_physical_requires_health_hit_progress_recovery_and_consistent_observers(self):
         hit = dict(attacker=1, target=7, attacker_revision=2, target_revision=3,
                    hit=True, damage=12, stat=0, died=False)

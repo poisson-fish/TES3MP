@@ -8,7 +8,8 @@ import time
 def subjects(row, npc=False):
     if npc:
         return row["actors"]
-    return [dict(id=row["self"], fatigue=row["fatigue"], knockout=row["knockout"]), *row["players"]]
+    return [dict(id=row["self"], **{key: row[key] for key in ("fatigue", "knockout", "health", "dead")
+                                 if key in row}), *row["players"]]
 
 
 def validate_observations(segments, npc=False):
@@ -53,10 +54,13 @@ def validate_observations(segments, npc=False):
     return dict(shared_ticks=shared, phases={f"{r}:{p}": sorted(v) for (r, p), v in phases.items()})
 
 
-def validate_physical_observations(segments, require_hit=True):
+def validate_physical_observations(segments, require_hit=True, player_id=None):
     """Require a living physical fall, advancing authored clock and later recovery per observer."""
+    def targets(row):
+        return row["actors"] if player_id is None else [p for p in subjects(row) if p["id"] == player_id]
+
     identities = {p["id"] for segment in segments for rows in segment.values()
-                  for row in rows for p in row["actors"]}
+                  for row in rows for p in targets(row)}
     if len(identities) != 1:
         raise RuntimeError("physical capture requires one stable actor identity")
     actor_id, = identities
@@ -69,12 +73,14 @@ def validate_physical_observations(segments, require_hit=True):
         committed = {}
         for role, rows in segment.items():
             for row in rows:
-                for hit in row["player_hits"]:
+                for hit in row["player_hits" if player_id is None else "actor_hits"]:
                     key = hit["attacker"], hit["attacker_revision"], hit["target_revision"]
                     if key in hits[role]:
                         raise RuntimeError("duplicated physical hit outcome")
                     hits[role][key] = hit
-                for actor in row["actors"]:
+                if len(targets(row)) != 1:
+                    raise RuntimeError("physical capture lost its target")
+                for actor in targets(row):
                     pose = actor["knockout"]
                     if actor["dead"] or actor["fatigue"] < 0 or pose["paralyzed"] or pose["state"] not in (1, 3):
                         raise RuntimeError("physical proof contains death, fatigue knockout or invalid pose")
@@ -156,17 +162,28 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
 
     def all_at(state, fatigue_negative=None):
         rows = [samples(r) for r in evidence]
-        return all(rows) and all(len(subjects(r[-1], npc)) == len(identities) for r in rows) and all(
+        return all(rows) and all(set(identities).issubset(p["id"] for p in subjects(r[-1], npc)) for r in rows) and all(
             (p := player(rows[i][-1], identity))["knockout"]["state"] == state
             and (fatigue_negative is None or (p["fatigue"] < 0) == fatigue_negative)
             for i in range(2) for identity in identities)
 
     def frame_subjects():
         for role in evidence:
-            if npc:
+            if physical and not npc:
+                command(role, "pose 60 -300 1 0.45 0" if role == "Alice" else "pose -180 -300 1 0.3 1.57")
+                if role == "Alice":
+                    command(role, "thirdperson")
+            elif npc:
                 command(role, "pose 60 -300 1 0.3 0" if role == "Alice" else "pose -180 -140 1 0.3 1.15")
             else:
                 command(role, "facepeer")
+        if physical and not npc:
+            # Control acknowledgement is local. Wait for the actual impaired
+            # movement publication before disconnecting or saving the setup.
+            for role, position in (("Alice", [61440, -307200, 1024]), ("Bob", [-184320, -307200, 1024])):
+                wait_for(lambda: (rows := [r for r in records(evidence[role])
+                                          if r.get("event") == "native_player_sample"])
+                         and rows[-1]["position"] == position, role + ": authority retains camera position")
 
     def exhaust():
         if npc:
@@ -209,16 +226,25 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
     frame_subjects()
     initial = {r: samples(r)[-1] for r in evidence}
     if physical:
-        if not npc or not content or not content["profile"].startswith("vanilla-knockdown-"):
-            raise RuntimeError("physical capture requires a vanilla-knockdown NPC fixture")
+        if not content or not content["profile"].startswith("vanilla-knockdown-"):
+            raise RuntimeError("physical capture requires a vanilla-knockdown fixture")
+        if not npc:
+            identities = (1,)
+
+        def validate(segments, require_hit=True):
+            return validate_physical_observations(segments, require_hit, None if npc else identities[0])
 
         def strike():
             health = {r: player(samples(r)[-1], identities[0])["health"] for r in evidence}
-            command("Bob", "pose 140 -34 1 0.3 -1.57")
-            command("Alice", "pose 60 -150 1 0.3 0")
+            # Stage the high-agility observer within melee reach:
+            # a selected out-of-reach target currently holds the NPC wind-up.
+            # Alice steps closer to become its next target, then leaves range.
+            command("Bob", "pose 140 -34 1 0.3 -1.57" if npc else "pose 140 -34 1 0.3 -2.85")
+            command("Alice", "pose 60 -150 1 0.3 0" if npc else "pose 60 -95 1 0.3 0")
             time.sleep(.5)
             for attempt in range(12):
-                command("Alice", "swing 0 1")
+                if npc:
+                    command("Alice", "swing 0 1")
                 deadline = time.monotonic() + 2
                 while time.monotonic() < deadline:
                     if all_at(3, False):
@@ -231,10 +257,16 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         def physical_recovery(label):
             # Capture the late authored clip separately from the upright commit.
             # Images must be inspected; frame progress alone is not rendered-body proof.
-            for role in evidence:
-                wait_for(lambda: (p := player(samples(role)[-1], identities[0]))["knockout"]["state"] == 3
-                         and p["knockout"]["frame"] >= 55, role + ": late physical clip")
+            pending = set(evidence)
+            while pending:
+                def ready():
+                    candidates = [(p["knockout"]["frame"], role) for role in pending
+                                  if (p := player(samples(role)[-1], identities[0]))["knockout"]["state"] == 3
+                                  and p["knockout"]["frame"] >= (55 if npc else 65)]
+                    return max(candidates)[1] if candidates else None
+                role = wait_for(ready, "late physical clip")
                 screenshot(role, label + "-late")
+                pending.remove(role)
             wait_for(lambda: all_at(1, False), "physical get-up completes on both observers")
             for role in evidence:
                 screenshot(role, label + "-upright")
@@ -247,16 +279,19 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             screenshot(role, "physical-down")
         physical_recovery("physical")
         normal = {r: samples(r) for r in evidence}
-        normal_validation = validate_physical_observations([normal])
+        normal_validation = validate([normal])
 
         missed_reconnect_windows = 0
         for attempt in range(3):
             reconnect_start = {r: len(samples(r)) for r in evidence}
             strike()
+            if not npc:
+                frame_subjects()
             retained_health = {r: player(samples(r)[-1], identities[0])["health"] for r in evidence}
-            generation = samples("Bob")[-1]["generation"]
-            command("Bob", "reconnect")
-            wait_for(lambda: samples("Bob")[-1]["generation"] > generation, "observer reconnects")
+            reconnecting = "Bob" if npc else "Alice"
+            generation = samples(reconnecting)[-1]["generation"]
+            command(reconnecting, "reconnect")
+            wait_for(lambda: samples(reconnecting)[-1]["generation"] > generation, "physical participant reconnects")
             if any(player(samples(r)[-1], identities[0])["health"] != retained_health[r] for r in evidence):
                 raise RuntimeError("reconnect lost committed physical damage")
             if all_at(3, False) and all(player(samples(r)[-1], identities[0])["knockout"]["frame"] <= 60
@@ -274,10 +309,12 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         physical_recovery("physical-reconnect")
         # A hit event may arrive after disconnect and need not replay. The
         # rejoining baseline must retain its health loss and advancing body clock.
-        reconnect_validation = validate_physical_observations([
+        reconnect_validation = validate([
             {r: samples(r)[reconnect_start[r]:] for r in evidence}], require_hit=False)
 
         strike()
+        if not npc:
+            frame_subjects()
         processes["server"].terminate()
         processes["server"].wait(timeout=15)
         finished.add("server")
@@ -309,17 +346,17 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             screenshot(role, "physical-restored")
         physical_recovery("physical-restart")
         after = {r: samples(r) for r in evidence}
-        validation = validate_physical_observations([before, after])
+        validation = validate([before, after])
         validation["normal"] = normal_validation
         validation["reconnect"] = reconnect_validation
-        validation["restored"] = validate_physical_observations([after], require_hit=False)
+        validation["restored"] = validate([after], require_hit=False)
         for role in evidence:
             command(role, "quit")
             processes[role].wait(timeout=15)
             finished.add(role)
             if processes[role].returncode:
                 raise RuntimeError(f"{role} did not finish cleanly")
-        report = dict(success=True, scenario="V51 live NPC physical knockdown and get-up", manifest=manifest,
+        report = dict(success=True, scenario="V51 live " + ("NPC" if npc else "player") + " physical knockdown and get-up", manifest=manifest,
                       synthetic_actor_stats_and_placements=True, content=content, initial=initial,
                       missed_reconnect_windows=missed_reconnect_windows,
                       reconnected=reconnected, restored=restored, validation=validation,

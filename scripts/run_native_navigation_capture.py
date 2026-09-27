@@ -732,6 +732,9 @@ def run(args):
     version = 51 if args.knockout else 46 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     player_actor = "npc_knockdown_observer" if args.physical_knockdown else npc if args.life_encounter or spell_capture else "player"
+    player_actors = [player_actor, player_actor]
+    if args.physical_knockdown and args.knockout_target == "players":
+        player_actors[0] = npc
     destination = "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
@@ -740,7 +743,7 @@ def run(args):
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
-        f'actors "{player_actor}" "{player_actor}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
+        f'actors "{player_actors[0]}" "{player_actors[1]}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
@@ -789,6 +792,7 @@ def run(args):
         user.joinpath("settings.cfg").write_text(
             "[Video]\nresolution x = 1000\nresolution y = 700\nwindow mode = 2\nwindow border = true\n"
             "minimize on focus loss = false\nframerate limit = 30\n"
+            + ("[Camera]\nfield of view = 85\n" if args.physical_knockdown and args.knockout_target == "players" else "")
             + ("[Shaders]\nclassic falloff = false\nminimum interior brightness = 0.7\n" if args.knockout else ""),
             encoding="utf-8")
     output.joinpath("players.txt").write_text("TES3MP_PLAYER_IDENTITIES_V5\n" + "\n".join(identities) + "\n",
@@ -997,13 +1001,13 @@ if __name__ == "__main__":
     parser.add_argument("--knockout-target", choices=("players", "npc"), default="players",
                         help="Subject of the --knockout capture")
     parser.add_argument("--physical-knockdown", action="store_true",
-                        help="Use sword hits with --knockout --knockout-target npc and a vanilla-knockdown fixture")
+                        help="Use sword hits with --knockout and a vanilla-knockdown fixture (player subject: Alice)")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
     if args.knockout_target != "players" and not args.knockout:
         parser.error("--knockout-target requires --knockout")
-    if args.physical_knockdown and (not args.knockout or args.knockout_target != "npc"):
-        parser.error("--physical-knockdown requires --knockout --knockout-target npc")
+    if args.physical_knockdown and not args.knockout:
+        parser.error("--physical-knockdown requires --knockout")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
             args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings, args.knockout)) > 1:
         parser.error("choose one capture mode")

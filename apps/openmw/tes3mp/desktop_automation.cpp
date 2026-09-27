@@ -313,6 +313,15 @@ namespace TES3MP::OpenMWAdapter
         if (mRole == DesktopAutomationRole::NativeTraversal)
         {
             mTraversalPeer.reset();
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                const auto& position = self->transform().position();
+                mOutput << "{\"event\":\"native_player_sample\",\"self\":" << self->playerId().value()
+                    << ",\"revision\":" << snapshot.header().canonicalRevision().value()
+                    << ",\"position\":[" << position.x() << ',' << position.y() << ',' << position.z() << "]}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
             for (const auto& entry : snapshot.view().entries())
                 if (entry.playerId() != snapshot.header().targetPlayerId())
                 {
@@ -785,8 +794,11 @@ namespace TES3MP::OpenMWAdapter
                     if (!first) mOutput << ',';
                     first = false;
                     mOutput << "{\"attacker\":" << hit.attackerActorId.value() << ",\"target\":"
-                        << hit.targetPlayerId.value() << ",\"hit\":" << (hit.hit ? "true" : "false")
-                        << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat) << '}';
+                        << hit.targetPlayerId.value() << ",\"attacker_revision\":" << hit.attackerCombatRevision.value()
+                        << ",\"target_revision\":" << hit.targetCombatRevision.value()
+                        << ",\"hit\":" << (hit.hit ? "true" : "false")
+                        << ",\"damage\":" << hit.damage << ",\"stat\":" << unsigned(hit.damagedStat)
+                        << ",\"died\":" << (hit.targetDied ? "true" : "false") << '}';
                 }
             mOutput << "],\"player_hits\":[";
             first = true;

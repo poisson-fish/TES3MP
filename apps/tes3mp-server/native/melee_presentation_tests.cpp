@@ -30,21 +30,27 @@ namespace TES3MP::Native::Testing
                 : Animation({}, new osg::Group, &resources, Context::ReplicatedActor)
             {
                 mObjectRoot = new osg::Group;
+                reloadSources(body);
+                mContext = Context::Gameplay;
+            }
+            void reloadSources(unsigned body)
+            {
+                clearAnimSources();
                 addSingleAnimSource(std::string(Settings::models().mXbaseanimkf.get().value()), "pose test");
                 if (body == 1)
                     addSingleAnimSource(std::string(Settings::models().mXbaseanimfemalekf.get().value()), "female pose test");
                 if (body >= 2)
                 {
                     auto beast = Misc::ResourceHelpers::correctActorModelPath(
-                        Settings::models().mBaseanimkna.get(), resources.getVFS());
+                        Settings::models().mBaseanimkna.get(), mResourceSystem->getVFS());
                     beast.changeExtension(VFS::Path::ExtensionView("kf"));
-                    require(resources.getVFS()->exists(beast), "Beast animation layer missing");
+                    require(mResourceSystem->getVFS()->exists(beast), "Beast animation layer missing");
                     addSingleAnimSource(std::string(beast.value()), "beast pose test");
                     if (body == 3)
                         addSingleAnimSource(std::string(Settings::models().mXargonianswimknakf.get().value()), "argonian pose test");
                 }
-                mContext = Context::Gameplay;
             }
+            void clearSources() { clearAnimSources(); }
             bool listenerIs(TextKeyListener* value) const { return mTextKeyListener == value; }
         };
         struct Listener : MWRender::Animation::TextKeyListener
@@ -94,6 +100,14 @@ namespace TES3MP::Native::Testing
                             && peer.getCurrentTime(group) == time, "Wall time advanced knockout or retained swing");
                         require(reconnect.setCommittedKnockout(0, 0) && reconnect.setCommittedKnockout(pose, frame)
                             && reconnect.getCurrentTime(group) == time, "Reconnect restarted knockout");
+                        // A POV/model rebuild can briefly have no matching clip.
+                        // Reinstalling layered resources must recover the exact
+                        // last server sample without another packet or callbacks.
+                        local.clearSources();
+                        require(local.restoreCommittedKnockout(), "Missing clip lost committed authority");
+                        local.reloadSources(body);
+                        require(local.restoreCommittedKnockout() && local.getCurrentTime(group) == time,
+                            "Skeleton rebuild reset the committed knockout frame");
                         require(listener.calls == 0 && local.listenerIs(&listener), "Knockout replayed gameplay callbacks");
                     }
                     require(local.setCommittedKnockout(1, 0) && !local.getInfo(group)

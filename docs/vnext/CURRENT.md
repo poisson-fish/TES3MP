@@ -1,56 +1,45 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-one NPC/doors at 60 Hz, commits at 30 Hz; neighbors freeze. T3C6 requires capability 24.
+one NPC/doors at 60 Hz, commits at 30 Hz; neighbors freeze. T3C6/capability 24.
 
-V51 implements a subset of step 4: Reflect, Spell Absorption, Paralyze,
-Resist Paralysis, Dispel, Drain Health/Magicka/Fatigue and Absorb Health/Magicka/
-Fatigue/Attribute/Skill. Shared OpenMW helpers own mechanics/AI. Constant defenses
-work; Dispel preserves items/constants. Absorb benefits bind caster life.
-V51 requires fresh campaigns and binds reflected-absorb settings. Paralyze blocks
-actions/movement; snapshots carry paralysis/negative magicka. Touch attribution
-and on-strike death deduplication persist.
+V51: Reflect, Spell Absorption, Paralyze/Resist Paralysis, Dispel,
+Drain Health/Magicka/Fatigue, Absorb Health/Magicka/Fatigue/Attribute/Skill.
+Shared OpenMW mechanics/AI; constant defenses; life-bound absorb;
+Dispel preserves items/constants. Fresh campaigns required.
+Paralyze blocks actions/movement. Touch attribution/on-strike death deduplication persist.
 
-Inherited V51 evidence: synthetic vanilla spell/items, retry, expiry, restart and
-NPC lifecycle (`build/logs/m4-expanded-effects-test.log`); shared helpers/AI
-(`build/logs/m4-expanded-ai-test.log`); protocol/handshake
-(`build/logs/m4-expanded-protocol-test.log`, `build/logs/m4-expanded-handshake-test.log`).
+Inherited focused evidence (`build/logs/`): `m4-expanded-effects-test.log`,
+`m4-expanded-ai-test.log`, `m4-expanded-protocol-test.log`, `m4-expanded-handshake-test.log`;
+`m4-interrupted-test.log`; `m4-death-history-test.log` (2,049 deaths, 16 MiB budget);
+`m4-knockout-presentation-test.log`, `m4-knockout-presentation-getup.log`,
+`m4-knockout-presentation-loop.log`; `m4-stat-drains-unit.log`, `m4-stat-drains-test.log`.
 
-Other inherited checks:
-- Interrupted-cast cancellation: `build/logs/m4-interrupted-test.log`.
-- Death history through 2,049, attribution, loot deduplication and respawn:
-  `build/logs/m4-death-history-test.log`. The image remains bounded to 16 MiB;
-  quest rewards remain M5.
-- Knockout/get-up: `build/logs/m4-knockout-presentation-test.log`,
-  `build/logs/m4-knockout-presentation-getup.log`, `build/logs/m4-knockout-presentation-loop.log`.
-- Drain Attribute/Skill: `build/logs/m4-stat-drains-unit.log`, `build/logs/m4-stat-drains-test.log`.
+Inherited inspected fatigue captures: `build/m4-knockout-live-05/result.json`,
+`build/m4-npc-knockout-live-03/result.json`. NPC physical captures:
+`build/m4-physical-female-live-04/result.json`, `build/m4-physical-khajiit-live-03/result.json`,
+`build/m4-physical-argonian-live-03/result.json`. Synthetic vanilla bodies/stats/placements;
+two clients, 10% loss/100 ms delay/jitter, reconnect/restart. Native NPC body
+replacements immediately sample retained combat.
 
-Inherited fatigue captures: players `build/m4-knockout-live-05/result.json`,
-NPC `build/m4-npc-knockout-live-03/result.json`. Synthetic vanilla actors/spells;
-both clients' inspected exhaustion/get-up/upright screenshots passed 10% loss/100 ms
-delay/jitter, reconnect/restart. Fixture/validators passed.
-Humanoid/female/beast/Argonian exhaustion/physical-knockdown sampling passed
-(`build/logs/m4-knockout-body-presentation.log`): resource clocks only.
+New player physical capture: `build/m4-player-physical-live-08/result.json`.
+Stock male player, NPC sword hits; synthetic stats/placement. Both clients'
+self/remote down/get-up/upright images inspected under the same impairment,
+subject reconnect and restart. Damage retention, clocks and hit deduplication pass.
+Remote player creation/equipment replacement samples retained combat; local
+POV/skeleton rebuilds retain knockout frames. Camera setup waits for server positions.
+Focused checks: `build/logs/m4-player-physical-validator.log`, `build/logs/m4-physical-validator.log`,
+`build/logs/m4-player-physical-pose-test.log` (four resource layers),
+`build/logs/m4-player-physical-client-build.log`.
 
-New: NPC physical sword-hit knockdown/get-up passed two-client captures at 10%
-loss/100 ms delay/jitter, reconnect and restart: `build/m4-physical-female-live-04/result.json`,
-`build/m4-physical-khajiit-live-03/result.json`, `build/m4-physical-argonian-live-03/result.json`.
-Inspected both clients' down/get-up/upright screenshots. Synthetic vanilla
-placements/stats; stock sword/rolls/clips. Damage retention, advancing clocks and
-hit deduplication passed; missed reconnect windows are recorded, not credited.
-New native bodies immediately apply retained combat before another packet arrives.
-Validator/builds passed (`build/logs/m4-physical-validator.log`,
-`build/logs/m4-physical-client-build.log`, `build/logs/m4-physical-fixture-build.log`).
-Player physical-hit recovery and male/creature/custom-body live coverage remain.
+**M4 incomplete. Next: diagnose concurrent-hit reconnect failure**, then remaining
+male NPC/creature/custom-body coverage and attribute/resource effects.
+`build/m4-player-physical-live-03/server.stderr.log` records `CandidateStateInvalid`
+(preparation=5, tick 373) while the observer remains under attack during subject
+reconnect; unresolved. NPC wind-up also holds an out-of-reach selected target.
+Accepted player capture stages the observer in reach for selection, then moves
+both players away during recovery. It does not prove overlapping combat.
 
-Inherited desktop evidence, 10% loss/100 ms delay/jitter:
-`build/m4-cast-vanilla-live-10/result.json`, `build/m4-cast-tr-live-02/result.json`,
-`build/m4-cast-vanilla-item-live-03/result.json`, `build/m4-cast-tr-item-live-04/result.json`,
-`build/m4-swing-vanilla-live-07/result.json`.
-Synthetic placements; these captures do not verify new effects.
-
-**M4 incomplete. Next: step 4's player physical-hit knockdown and remaining body presentation,
-then attribute/resource effects.**
 The following 100 built-in effects remain outside general native casting:
 
 - Attribute/resources (8): DamageAttribute, DamageSkill, RestoreAttribute,

@@ -1,5 +1,7 @@
 #include "npcanimation.hpp"
 
+#include <stdexcept>
+
 #include <osg/Depth>
 #include <osg/MatrixTransform>
 #include <osg/UserDataContainer>
@@ -545,6 +547,8 @@ namespace MWRender
         }
 
         mWeaponAnimationTime->updateStartTime();
+        if (committedKnockoutState() && !restoreCommittedKnockout())
+            throw std::runtime_error("Failed to restore committed knockout after NPC skeleton rebuild");
     }
 
     std::string NpcAnimation::getSheathedShieldMesh(const MWWorld::ConstPtr& shield) const

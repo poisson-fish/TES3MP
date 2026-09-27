@@ -375,6 +375,11 @@ namespace TES3MP::OpenMWAdapter
             world->moveObject(world->getPlayerPtr(), osg::Vec3f(x,y,z));
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(pitch,0,yaw));
         }
+        else if (action == "thirdperson")
+        {
+            world->toggleVanityMode(false);
+            if (world->isFirstPerson()) world->togglePOV(true);
+        }
         else if (action == "facepeer")
         {
             auto* desktop = dynamic_cast<DesktopPresentation*>(&mPresentation);

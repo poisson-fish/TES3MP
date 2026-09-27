@@ -1231,6 +1231,9 @@ namespace TES3MP::OpenMWAdapter
                 if (mapped != ProviderResult::Accepted || !actor)
                     return mapped;
                 remote.actor = std::move(actor);
+                if (combatSnapshot && applyRemotePlayerCombat(*remote.actor,
+                        remote.lastObserved->playerId(), *combatSnapshot) != ProviderResult::Accepted)
+                    return ProviderResult::PresentationFailed;
                 remote.equipment = slots;
                 remote.authoritativeEquipment = true;
             }
@@ -1332,6 +1335,11 @@ namespace TES3MP::OpenMWAdapter
                         return mappedResult;
                     }
                     found = remotes.try_emplace(observed.entityId, remoteCell, std::move(actor), metrics).first;
+                    // Movement/equipment and combat have independent delivery order.
+                    // New bodies must sample the retained pose immediately.
+                    if (combatSnapshot && applyRemotePlayerCombat(*found->second.actor,
+                            observed.playerId, *combatSnapshot) != ProviderResult::Accepted)
+                        return ProviderResult::PresentationFailed;
                 }
                 if (found->second.lastObserved
                     && entry->entityRevision() == found->second.lastObserved->entityRevision())
@@ -1785,6 +1793,41 @@ namespace TES3MP::OpenMWAdapter
             return ProviderResult::Accepted;
         }
 
+        ProviderResult applyRemotePlayerCombat(MWRender::ReplicatedActor& actor,
+            PlayerId playerId, const LatestWinsCombatSnapshot& snapshot)
+        {
+            const auto combat = std::ranges::lower_bound(snapshot.players(), playerId, {}, &PlayerCombatSnapshot::playerId);
+            if (combat == snapshot.players().end() || combat->playerId != playerId)
+                return ProviderResult::Accepted;
+            for (const auto& swing : snapshot.swings())
+                if (swing.playerId == playerId
+                    && !replicatedActorResultAccepted(actor.setMelee(swing.group,
+                        swing.interruption || combat->dead ? 0 : swing.phase,
+                        swing.direction, swing.strength, swing.completion)))
+                    return ProviderResult::PresentationFailed;
+            auto ptr = actor.ptr();
+            auto& stats = ptr.getClass().getCreatureStats(ptr);
+            if (!combat->dead && stats.isDead()) stats.resurrect();
+            auto health = stats.getHealth();
+            health.setBase(combat->maximumHealth);
+            health.setCurrent(combat->health);
+            stats.setHealth(health);
+            auto fatigue = stats.getFatigue();
+            fatigue.setBase(combat->maximumFatigue);
+            fatigue.setCurrent(combat->fatigue, true, true);
+            stats.setFatigue(fatigue);
+            auto magicka = stats.getMagicka();
+            magicka.setBase(combat->maximumMagicka);
+            magicka.setCurrent(combat->magicka, true, true);
+            stats.setMagicka(magicka);
+            if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+            setParalyzed(stats, combat->knockout.paralyzed);
+            if (!replicatedActorResultAccepted(actor.setKnockout(combat->knockout.state, combat->knockout.frame))
+                || !replicatedActorResultAccepted(actor.setDead(combat->dead)))
+                return ProviderResult::PresentationFailed;
+            return ProviderResult::Accepted;
+        }
+
         ProviderResult applyCombat(
             const LatestWinsCombatSnapshot& snapshot, std::span<const ReliableCombatEventBatch> events)
         {
@@ -1812,12 +1855,6 @@ namespace TES3MP::OpenMWAdapter
                     animation->showWeapons(phase >= 1 && phase <= 3 && !snapshot.selfDead()
                         ? swing.source != 0 : playerStats.getDrawState() == MWMechanics::DrawState::Weapon);
                 }
-                else
-                    for (auto& [entity, remote] : remotes)
-                        if (remote.actor && remote.lastObserved && remote.lastObserved->playerId() == swing.playerId)
-                            if (!replicatedActorResultAccepted(remote.actor->setMelee(swing.group, phase,
-                                    swing.direction, swing.strength, swing.completion)))
-                                return ProviderResult::PresentationFailed;
             }
             const auto knockout = snapshot.selfKnockout();
             auto* animation = world->getAnimation(player);
@@ -1913,38 +1950,9 @@ namespace TES3MP::OpenMWAdapter
                 (void)entity;
                 if (!remote.actor || !remote.lastObserved)
                     continue;
-                const auto combat = std::ranges::lower_bound(
-                    snapshot.players(), remote.lastObserved->playerId(), {}, &PlayerCombatSnapshot::playerId);
-                if (combat == snapshot.players().end() || combat->playerId != remote.lastObserved->playerId())
-                    continue;
-                auto ptr = remote.actor->ptr();
-                auto& stats = ptr.getClass().getCreatureStats(ptr);
-                if (!combat->dead && stats.isDead())
-                    stats.resurrect();
-                auto health = stats.getHealth();
-                health.setBase(combat->maximumHealth);
-                health.setCurrent(combat->health);
-                stats.setHealth(health);
-                auto remoteFatigue = stats.getFatigue();
-                remoteFatigue.setBase(combat->maximumFatigue);
-                remoteFatigue.setCurrent(combat->fatigue, true, true);
-                stats.setFatigue(remoteFatigue);
-                auto remoteMagicka = stats.getMagicka();
-                remoteMagicka.setBase(combat->maximumMagicka);
-                remoteMagicka.setCurrent(combat->magicka, true, true);
-                stats.setMagicka(remoteMagicka);
-                if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
-                setParalyzed(stats, combat->knockout.paralyzed);
-                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
-                        combat->knockout.state, combat->knockout.frame)))
+                if (applyRemotePlayerCombat(*remote.actor, remote.lastObserved->playerId(), snapshot)
+                    != ProviderResult::Accepted)
                     return ProviderResult::PresentationFailed;
-                const auto deathResult = remote.actor->setDead(combat->dead);
-                if (!replicatedActorResultAccepted(deathResult))
-                {
-                    Log(Debug::Error) << "TES3MP combat player death presentation: "
-                                      << replicatedActorResultName(deathResult);
-                    return ProviderResult::PresentationFailed;
-                }
             }
             for (const auto& batch : events)
             {
