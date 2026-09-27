@@ -981,6 +981,13 @@ namespace TES3MP::Native
         return {mState->actor, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
             frame.mIsOnGround, mState->contacts, frame.mRotation.y()};
     }
+    void InteriorActorScene::setFacing(Prepared& prepared, float yaw) const
+    {
+        if (!std::isfinite(yaw) || !canInstall(prepared)) throw std::invalid_argument("Invalid prepared facing");
+        auto& state = *prepared.mState;
+        state.frame->mRotation.y() = yaw;
+        state.bytes = mImpl->encode(*state.frame, state.path, state.contacts, state.travel);
+    }
     std::span<const char> InteriorActorScene::Prepared::image() const { return mState->bytes; }
     bool InteriorActorScene::Prepared::pathUnavailable() const
     { return !mState->path.isPathConstructed() && !mState->path.checkPathCompleted(); }

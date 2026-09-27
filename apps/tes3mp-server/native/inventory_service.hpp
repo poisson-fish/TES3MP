@@ -97,6 +97,7 @@ namespace TES3MP::Native
         bool mMagicProjectileCollection = false;
         bool mKnockoutRules = false;
         bool mExpandedEffects = false; // V51 cross-actor effects and defenses.
+        bool mActorPresentation = false; // V52 durable action and hit-clip identities.
         bool mClassicReflectedAbsorb = false;
         bool mKnockoutAnimation = false; // V50 retains the authored get-up tail.
         bool mMeleeDefenseRules = false;

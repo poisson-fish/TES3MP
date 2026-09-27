@@ -22,6 +22,7 @@ namespace TES3MP::Native
         std::string attack, float speed, std::string identity)
         : mGroup(std::move(group)), mIdentity(std::move(identity)), mShoot(attack == "shoot"), mSpeed(speed)
     {
+        mDirection = attack == "slash" ? 1 : attack == "thrust" ? 2 : 0;
         if (mGroup.empty() || mGroup.size() > 64 || !std::isfinite(speed) || speed <= 0 || speed > 100
             || (attack != "chop" && attack != "slash" && attack != "thrust" && !mShoot))
             throw std::invalid_argument("Invalid native melee animation input");
@@ -89,6 +90,16 @@ namespace TES3MP::Native
             : mFollow[strength == "small" ? 0 : strength == "medium" ? 1 : 2];
         return range.mStop == range.mStart ? 1.f
             : std::clamp((mState.mTime - range.mStart) / (range.mStop - range.mStart), 0.f, 1.f);
+    }
+
+    float MeleeAnimation::phaseRate() const
+    {
+        const auto strength = MWMechanics::attackFollowStrength(mState.mStrength);
+        const auto range = mState.mPhase == Phase::WindUp ? mWindUp
+            : mState.mPhase == Phase::Release ? mRelease
+            : mFollow[strength == "small" ? 0 : strength == "medium" ? 1 : 2];
+        return mState.mPhase == Phase::Complete || range.mStop == range.mStart ? 0.f
+            : mSpeed / (range.mStop - range.mStart);
     }
 
     float MeleeAnimation::windUp() const

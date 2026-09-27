@@ -1,5 +1,6 @@
 #include "../mwworld/regionalweather.hpp"
 #include "desktop_providers.hpp"
+#include "actor_presentation.hpp"
 #include <apps/openmw/mwclass/creaturelevlist.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include "movement_mapping.hpp"
@@ -948,6 +949,8 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
         std::optional<LatestWinsCombatSnapshot> combatSnapshot;
+        ActorPresentationTimeline actorTimeline;
+        std::vector<DesktopPresentation::ActorPoseEvidence> poseEvidence;
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
         bool sessionBootstrapPending = true;
 
@@ -1006,6 +1009,7 @@ namespace TES3MP::OpenMWAdapter
             observedPlayerInventoryRevision.reset();
             observedInventoryCanonicalRevision.reset();
             combatSnapshot.reset();
+            actorTimeline.clear();
             activeMagicEffects.clear();
             try
             {
@@ -1785,7 +1789,7 @@ namespace TES3MP::OpenMWAdapter
             stats.setMagicka(magicka);
             if (combat.knockout.state) stats.setKnockedDown(combat.knockout.state >= 2);
             setParalyzed(stats, combat.knockout.paralyzed);
-            if (!replicatedActorResultAccepted(actor.setKnockout(combat.knockout.state, combat.knockout.frame))
+            if ((actorTimeline.empty() && !replicatedActorResultAccepted(actor.setKnockout(combat.knockout.state, combat.knockout.frame)))
                 || !replicatedActorResultAccepted(actor.setCast(combat.castPhase >= 3 && !combat.dead,
                     combat.castRange, combat.castStop ? float(combat.castElapsed) / combat.castStop : 0.f))
                 || !replicatedActorResultAccepted(actor.setDead(combat.dead)))
@@ -1799,7 +1803,7 @@ namespace TES3MP::OpenMWAdapter
             const auto combat = std::ranges::lower_bound(snapshot.players(), playerId, {}, &PlayerCombatSnapshot::playerId);
             if (combat == snapshot.players().end() || combat->playerId != playerId)
                 return ProviderResult::Accepted;
-            for (const auto& swing : snapshot.swings())
+            if (actorTimeline.empty()) for (const auto& swing : snapshot.swings())
                 if (swing.playerId == playerId
                     && !replicatedActorResultAccepted(actor.setMelee(swing.group,
                         swing.interruption || combat->dead ? 0 : swing.phase,
@@ -1822,7 +1826,7 @@ namespace TES3MP::OpenMWAdapter
             stats.setMagicka(magicka);
             if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
             setParalyzed(stats, combat->knockout.paralyzed);
-            if (!replicatedActorResultAccepted(actor.setKnockout(combat->knockout.state, combat->knockout.frame))
+            if ((actorTimeline.empty() && !replicatedActorResultAccepted(actor.setKnockout(combat->knockout.state, combat->knockout.frame)))
                 || !replicatedActorResultAccepted(actor.setDead(combat->dead)))
                 return ProviderResult::PresentationFailed;
             return ProviderResult::Accepted;
@@ -1838,12 +1842,13 @@ namespace TES3MP::OpenMWAdapter
                 Log(Debug::Error) << "TES3MP combat presentation: conflicting snapshot at the same tick";
                 return ProviderResult::PresentationFailed;
             }
+            actorTimeline.observe(snapshot);
             auto world = MWBase::Environment::get().getWorld();
             if (!world)
                 return ProviderResult::PresentationFailed;
             auto player = world->getPlayerPtr();
             auto& playerStats = player.getClass().getCreatureStats(player);
-            for (const auto& swing : snapshot.swings())
+            if (actorTimeline.empty()) for (const auto& swing : snapshot.swings())
             {
                 const unsigned phase = swing.interruption ? 0 : swing.phase;
                 if (swing.playerId == snapshot.selfPlayerId())
@@ -1858,7 +1863,7 @@ namespace TES3MP::OpenMWAdapter
             }
             const auto knockout = snapshot.selfKnockout();
             auto* animation = world->getAnimation(player);
-            if (!animation || !animation->setCommittedKnockout(knockout.state, knockout.frame))
+            if (actorTimeline.empty() && (!animation || !animation->setCommittedKnockout(knockout.state, knockout.frame)))
                 return ProviderResult::PresentationFailed;
             if (knockout.state) playerStats.setKnockedDown(knockout.state >= 2);
             setParalyzed(playerStats, knockout.paralyzed);
@@ -1920,7 +1925,7 @@ namespace TES3MP::OpenMWAdapter
                 stats.setMagicka(actorMagicka);
                 if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
                 setParalyzed(stats, combat->knockout.paralyzed);
-                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
+                if (actorTimeline.empty() && !replicatedActorResultAccepted(remote.actor->setKnockout(
                         combat->knockout.state, combat->knockout.frame)))
                     return ProviderResult::PresentationFailed;
                 if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
@@ -1970,7 +1975,7 @@ namespace TES3MP::OpenMWAdapter
                     if (!event.hit)
                         continue;
                     auto* actor = meleeActor(event.targetActorId);
-                    if (actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                    if (actorTimeline.empty() && actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                         return ProviderResult::PresentationFailed;
                     if (actor && event.damage > 0.f)
                     {
@@ -1983,7 +1988,7 @@ namespace TES3MP::OpenMWAdapter
                 for (const auto& event : batch.actorEvents())
                 {
                     auto* actor = meleeActor(event.attackerActorId);
-                    if (actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Attack)))
+                    if (actorTimeline.empty() && actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Attack)))
                         return ProviderResult::PresentationFailed;
                     if (event.targetPlayerId == snapshot.selfPlayerId() && event.hit)
                     {
@@ -2006,7 +2011,7 @@ namespace TES3MP::OpenMWAdapter
                         }
                         else if (event.damage > 0.f)
                         {
-                            playerStats.setHitRecovery(true);
+                            if (actorTimeline.empty()) playerStats.setHitRecovery(true);
                             const auto soundId = event.damagedStat == MeleeDamageStat::Fatigue
                                 ? ESM::RefId::stringRefId("Hand To Hand Hit")
                                 : ESM::RefId::stringRefId("Health Damage");
@@ -2039,7 +2044,7 @@ namespace TES3MP::OpenMWAdapter
                         const auto target = PlayerId::fromValue(event.targetId);
                         if (target && *target == snapshot.selfPlayerId())
                         {
-                            playerStats.setHitRecovery(true);
+                            if (actorTimeline.empty()) playerStats.setHitRecovery(true);
                             MWBase::Environment::get().getWindowManager()->activateHitOverlay();
                         }
                         const auto remote = target ? std::ranges::find_if(remotes,
@@ -2048,7 +2053,7 @@ namespace TES3MP::OpenMWAdapter
                                                                  && entry.second.lastObserved->playerId() == *target;
                                                          })
                                                    : remotes.end();
-                        if (remote != remotes.end()
+                        if (actorTimeline.empty() && remote != remotes.end()
                             && !replicatedActorResultAccepted(
                                 remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                         return ProviderResult::PresentationFailed;
@@ -2080,7 +2085,7 @@ namespace TES3MP::OpenMWAdapter
                         if (target && *target == snapshot.selfPlayerId()
                             && event.effectKind <= DirectMagicEffectKind::DamageHealth)
                         {
-                            playerStats.setHitRecovery(true);
+                            if (actorTimeline.empty()) playerStats.setHitRecovery(true);
                             MWBase::Environment::get().getWindowManager()->activateHitOverlay();
                         }
                         const auto remote = target ? std::ranges::find_if(remotes,
@@ -2089,7 +2094,7 @@ namespace TES3MP::OpenMWAdapter
                                                                  && entry.second.lastObserved->playerId() == *target;
                                                          })
                                                    : remotes.end();
-                        if (remote != remotes.end()
+                        if (actorTimeline.empty() && remote != remotes.end()
                             && !replicatedActorResultAccepted(
                                 remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                             return ProviderResult::PresentationFailed;
@@ -2107,6 +2112,43 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult advance(MonotonicInstant now)
         {
+            actorTimeline.advance(now);
+            poseEvidence.clear();
+            const auto presentationTick = actorTimeline.empty() ? std::optional<double>{} : actorTimeline.tick();
+            if (!actorTimeline.empty() && combatSnapshot)
+            {
+                auto world = MWBase::Environment::get().getWorld();
+                const auto apply = [&](const MWWorld::Ptr& ptr, MWRender::Animation* animation, uint8_t kind, uint64_t id) {
+                    const auto pose = actorTimeline.sample(kind, id);
+                    if (!pose || ptr.isEmpty()) return true;
+                    if (!animation) return false;
+                    const auto& p = *pose;
+                    const bool dead = ptr.getClass().getCreatureStats(ptr).isDead() || p.dead;
+                    if (!animation->setCommittedMelee(p.group, dead || p.bodyState >= 2 ? 0 : p.phase,
+                            p.direction, p.strength, p.completion)
+                        || !animation->setCommittedBody(dead ? 1 : p.bodyState,
+                            dead ? 0.f : p.bodyFrame, p.hitGroup)) return false;
+                    const auto group = p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
+                        : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup) : p.group;
+                    const float clipTime = group.empty() ? -1.f : animation->getCurrentTime(group);
+                    const float clipStart = group.empty() ? -1.f : animation->getTextKeyTime(group + ": start");
+                    // First/third-person resources have different absolute KF origins.
+                    poseEvidence.push_back({p, actorTimeline.tick(), clipTime < 0 ? -1.f
+                        : clipTime - std::max(0.f, clipStart)});
+                    return true;
+                };
+                if (!apply(world->getPlayerPtr(), world->getAnimation(world->getPlayerPtr()), 1, combatSnapshot->selfPlayerId().value()))
+                    return ProviderResult::PresentationFailed;
+                for (auto& [id, remote] : nativeRemotes)
+                    if (remote.actor && remote.actor->ptr().getRefData().getBaseNode() && !apply(remote.actor->ptr(), remote.actor->animation(), 2, id))
+                        return ProviderResult::PresentationFailed;
+                for (auto& [id, remote] : remotes)
+                    if (remote.actor && remote.lastObserved && !apply(remote.actor->ptr(), remote.actor->animation(), 1, remote.lastObserved->playerId().value()))
+                        return ProviderResult::PresentationFailed;
+                for (auto& [id, remote] : actorRemotes)
+                    if (remote.actor && remote.lastObserved && !apply(remote.actor->ptr(), remote.actor->animation(), 2, remote.lastObserved->actorId().value()))
+                        return ProviderResult::PresentationFailed;
+            }
             for (auto& [identity, remote] : leveledActors)
             {
                 if (!remote.actor->ptr().getRefData().getBaseNode()) continue; // Recreated on scene reentry.
@@ -2121,7 +2163,7 @@ namespace TES3MP::OpenMWAdapter
             for (auto& [entity, remote] : remotes)
             {
                 (void)entity;
-                auto pose = remote.motion.advance(now);
+                auto pose = remote.motion.advance(now, presentationTick);
                 if (!pose)
                 {
                     Log(Debug::Error) << "TES3MP replicated actor motion resolve failed: entity=" << entity.value();
@@ -2144,7 +2186,7 @@ namespace TES3MP::OpenMWAdapter
             for (auto& [id, remote] : nativeRemotes)
             {
                 if (!remote.actor->ptr().getRefData().getBaseNode()) continue;
-                auto pose=remote.motion.advance(now);
+                auto pose=remote.motion.advance(now, presentationTick);
                 if (!pose) return ProviderResult::PresentationFailed;
                 const float seconds=remote.lastAdvance && now>=*remote.lastAdvance
                     ? float(now.nanoseconds()-remote.lastAdvance->nanoseconds())/1e9f : 0.f;
@@ -2154,7 +2196,7 @@ namespace TES3MP::OpenMWAdapter
             }
             for (auto& [entity, remote] : actorRemotes)
             {
-                auto pose = remote.motion.advance(now);
+                auto pose = remote.motion.advance(now, presentationTick);
                 if (!pose)
                     return ProviderResult::PresentationFailed;
                 float animationSeconds = 0.f;
@@ -2929,6 +2971,9 @@ namespace TES3MP::OpenMWAdapter
             }
         return std::nullopt;
     }
+
+    std::vector<DesktopPresentation::ActorPoseEvidence> DesktopPresentation::actorPoseEvidence() const
+    { return mImpl ? mImpl->poseEvidence : std::vector<ActorPoseEvidence>{}; }
 
     std::vector<NativeActorMotion> DesktopPresentation::nativeActorPresentation() const
     {

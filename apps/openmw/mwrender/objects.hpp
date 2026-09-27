@@ -95,6 +95,7 @@ namespace MWRender
         bool removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept;
         std::size_t replicatedActorCount() const noexcept { return mReplicatedActors.size(); }
 
+        Animation* getReplicatedActorAnimation(const MWWorld::Ptr& ptr);
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;
 

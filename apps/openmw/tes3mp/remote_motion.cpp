@@ -1,4 +1,5 @@
 #include "remote_motion.hpp"
+#include <bit>
 
 #include <algorithm>
 #include <cmath>
@@ -290,9 +291,16 @@ namespace TES3MP::OpenMWAdapter
                     return static_cast<double>(a) + (static_cast<double>(b) - static_cast<double>(a)) * ratio;
                 };
                 const auto& state = ratio < 1.0 ? lower : upper;
-                return ResolvedPose{ poseFrom(state, interpolate(from.x(), to.x()), interpolate(from.y(), to.y()),
-                                         interpolate(from.z(), to.z())),
-                    0 };
+                auto pose = poseFrom(state, interpolate(from.x(), to.x()), interpolate(from.y(), to.y()),
+                    interpolate(from.z(), to.z()));
+                const auto turn = [ratio](Turn32 a, Turn32 b) {
+                    const auto delta = std::bit_cast<int32_t>(uint32_t(b.value() - a.value()));
+                    return Turn32::fromValue(uint32_t(a.value() + int64_t(std::llround(double(delta) * ratio))));
+                };
+                const auto& a = lower.transform.orientation();
+                const auto& b = upper.transform.orientation();
+                pose.orientation = Orientation3(turn(a.x(), b.x()), turn(a.y(), b.y()), turn(a.z(), b.z()));
+                return ResolvedPose{pose, 0};
             }
         }
 
@@ -456,9 +464,17 @@ namespace TES3MP::OpenMWAdapter
         return true;
     }
 
-    std::optional<RemoteMotionPose> RemoteMotionBuffer::advance(MonotonicInstant now) noexcept
+    std::optional<RemoteMotionPose> RemoteMotionBuffer::advance(MonotonicInstant now, std::optional<double> presentationTick) noexcept
     {
         advanceCursor(now);
+        if (presentationTick && mSampleCount && std::isfinite(*presentationTick))
+        {
+            const double cursor = std::clamp(*presentationTick, double(mSamples[0]->snapshot.serverTick.value()),
+                double(mSamples[mSampleCount - 1]->snapshot.serverTick.value()));
+            mCursorTick = uint64_t(cursor);
+            mCursorFraction = uint64_t((cursor - double(mCursorTick)) * NanosecondsPerSecond);
+            mStarted = true;
+        }
         const auto resolved = resolve();
         if (!resolved)
             return std::nullopt;

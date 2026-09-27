@@ -185,6 +185,13 @@ namespace TES3MP::OpenMWAdapter
         void clear() noexcept override;
         // Read-only presentation evidence: positions of the actual rendered
         // native actors, in OpenMW units, with their last committed sample tick.
+        struct ActorPoseEvidence
+        {
+            ActorPresentationSnapshot pose;
+            double tick;
+            float clipTime;
+        };
+        std::vector<ActorPoseEvidence> actorPoseEvidence() const;
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
 

@@ -132,6 +132,7 @@ namespace TES3MP::Native
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});
+        void setFacing(Prepared& prepared, float yaw) const;
         bool canInstall(const Prepared& prepared) const noexcept;
         void install(Prepared& prepared) noexcept;
         std::vector<char> image() const;

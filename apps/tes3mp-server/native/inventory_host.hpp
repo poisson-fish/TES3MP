@@ -7,6 +7,8 @@
 
 namespace TES3MP::Native
 {
+    // V52 persists NPC action IDs and body action/clip identities for timestamped
+    // actor presentation. Requires a fresh campaign; older domains retain their layouts.
     // Owns loaded content/readers before the persistent inventory service.
     // The trusted startup descriptor is bounded text, in this exact order:
     // native-inventory-8

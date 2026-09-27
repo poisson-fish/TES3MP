@@ -36,8 +36,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t RangedFlightCampaignMagic = 0x4e50434154335354;
     inline constexpr uint64_t KnockoutAnimationCampaignMagic = 0x4f50434154335354;
     inline constexpr uint64_t ExpandedEffectsCampaignMagic = 0x5050434154335354;
+    inline constexpr uint64_t ActorPresentationCampaignMagic = 0x5150434154335354;
+    inline constexpr bool hasExpandedEffects(uint64_t magic)
+    { return magic == ExpandedEffectsCampaignMagic || magic == ActorPresentationCampaignMagic; }
     inline constexpr bool hasKnockoutAnimation(uint64_t magic)
-    { return magic == KnockoutAnimationCampaignMagic || magic == ExpandedEffectsCampaignMagic; }
+    { return magic == KnockoutAnimationCampaignMagic || hasExpandedEffects(magic); }
     inline constexpr bool hasRangedFlight(uint64_t magic)
     { return magic == RangedFlightCampaignMagic || hasKnockoutAnimation(magic); }
     inline constexpr bool hasRangedRelease(uint64_t magic)
@@ -112,6 +115,8 @@ namespace TES3MP::Native
         std::array<uint32_t, 3> hitRecoveryTicks{};
         std::array<std::optional<PlayerSwing>, 2> swings;
         std::vector<BowProjectile> arrows;
+        uint64_t npcAction = 0;
+        std::array<uint64_t, 3> bodyAction{}, hitGroup{};
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -316,6 +321,16 @@ namespace TES3MP::Native
                     state.hitKnockdown[actor] = value != 0;
                 }
         }
+        if (magic == ActorPresentationCampaignMagic)
+        {
+            auto& state = *combat;
+            state.npcAction = getAreaWord(bytes, offset);
+            if (state.npcAction > tick) throw std::invalid_argument("Future NPC action");
+            for (auto& action : state.bodyAction)
+            { action = getAreaWord(bytes, offset); if (action > tick) throw std::invalid_argument("Future body action"); }
+            for (auto& group : state.hitGroup)
+            { group = getAreaWord(bytes, offset); if (group > 16) throw std::invalid_argument("Invalid hit group"); }
+        }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
             || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
@@ -463,7 +478,7 @@ namespace TES3MP::Native
             || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            const size_t effectBytes = magic == ExpandedEffectsCampaignMagic ? 120 : hasCasterState(magic) ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
+            const size_t effectBytes = hasExpandedEffects(magic) ? 120 : hasCasterState(magic) ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
             if (count > (hasGeneralConstantState(magic) ? MaximumActorTimedEffects : 16) || count > (bytes.size() - offset) / effectBytes)
                 throw std::invalid_argument("Native timed effect count invalid");
             timedEffects.reserve(size_t(count));
@@ -502,7 +517,7 @@ namespace TES3MP::Native
                         effect.casterLife = getAreaWord(bytes, offset);
                         validateActorCaster({effect.caster, effect.casterKind, effect.casterLife}, life->generation);
                     }
-                    if (magic == ExpandedEffectsCampaignMagic)
+                    if (hasExpandedEffects(magic))
                     {
                         effect.beneficiary = getAreaWord(bytes, offset);
                         if (effect.beneficiary > 3) throw std::invalid_argument("Native effect beneficiary invalid");

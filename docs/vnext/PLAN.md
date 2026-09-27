@@ -59,11 +59,11 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    unrelated tick rollback, and complete life-indexed death attribution within the
    save byte budget. Preserve focused failure/recovery and death/loot deduplication
    checks; M5 owns personal quest credit and rewards.
-   After committed NPC swing replication, complete a bounded **combat animation
-   smoothness** slice: attacks, hit reactions, falls, knockout loops and get-up
+   Retain the bounded **actor presentation smoothness** slice and extend body coverage:
+   attacks, hit reactions, falls, knockout loops and get-up
    for self, remote players and one NPC. Measure render cadence, snapshot gaps
-   and clip duration against stock at matching weapon speed; remove the capture's
-   30-FPS cap. Sample visual poses each render frame between server timestamps;
+   and clip duration against stock at matching weapon speed. Sample visual poses
+   each render frame between server timestamps;
    preserve authoritative timing, pauses, interruption and callback suppression.
    Accept with 60-FPS video/frame traces on both desktops showing smooth progression
    and stock-speed recovery under loss/delay/jitter and reconnect/restart, without

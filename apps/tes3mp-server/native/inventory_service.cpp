@@ -1937,6 +1937,14 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native knockout exceeds participant resource");
                     if (decoded.combat->hitRecoveryTicks[i] > maximum)
                         throw std::invalid_argument("Native hit recovery exceeds participant resource");
+                    if (mBinding.mActorPresentation)
+                    {
+                        const auto group = decoded.combat->hitGroup[i];
+                        if (group > hit.count || (group && decoded.combat->hitRecoveryTicks[i] > hit.ticks[group - 1])
+                            || ((decoded.combat->knockedDown[i] || (group && decoded.combat->hitRecoveryTicks[i]))
+                                && !decoded.combat->bodyAction[i]))
+                            throw std::invalid_argument("Native body recipe differs from participant resource");
+                    }
                 }
             if (bool(decoded.life) != mBinding.mNpcLifecycle)
                 throw std::invalid_argument("Native NPC lifecycle campaign version differs from binding");
@@ -1974,7 +1982,8 @@ namespace TES3MP::Native
                 || mBinding.mRangedRelease != (magic == RangedReleaseCampaignMagic || hasRangedFlight(magic))
                 || mBinding.mRangedFlight != hasRangedFlight(magic)
                 || mBinding.mKnockoutAnimation != hasKnockoutAnimation(magic)
-                || mBinding.mExpandedEffects != (magic == ExpandedEffectsCampaignMagic))
+                || mBinding.mExpandedEffects != hasExpandedEffects(magic)
+                || mBinding.mActorPresentation != (magic == ActorPresentationCampaignMagic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2359,7 +2368,8 @@ namespace TES3MP::Native
         const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8
             + (mBinding.mKnockoutRules ? 3 * 8 : 0)
             + (mBinding.mKnockoutAnimation ? 6 * 8 : 0)
-            + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0) : 0;
+            + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0)
+            + (mBinding.mActorPresentation ? 7 * 8 : 0) : 0;
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + (mBinding.mDurableCasters ? 5 : 3) * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
@@ -2390,7 +2400,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mExpandedEffects ? ExpandedEffectsCampaignMagic
+        putAreaWord(result, mBinding.mActorPresentation ? ActorPresentationCampaignMagic
+            : mBinding.mExpandedEffects ? ExpandedEffectsCampaignMagic
             : mBinding.mKnockoutAnimation ? KnockoutAnimationCampaignMagic
             : mBinding.mRangedFlight ? RangedFlightCampaignMagic
             : mBinding.mRangedRelease ? RangedReleaseCampaignMagic : mBinding.mBowRelease ? BowReleaseCampaignMagic
@@ -2439,6 +2450,12 @@ namespace TES3MP::Native
                 for (uint32_t value : combat->knockoutFrame) putAreaWord(result, value);
             if (mBinding.mKnockoutAnimation)
                 for (bool value : combat->hitKnockdown) putAreaWord(result, value);
+        }
+        if (combat && mBinding.mActorPresentation)
+        {
+            putAreaWord(result, combat->npcAction);
+            for (auto v : combat->bodyAction) putAreaWord(result, v);
+            for (auto v : combat->hitGroup) putAreaWord(result, v);
         }
         if (life)
         {
@@ -3364,6 +3381,8 @@ namespace TES3MP::Native
             // With no hit clip, CharacterController clears recovery on its next
             // update. Otherwise it selects one of the consecutive hit groups.
             const auto selected = groups ? Misc::Rng::rollDice(int(groups), rng) : 0;
+            if (mBinding.mActorPresentation)
+            { combat->bodyAction[defender] = tick.value(); combat->hitGroup[defender] = groups ? selected + 1 : 0; }
             combat->hitRecoveryTicks[defender] = groups
                 ? (bound ? bound->ticks[size_t(selected)] : mBinding.mBoundMelee->mAnimation.hitRecoveryTicks(unsigned(selected))) : 1;
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
@@ -4121,6 +4140,7 @@ namespace TES3MP::Native
                         const auto mode = mBinding.mGeneralAttackModes
                             ? MWMechanics::chooseMeleeAttack(weapon, rng) : std::string_view{};
                         melee = mBinding.mWeaponMelee(weapon, mode);
+                        if (mBinding.mActorPresentation) combat->npcAction = tick.value();
                         combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                         target = enemy->playerId().value();
                     }
@@ -4537,6 +4557,18 @@ namespace TES3MP::Native
                 }))
             { melee = mIdleMelee; target = 0; contact = false; }
         }
+        if (mBinding.mActorPresentation && step && target && !respawn)
+            if (const auto* victim = players.findPlayer(*PlayerId::fromValue(target)))
+            {
+                const auto position = victim->transform().position();
+                const float dx = float(double(position.x()) / 1024) - after.mPosition[0];
+                const float dy = float(double(position.y()) / 1024) - after.mPosition[1];
+                if (dx != 0 || dy != 0)
+                {
+                    mBinding.mNavigatingActor->setFacing(*step, std::atan2(dx, dy));
+                    after = step->snapshot();
+                }
+            }
         if (step && !respawn && !automaticCast && melee && (!mBinding.mWeaponMelee || target)
             && (!combat || (combat->actors[2][8][2] > 0
                 && (!mBinding.mKnockoutRules || (!combat->knockedDown[2] && !hasParalysis(timedEffects, 2))))))
@@ -4725,6 +4757,9 @@ namespace TES3MP::Native
         if (combat && mBinding.mKnockoutAnimation)
             for (size_t index = 0; index < combat->actors.size(); ++index)
             {
+                if (mBinding.mActorPresentation && combat->knockedDown[index]
+                    && (!mCombat->knockedDown[index] || combat->hitKnockdown[index] != mCombat->hitKnockdown[index]))
+                    combat->bodyAction[index] = tick.value();
                 if (combat->actors[index][8][2] <= 0) combat->knockedDown[index] = false;
                 if (!combat->knockedDown[index])
                 { combat->knockoutFrame[index] = 0; combat->hitKnockdown[index] = false; }
@@ -4880,6 +4915,60 @@ namespace TES3MP::Native
                 projected.castRelease = uint16_t(timing.releaseTicks); projected.castStop = uint16_t(timing.stopTicks);
             }
         }
+        std::vector<ActorPresentationSnapshot> presentation;
+        if (mBinding.mActorPresentation)
+        {
+            for (size_t index = 0; index < 3; ++index)
+            {
+                if (index < 2 && index != selfIndex && std::ranges::none_of(others,
+                        [&](const auto& other) { return other.playerId == mBinding.mPlayers[index]; })) continue;
+                if (index == 2 && visible.empty()) continue;
+                ActorPresentationSnapshot p;
+                p.id = index < 2 ? mBinding.mPlayers[index].value() : scene.mActor;
+                p.kind = index < 2 ? 1 : 2;
+                p.life = index < 2 ? 1 : (moving && moving->life ? moving->life->generation : mLife->generation);
+                p.dead = combat.actors[index][8][2] <= 0;
+                const auto setSwing = [&](const MeleeAnimation& clip, uint64_t action) {
+                    p.action = action; p.group = clip.group(); p.phase = uint8_t(unsigned(clip.snapshot().mPhase) + 1);
+                    p.direction = uint8_t(clip.direction()); p.strength = clip.snapshot().mStrength;
+                    p.completion = clip.phaseCompletion(); p.rate = clip.phaseRate();
+                };
+                if (!p.dead && index < 2 && combat.swings[index] && !combat.swings[index]->interruption)
+                {
+                    const auto& swing = *combat.swings[index];
+                    const auto* weapon = swing.weapon.empty() ? nullptr
+                        : mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing.weapon));
+                    const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
+                    auto clip = mBinding.mPlayerMelee[index](weapon, directions[swing.direction]);
+                    clip.restore(swing.state); setSwing(clip, swing.command);
+                    p.strength = swing.strength;
+                }
+                if (!p.dead && index == 2)
+                {
+                    const auto& clip = moving ? moving->melee : mMelee;
+                    const auto target = moving ? moving->target : mMeleeTarget;
+                    if (clip && target) setSwing(*clip, combat.npcAction);
+                }
+                p.bodyAction = combat.bodyAction[index];
+                if (!p.dead && combat.knockedDown[index])
+                {
+                    p.bodyState = combat.hitKnockdown[index] ? 3 : 2;
+                    const auto& bound = (*mBinding.mBoundHits)[index];
+                    const auto timing = combat.hitKnockdown[index] ? bound.knockdown : bound.knockout;
+                    p.bodyFrame = float(combat.knockoutFrame[index]); p.bodyStop = uint16_t(timing.stop);
+                    p.loopStart = uint16_t(timing.loopStart); p.loopStop = uint16_t(timing.loopStop);
+                }
+                else if (!p.dead && combat.hitRecoveryTicks[index] && combat.hitGroup[index])
+                {
+                    p.bodyState = 4; p.hitGroup = uint8_t(combat.hitGroup[index]);
+                    p.bodyStop = uint16_t((*mBinding.mBoundHits)[index].animations.ticks[p.hitGroup - 1]);
+                    p.bodyFrame = float(p.bodyStop - combat.hitRecoveryTicks[index]);
+                }
+                presentation.push_back(std::move(p));
+            }
+            std::ranges::sort(presentation, [](const auto& a, const auto& b) {
+                return std::pair(a.kind, a.id) < std::pair(b.kind, b.id); });
+        }
         const std::array skillIds{ESM::Skill::Block, ESM::Skill::ShortBlade, ESM::Skill::LongBlade,
             ESM::Skill::BluntWeapon, ESM::Skill::Axe, ESM::Skill::Spear, ESM::Skill::HandToHand,
             ESM::Skill::LightArmor, ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor,
@@ -4897,7 +4986,7 @@ namespace TES3MP::Native
             player->playerId(), combatRevision, self.getHealth().getCurrent(), self.getHealth().getModified(),
             self.getFatigue().getCurrent(), self.getFatigue().getModified(), self.getMagicka().getCurrent(),
             self.getMagicka().getModified(), self.getHealth().getCurrent() <= 0,
-            visible, skills, others, {}, swings, knockout(selfIndex));
+            visible, skills, others, {}, swings, knockout(selfIndex), presentation);
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
     }

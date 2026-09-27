@@ -391,7 +391,7 @@ namespace MWMechanics
             return;
         const auto world = MWBase::Environment::get().getWorld();
         auto& stats = charClass.getCreatureStats(mPtr);
-        const unsigned committed = mAnimation->committedKnockoutState();
+        const unsigned committed = mAnimation->committedBodyState();
         if (committed)
         {
             // The server owns both exhaustion and the get-up tail, even after fatigue returns.
@@ -401,14 +401,14 @@ namespace MWMechanics
                 if (!mCurrentHit.empty() && mCurrentHit != "knockout" && mCurrentHit != "knockdown")
                     clearStateAnimation(mCurrentHit);
                 mCurrentHit.clear();
-                mHitState = committed == 2 ? CharState_KnockOut : CharState_KnockDown;
+                mHitState = committed == 2 ? CharState_KnockOut : committed == 3 ? CharState_KnockDown : CharState_Hit;
                 if (!mCurrentWeapon.empty()) clearStateAnimation(mCurrentWeapon);
                 setAttackingOrSpell(false);
                 mReadyToHit = false;
                 mUpperBodyState = UpperBodyState::WeaponEquipped;
                 return;
             }
-            if (isKnockedOut() || isKnockedDown())
+            if (isKnockedOut() || isKnockedDown() || (isRecovery() && mCurrentHit.empty()))
             {
                 mHitState = CharState_None;
                 mCurrentHit.clear();

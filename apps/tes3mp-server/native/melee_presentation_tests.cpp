@@ -142,6 +142,9 @@ namespace TES3MP::Native::Testing
                         local.reloadSources(body);
                         require(local.restoreCommittedKnockout() && local.getCurrentTime(group) == time,
                             "Skeleton rebuild reset the committed knockout frame");
+                        require(local.setCommittedBody(pose, float(frame) + .5f)
+                            && std::abs(local.getCurrentTime(group) - std::min(stop, start + (float(frame) + .5f) / 30.f)) < .0001f,
+                            "Render-frame sampling did not progress at stock clip speed");
                         require(listener.calls == 0 && local.listenerIs(&listener), "Knockout replayed gameplay callbacks");
                     }
                     require(local.setCommittedKnockout(1, 0) && !local.getInfo(group)

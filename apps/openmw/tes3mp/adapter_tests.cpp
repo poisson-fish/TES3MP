@@ -1,4 +1,5 @@
 #include "adapter.hpp"
+#include "actor_presentation.hpp"
 #include "client_connection.hpp"
 #include "movement_mapping.hpp"
 #include "player_profile_manager.hpp"
@@ -876,11 +877,50 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "actor-presentation")
+    {
+        ActorPresentationTimeline timeline;
+        ActorPresentationSnapshot pose;
+        pose.id = pose.kind = 1; pose.action = 10; pose.phase = 1;
+        pose.group = "weapononehand"; pose.rate = 1;
+        std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+        for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = ReplicatedCombatSkill(i);
+        auto snapshot = [&](uint64_t tick, uint64_t generation = 1) {
+            return std::get<LatestWinsCombatSnapshot>(LatestWinsCombatSnapshot::create(
+                *SessionId::fromValue(1), *SessionGeneration::fromValue(generation), *ServerTick::fromValue(tick),
+                *CanonicalRevision::fromValue(tick), *PlayerId::fromValue(1), CombatRevision::initial(),
+                100, 100, 100, 100, 100, 100, false, {}, skills, {}, {}, {}, {}, std::span(&pose, 1)));
+        };
+        auto now = [](uint64_t ns) { return MonotonicInstant::fromNanoseconds(ns); };
+        timeline.observe(snapshot(100)); timeline.advance(now(0));
+        pose.completion = .1f; timeline.observe(snapshot(103));
+        timeline.advance(now(16'666'667));
+        require(std::abs(timeline.sample(1,1)->completion - 1.f/60) < .00001f);
+        timeline.advance(now(50'000'000));
+        require(std::abs(timeline.sample(1,1)->completion - .05f) < .00001f);
+        timeline.advance(now(1'000'000'000));
+        require(timeline.sample(1,1)->completion == .1f); // Loss cannot finish a swing.
+        pose.completion = .1f; timeline.observe(snapshot(106));
+        timeline.advance(now(1'050'000'000));
+        require(timeline.sample(1,1)->completion == .1f); // Committed pause.
+        timeline.clear(); pose.bodyState = 2; pose.bodyAction = 20; pose.bodyFrame = 29;
+        pose.bodyStop = 90; pose.loopStart = 10; pose.loopStop = 30;
+        timeline.observe(snapshot(200)); timeline.advance(now(0));
+        pose.bodyFrame = 12; timeline.observe(snapshot(203)); timeline.advance(now(50'000'000));
+        require(std::abs(timeline.sample(1,1)->bodyFrame - 10.5f) < .0001f); // Wrap forward.
+        pose.bodyState = 1; pose.bodyFrame = 0; pose.bodyStop = pose.loopStart = pose.loopStop = 0;
+        pose.action = 11; pose.completion = .7f;
+        timeline.observe(snapshot(300,2));
+        require(timeline.sample(1,1)->action == 11 && timeline.sample(1,1)->completion == .7f);
+        const auto wire = encodeLatestWinsCombatSnapshot(snapshot(300,2));
+        require(std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(wire)) == snapshot(300,2));
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "native-capabilities")
     {
         const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),
             nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
-            playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability() };
+            playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability() };
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
             versions, {}, required, testContentManifestId()));

@@ -943,7 +943,13 @@ namespace MWRender
 
     bool Animation::setCommittedKnockout(unsigned pose, unsigned frame)
     {
-        if (pose > 3 || frame >= 1800 || (pose < 2 && frame)) return false;
+        return pose <= 3 && setCommittedBody(pose, float(frame));
+    }
+
+    bool Animation::setCommittedBody(unsigned pose, float frame, unsigned hitGroup)
+    {
+        if (pose > 4 || !std::isfinite(frame) || frame < 0 || frame >= 1800 || (pose < 2 && frame)
+            || hitGroup > 16 || (pose == 4 && !hitGroup)) return false;
         struct RestoreCallbacks
         {
             Context& context;
@@ -954,7 +960,8 @@ namespace MWRender
         } restore{mContext, mTextKeyListener, mContext, mTextKeyListener};
         mContext = Context::ReplicatedActor;
         mTextKeyListener = nullptr;
-        const std::string group = pose == 2 ? "knockout" : pose == 3 ? "knockdown" : "";
+        const std::string group = pose == 2 ? "knockout" : pose == 3 ? "knockdown"
+            : pose == 4 ? "hit" + std::to_string(hitGroup) : "";
         if (group != mCommittedKnockoutGroup)
         {
             if (!mCommittedKnockoutGroup.empty()) disable(mCommittedKnockoutGroup);
@@ -962,6 +969,7 @@ namespace MWRender
         }
         mCommittedKnockoutState = pose;
         mCommittedKnockoutFrame = frame;
+        mCommittedHitGroup = hitGroup;
         if (group.empty()) return true;
         setCommittedMelee({}, 0, 0, 0, 0);
         // Missing bound clips retain incapacity on the server and use no visual clip.
@@ -969,7 +977,7 @@ namespace MWRender
         if (mCommittedKnockoutGroup.empty() || !mStates.contains(group))
         {
             disable(group);
-            play(group, MWMechanics::Priority_Knockdown, BlendMask_All, false, 0.f,
+            play(group, pose == 4 ? MWMechanics::Priority_Hit : MWMechanics::Priority_Knockdown, BlendMask_All, false, 0.f,
                 "start", "stop", 0.f, 0, false);
             if (!getInfo(group)) return false;
             mCommittedKnockoutGroup = group;

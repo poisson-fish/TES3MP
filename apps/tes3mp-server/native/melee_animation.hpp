@@ -38,6 +38,8 @@ namespace TES3MP::Native
         const std::string& identity() const { return mIdentity; }
         const std::string& group() const { return mGroup; }
         float phaseCompletion() const;
+        float phaseRate() const;
+        unsigned direction() const { return mDirection; }
         float windUp() const;
         // Stock CharacterController plays one of the consecutive hit groups at
         // speed one. A missing group clears recovery on the next update.
@@ -59,6 +61,7 @@ namespace TES3MP::Native
         std::string mGroup;
         std::string mIdentity;
         bool mShoot = false;
+        unsigned mDirection = 0;
         float mSpeed, mMinimumAttack, mMinimumHit;
         Range mWindUp, mRelease;
         std::array<Range, 3> mFollow;

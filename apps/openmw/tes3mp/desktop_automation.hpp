@@ -54,7 +54,7 @@ namespace TES3MP::OpenMWAdapter
                                     public ConnectionControlProvider
     {
     public:
-        static constexpr std::size_t MaximumEvidenceEvents = 2048;
+        static constexpr std::size_t MaximumEvidenceEvents = 16'384;
 
         DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
             ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);
@@ -138,6 +138,8 @@ namespace TES3MP::OpenMWAdapter
         bool mNativeInventoryAfterResume = false;
         std::optional<MonotonicInstant> mNativeStageAt;
         std::size_t mEvidenceEvents = 0;
+        std::size_t mPresentationFrames = 0;
+        uint64_t mLastNativePoseEvidence = 0;
         std::size_t mSnapshots = 0;
         std::size_t mResumes = 0;
         std::size_t mActorSnapshots = 0;

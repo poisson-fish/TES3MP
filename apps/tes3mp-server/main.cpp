@@ -640,8 +640,12 @@ int main(int argc, char** argv)
         std::cerr << "native environment recovery failed: " << error.what() << '\n';
         return 2;
     }
+    // Each loop publishes world, actors, equipment and combat. A one-message
+    // burst rotates these streams at ~7 Hz despite 30 Hz commits.
+    auto outboundPolicy = TES3MP::OutboundQueuePolicy{};
+    outboundPolicy.latestRateBurst = 4;
     auto queues = TES3MP::OutboundQueueSet::create(
-        TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
+        outboundPolicy, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
     auto timeouts = TES3MP::SessionTimeoutPolicy::create(timeoutNanoseconds, timeoutNanoseconds, timeoutNanoseconds);
     auto versions = std::get<TES3MP::ProtocolVersionRange>(
@@ -708,6 +712,7 @@ int main(int argc, char** argv)
         requiredCapabilities.push_back(TES3MP::playerSwingPresentationCapability());
         requiredCapabilities.push_back(TES3MP::knockoutPresentationCapability());
         requiredCapabilities.push_back(TES3MP::expandedCombatEffectsCapability());
+        requiredCapabilities.push_back(TES3MP::actorPresentationCapability());
     }
     std::ranges::sort(requiredCapabilities);
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,

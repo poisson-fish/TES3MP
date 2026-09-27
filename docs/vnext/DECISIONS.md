@@ -110,6 +110,11 @@ equip selected carried weapons; recovery never re-equips. NPC clips bind layered
 groups/fallback, direction and speed. Completion resumes selection; breakage and
 passive-source removal commit together.
 
+**V52 actor presentation.** A fractional client cursor samples committed motion/action
+history without gameplay callbacks. Persist swing/body identities and selected hit
+clips; preserve life boundaries, pauses and starvation holds. T3C7/capability 25;
+fresh campaigns. Budget all four latest-state streams per pump, retaining backpressure.
+
 **Movement smoothness (target).** Cut over after smooth replication and unified
 engine collision. Until then validate inherited combat contacts on the server.
 Start with stock physics; tune snapshot frequency separately. Interpolate remote

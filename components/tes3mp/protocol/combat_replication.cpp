@@ -107,7 +107,8 @@ namespace TES3MP
         float selfMaximumFatigue, float selfMagicka, float selfMaximumMagicka, bool selfDead,
         std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
         std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects,
-        std::span<const PlayerSwingSnapshot> swings, KnockoutSnapshot selfKnockout)
+        std::span<const PlayerSwingSnapshot> swings, KnockoutSnapshot selfKnockout,
+        std::span<const ActorPresentationSnapshot> presentation)
     {
         const auto validKnockout = [](KnockoutSnapshot pose, bool dead) {
             return pose.state <= 3 && pose.frame < 1800
@@ -203,11 +204,35 @@ namespace TES3MP
                     || (swing.phase == 4 && swing.completion != 1)))
                 return error(Code::InvalidAttackType, 0, 0, i);
         }
+        if (presentation.size() > MaximumCombatSnapshotActors + MaximumCombatSnapshotPlayers + 1)
+            return error(Code::TooManyEntries, presentation.size(), MaximumCombatSnapshotActors + MaximumCombatSnapshotPlayers + 1);
+        for (size_t i = 0; i < presentation.size(); ++i)
+        {
+            const auto& p = presentation[i];
+            if (!p.id || !p.life || (p.kind != 1 && p.kind != 2)
+                || (i && std::pair(presentation[i-1].kind, presentation[i-1].id) >= std::pair(p.kind, p.id))
+                || (p.kind == 1 ? (p.id != self.value() && std::ranges::none_of(players,
+                    [&](const auto& v) { return v.playerId.value() == p.id; }))
+                    : std::ranges::none_of(actors, [&](const auto& v) { return v.actorId.value() == p.id; })))
+                return error(Code::EntriesNotStrictlySorted, p.id, 0, i);
+            if (p.phase > 4 || p.direction > 2 || p.bodyState < 1 || p.bodyState > 4 || p.hitGroup > 16
+                || !std::isfinite(p.strength) || p.strength < 0 || p.strength > 1
+                || !std::isfinite(p.completion) || p.completion < 0 || p.completion > 1
+                || !std::isfinite(p.rate) || p.rate < 0 || p.rate > 1000
+                || !std::isfinite(p.bodyFrame) || p.bodyFrame < 0 || p.bodyFrame > p.bodyStop
+                || p.bodyStop >= 1800 || p.loopStart > p.loopStop || p.loopStop > p.bodyStop
+                || (p.phase && (!p.action || p.group.empty())) || p.group.size() > 64
+                || !std::ranges::all_of(p.group, [](unsigned char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); })
+                || (p.bodyState >= 2 && (!p.bodyAction || !p.bodyStop))
+                || (p.bodyState == 4 && !p.hitGroup) || (p.dead && (p.phase || p.bodyState != 1)))
+                return error(Code::InvalidFloat, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision, selfHealth,
             selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka, selfDead,
             std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()),
             std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()),
-            std::vector(swings.begin(), swings.end()), selfKnockout);
+            std::vector(swings.begin(), swings.end()), selfKnockout, std::vector(presentation.begin(), presentation.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
@@ -322,10 +347,15 @@ namespace TES3MP
             swings.push_back(Snapshot::CreatePlayerSwingSnapshot(builder, swing.playerId.value(), swing.command,
                 swing.source, swing.targetLife, swing.direction, swing.phase, swing.interruption,
                 swing.strength, swing.completion, builder.CreateString(swing.group)));
+        std::vector<flatbuffers::Offset<Snapshot::ActorPresentationSnapshot>> presentation;
+        for (const auto& p : input.presentation())
+            presentation.push_back(Snapshot::CreateActorPresentationSnapshot(builder, p.id, p.life, p.action,
+                p.bodyAction, p.kind, p.phase, p.direction, p.bodyState, p.hitGroup, p.strength, p.completion,
+                p.rate, p.bodyFrame, p.bodyStop, p.loopStart, p.loopStop, builder.CreateString(p.group), p.dead));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
-                builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings));
+                builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings), builder.CreateVector(presentation));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -550,11 +580,25 @@ namespace TES3MP
                 current->direction(), current->phase(), current->interruption(), current->strength(),
                 current->completion(), current->group() ? current->group()->str() : std::string{}});
         }
+        const size_t presentationCount = root->presentation() ? root->presentation()->size() : 0;
+        if (presentationCount > MaximumCombatSnapshotActors + MaximumCombatSnapshotPlayers + 1)
+            return error(Code::TooManyEntries, presentationCount, MaximumCombatSnapshotActors + MaximumCombatSnapshotPlayers + 1);
+        std::vector<ActorPresentationSnapshot> presentation;
+        presentation.reserve(presentationCount);
+        for (size_t i = 0; i < presentationCount; ++i)
+        {
+            const auto* p = root->presentation()->Get(flatbuffers::uoffset_t(i));
+            if (!p || (p->group() && p->group()->size() > 64)) return error(Code::TooManyEntries, 0, 64, i);
+            presentation.push_back({p->id(), p->life(), p->action(), p->body_action(), p->kind(), p->phase(),
+                p->direction(), p->body_state(), p->hit_group(), p->strength(), p->completion(), p->rate(),
+                p->body_frame(), p->body_stop(), p->loop_start(), p->loop_stop(),
+                p->group() ? p->group()->str() : std::string{}, p->dead()});
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
             root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
-            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()});
+            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()}, presentation);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(

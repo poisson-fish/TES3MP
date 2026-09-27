@@ -98,6 +98,27 @@ table PlayerSwingSnapshot {
   group:string;
 }
 
+table ActorPresentationSnapshot {
+  id:ulong;
+  life:ulong = 1;
+  action:ulong;
+  body_action:ulong;
+  kind:ubyte;
+  phase:ubyte;
+  direction:ubyte;
+  body_state:ubyte = 1;
+  hit_group:ubyte;
+  strength:float;
+  completion:float;
+  rate:float;
+  body_frame:float;
+  body_stop:ushort;
+  loop_start:ushort;
+  loop_stop:ushort;
+  group:string;
+  dead:bool;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
@@ -105,8 +126,9 @@ table LatestWinsCombatSnapshot {
   players:[PlayerCombatSnapshot] (id: 3);
   active_effects:[ActiveMagicEffectSnapshot] (id: 4);
   swings:[PlayerSwingSnapshot] (id: 5);
+  presentation:[ActorPresentationSnapshot] (id: 6);
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C6";
+file_identifier "T3C7";
 file_extension "t3cs";

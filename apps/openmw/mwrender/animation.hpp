@@ -230,7 +230,8 @@ namespace MWRender
         std::string mCommittedMeleeGroup;
         std::string mCommittedKnockoutGroup;
         unsigned mCommittedKnockoutState = 0;
-        unsigned mCommittedKnockoutFrame = 0;
+        float mCommittedKnockoutFrame = 0;
+        unsigned mCommittedHitGroup = 0;
 
         osg::ref_ptr<RotateController> mHeadController;
         osg::ref_ptr<RotateController> mSpineController;
@@ -417,9 +418,12 @@ namespace MWRender
         bool hasCommittedMelee() const { return !mCommittedMeleeGroup.empty(); }
         // 0 releases authority, 1 upright, 2 knockout, 3 knockdown; frame is at 30 Hz.
         bool setCommittedKnockout(unsigned state, unsigned frame);
-        unsigned committedKnockoutState() const { return mCommittedKnockoutState; }
+        // The general body sampler additionally accepts state 4 and a stock hit group (1..16).
+        bool setCommittedBody(unsigned state, float frame, unsigned hitGroup = 0);
+        unsigned committedBodyState() const { return mCommittedKnockoutState; }
+        unsigned committedKnockoutState() const { return mCommittedKnockoutState == 4 ? 1 : mCommittedKnockoutState; }
         // Rebind the retained sample after animation resources or the POV skeleton change.
-        bool restoreCommittedKnockout() { return setCommittedKnockout(mCommittedKnockoutState, mCommittedKnockoutFrame); }
+        bool restoreCommittedKnockout() { return setCommittedBody(mCommittedKnockoutState, mCommittedKnockoutFrame, mCommittedHitGroup); }
 
         /** Adjust the speed multiplier of an already playing animation.
          */

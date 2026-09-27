@@ -5088,13 +5088,13 @@ namespace TES3MP::Native::Testing
         checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false, false, false, false, false, false, false, false, {}, false, true);
-        if (generalAttackModes)
+        if (generalAttackModes || lostTarget)
         {
             const auto path = scratch / "native.txt";
             std::ifstream input(path);
             std::string descriptor((std::istreambuf_iterator<char>(input)), {});
             input.close();
-            descriptor.replace(0, std::string_view("native-inventory-44").size(), "native-inventory-45");
+            descriptor.replace(0, std::string_view("native-inventory-44").size(), lostTarget ? "native-inventory-52" : "native-inventory-45");
             std::ofstream(path) << descriptor;
         }
         auto crypto = makeProductionCredentialCrypto(); require(bool(crypto), "NPC door crypto unavailable");
@@ -5144,6 +5144,13 @@ namespace TES3MP::Native::Testing
             const auto selected = state(service);
             require(selected.melee->target && !selected.melee->state.mReleased,
                 "Wind-up fixture did not select a target before release");
+            const auto projected = service.projectCombat(authority, id<SessionId>(1), id<ServerTick>(time),
+                id<CanonicalRevision>(time));
+            require(projected && projected->presentation().size() == 3, "Missing actor presentation baseline");
+            const auto& pose = projected->presentation().back();
+            require(pose.kind == 2 && pose.action == selected.combat->npcAction && pose.action
+                && pose.phase == 1 && !pose.group.empty() && pose.rate > 0,
+                "NPC committed swing recipe or identity was not projected");
             const auto seed = bytes(service);
             const auto start = time;
             const auto original = selected.melee->target;

@@ -729,7 +729,7 @@ def run(args):
     if args.npc_casting: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 51 if args.knockout else 46 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 52 if args.knockout else 52 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     player_actor = "npc_knockdown_observer" if args.physical_knockdown else npc if args.life_encounter or spell_capture else "player"
     player_actors = [player_actor, player_actor]
@@ -791,7 +791,7 @@ def run(args):
         shutil.copyfile(config / "openmw.cfg", user / "openmw.cfg")
         user.joinpath("settings.cfg").write_text(
             "[Video]\nresolution x = 1000\nresolution y = 700\nwindow mode = 2\nwindow border = true\n"
-            "minimize on focus loss = false\nframerate limit = 30\n"
+            "minimize on focus loss = false\nframerate limit = 120\n"
             + ("[Camera]\nfield of view = 85\n" if args.physical_knockdown and args.knockout_target == "players" else "")
             + ("[Shaders]\nclassic falloff = false\nminimum interior brightness = 0.7\n" if args.knockout else ""),
             encoding="utf-8")

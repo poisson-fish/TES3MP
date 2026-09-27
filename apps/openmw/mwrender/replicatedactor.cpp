@@ -698,6 +698,12 @@ namespace MWRender
         catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
     }
 
+    Animation* Objects::getReplicatedActorAnimation(const MWWorld::Ptr& ptr)
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        return found == mReplicatedActors.end() ? nullptr : found->second.get();
+    }
+
     ReplicatedActorResult Objects::setReplicatedActorKnockout(const MWWorld::Ptr& ptr,
         unsigned state, unsigned frame) noexcept
     {
@@ -796,6 +802,7 @@ namespace MWRender
 
         ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept
         { return mRendering.getObjects().setReplicatedActorCast(mPtr, active, range, completion); }
+        Animation* animation() const { return mRendering.getObjects().getReplicatedActorAnimation(mPtr); }
         ReplicatedActorResult setKnockout(unsigned state, unsigned frame) noexcept
         { return mRendering.getObjects().setReplicatedActorKnockout(mPtr, state, frame); }
         ReplicatedActorResult setMelee(std::string_view group, unsigned phase, unsigned direction,
@@ -844,6 +851,8 @@ namespace MWRender
         if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
         return mImpl->setCast(active, range, completion);
     }
+
+    Animation* ReplicatedActor::animation() const { return mImpl ? mImpl->animation() : nullptr; }
 
     ReplicatedActorResult ReplicatedActor::setKnockout(unsigned state, unsigned frame) noexcept
     {

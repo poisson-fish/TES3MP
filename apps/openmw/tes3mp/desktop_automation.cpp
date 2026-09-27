@@ -430,8 +430,36 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.advance(now);
         if (applied != ProviderResult::Accepted)
             return applied;
-        if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        if (nativeInventoryRole() && mOutput && mPresentationFrames < 36'000)
         {
+            if (auto* desktop = dynamic_cast<DesktopPresentation*>(&mPresentation))
+            {
+                const auto poses = desktop->actorPoseEvidence();
+                if (!poses.empty())
+                {
+                    mOutput << "{\"event\":\"actor_presentation_frame\",\"time_ns\":" << now.nanoseconds() << ",\"actors\":[";
+                    bool first = true;
+                    for (const auto& rendered : poses)
+                    {
+                        const auto& p = rendered.pose;
+                        if (!first) mOutput << ','; first = false;
+                        mOutput << "{\"id\":" << p.id << ",\"kind\":" << unsigned(p.kind)
+                            << ",\"life\":" << p.life << ",\"tick\":" << rendered.tick
+                            << ",\"action\":" << p.action << ",\"phase\":" << unsigned(p.phase)
+                            << ",\"direction\":" << unsigned(p.direction) << ",\"strength\":" << p.strength
+                            << ",\"completion\":" << p.completion << ",\"group\":\"" << p.group
+                            << "\",\"body_action\":" << p.bodyAction << ",\"body\":" << unsigned(p.bodyState)
+                            << ",\"frame\":" << p.bodyFrame << ",\"clip_time\":" << rendered.clipTime << '}';
+                    }
+                    mOutput << "]}\n";
+                    ++mPresentationFrames;
+                }
+            }
+        }
+        if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents
+            && now.nanoseconds() - mLastNativePoseEvidence >= 33'333'333)
+        {
+            mLastNativePoseEvidence = now.nanoseconds();
             try
             {
                 if (auto* desktop=dynamic_cast<DesktopPresentation*>(&mPresentation))

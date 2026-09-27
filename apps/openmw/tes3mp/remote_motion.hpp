@@ -15,7 +15,7 @@
 
 namespace TES3MP::OpenMWAdapter
 {
-    inline constexpr std::size_t MaximumRemoteMotionSamples = 4;
+    inline constexpr std::size_t MaximumRemoteMotionSamples = 16;
     inline constexpr std::uint64_t RemotePlaybackDelayFloorTicks = 2;
     inline constexpr std::uint64_t RemotePlaybackDelayCeilingTicks = 3;
     inline constexpr std::size_t RemotePlaybackStableSamples = MaximumRemoteMotionSamples;
@@ -155,7 +155,7 @@ namespace TES3MP::OpenMWAdapter
         bool observe(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
         bool observe(const ActorSpatialSnapshot& sample, MonotonicInstant receivedAt) noexcept;
         bool observe(const NativeActorMotion& sample, CellId cell, MonotonicInstant receivedAt) noexcept;
-        std::optional<RemoteMotionPose> advance(MonotonicInstant now) noexcept;
+        std::optional<RemoteMotionPose> advance(MonotonicInstant now, std::optional<double> presentationTick = {}) noexcept;
         void clear() noexcept;
         std::size_t sampleCount() const noexcept { return mSampleCount; }
         std::uint64_t playbackDelayTicks() const noexcept { return mPlaybackDelayTicks; }

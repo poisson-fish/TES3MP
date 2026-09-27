@@ -232,9 +232,11 @@ namespace
             && check(!queue.hasWorldLatest(), "latest records retained after fair drain");
     }
 
-    bool gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
+    bool gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly(bool onePump = false)
     {
-        auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
+        auto configured = policy();
+        if (onePump) configured.latestRateBurst = 4;
+        auto queues = TES3MP::OutboundQueueSet::create(configured, 1);
         FakeRuntime runtime;
         const auto connection = TES3MP::TransportConnectionId::initial();
         if (!queues || queues->attach(connection) != TES3MP::TransportResult::Accepted)
@@ -252,7 +254,7 @@ namespace
             messages.push_back({ connection, TES3MP::TransportChannel::LatestWins, frames[index] });
         }
         const auto admitted = queues->enqueueMessagesAtomically(messages);
-        for (std::uint64_t now = 0; now < 40; now += 10)
+        for (std::uint64_t now = 0; now < (onePump ? 1 : 40); now += 10)
             queues->pump(runtime, connection, now);
         if (runtime.sent.size() != kinds.size())
             return false;
@@ -419,6 +421,9 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "latest-families")
+        return gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
+            && gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly(true) ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "inventory-burst")
     {
         if (!inventoryBurstUsesBudget()) return 1;
