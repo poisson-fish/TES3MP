@@ -571,9 +571,7 @@ namespace TES3MP::Native
                     const std::array participants{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase};
                     for (size_t i = 0; i < participants.size(); ++i)
                     {
-                        const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
-                        hits[i] = scene->bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace),
-                            start.binding.mKnockoutAnimation);
+                        hits[i] = scene->bindHitAnimations(participants[i], start.binding.mKnockoutAnimation);
                         placement << "\nhit-participant:" << i << ':' << hits[i].resourceIdentity;
                     }
                 }
@@ -584,9 +582,7 @@ namespace TES3MP::Native
                 start.binding.mGeneralAttackModes = start.text.starts_with("native-inventory-45") || playerSwings;
                 if (start.text.starts_with("native-inventory-44") || start.binding.mGeneralAttackModes)
                 {
-                    const auto& npc = *loadout.store().get<ESM::NPC>().find(owner.mBase);
-                    const auto& race = *loadout.store().get<ESM::Race>().find(npc.mRace);
-                    start.binding.mWeaponMelee = [scene, &npc, &race, attack = start.navigation->meleeAttack,
+                    start.binding.mWeaponMelee = [scene, actor = owner.mBase, attack = start.navigation->meleeAttack,
                         cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
                         (const ESM::Weapon* weapon, std::string_view direction) mutable {
                         const std::string mode(direction.empty() ? std::string_view(attack) : direction);
@@ -594,15 +590,13 @@ namespace TES3MP::Native
                         if (const auto found = cache.find(id); found != cache.end()) return found->second;
                         if (cache.size() >= 3 * (PlainEquipmentValues::MaxItems + 1))
                             throw std::invalid_argument("Native weapon animation cache exceeded inventory bound");
-                        return cache.emplace(id, scene->bindWeaponMeleeAnimation(npc, race, weapon, mode)).first->second;
+                        return cache.emplace(id, scene->bindWeaponMeleeAnimation(actor, weapon, mode)).first->second;
                     };
                 }
                 if (playerSwings)
                     for (size_t i = 0; i < start.binding.mPlayerMelee.size(); ++i)
                     {
-                        const auto& npc = *loadout.store().get<ESM::NPC>().find(start.binding.mActors[i].mBase);
-                        const auto& race = *loadout.store().get<ESM::Race>().find(npc.mRace);
-                        start.binding.mPlayerMelee[i] = [scene, &npc, &race, bows = start.binding.mBowRelease,
+                        start.binding.mPlayerMelee[i] = [scene, actor = start.binding.mActors[i].mBase, bows = start.binding.mBowRelease,
                             ranged = start.binding.mRangedRelease,
                             cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
                             (const ESM::Weapon* weapon, std::string_view direction) mutable {
@@ -614,7 +608,7 @@ namespace TES3MP::Native
                             if (const auto found = cache.find(key); found != cache.end()) return found->second;
                             if (cache.size() >= 3 * (PlainEquipmentValues::MaxItems + 1))
                                 throw std::invalid_argument("Native player animation cache exceeded bound");
-                            return cache.emplace(key, scene->bindWeaponMeleeAnimation(npc, race, weapon, key.second)).first->second;
+                            return cache.emplace(key, scene->bindWeaponMeleeAnimation(actor, weapon, key.second)).first->second;
                         };
                     }
                 if (start.binding.mRetainTraveler)
@@ -637,9 +631,7 @@ namespace TES3MP::Native
                             if (hits)
                                 for (size_t i = 0; i < participants.size(); ++i)
                                 {
-                                    const auto& npc = *loadout.store().get<ESM::NPC>().find(participants[i]);
-                                    const auto rebound = fresh->bindHitAnimations(npc,
-                                        *loadout.store().get<ESM::Race>().find(npc.mRace), knockout);
+                                    const auto rebound = fresh->bindHitAnimations(participants[i], knockout);
                                     if (rebound.resourceIdentity != (*hits)[i].resourceIdentity
                                         || rebound.animations != (*hits)[i].animations
                                         || rebound.knockout != (*hits)[i].knockout || rebound.knockdown != (*hits)[i].knockdown)

@@ -62,7 +62,7 @@ namespace TES3MP::Native
         struct Dormant;
         std::unique_ptr<Dormant> mDormant;
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
-            bindAnimationSources(const ESM::NPC& npc, const ESM::Race& race);
+            bindAnimationSources(ESM::RefId actor);
     public:
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
@@ -97,9 +97,8 @@ namespace TES3MP::Native
         // content binding before a swing can become authoritative.
         BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
         BoundCastAnimations bindCastAnimations();
-        BoundHitAnimations bindHitAnimations(const ESM::NPC& npc, const ESM::Race& race, bool knockout = false);
-        MeleeAnimation bindWeaponMeleeAnimation(const ESM::NPC& npc, const ESM::Race& race,
-            const ESM::Weapon* weapon, const std::string& attack);
+        BoundHitAnimations bindHitAnimations(ESM::RefId actor, bool knockout = false);
+        MeleeAnimation bindWeaponMeleeAnimation(ESM::RefId actor, const ESM::Weapon* weapon, const std::string& attack);
         bool loaded() const noexcept { return bool(mImpl); }
         // Release collision/navigation resources, retaining the exact committed
         // image. Reload validates a freshly bound scene before swapping it in.

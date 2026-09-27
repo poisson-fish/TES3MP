@@ -5082,10 +5082,24 @@ namespace TES3MP::Native::Testing
     }
 
     void checkNpcWeaponExecution(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings, bool generalAttackModes, bool lostTarget)
+        const std::filesystem::path& settings, bool generalAttackModes, bool lostTarget, bool creature)
     {
         // Finish the large shared fixture builder before entering recovery tests.
-        checkNpcDoors(scratch, config, settings,
+        if (creature)
+        {
+            checkNpcDoors(scratch, config, settings,
+                true, true, true, true, true, true, true, true,
+                false, false, false, true, false, false, false, true, false, false, true, false, true,
+                true, true, true, "vanilla-knockdown-dremora");
+            std::ofstream out(scratch / "native.txt");
+            out << "native-inventory-52\nmanifest ";
+            for (auto byte : testContentManifestId().bytes()) out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
+            out
+                << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_knockdown_observer\" \"npc_knockdown_observer\""
+                << "\nloot 1 0\ninterior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\nnpc \"timeline_creature\" "
+                << std::quoted(settings.string()) << "\ndestination 60 -32 1 120\nprocessing 1 2\nmelee \"handtohand\" \"chop\" 1\nrespawn 27000\n";
+        }
+        else checkNpcDoors(scratch, config, settings,
             true, true, true, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false, false, false, false, false, false, false, false, {}, false, true);
         if (generalAttackModes || lostTarget)
@@ -5781,6 +5795,7 @@ namespace TES3MP::Native::Testing
                 }
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
+            const bool creatureEncounter = encounterProfile == "vanilla-knockdown-dremora";
             const bool physicalKnockdown = encounterProfile.starts_with("vanilla-knockdown-");
             if (encounterProfile == "vanilla-melee" || physicalKnockdown)
             {
@@ -5792,7 +5807,7 @@ namespace TES3MP::Native::Testing
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
                 if (physicalKnockdown)
                 {
-                    const auto body = encounterProfile.substr(std::string_view("vanilla-knockdown-").size());
+                    const auto body = creatureEncounter ? std::string_view("male") : encounterProfile.substr(std::string_view("vanilla-knockdown-").size());
                     require(body == "male" || body == "female" || body == "khajiit" || body == "argonian",
                         "Unknown knockdown body profile");
                     const auto race = ESM::RefId::stringRefId(body == "khajiit" ? "khajiit"
@@ -6021,9 +6036,33 @@ namespace TES3MP::Native::Testing
                 }
             }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            ESM::RefId placedActor = npc.mId;
+            if (creatureEncounter)
+            {
+                auto creature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("dremora"));
+                require((creature.mFlags & ESM::Creature::Bipedal) != 0, "Creature fixture must be bipedal");
+                creature.mId = placedActor = ESM::RefId::stringRefId("timeline_creature");
+                creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
+                creature.mData.mHealth = 10000; creature.mData.mMana = 100; creature.mData.mFatigue = 100;
+                for (auto& attribute : creature.mData.mAttributes) attribute = 40;
+                creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
+                creature.mData.mCombat = 100;
+                out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
+                std::ofstream(scratch / "encounter.txt", std::ios::app)
+                    << "actor timeline_creature\ncreature dremora\nmodel " << creature.mModel << "\nmelee handtohand\n";
+            }
             if (physicalKnockdown)
             {
                 auto observer = npc;
+                if (creatureEncounter)
+                {
+                    ESM::Spell spell; spell.blank(); spell.mId = ESM::RefId::stringRefId("expanded_knockout_touch");
+                    spell.mData.mType = ESM::Spell::ST_Spell; spell.mData.mFlags = ESM::Spell::F_Always;
+                    spell.mData.mCost = 1;
+                    spell.mEffects.populate({{ESM::MagicEffect::DrainFatigue, {}, {}, ESM::RT_Touch, 0, 10, 1000, 1000}});
+                    observer.mSpells.mList.push_back(spell.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
+                }
                 observer.mId = ESM::RefId::stringRefId("npc_knockdown_observer");
                 // Keep camera players above the stock knockdown damage threshold
                 // while the independent NPC target retains its vulnerable stats.
@@ -6202,19 +6241,19 @@ namespace TES3MP::Native::Testing
                 placed.mRefID = earlierOwner.mId; placed.mPos = {{-200, -200, 1}, {0, 0, 0}};
                 placed.save(out);
             }
-            for (auto record : {npc.mId, floor.mId, door.mId})
+            for (auto record : {placedActor, floor.mId, door.mId})
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
-                if (record == npc.mId) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
+                if (record == placedActor) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
             }
             out.endRecord(ESM::Cell::sRecordId);
             cell.mName = "NPC Door Path Test"; cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
-            for (auto record : {npc.mId, floor.mId, door.mId})
+            for (auto record : {placedActor, floor.mId, door.mId})
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
-                if (record == npc.mId) placed.mPos = {{0, -220, 1}, {0, 0, 0}};
+                if (record == placedActor) placed.mPos = {{0, -220, 1}, {0, 0, 0}};
                 placed.save(out);
             }
             out.endRecord(ESM::Cell::sRecordId); out.close();
@@ -7254,7 +7293,7 @@ namespace TES3MP::Native::Testing
                 for (size_t i = 0; i < names.size(); ++i)
                 {
                     const auto& npc = *loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId(names[i]));
-                    expectedHits[i] = scene.bindHitAnimations(npc, *loadout.store().get<ESM::Race>().find(npc.mRace));
+                    expectedHits[i] = scene.bindHitAnimations(npc.mId);
                     require(expectedHits[i].animations.count > 0, "Participant lacks authored hit groups");
                 }
                 require(expectedHits[0].resourceIdentity.find("xbase_anim_female.kf") != std::string::npos

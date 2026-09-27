@@ -10,7 +10,7 @@ def percentile(values, fraction):
     return sorted(values)[min(len(values) - 1, int(len(values) * fraction))]
 
 
-def verify(directory):
+def verify(directory, creature=False):
     result = {}
     for path in sorted(directory.glob("*.ndjson")):
         if not path.name.startswith(("Alice", "Bob")):
@@ -36,6 +36,8 @@ def verify(directory):
             cadence.append(seconds * 1000)
             previous = {(p["kind"], p["id"]): p for p in a["actors"]}
             for p in b["actors"]:
+                if creature and p["kind"] != 2:
+                    continue
                 old = previous.get((p["kind"], p["id"]))
                 if not old or any(old[key] != p[key] for key in
                                   ("life", "action", "phase", "body_action", "body", "group")):
@@ -59,6 +61,9 @@ def verify(directory):
             raise ValueError(f"{path.name}: body poses still stepped at snapshot cadence")
         if body_rates and not .9 <= statistics.median(body_rates) <= 1.1:
             raise ValueError(f"{path.name}: body recovery differs from stock clip speed")
+        if creature and (body_samples < 30 or swing_samples < 30 or not swing_rates
+                         or not .9 <= statistics.median(swing_rates) <= 1.1):
+            raise ValueError(f"{path.name}: insufficient creature body/melee progression at stock speed")
         gaps = [b - a for a, b in zip(snapshots, snapshots[1:]) if b > a]
         result[path.name] = dict(
             frames=len(frames), median_frame_ms=statistics.median(cadence),
@@ -77,7 +82,8 @@ def verify(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--creature", action="store_true", help="Require creature-only body and unarmed melee evidence")
     args = parser.parse_args()
-    report = verify(args.directory)
+    report = verify(args.directory, args.creature)
     args.directory.joinpath("presentation-validation.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

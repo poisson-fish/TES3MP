@@ -131,14 +131,7 @@ namespace MWClass
             MWWorld::LiveCellRef<ESM::Creature>* ref = ptr.get<ESM::Creature>();
 
             // creature stats
-            for (size_t i = 0; i < ref->mBase->mData.mAttributes.size(); ++i)
-                data->mCreatureStats.setAttribute(ESM::Attribute::indexToRefId(static_cast<int>(i)),
-                    static_cast<float>(ref->mBase->mData.mAttributes[i]));
-            data->mCreatureStats.setHealth(static_cast<float>(ref->mBase->mData.mHealth));
-            data->mCreatureStats.setMagicka(static_cast<float>(ref->mBase->mData.mMana));
-            data->mCreatureStats.setFatigue(static_cast<float>(ref->mBase->mData.mFatigue));
-
-            data->mCreatureStats.setLevel(ref->mBase->mData.mLevel);
+            data->mCreatureStats.initializeBaseStats(*ref->mBase);
 
             data->mCreatureStats.getAiSequence().fill(ref->mBase->mAiPackage);
 
@@ -756,18 +749,21 @@ namespace MWClass
 
     float Creature::getSkill(const MWWorld::Ptr& ptr, ESM::RefId id, const MWWorld::ESMStore& store) const
     {
-        MWWorld::LiveCellRef<ESM::Creature>* ref = ptr.get<ESM::Creature>();
+        return getSkill(*ptr.get<ESM::Creature>()->mBase, id, store);
+    }
 
+    float Creature::getSkill(const ESM::Creature& creature, ESM::RefId id, const MWWorld::ESMStore& store)
+    {
         const ESM::Skill* skillRecord = store.get<ESM::Skill>().find(id);
 
         switch (skillRecord->mData.mSpecialization)
         {
             case ESM::Class::Combat:
-                return static_cast<float>(ref->mBase->mData.mCombat);
+                return static_cast<float>(creature.mData.mCombat);
             case ESM::Class::Magic:
-                return static_cast<float>(ref->mBase->mData.mMagic);
+                return static_cast<float>(creature.mData.mMagic);
             case ESM::Class::Stealth:
-                return static_cast<float>(ref->mBase->mData.mStealth);
+                return static_cast<float>(creature.mData.mStealth);
             default:
                 throw std::runtime_error("invalid specialisation");
         }

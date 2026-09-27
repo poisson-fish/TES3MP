@@ -40,7 +40,9 @@ namespace TES3MP::Native::Testing
                 addSingleAnimSource(std::string(Settings::models().mXbaseanimkf.get().value()), "pose test");
                 if (body == 1)
                     addSingleAnimSource(std::string(Settings::models().mXbaseanimfemalekf.get().value()), "female pose test");
-                if (body >= 2)
+                if (body == 4)
+                    addSingleAnimSource("meshes/r/xdremora.kf", "Dremora pose test");
+                if (body >= 2 && body < 4)
                 {
                     auto beast = Misc::ResourceHelpers::correctActorModelPath(
                         Settings::models().mBaseanimkna.get(), mResourceSystem->getVFS());
@@ -77,7 +79,7 @@ namespace TES3MP::Native::Testing
         Resource::ResourceSystem resources(&vfs, 0, &encoder.getStatelessEncoder());
         if (actions)
         {
-            for (unsigned body = 0; body < 4; ++body)
+            for (unsigned body = 0; body < 5; ++body)
             {
                 Pose replica(resources, body);
                 replica.useReplicaContext();
@@ -108,7 +110,7 @@ namespace TES3MP::Native::Testing
         }
         if (knockout)
         {
-            for (unsigned body = 0; body < 4; ++body)
+            for (unsigned body = 0; body < 5; ++body)
             {
                 Listener listener;
                 Pose local(resources, body), peer(resources, body), reconnect(resources, body);

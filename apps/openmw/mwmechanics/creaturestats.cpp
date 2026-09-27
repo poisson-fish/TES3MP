@@ -8,6 +8,7 @@
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadmgef.hpp>
+#include <components/esm3/loadcrea.hpp>
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -18,6 +19,22 @@
 
 namespace MWMechanics
 {
+    void CreatureStats::initializeBaseStats(const ESM::Creature& creature, std::optional<float> baseMagickaMultiplier)
+    {
+        for (size_t i = 0; i < creature.mData.mAttributes.size(); ++i)
+        {
+            const auto id = ESM::Attribute::indexToRefId(static_cast<int>(i));
+            auto value = getAttribute(id);
+            value.setBase(creature.mData.mAttributes[i]);
+            if (baseMagickaMultiplier) setAttribute(id, value, *baseMagickaMultiplier);
+            else setAttribute(id, value);
+        }
+        setHealth(static_cast<float>(creature.mData.mHealth));
+        setMagicka(static_cast<float>(creature.mData.mMana));
+        setFatigue(static_cast<float>(creature.mData.mFatigue));
+        setLevel(creature.mData.mLevel);
+    }
+
     CreatureStats::CreatureStats()
         : CreatureStats(*MWBase::Environment::get().getESMStore())
     {

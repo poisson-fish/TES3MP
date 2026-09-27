@@ -12,6 +12,7 @@
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/containeradd.hpp>
 #include <apps/openmw/mwclass/armor.hpp>
+#include <apps/openmw/mwclass/creature.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
@@ -40,6 +41,12 @@ namespace TES3MP::Native
 {
     namespace
     {
+        const ESM::SpellList& actorSpells(const MWWorld::Ptr& actor)
+        {
+            return actor.getType() == ESM::NPC::sRecordId ? actor.get<ESM::NPC>()->mBase->mSpells
+                : actor.get<ESM::Creature>()->mBase->mSpells;
+        }
+
         constexpr uint64_t PhysicalAttackRetryTicks = 64;
 
         bool rangedWeapon(const ESM::Weapon* weapon, bool extended)
@@ -126,11 +133,23 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native combat magicka multiplier invalid");
             for (size_t actor = 0; actor < actors.size(); ++actor)
             {
-                const auto& base = *content.get<ESM::NPC>().find(actors[actor]);
                 MWMechanics::NpcStats stats(content);
-                if (base.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
-                    stats.initializeAutoStats(base, content, magickaMultiplier);
-                else stats.initializeExplicitStats(base, magickaMultiplier);
+                if (const auto* creature = content.get<ESM::Creature>().search(actors[actor]))
+                {
+                    stats.initializeBaseStats(*creature, magickaMultiplier);
+                    for (int i = 0; i < ESM::Skill::Length; ++i)
+                    {
+                        const auto skill = ESM::Skill::indexToRefId(i);
+                        stats.getSkill(skill).setBase(MWClass::Creature::getSkill(*creature, skill, content));
+                    }
+                }
+                else
+                {
+                    const auto& base = *content.get<ESM::NPC>().find(actors[actor]);
+                    if (base.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS)
+                        stats.initializeAutoStats(base, content, magickaMultiplier);
+                    else stats.initializeExplicitStats(base, magickaMultiplier);
+                }
                 size_t index = 0;
                 const auto capture = [&](const auto& stat) {
                     ESM::StatState<float> value;
@@ -892,9 +911,14 @@ namespace TES3MP::Native
             const auto id = mBinding.mNavigatingActor->actorId();
             const auto owner = std::ranges::find_if(mBinding.mContainers,
                 [id](const auto& value) { return value.mId.value() == id; });
-            if (owner == mBinding.mContainers.end() || mRuntime.ownerPtr(size_t(owner - mBinding.mContainers.begin()) + 2).getType() != ESM::NPC::sRecordId)
+            if (owner == mBinding.mContainers.end() || !actorInventory(mRuntime.ownerPtr(size_t(owner - mBinding.mContainers.begin()) + 2)))
                 throw std::invalid_argument("Native combat stat owner must be the selected NPC");
             mCombatNpcOwner = size_t(owner - mBinding.mContainers.begin()) + 2;
+            const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
+            if (selected.getType() == ESM::Creature::sRecordId
+                && (!mBinding.mActorPresentation || !actorSpells(selected).mList.empty()
+                    || mRuntime.equippedWeaponCondition(mCombatNpcOwner)))
+                throw std::invalid_argument("Creature timeline currently requires an unarmed biped without spell sources");
             mCombat = initialCombat({mBinding.mActors[0].mBase, mBinding.mActors[1].mBase, owner->mBase},
                 content, mBinding.mLootSeed, mBinding.mKnockoutAnimation);
             (void)mRuntime.equippedWeaponCondition(mCombatNpcOwner);
@@ -2306,7 +2330,7 @@ namespace TES3MP::Native
                 std::optional<PreparedInstantEffects> effects;
                 if (cast.sourceKind == uint64_t(MagicUseSourceKind::Spell))
                 {
-                    const auto& known = mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::NPC>()->mBase->mSpells.mList;
+                    const auto& known = actorSpells(mRuntime.ownerPtr(mCombatNpcOwner)).mList;
                     for (const auto& id : known) if (spellRecordId(id) == cast.source)
                     {
                         if (effects) throw std::invalid_argument("Native saved cast source ambiguous");
@@ -2627,7 +2651,8 @@ namespace TES3MP::Native
             if (mRuntime.mStore.find(item->mRef.mRefID) == ESM::Weapon::sRecordId)
                 weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
         }
-        return MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon, true);
+        return MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon,
+            mRuntime.ownerPtr(size_t(owner - mBinding.mContainers.begin()) + 2).getType() == ESM::NPC::sRecordId);
     }
 
     uint64_t InventoryService::meleeContact(const CanonicalServerState& players,
@@ -3208,6 +3233,8 @@ namespace TES3MP::Native
             wear.push_back({owner, *mRuntime.equippedArmorCondition(owner, slot), condition, slot});
         };
         const auto armorRating = [&](size_t owner, const MWMechanics::NpcStats& stats) {
+            if (mRuntime.ownerPtr(owner).getType() == ESM::Creature::sRecordId)
+                return stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Shield).getMagnitude();
             const auto* inventory = mRuntime.inventoryStorage(owner);
             if (!inventory) throw std::invalid_argument("Native armor defender has no inventory");
             const float skill = stats.getSkill(ESM::Skill::Unarmored).getModified();
@@ -3830,7 +3857,7 @@ namespace TES3MP::Native
             uint64_t effectSource = use.sourceId;
             if (use.sourceKind == MagicUseSourceKind::Spell)
             {
-                const auto& known = mRuntime.ownerPtr(context.inventoryOwner).get<ESM::NPC>()->mBase->mSpells.mList;
+                const auto& known = actorSpells(mRuntime.ownerPtr(context.inventoryOwner)).mList;
                 const ESM::Spell* selected = nullptr;
                 for (const auto& id : known) if (!id.empty() && spellRecordId(id) == use.sourceId)
                 {
@@ -4035,13 +4062,15 @@ namespace TES3MP::Native
                 // An unsupported weapon retains the existing combat path.
                 // Do not pretend it has zero value and favor magic accidentally.
                 selection.weaponRating = weaponRating.value_or(0.f);
-                const auto& base = *mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::NPC>()->mBase;
-                if (base.mSpells.mList.size() > MaximumAiMagicSources)
+                const auto ptr = mRuntime.ownerPtr(mCombatNpcOwner);
+                const auto& known = actorSpells(ptr).mList;
+                if (known.size() > MaximumAiMagicSources)
                     throw std::invalid_argument("Automatic NPC spell budget exceeded");
-                const auto* race = mRuntime.mStore.get<ESM::Race>().find(base.mRace);
+                const auto* race = ptr.getType() == ESM::NPC::sRecordId
+                    ? mRuntime.mStore.get<ESM::Race>().find(ptr.get<ESM::NPC>()->mBase->mRace) : nullptr;
                 std::vector<AiMagicSpell> sources;
-                sources.reserve(base.mSpells.mList.size());
-                for (const auto& id : base.mSpells.mList)
+                sources.reserve(known.size());
+                for (const auto& id : known)
                 {
                     const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id);
                     if (!spell) continue;
@@ -4063,7 +4092,7 @@ namespace TES3MP::Native
                                 && effect.caster == before.mActor && effect.casterLife == life->generation;
                         });
                     };
-                    sources.push_back({spell, race->mPowers.exists(id), activeOn(2), activeOn(actor(enemy->playerId()))});
+                    sources.push_back({spell, race && race->mPowers.exists(id), activeOn(2), activeOn(actor(enemy->playerId()))});
                 }
                 std::vector<AiMagicItem> items;
                 if (mBinding.mNpcFullSelection) for (const auto& item : values.mObjects)
@@ -4617,7 +4646,9 @@ namespace TES3MP::Native
                     addTimedResistance(victim, timedEffects, victimIndex);
                     const auto skill = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill
                         : ESM::Skill::HandToHand;
-                    const int skillValue = int(attacker.getSkill(skill).getModified());
+                    const auto ptr = mRuntime.ownerPtr(mCombatNpcOwner);
+                    const int skillValue = ptr.getType() == ESM::Creature::sRecordId
+                        ? ptr.get<ESM::Creature>()->mBase->mData.mCombat : int(attacker.getSkill(skill).getModified());
                     const bool paralyzed = victim.getMagicEffects()
                         .getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0;
                     const float chance = MWMechanics::getHitChance(mRuntime.mStore, attacker, victim,

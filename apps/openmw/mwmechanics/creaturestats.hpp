@@ -21,6 +21,7 @@
 namespace ESM
 {
     struct CreatureStats;
+    struct Creature;
 }
 
 namespace MWMechanics
@@ -99,6 +100,7 @@ namespace MWMechanics
         bool mTeleported = false;
 
     public:
+        void initializeBaseStats(const ESM::Creature& creature, std::optional<float> baseMagickaMultiplier = {});
         CreatureStats();
         explicit CreatureStats(const MWWorld::ESMStore& store);
 

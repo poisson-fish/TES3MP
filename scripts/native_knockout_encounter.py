@@ -19,6 +19,24 @@ def established_samples(rows):
     return rows[first:]
 
 
+def validate_creature_melee(segments):
+    outcomes = {role: {} for role in ("Alice", "Bob")}
+    for segment in segments:
+        for role, rows in segment.items():
+            for row in rows:
+                for hit in row["actor_hits"]:
+                    key = hit["attacker"], hit["attacker_revision"], hit["target_revision"]
+                    if hit["attacker"] not in {a["id"] for a in row["actors"]} or key in outcomes[role]:
+                        raise RuntimeError("foreign or duplicated creature melee outcome")
+                    outcomes[role][key] = hit
+    common = outcomes["Alice"].keys() & outcomes["Bob"].keys()
+    if not common or any(outcomes["Alice"][k] != outcomes["Bob"][k] for k in common):
+        raise RuntimeError("creature melee outcomes disagree between desktops")
+    if not any(outcomes["Alice"][k]["hit"] and outcomes["Alice"][k]["damage"] > 0 for k in common):
+        raise RuntimeError("no shared creature melee damage")
+    return dict(shared_outcomes=len(common), unique_outcomes={r: len(v) for r, v in outcomes.items()})
+
+
 def validate_observations(segments, npc=False):
     """Require both observers to see ordered exhaustion, get-up and recovery."""
     identities = (1, 2)
@@ -160,7 +178,7 @@ def validate_retarget_observations(segment):
 
 
 def verify_knockout_encounter(output, evidence, processes, relay, manifest, restart_server, restart_client,
-                             npc=False, physical=False, content=None, retarget=False, runtime=None):
+                             npc=False, physical=False, content=None, retarget=False, runtime=None, creature=False):
     from run_native_navigation_capture import records
 
     sequence = dict.fromkeys(evidence, 0)
@@ -274,7 +292,30 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         if len(actors) != 1:
             raise RuntimeError("NPC capture requires one actor")
         identities = (actors[0]["id"],)
+    melee_evidence = {}
+
+    def creature_melee(label):
+        if not creature:
+            return
+        start = {r: len(samples(r)) for r in evidence}
+        command("Bob", "pose -180 -300 1 0.3 1.57")
+        command("Alice", "pose 60 -100 1 0.3 0")
+        def hit_both():
+            return all(any(hit["hit"] and hit["damage"] > 0 for row in samples(r)[start[r]:]
+                           for hit in row["actor_hits"]) for r in evidence)
+        wait_for(hit_both, "creature authoritative melee reaches both observers")
+        for role in evidence:
+            screenshot(role, label + "-melee")
+        frame_subjects()
+        melee_evidence[label] = {r: [hit for row in samples(r)[start[r]:] for hit in row["actor_hits"]]
+                                 for r in evidence}
+        for role, hits in melee_evidence[label].items():
+            keys = [(h["attacker"], h["attacker_revision"], h["target_revision"]) for h in hits]
+            if len(keys) != len(set(keys)):
+                raise RuntimeError(role + ": duplicated creature hit")
+
     frame_subjects()
+    creature_melee("initial")
     initial = {r: samples(r)[-1] for r in evidence}
     if physical:
         if not content or not content["profile"].startswith("vanilla-knockdown-"):
@@ -449,8 +490,11 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             if states[0] != states[1]:
                 raise RuntimeError("final player health/pose failed to converge")
             retarget_validation["final_players"] = states[0]
+        creature_melee("restored")
         after = {r: samples(r) for r in evidence}
         validation = validate([before, after])
+        if creature:
+            validation["creature_melee"] = validate_creature_melee([before, after])
         validation["normal"] = normal_validation
         validation["reconnect"] = reconnect_validation
         validation["restored"] = validate([after], require_hit=False)
@@ -464,7 +508,7 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             if processes[role].returncode:
                 raise RuntimeError(f"{role} did not finish cleanly")
         report = dict(success=True, scenario="V51 live " + ("NPC" if npc else "player") + " physical knockdown and get-up", manifest=manifest,
-                      synthetic_actor_stats_and_placements=True, content=content, initial=initial,
+                      synthetic_actor_stats_and_placements=True, content=content, initial=initial, melee=melee_evidence,
                       runtime=runtime,
                       missed_reconnect_windows=missed_reconnect_windows,
                       reconnected=reconnected, restored=restored, validation=validation,
@@ -511,8 +555,11 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
     for role in evidence:
         screenshot(role, "restored")
     recover("restart")
+    creature_melee("restored")
     after = {r: samples(r) for r in evidence}
     validation = validate_observations([before, after], npc)
+    if creature:
+        validation["creature_melee"] = validate_creature_melee([before, after])
     # A recovery before the restart cannot substitute for a missing restored tail.
     validation["segments"] = [validate_observations([segment], npc) for segment in (before, after)]
     for role in evidence:
@@ -522,7 +569,7 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         if processes[role].returncode:
             raise RuntimeError(f"{role} did not finish cleanly")
     report = dict(success=True, scenario="V51 live " + ("NPC" if npc else "player") + " fatigue knockout and get-up", manifest=manifest,
-                  synthetic_actor_placements_and_spell=True, initial=initial, restored=restored,
+                  synthetic_actor_placements_and_spell=True, content=content, runtime=runtime, melee=melee_evidence, initial=initial, restored=restored,
                   final={r: after[r][-1] for r in evidence}, validation=validation,
                   relay=asdict(relay.stop()), screenshots=captures)
     output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

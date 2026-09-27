@@ -8,6 +8,7 @@
 namespace ESM
 {
     struct GameSetting;
+    struct Creature;
 }
 
 namespace MWClass
@@ -118,6 +119,7 @@ namespace MWClass
 
         float getSkill(const MWWorld::Ptr& ptr, ESM::RefId id) const override;
         float getSkill(const MWWorld::Ptr& ptr, ESM::RefId id, const MWWorld::ESMStore& store) const;
+        static float getSkill(const ESM::Creature& creature, ESM::RefId id, const MWWorld::ESMStore& store);
 
         void readAdditionalState(const MWWorld::Ptr& ptr, const ESM::ObjectState& state) const override;
         ///< Read additional state from \a state into \a ptr.

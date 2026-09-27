@@ -724,14 +724,15 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.player_swings or args.knockout
-    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings or args.physical_knockdown else {}
+    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings or args.physical_knockdown or args.creature else {}
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
     if args.npc_casting: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
     version = 52 if args.knockout else 52 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
-    player_actor = "npc_knockdown_observer" if args.physical_knockdown else npc if args.life_encounter or spell_capture else "player"
+    if args.creature: npc = encounter["actor"]
+    player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature else npc if args.life_encounter or spell_capture else "player"
     player_actors = [player_actor, player_actor]
     if args.physical_knockdown and args.knockout_target == "players":
         player_actors[0] = npc
@@ -746,7 +747,7 @@ def run(args):
         f'actors "{player_actors[0]}" "{player_actors[1]}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
-        + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
+        + (f'melee "{encounter.get("melee", "weapononehand")}" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect or spell_capture else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
@@ -849,7 +850,7 @@ def run(args):
                                      lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
                                      lambda selected: start(selected, client_commands[selected]),
                                      npc=args.knockout_target == "npc", physical=args.physical_knockdown,
-                                     content=encounter, retarget=args.retarget_getup,
+                                     content=encounter, retarget=args.retarget_getup, creature=args.creature,
                                      runtime={name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
                                               for name in ("openmw.exe", "tes3mp_server.exe")})
             return
@@ -999,6 +1000,7 @@ if __name__ == "__main__":
                         help="V35 active timed effect through server restart and two returning desktops")
     parser.add_argument("--npc-casting", action="store_true", help="V42 concurrent real-record NPC/player casting, disconnect and restart")
     parser.add_argument("--player-swings", action="store_true", help="V46 two-client swing presentation, interruption, reconnect and restart")
+    parser.add_argument("--creature", action="store_true", help="Use the bound bipedal creature fixture with --knockout-target npc")
     parser.add_argument("--knockout", action="store_true", help="V51 fatigue knockout/get-up on two desktops, reconnect and restart")
     parser.add_argument("--knockout-target", choices=("players", "npc"), default="players",
                         help="Subject of the --knockout capture")
@@ -1008,6 +1010,8 @@ if __name__ == "__main__":
                         help="Keep Bob in melee reach during Alice's physical get-up; verify shared NPC retarget contacts")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
+    if args.creature and (not args.knockout or args.knockout_target != "npc"):
+        parser.error("--creature requires --knockout --knockout-target npc")
     if args.knockout_target != "players" and not args.knockout:
         parser.error("--knockout-target requires --knockout")
     if args.physical_knockdown and not args.knockout:

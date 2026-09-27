@@ -1,37 +1,36 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-one NPC/doors at 60 Hz, commits at 30 Hz; neighbors freeze.
-**V52, T3C7/capability 25; fresh campaigns required.**
+one selected NPC or walking bipedal creature/doors at 60 Hz, commits at 30 Hz;
+neighbors freeze. **V52, T3C7/capability 25; fresh campaigns required.**
 
-NPC swings replicate committed identity/life, timing, direction, strength and facing.
-Hit reactions persist their stock clip. A shared timeline samples self/remote/NPC
-actions and body poses per frame, aligned with motion/facing. Gameplay remains
-server-owned; visual callbacks are suppressed. Pauses/starvation hold; recovery
-restores actions.
+The shared timeline now presents an unarmed Dremora's melee, hit reactions,
+physical knockdown, exhaustion and get-up. Creature admission requires no known
+spells or equipped weapon; quadrupeds/flying creatures remain unsupported.
+Callbacks stay suppressed; pauses/starvation hold.
 
-Four latest-state streams now fit each pump; the old budget limited combat to ~7 Hz.
+Two-desktop evidence with synthetic stats/placements/spell and stock Dremora resources
+(selected screenshots inspected):
+- `build/m4-creature-fatigue-live-01/result.json`: melee, exhaustion,
+  get-up, reconnect/restart.
+- `build/m4-creature-physical-live-01/result.json`: creature melee/hit reactions,
+  falls/get-up, reconnect/restart; 10 shared unique outcomes, four matching
+  health hits, no duplicates.
 
-Verified synthetic two-desktop captures with stock resources:
-- `build/m4-smoothness-live-05/result.json`: physical get-up, retargeting, 128-tick
-  retreat, reconnect/restart; stock male/iron longsword, selected screenshots inspected. Bob restarts first; offline Alice pauses.
-- `build/m4-smoothness-npc-live-02/result.json`: NPC exhaustion/loop/get-up and recovery.
-- `build/m4-smoothness-players-live-01/result.json`: player swings/interruption/restart;
-  shared identities.
+Both include creature-only `presentation-validation.json`: render median ~8.5 ms,
+95th percentile below 16.7 ms; melee/body ~1x stock before/after restart. Snapshot
+gaps: median one tick, 95th percentile three. Impairment:
+100 ms +/-25 ms, 10% loss, periodic extra 125 ms; 120-FPS capture cap.
 
-Each has `presentation-validation.json`: median render frame ~8.5 ms, 95th percentile
-better than 60 FPS; recovery ~1x stock speed. Snapshot gaps: median one tick,
-95th percentile three. Impairment: 100 ms +/-25 ms, 10% loss, periodic extra 125 ms.
-120-FPS capture cap; overlapping combat/modded bodies remain unproven.
+Focused evidence in `build/logs`: `m4-creature-native-test.log` (atomic rejection,
+exact retry/restart, two-observer events, retarget/retreat/pause),
+`m4-creature-stock-pose-test.log` (four NPC bodies plus Dremora, callbacks suppressed),
+`m4-creature-npc-regression.log`, `m4-creature-evidence-test.log`,
+`m4-creature-stats-build.log` (client/server) and `m4-creature-final-build.log`.
 
-Focused evidence in `build/logs`: `m4-smoothness-timeline-test.log`,
-`m4-smoothness-protocol-test.log`, `m4-smoothness-queue-test.log`,
-`m4-smoothness-stock-pose-test.log` (four body layers),
-`m4-smoothness-windup-test.log` (V52 rejection/retry/restart/retreat/pause),
-`m4-smoothness-final-build.log` (client/server).
-
-**Next: one creature's authoritative melee/body clips through the shared timeline,
-verified on both desktops under impairment/reconnect/restart.** Custom-body/casting coverage and remaining combat scope follow.
+**Next: bind one custom-body NPC's authoritative melee/body clips through the shared
+timeline; verify matching layered resources and both desktops under impairment,
+reconnect and restart.** Casting presentation and remaining combat scope follow.
 
 100 built-in effects remain outside general native casting:
 

@@ -100,6 +100,7 @@ namespace TES3MP::Native
 
     struct InteriorActorScene::Impl
     {
+        const MWWorld::ESMStore& mStore;
         // Prepared frames cannot outlive and later match a reallocated scene.
         std::shared_ptr<const char> mLifetime = std::make_shared<const char>(0);
         struct Body
@@ -241,7 +242,7 @@ namespace TES3MP::Native
 
         Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation)
-            : mResources(&mVfs, 0, &loadout.encoder()),
+            : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
               mReferences(loadout.store(), loadout.readers(), 1), mActorId(actor)
@@ -286,13 +287,15 @@ namespace TES3MP::Native
                 const auto id = *resolvedId;
                 if (!identities.insert(id).second) throw std::invalid_argument("Duplicate collision placement across cells");
                 const bool npc = ptr.getType() == ESM::NPC::sRecordId;
-                if (cls.isActor() && !npc)
-                    throw std::invalid_argument("Non-NPC actor in interior collision domain");
+                const bool actorBody = npc || ptr.getType() == ESM::Creature::sRecordId;
+                if (actorBody && !npc && (!(ptr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Bipedal)
+                    || (ptr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Flies)))
+                    throw std::invalid_argument("Creature collision currently requires a walking biped");
                 if (ptr.getType() == ESM::CreatureLevList::sRecordId)
                     throw std::invalid_argument("Unresolved leveled actor in interior collision domain");
-                if (id == actor && (!npc || initialCorpse(ptr) || !cls.getScript(ptr).empty()))
+                if (id == actor && (!actorBody || initialCorpse(ptr) || !cls.getScript(ptr).empty()))
                     throw std::invalid_argument("Selected actor must be a living unscripted native NPC");
-                if (npc && initialCorpse(ptr))
+                if (actorBody && initialCorpse(ptr))
                     throw std::invalid_argument("Corpse collision requires gameplay animation");
                 const auto& position = ptr.getRefData().getPosition();
                 const float scale = ptr.getCellRef().getScale();
@@ -302,19 +305,19 @@ namespace TES3MP::Native
                         ptr.get<ESM::NPC>()->mBase->mRace), base, beast))
                     : cls.getCorrectedModel(ptr);
                 if (model.empty()) return true;
-                if (npc) model = Misc::ResourceHelpers::correctActorModelPath(model, &mVfs);
+                if (actorBody) model = Misc::ResourceHelpers::correctActorModelPath(model, &mVfs);
                 if (!mVfs.exists(model)) throw std::invalid_argument("Missing collision model: " + model.value());
                 meshes.emplace(model.value());
                 auto shape = mShapes->getInstance(model);
                 if (!shape) return true;
                 // Stock NPC collision uses the resource's fixed bounding hull,
                 // not its animated child shapes. Objects need CPU evaluation.
-                if (!npc && shape->isAnimated())
+                if (!actorBody && shape->isAnimated())
                     throw std::invalid_argument("Animated collision requires CPU evaluation: " + model.value());
                 auto body = std::make_unique<Body>(mWorld);
                 body->mResource = shape;
                 const auto rotation = Misc::Convert::makeOsgQuat(position);
-                if (npc)
+                if (actorBody)
                 {
                     const auto extents = shape->mCollisionBox.mExtents;
                     if (!(extents.x() > 0 && extents.y() > 0 && extents.z() > 0)
@@ -335,12 +338,13 @@ namespace TES3MP::Native
                     body->mObject->setActivationState(DISABLE_DEACTIVATION);
                     if (id == actor)
                     {
-                        mMeleeSources.push_back(base);
+                        mMeleeSources.push_back(npc ? base
+                            : VFS::Path::Normalized(Misc::ResourceHelpers::correctActorModelPath(base, &mVfs)));
                         if (model != base) mMeleeSources.push_back(model);
                         // The collision slice does not yet construct a custom
                         // skeleton. Do not silently use default animation keys
                         // for an NPC whose visual model has its own sources.
-                        mCustomMeleeModel = !ptr.get<ESM::NPC>()->mBase->mModel.empty();
+                        mCustomMeleeModel = npc && !ptr.get<ESM::NPC>()->mBase->mModel.empty();
                         mActorOffset = offset;
                         mAgentBounds = {DetourNavigator::CollisionShapeType::Cylinder, extents * scale};
                         mActor = std::make_unique<MWPhysics::ActorFrameData>(MWPhysics::ActorFrameData{
@@ -363,8 +367,8 @@ namespace TES3MP::Native
                 mTransforms.push_back({position, scale});
                 mBodies.push_back(std::move(body));
                 mIdentities.emplace(object, id);
-                mWorld.addCollisionObject(object, npc ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
-                    npc ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
+                mWorld.addCollisionObject(object, actorBody ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
+                    actorBody ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
                 return true;
             });
             if (const auto* exterior = cellId.getIf<ESM::ESM3ExteriorCellRefId>())
@@ -630,7 +634,7 @@ namespace TES3MP::Native
     }
 
     std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
-    InteriorActorScene::bindAnimationSources(const ESM::NPC& npc, const ESM::Race& race)
+    InteriorActorScene::bindAnimationSources(ESM::RefId actor)
     {
         if (!mImpl || !mImpl->mNavigator)
             throw std::invalid_argument("Native hit resources require initialized actor settings");
@@ -638,21 +642,34 @@ namespace TES3MP::Native
         // skeleton, then the Argonian swim layer. Resolve each group's winning
         // source independently, as Animation::play does.
         const auto& models = mImpl->mHitModels;
-        const bool beast = (race.mData.mFlags & ESM::Race::Beast) != 0;
-        const auto& normal = models[beast ? 3 : npc.isMale() ? 1 : 2];
-        std::vector<VFS::Path::Normalized> paths{models[0]};
-        const VFS::Path::Normalized skeleton(Misc::ResourceHelpers::correctActorModelPath(normal, &mImpl->mVfs));
-        if (skeleton != models[0]) paths.push_back(skeleton);
-        if (!npc.mModel.empty())
-        {
-            const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(npc.mModel));
-            if (model != models[1] && model != models[2] && model != models[3])
-                paths.emplace_back(Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs));
-        }
-        if (beast && npc.mRace.contains("argonian")) paths.push_back(models[4]);
-        std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>> sources;
+        std::vector<VFS::Path::Normalized> paths;
         std::ostringstream identity;
-        identity << "native-hit-resources-1\n" << npc.mId << ':' << npc.mRace << ':' << npc.isMale() << '\n';
+        if (const auto* creature = mImpl->mStore.get<ESM::Creature>().search(actor))
+        {
+            identity << "native-creature-resources-1\n" << creature->mId << ':' << creature->mFlags << '\n';
+            if (creature->mFlags & ESM::Creature::Bipedal) paths.push_back(models[0]);
+            paths.emplace_back(Misc::ResourceHelpers::correctActorModelPath(
+                Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(creature->mModel)), &mImpl->mVfs));
+        }
+        else
+        {
+            const auto& npc = *mImpl->mStore.get<ESM::NPC>().find(actor);
+            const auto& race = *mImpl->mStore.get<ESM::Race>().find(npc.mRace);
+            const bool beast = (race.mData.mFlags & ESM::Race::Beast) != 0;
+            const auto& normal = models[beast ? 3 : npc.isMale() ? 1 : 2];
+            paths.push_back(models[0]);
+            const VFS::Path::Normalized skeleton(Misc::ResourceHelpers::correctActorModelPath(normal, &mImpl->mVfs));
+            if (skeleton != models[0]) paths.push_back(skeleton);
+            if (!npc.mModel.empty())
+            {
+                const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(npc.mModel));
+                if (model != models[1] && model != models[2] && model != models[3])
+                    paths.emplace_back(Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs));
+            }
+            if (beast && npc.mRace.contains("argonian")) paths.push_back(models[4]);
+            identity << "native-hit-resources-1\n" << npc.mId << ':' << npc.mRace << ':' << npc.isMale() << '\n';
+        }
+        std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>> sources;
         size_t sourceCount = 0;
         const auto appendSource = [&](const VFS::Path::Normalized& path) {
             if (++sourceCount > MaximumHitSources || path.value().size() > 512)
@@ -689,9 +706,11 @@ namespace TES3MP::Native
         return {std::move(sources), identity.str()};
     }
 
-    BoundHitAnimations InteriorActorScene::bindHitAnimations(const ESM::NPC& npc, const ESM::Race& race, bool knockout)
+
+
+    BoundHitAnimations InteriorActorScene::bindHitAnimations(ESM::RefId actor, bool knockout)
     {
-        const auto [owned, identity] = bindAnimationSources(npc, race);
+        const auto [owned, identity] = bindAnimationSources(actor);
         std::vector<const SceneUtil::TextKeyMap*> sources;
         for (const auto& source : owned) sources.push_back(source.get());
         return {readHitAnimations(sources), identity,
@@ -699,7 +718,9 @@ namespace TES3MP::Native
             knockout ? readKnockoutAnimation(sources, "knockdown") : KnockoutAnimation{}};
     }
 
-    MeleeAnimation InteriorActorScene::bindWeaponMeleeAnimation(const ESM::NPC& npc, const ESM::Race& race,
+
+
+    MeleeAnimation InteriorActorScene::bindWeaponMeleeAnimation(ESM::RefId actor,
         const ESM::Weapon* weapon, const std::string& attack)
     {
         const auto type = weapon ? weapon->mData.mType : ESM::Weapon::HandToHand;
@@ -708,7 +729,7 @@ namespace TES3MP::Native
             && !((info->mWeaponClass == ESM::WeaponType::Ranged || info->mWeaponClass == ESM::WeaponType::Thrown)
                 && attack == "shoot"))
             throw std::invalid_argument("Native ranged execution is not bound");
-        const auto [sources, resourceIdentity] = bindAnimationSources(npc, race);
+        const auto [sources, resourceIdentity] = bindAnimationSources(actor);
         std::string group(info->mLongGroup);
         const auto findGroup = [&](const std::string& name) -> const SceneUtil::TextKeyMap* {
             for (auto it = sources.rbegin(); it != sources.rend(); ++it)

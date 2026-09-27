@@ -61,7 +61,8 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    checks; M5 owns personal quest credit and rewards.
    Retain the bounded **actor presentation smoothness** slice and extend body coverage:
    attacks, hit reactions, falls, knockout loops and get-up
-   for self, remote players and one NPC. Measure render cadence, snapshot gaps
+   for self, remote players, one NPC and one creature; extend custom-body and casting
+   coverage through the same timeline. Measure render cadence, snapshot gaps
    and clip duration against stock at matching weapon speed. Sample visual poses
    each render frame between server timestamps;
    preserve authoritative timing, pauses, interruption and callback suppression.
