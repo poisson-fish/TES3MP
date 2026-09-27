@@ -12,6 +12,13 @@ def subjects(row, npc=False):
                                  if key in row}), *row["players"]]
 
 
+def established_samples(rows):
+    """Exclude only startup before the first two-player baseline; retain later losses."""
+    first = next((i for i, row in enumerate(rows)
+                  if {p["id"] for p in subjects(row)} == {1, 2}), len(rows))
+    return rows[first:]
+
+
 def validate_observations(segments, npc=False):
     """Require both observers to see ordered exhaustion, get-up and recovery."""
     identities = (1, 2)
@@ -115,8 +122,45 @@ def validate_physical_observations(segments, require_hit=True, player_id=None):
     return dict(shared_ticks=shared, matching_health_hits=len(successful), recovery=progress)
 
 
+def validate_retarget_observations(segment):
+    """A shared NPC contact with Bob must occur inside Alice's advancing fall clock.
+
+    Reliable events can arrive alongside an older/newer latest-wins snapshot, so
+    use their authoritative revision and bracket it with observed down ticks.
+    Misses count as selection/contact evidence, never as health damage.
+    """
+    recovery = validate_physical_observations([segment], require_hit=False, player_id=1)
+    contacts = {}
+    for role in ("Alice", "Bob"):
+        rows = segment[role]
+        windows = []
+        active = False
+        actor_ids = {actor["id"] for row in rows for actor in row["actors"]}
+        if len(actor_ids) != 1:
+            raise RuntimeError("retarget capture requires one stable NPC")
+        for row in rows:
+            pose = next(p for p in subjects(row) if p["id"] == 1)["knockout"]
+            if pose["state"] == 3:
+                if not active:
+                    # Offline clocks pause, so only observed ticks establish
+                    # overlap; do not infer a start from tick minus frame.
+                    windows.append([row["tick"], row["tick"]])
+                windows[-1][1] = row["tick"]
+                active = True
+            else:
+                active = False
+        contacts[role] = {(hit["attacker"], hit["attacker_revision"], hit["target_revision"]): hit
+                          for row in rows for hit in row["actor_hits"]
+                          if hit["target"] == 2 and hit["attacker"] in actor_ids
+                          and any(start <= hit["attacker_revision"] <= end for start, end in windows)}
+    common = contacts["Alice"].keys() & contacts["Bob"].keys()
+    if not common:
+        raise RuntimeError("missing shared retarget contact during player recovery")
+    return dict(recovery=recovery, contacts=[contacts["Alice"][key] for key in sorted(common)])
+
+
 def verify_knockout_encounter(output, evidence, processes, relay, manifest, restart_server, restart_client,
-                             npc=False, physical=False, content=None):
+                             npc=False, physical=False, content=None, retarget=False, runtime=None):
     from run_native_navigation_capture import records
 
     sequence = dict.fromkeys(evidence, 0)
@@ -124,7 +168,7 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
     captures = {}
 
     def samples(role):
-        return [r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"]
+        return established_samples([r for r in records(evidence[role]) if r.get("event") == "native_combat_sample"])
 
     def player(row, identity):
         return next(p for p in subjects(row, npc) if p["id"] == identity)
@@ -168,9 +212,12 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             for i in range(2) for identity in identities)
 
     def frame_subjects():
+        revisions = {r: max((row["revision"] for row in records(evidence[r])
+                             if row.get("event") == "native_player_sample"), default=0) for r in evidence}
         for role in evidence:
             if physical and not npc:
-                command(role, "pose 60 -300 1 0.45 0" if role == "Alice" else "pose -180 -300 1 0.3 1.57")
+                command(role, "pose 60 -300 1 0.45 0" if role == "Alice" else (
+                    "pose 140 -34 1 0.3 -2.15" if retarget else "pose -180 -300 1 0.3 1.57"))
                 if role == "Alice":
                     command(role, "thirdperson")
             elif npc:
@@ -180,10 +227,14 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         if physical and not npc:
             # Control acknowledgement is local. Wait for the actual impaired
             # movement publication before disconnecting or saving the setup.
-            for role, position in (("Alice", [61440, -307200, 1024]), ("Bob", [-184320, -307200, 1024])):
+            for role, position in (("Alice", [61440, -307200, 1024]),
+                                   ("Bob", [143360, -34816, 1024] if retarget else [-184320, -307200, 1024])):
                 wait_for(lambda: (rows := [r for r in records(evidence[role])
                                           if r.get("event") == "native_player_sample"])
-                         and rows[-1]["position"] == position, role + ": authority retains camera position")
+                         and rows[-1]["revision"] > revisions[role]
+                         and sum((a - b) ** 2 for a, b in zip(rows[-1]["position"], position))
+                         <= ((32 * 1024) ** 2 if retarget and role == "Bob" else 0),
+                         role + ": authority retains camera position")
 
     def exhaust():
         if npc:
@@ -236,9 +287,8 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
 
         def strike():
             health = {r: player(samples(r)[-1], identities[0])["health"] for r in evidence}
-            # Stage the high-agility observer within melee reach:
-            # a selected out-of-reach target currently holds the NPC wind-up.
-            # Alice steps closer to become its next target, then leaves range.
+            # Alice steps closer than the high-agility observer to become the
+            # next target. Recovery framing then exercises selection after retreat.
             command("Bob", "pose 140 -34 1 0.3 -1.57" if npc else "pose 140 -34 1 0.3 -2.85")
             command("Alice", "pose 60 -150 1 0.3 0" if npc else "pose 60 -95 1 0.3 0")
             time.sleep(.5)
@@ -277,9 +327,30 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             wait_for(lambda: (p := player(samples(role)[-1], identities[0]))["knockout"]["state"] == 3
                      and p["knockout"]["frame"] >= 32, role + ": physical fall reaches ground")
             screenshot(role, "physical-down")
+        if retarget:
+            for role in evidence:
+                wait_for(lambda: any(hit["target"] == 2 for row in samples(role)[-5:] for hit in row["actor_hits"])
+                         and player(samples(role)[-1], 1)["knockout"]["state"] == 3,
+                         role + ": NPC attacks Bob during Alice recovery")
+                screenshot(role, "physical-combat")
         physical_recovery("physical")
         normal = {r: samples(r) for r in evidence}
         normal_validation = validate([normal])
+        retarget_validation = {}
+        if retarget:
+            retarget_validation["normal"] = validate_retarget_observations(normal)
+            # Leave no reachable target for longer than the old 128-tick lock
+            # reproduction, then return for the reconnect encounter below.
+            command("Bob", "pose -180 -300 1 0.3 1.57")
+            time.sleep(.7)
+            start = {r: samples(r)[-1] for r in evidence}
+            wait_for(lambda: all(samples(r)[-1]["tick"] >= start[r]["tick"] + 128 for r in evidence),
+                     "both players remain out of reach for 128 committed ticks")
+            for role in evidence:
+                if any(p["health"] != next(q for q in subjects(start[role]) if q["id"] == p["id"])["health"]
+                       for p in subjects(samples(role)[-1])):
+                    raise RuntimeError("retreated players took melee damage")
+            retarget_validation["both_retreat"] = dict(start=start, end={r: samples(r)[-1] for r in evidence})
 
         missed_reconnect_windows = 0
         for attempt in range(3):
@@ -311,6 +382,9 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         # rejoining baseline must retain its health loss and advancing body clock.
         reconnect_validation = validate([
             {r: samples(r)[reconnect_start[r]:] for r in evidence}], require_hit=False)
+        if retarget:
+            retarget_validation["reconnect"] = validate_retarget_observations(
+                {r: samples(r)[reconnect_start[r]:] for r in evidence})
 
         strike()
         if not npc:
@@ -318,6 +392,9 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         processes["server"].terminate()
         processes["server"].wait(timeout=15)
         finished.add("server")
+        # Drain already-published impaired packets before shutting the observers
+        # down, so their last sample can witness the durable stopping point.
+        time.sleep(.7)
         for role in evidence:
             processes[role].terminate()
             processes[role].wait(timeout=15)
@@ -327,17 +404,30 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             path.rename(output / f"{role}-before.ndjson")
             path.with_suffix(".ndjson.control").unlink(missing_ok=True)
             sequence[role] = 0
-        for role in evidence:
-            restart_client(role)
-            finished.remove(role)
-        # Warm both renderers before authority resumes its short physical clip.
-        wait_for(lambda: all(any(r.get("event") == "phase8_desktop_started" for r in records(path))
-                             for path in evidence.values()), "both restarted desktops initialized", 15)
-        restart_server()
+        if retarget:
+            # Restore the observer first. Alice's offline recovery clock stays
+            # paused while Bob joins, so slow startup cannot consume her tail
+            # before his renderer is ready. Bob still receives live NPC attacks.
+            restart_client("Bob")
+            finished.remove("Bob")
+            restart_server()
+            wait_for(lambda: any(r.get("event") == "native_combat_sample" for r in records(evidence["Bob"])),
+                     "restarted observer receives authority", 75)
+            restart_client("Alice")
+            finished.remove("Alice")
+        else:
+            for role in evidence:
+                restart_client(role)
+                finished.remove(role)
+            # Warm both renderers before authority resumes its short physical clip.
+            wait_for(lambda: all(any(r.get("event") == "phase8_desktop_started" for r in records(path))
+                                 for path in evidence.values()), "both restarted desktops initialized", 15)
+            restart_server()
         wait_for(lambda: all_at(3, False), "restart restores physical knockdown on both clients", 75)
         restored = {r: samples(r)[-1] for r in evidence}
+        latest_before = max((before[r][-1] for r in evidence), key=lambda row: row["tick"])
         for role in evidence:
-            old = player(before[role][-1], identities[0])
+            old = player(latest_before, identities[0])
             new = player(restored[role], identities[0])
             if new["health"] != old["health"] or new["knockout"]["frame"] < old["knockout"]["frame"]:
                 raise RuntimeError("restart lost physical damage or rewound the committed clip")
@@ -345,11 +435,28 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         for role in evidence:
             screenshot(role, "physical-restored")
         physical_recovery("physical-restart")
+        if retarget:
+            command("Bob", "pose -180 -300 1 0.3 1.57")
+            wait_for(lambda: (rows := [r for r in records(evidence["Bob"])
+                                      if r.get("event") == "native_player_sample"])
+                     and rows[-1]["position"] == [-184320, -307200, 1024],
+                     "authority retains final retreat")
+            settled_tick = max(samples(r)[-1]["tick"] for r in evidence) + 30
+            wait_for(lambda: all(samples(r)[-1]["tick"] >= settled_tick for r in evidence),
+                     "final combat publications settle")
+            states = [{p["id"]: (p["health"], p["dead"], p["knockout"])
+                       for p in subjects(samples(r)[-1])} for r in evidence]
+            if states[0] != states[1]:
+                raise RuntimeError("final player health/pose failed to converge")
+            retarget_validation["final_players"] = states[0]
         after = {r: samples(r) for r in evidence}
         validation = validate([before, after])
         validation["normal"] = normal_validation
         validation["reconnect"] = reconnect_validation
         validation["restored"] = validate([after], require_hit=False)
+        if retarget:
+            retarget_validation["restored"] = validate_retarget_observations(after)
+            validation["retarget"] = retarget_validation
         for role in evidence:
             command(role, "quit")
             processes[role].wait(timeout=15)
@@ -358,11 +465,16 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
                 raise RuntimeError(f"{role} did not finish cleanly")
         report = dict(success=True, scenario="V51 live " + ("NPC" if npc else "player") + " physical knockdown and get-up", manifest=manifest,
                       synthetic_actor_stats_and_placements=True, content=content, initial=initial,
+                      runtime=runtime,
                       missed_reconnect_windows=missed_reconnect_windows,
                       reconnected=reconnected, restored=restored, validation=validation,
+                      profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay",
                       final={r: after[r][-1] for r in evidence}, relay=asdict(relay.stop()), screenshots=captures)
         output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps(dict(success=True, content=content, validation=validation)), flush=True)
+        print(json.dumps(dict(success=True, content=content,
+                              validation={k: v for k, v in validation.items() if k != "retarget"},
+                              retarget_contacts={k: len(v["contacts"]) for k, v in retarget_validation.items()
+                                                 if "contacts" in v})), flush=True)
         return
     exhaust()
     for role, identity in (dict.fromkeys(evidence, identities[0]) if npc else {"Alice": 2, "Bob": 1}).items():

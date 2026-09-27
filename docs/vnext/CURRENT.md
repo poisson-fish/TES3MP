@@ -9,47 +9,44 @@ Shared OpenMW mechanics/AI; constant defenses; life-bound absorb;
 Dispel preserves items/constants. Fresh campaigns required.
 Paralyze blocks actions/movement. Touch attribution/on-strike death deduplication persist.
 
-Inherited focused evidence (`build/logs/`): `m4-expanded-effects-test.log`,
-`m4-expanded-ai-test.log`, `m4-expanded-protocol-test.log`, `m4-expanded-handshake-test.log`;
-`m4-interrupted-test.log`; `m4-death-history-test.log` (2,049 deaths, 16 MiB budget);
-`m4-knockout-presentation-test.log`, `m4-knockout-presentation-getup.log`,
-`m4-knockout-presentation-loop.log`; `m4-stat-drains-unit.log`, `m4-stat-drains-test.log`.
-
-Inherited inspected fatigue captures: `build/m4-knockout-live-05/result.json`,
+Inherited fatigue captures: `build/m4-knockout-live-05/result.json`,
 `build/m4-npc-knockout-live-03/result.json`. NPC physical captures:
 `build/m4-physical-female-live-04/result.json`, `build/m4-physical-khajiit-live-03/result.json`,
 `build/m4-physical-argonian-live-03/result.json`. Synthetic vanilla bodies/stats/placements;
-two clients, 10% loss/100 ms delay/jitter, reconnect/restart. Native NPC body
-replacements immediately sample retained combat.
+two clients, 10% loss/100 ms delay/jitter, reconnect/restart.
 
 Inherited player physical capture: `build/m4-player-physical-live-08/result.json`.
-Stock male player/NPC sword hits, synthetic stats/placement; self/remote get-up
-inspected under impairment/reconnect/restart. Remote creation/equipment and local POV/skeleton
-rebuilds retain combat poses; camera setup waits for server positions.
-Inherited checks: `build/logs/m4-player-physical-validator.log`, `build/logs/m4-physical-validator.log`,
-`build/logs/m4-player-physical-pose-test.log` (four layers), `build/logs/m4-player-physical-client-build.log`.
+Remote creation/equipment and local POV/skeleton rebuilds retain combat poses.
+Inherited four-layer check: `build/logs/m4-player-physical-pose-test.log`.
 
 Tick-373 reconnect fixed: native campaigns exclude retained pose velocity from
-legacy integration across disconnect/rejoin/restart. Inherited reproduction:
-`build/logs/m4-reconnect-before.log` (`CandidateStateInvalid`, preparation=5).
-`m4-reconnect-pose.log` covers four presentation layers.
+legacy integration across disconnect/rejoin/restart. Inherited checks:
+`build/logs/m4-reconnect-before.log`, `m4-reconnect-pose.log`.
 
 NPC wind-up lock fixed: out-of-reach targets cancel unreleased swings at full
 wind-up; normal selection resumes. Released swings retain targets and recheck
-reach at the hit key. No save/protocol change.
-`build/logs/m4-windup-before.log` reproduces the 128-tick lock;
-`m4-windup-test.log` passes nearby-player reselection, both players retreating,
-return/reconnect, inactive pause, released misses, atomic rejection, exact retry/restart
-and two-observer events.
-`m4-windup-reconnect.log`, `m4-windup-getup.log` and `m4-windup-weapons.log`
-preserve tick-373 recovery, player fatigue/physical get-up, weapon replacement
-and uncertain-write failure. Server build: `m4-windup-server-build.log`.
-New evidence is synthetic; rendered acceptance remains inherited.
+reach at the hit key. Inherited transaction/failure evidence:
+`build/logs/m4-windup-test.log`, `m4-windup-reconnect.log`, `m4-windup-getup.log`,
+`m4-windup-weapons.log`. Server build: `m4-windup-server-build.log`.
 
-**M4 incomplete. Next: capture stock male NPC combat on both desktops**, exercising
-retreat/retargeting during player get-up under loss/delay/jitter and reconnect/restart.
-Then finish creature/custom-body coverage and the eight attribute/resource effects below.
-Inherited player capture moves both players away during recovery; overlapping combat remains unproven.
+New inspected capture: `build/m4-retarget-getup-live-06/result.json` (18 screenshots,
+binary hashes). Stock male bodies/iron longsword; synthetic stats/placements.
+Both desktops show swings and retargeting during player get-up, 128-tick retreat,
+return/reconnect/restart and final convergence without duplicated observed outcomes.
+100 ms delay, +/-25 ms jitter, 10% loss; 147 drops. Reconnect frame 35; restore 33.
+Bob restarts first; offline Alice pauses. General overlapping melee/ranged/magic remains unproven.
+
+Fixed native-placement melee-event routing and stock weapon sections. Cosmetic chops
+restart and release completed poses; replica callbacks are suppressed.
+Checks: `build/logs/m4-retarget-action-test.log` (four
+stock body layers), `m4-retarget-validator.log`, `m4-retarget-baseline-test.log`;
+client build: `m4-retarget-client-build.log`. Harness fixes: fresh movement,
+startup-prefix exclusion, shutdown packet drain; failed attempts remain in `build/`.
+
+**M4 incomplete. Next: replicate the committed NPC swing recipe/clock and
+target-facing to both desktops**, replacing the cosmetic event-only chop fallback.
+Verify under impairment/retreat/get-up/reconnect/restart before creature/custom-body
+coverage and remaining effects.
 
 100 built-in effects remain outside general native casting:
 

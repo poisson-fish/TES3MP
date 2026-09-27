@@ -55,6 +55,11 @@ namespace MWRender
 
     std::string_view replicatedActorAnimationGroup(ReplicatedActorLocomotion locomotion) noexcept;
 
+    class Animation;
+    // Cosmetic reliable-event fallback, on a ReplicatedActor-context animation.
+    // Does not sample or advance the authoritative NPC swing clock.
+    bool playReplicatedActorAction(Animation& animation, ReplicatedActorAction action);
+
     enum class ReplicatedActorResult : std::uint8_t
     {
         Accepted,

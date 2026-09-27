@@ -41,6 +41,32 @@
 
 namespace MWRender
 {
+    bool playReplicatedActorAction(Animation& animation, ReplicatedActorAction action)
+    {
+        const std::array<std::string_view, 3> candidates = action == ReplicatedActorAction::Attack
+            ? std::array<std::string_view, 3>{ "attack1", "weapononehand", "handtohand" }
+            : std::array<std::string_view, 3>{ "hit1", "hit2", "hit3" };
+        for (const auto group : candidates)
+        {
+            if (!animation.hasAnimation(group)) continue;
+            const bool directional = group == "weapononehand" || group == "handtohand";
+            // Stock NPC weapon groups have named attacks, not a whole-group
+            // start/stop clip. The event carries no direction/strength recipe;
+            // retain a cosmetic chop fallback until NPC clocks are replicated.
+            const std::string_view start = directional ? "chop min attack" : "start";
+            const std::string_view stop = directional ? "chop small follow stop" : "stop";
+            const std::string prefix = std::string(group) + ": ";
+            const float begin = animation.getTextKeyTime(prefix + std::string(start));
+            if (begin < 0 || animation.getTextKeyTime(prefix + std::string(stop)) <= begin) continue;
+            // Repeated reliable events must restart the clip; completed actions
+            // must release their priority so idle/locomotion can resume.
+            animation.disable(group);
+            animation.play(group, 2, BlendMask_All, true, 1.f, start, stop, 0.f, 0, false);
+            return animation.getInfo(group);
+        }
+        return false;
+    }
+
     std::string_view replicatedActorAnimationGroup(ReplicatedActorLocomotion locomotion) noexcept
     {
         switch (locomotion)
@@ -355,15 +381,7 @@ namespace MWRender
             {
                 if (mAnimationFallback || mDead)
                     return false;
-                const std::array<std::string_view, 3> candidates = action == ReplicatedActorAction::Attack
-                    ? std::array<std::string_view, 3>{ "attack1", "weapononehand", "handtohand" }
-                    : std::array<std::string_view, 3>{ "hit1", "hit2", "hit3" };
-                const auto selected = std::ranges::find_if(
-                    candidates, [&](std::string_view group) { return hasAnimation(group); });
-                if (selected == candidates.end())
-                    return false;
-                play(*selected, 2, BlendMask_All, false, 1.f, "start", "stop", 0.f, 0, false);
-                return true;
+                return playReplicatedActorAction(*this, action);
             }
 
         private:

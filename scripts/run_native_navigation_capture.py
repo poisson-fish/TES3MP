@@ -849,7 +849,9 @@ def run(args):
                                      lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
                                      lambda selected: start(selected, client_commands[selected]),
                                      npc=args.knockout_target == "npc", physical=args.physical_knockdown,
-                                     content=encounter)
+                                     content=encounter, retarget=args.retarget_getup,
+                                     runtime={name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
+                                              for name in ("openmw.exe", "tes3mp_server.exe")})
             return
         if args.player_swings:
             from native_swing_encounter import verify_swing_encounter
@@ -1002,12 +1004,16 @@ if __name__ == "__main__":
                         help="Subject of the --knockout capture")
     parser.add_argument("--physical-knockdown", action="store_true",
                         help="Use sword hits with --knockout and a vanilla-knockdown fixture (player subject: Alice)")
+    parser.add_argument("--retarget-getup", action="store_true",
+                        help="Keep Bob in melee reach during Alice's physical get-up; verify shared NPC retarget contacts")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
     if args.knockout_target != "players" and not args.knockout:
         parser.error("--knockout-target requires --knockout")
     if args.physical_knockdown and not args.knockout:
         parser.error("--physical-knockdown requires --knockout")
+    if args.retarget_getup and (not args.physical_knockdown or args.knockout_target != "players"):
+        parser.error("--retarget-getup requires --physical-knockdown with player subjects")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
             args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings, args.knockout)) > 1:
         parser.error("choose one capture mode")

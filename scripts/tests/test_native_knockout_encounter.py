@@ -1,10 +1,55 @@
 import copy
 import unittest
 
-from scripts.native_knockout_encounter import validate_observations, validate_physical_observations
+from scripts.native_knockout_encounter import (
+    established_samples, validate_observations, validate_physical_observations, validate_retarget_observations)
 
 
 class KnockoutEvidenceTests(unittest.TestCase):
+    def test_baseline_trims_startup_but_preserves_later_missing_peers(self):
+        joining = dict(self=2, players=[])
+        ready = dict(self=2, players=[dict(id=1)])
+        self.assertEqual(established_samples([joining]), [])
+        self.assertEqual(established_samples([joining, ready, joining]), [ready, joining])
+
+    def test_retarget_requires_shared_npc_contact_inside_recovery(self):
+        segment = {role: [] for role in ("Alice", "Bob")}
+        hit = dict(attacker=7, target=2, attacker_revision=30, target_revision=30,
+                   hit=False, damage=0, stat=0, died=False)
+        for tick, state, frame in ((10, 3, 5), (50, 3, 45), (80, 1, 0)):
+            alice = dict(id=1, health=90, fatigue=100, dead=False,
+                         knockout=dict(state=state, frame=frame, paralyzed=False))
+            bob = dict(id=2, health=100, fatigue=100, dead=False,
+                       knockout=dict(state=1, frame=0, paralyzed=False))
+            for role, own, peer in (("Alice", alice, bob), ("Bob", bob, alice)):
+                row = dict(tick=tick, self=own["id"], players=[copy.deepcopy(peer)], actors=[dict(id=7)],
+                           actor_hits=[copy.deepcopy(hit)] if tick == 80 else [], player_hits=[])
+                row.update({k: copy.deepcopy(v) for k, v in own.items() if k != "id"})
+                segment[role].append(row)
+        self.assertEqual(validate_retarget_observations(segment)["contacts"], [hit])
+        for mutation in ("before", "after", "missing", "duplicate", "disagree", "wrong_npc", "gap"):
+            changed = copy.deepcopy(segment)
+            if mutation == "missing":
+                changed["Bob"][-1]["actor_hits"] = []
+            elif mutation == "duplicate":
+                changed["Bob"][1]["actor_hits"] = [copy.deepcopy(hit)]
+            elif mutation == "disagree":
+                changed["Bob"][-1]["actor_hits"][0]["damage"] = 1
+            else:
+                for rows in changed.values():
+                    event = rows[-1]["actor_hits"][0]
+                    if mutation == "wrong_npc":
+                        event["attacker"] = 8
+                    else:
+                        event["attacker_revision"] = {"before": 9, "after": 51, "gap": 90}[mutation]
+                    if mutation == "gap":
+                        second = copy.deepcopy(rows[:2])
+                        for row in second:
+                            row["tick"] += 100
+                        rows.extend(second + [dict(copy.deepcopy(rows[-1]), tick=180, actor_hits=[])])
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                validate_retarget_observations(changed)
+
     def test_player_physical_compares_self_and_remote_and_deduplicates_npc_hits(self):
         hit = dict(attacker=7, target=1, attacker_revision=2, target_revision=3,
                    hit=True, damage=12, stat=0, died=False)

@@ -1954,37 +1954,36 @@ namespace TES3MP::OpenMWAdapter
                     != ProviderResult::Accepted)
                     return ProviderResult::PresentationFailed;
             }
+            const auto meleeActor = [&](ActorId id) -> MWRender::ReplicatedActor* {
+                if (const auto native = nativeRemotes.find(id.value()); native != nativeRemotes.end())
+                    return native->second.actor.get();
+                const auto remote = std::ranges::find_if(actorRemotes, [&](const auto& entry) {
+                    return entry.second.actor && entry.second.lastObserved
+                        && entry.second.lastObserved->actorId() == id;
+                });
+                return remote == actorRemotes.end() ? nullptr : remote->second.actor.get();
+            };
             for (const auto& batch : events)
             {
                 for (const auto& event : batch.events())
                 {
                     if (!event.hit)
                         continue;
-                    const auto remote = std::ranges::find_if(actorRemotes, [&](const auto& entry) {
-                        return entry.second.actor && entry.second.lastObserved
-                            && entry.second.lastObserved->actorId() == event.targetActorId;
-                    });
-                    if (remote != actorRemotes.end()
-                        && !replicatedActorResultAccepted(
-                            remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                    auto* actor = meleeActor(event.targetActorId);
+                    if (actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                         return ProviderResult::PresentationFailed;
-                    if (remote != actorRemotes.end() && event.damage > 0.f)
+                    if (actor && event.damage > 0.f)
                     {
                         const auto soundId = event.damagedStat == MeleeDamageStat::Fatigue
                             ? ESM::RefId::stringRefId("Hand To Hand Hit")
                             : ESM::RefId::stringRefId("Health Damage");
-                        sound->playSound3D(remote->second.actor->ptr(), soundId, 1.f, 1.f);
+                        sound->playSound3D(actor->ptr(), soundId, 1.f, 1.f);
                     }
                 }
                 for (const auto& event : batch.actorEvents())
                 {
-                    const auto remote = std::ranges::find_if(actorRemotes, [&](const auto& entry) {
-                        return entry.second.actor && entry.second.lastObserved
-                            && entry.second.lastObserved->actorId() == event.attackerActorId;
-                    });
-                    if (remote != actorRemotes.end()
-                        && !replicatedActorResultAccepted(
-                            remote->second.actor->playAction(MWRender::ReplicatedActorAction::Attack)))
+                    auto* actor = meleeActor(event.attackerActorId);
+                    if (actor && !replicatedActorResultAccepted(actor->playAction(MWRender::ReplicatedActorAction::Attack)))
                         return ProviderResult::PresentationFailed;
                     if (event.targetPlayerId == snapshot.selfPlayerId() && event.hit)
                     {

@@ -883,7 +883,7 @@ namespace MWRender
 
         try
         {
-            if (mTextKeyListener != nullptr)
+            if (mContext != Context::ReplicatedActor && mTextKeyListener != nullptr)
                 mTextKeyListener->handleTextKey(groupname, key, map);
         }
         catch (std::exception& e)

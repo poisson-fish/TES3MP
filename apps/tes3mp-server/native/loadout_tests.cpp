@@ -7,7 +7,7 @@
 #include "transfer_rehearsal.hpp"
 
 namespace TES3MP::Native::Testing { void checkItemPlacement(); }
-namespace TES3MP::Native::Testing { void checkMeleePresentation(const std::filesystem::path&, const std::filesystem::path&, bool); }
+namespace TES3MP::Native::Testing { void checkMeleePresentation(const std::filesystem::path&, const std::filesystem::path&, bool, bool); }
 
 #include <cmath>
 #include <fstream>
@@ -6808,10 +6808,12 @@ int main(int argc, char** argv)
             std::cout << "PASS npc-knockout\n"; return 0;
         }
         if (argc == 4 && (std::string_view(argv[1]) == "melee-presentation"
-                || std::string_view(argv[1]) == "knockout-presentation"))
+                || std::string_view(argv[1]) == "knockout-presentation"
+                || std::string_view(argv[1]) == "npc-action-presentation"))
         {
             TES3MP::Native::Testing::checkMeleePresentation(std::filesystem::absolute(argv[2]),
-                std::filesystem::absolute(argv[3]), std::string_view(argv[1]) == "knockout-presentation");
+                std::filesystem::absolute(argv[3]), std::string_view(argv[1]) == "knockout-presentation",
+                std::string_view(argv[1]) == "npc-action-presentation");
             std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && (std::string_view(argv[1]) == "bow-combined-flight"

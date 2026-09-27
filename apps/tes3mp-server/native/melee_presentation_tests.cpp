@@ -1,4 +1,5 @@
 #include <apps/openmw/mwrender/animation.hpp>
+#include <apps/openmw/mwrender/replicatedactor.hpp>
 #include <components/files/collections.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/resourcesystem.hpp>
@@ -51,6 +52,7 @@ namespace TES3MP::Native::Testing
                 }
             }
             void clearSources() { clearAnimSources(); }
+            void useReplicaContext() { mContext = Context::ReplicatedActor; }
             bool listenerIs(TextKeyListener* value) const { return mTextKeyListener == value; }
         };
         struct Listener : MWRender::Animation::TextKeyListener
@@ -61,7 +63,8 @@ namespace TES3MP::Native::Testing
         };
     }
 
-    void checkMeleePresentation(const std::filesystem::path& data, const std::filesystem::path& settings, bool knockout)
+    void checkMeleePresentation(const std::filesystem::path& data, const std::filesystem::path& settings,
+        bool knockout, bool actions)
     {
         Settings::SettingsFileParser().loadSettingsFile(settings, Settings::Manager::mDefaultSettings);
         Settings::StaticValues::initDefaults();
@@ -72,6 +75,37 @@ namespace TES3MP::Native::Testing
         VFS::registerArchives(&vfs, Files::Collections({data}), {"Morrowind.bsa"}, true,
             &encoder.getStatelessEncoder());
         Resource::ResourceSystem resources(&vfs, 0, &encoder.getStatelessEncoder());
+        if (actions)
+        {
+            for (unsigned body = 0; body < 4; ++body)
+            {
+                Pose replica(resources, body);
+                replica.useReplicaContext();
+                Listener listener;
+                replica.setTextKeyListener(&listener);
+                for (const auto action : {MWRender::ReplicatedActorAction::Attack, MWRender::ReplicatedActorAction::Hit})
+                {
+                    const std::string group = action == MWRender::ReplicatedActorAction::Attack ? "weapononehand" : "hit1";
+                    const std::string key = action == MWRender::ReplicatedActorAction::Attack ? "chop min attack" : "start";
+                    const float start = replica.getTextKeyTime(group + ": " + key);
+                    for (unsigned repeat = 0; repeat < 2; ++repeat)
+                    {
+                        require(MWRender::playReplicatedActorAction(replica, action), "Replica action rejected");
+                        require(replica.getInfo(group) && replica.getCurrentTime(group) == start,
+                            "Replica action did not begin at its stock section");
+                        replica.runAnimation(.1f);
+                        require(replica.getCurrentTime(group) > start, "Replica action failed to advance");
+                        require(MWRender::playReplicatedActorAction(replica, action)
+                            && replica.getCurrentTime(group) == start, "New action did not restart the live clip");
+                        replica.runAnimation(10.f);
+                        require(!replica.getInfo(group), "Completed action retained animation priority");
+                    }
+                    require(listener.calls == 0, "Cosmetic NPC event replayed gameplay keys");
+                }
+                std::cout << "npc-action body=" << body << " attack+hit=advance+repeat+finish callbacks=none\n";
+            }
+            return;
+        }
         if (knockout)
         {
             for (unsigned body = 0; body < 4; ++body)
