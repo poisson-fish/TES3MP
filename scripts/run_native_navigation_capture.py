@@ -724,13 +724,14 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.player_swings or args.knockout
-    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings else {}
+    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings or args.physical_knockdown else {}
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
     if args.npc_casting: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
     version = 51 if args.knockout else 46 if args.player_swings else 42 if args.npc_casting else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
+    player_actor = "npc_knockdown_observer" if args.physical_knockdown else npc if args.life_encounter or spell_capture else "player"
     destination = "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
@@ -739,7 +740,7 @@ def run(args):
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
-        f'actors "{npc if args.life_encounter or spell_capture else "player"}" "{npc if args.life_encounter or spell_capture else "player"}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
+        f'actors "{player_actor}" "{player_actor}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
         f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + ('melee "weapononehand" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
@@ -831,7 +832,7 @@ def run(args):
                        "--tes3mp-content-cell-spaces=interior:1", "--tes3mp-content-allowed-cells=interior:1",
                        f"--tes3mp-content-cell-space-map=1={cell}", "--tes3mp-content-appearance-id=2",
                        "--tes3mp-content-appearance-record=player"]
-            if spell_capture and not args.player_swings:
+            if spell_capture and not args.player_swings and not args.physical_knockdown:
                 spell_id = 14695981039346656037
                 for byte in spell_name.lower().encode("ascii"):
                     spell_id = ((spell_id ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
@@ -843,7 +844,8 @@ def run(args):
             verify_knockout_encounter(output, evidence, processes, relay, manifest,
                                      lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
                                      lambda selected: start(selected, client_commands[selected]),
-                                     npc=args.knockout_target == "npc")
+                                     npc=args.knockout_target == "npc", physical=args.physical_knockdown,
+                                     content=encounter)
             return
         if args.player_swings:
             from native_swing_encounter import verify_swing_encounter
@@ -994,10 +996,14 @@ if __name__ == "__main__":
     parser.add_argument("--knockout", action="store_true", help="V51 fatigue knockout/get-up on two desktops, reconnect and restart")
     parser.add_argument("--knockout-target", choices=("players", "npc"), default="players",
                         help="Subject of the --knockout capture")
+    parser.add_argument("--physical-knockdown", action="store_true",
+                        help="Use sword hits with --knockout --knockout-target npc and a vanilla-knockdown fixture")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
     if args.knockout_target != "players" and not args.knockout:
         parser.error("--knockout-target requires --knockout")
+    if args.physical_knockdown and (not args.knockout or args.knockout_target != "npc"):
+        parser.error("--physical-knockdown requires --knockout --knockout-target npc")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
             args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings, args.knockout)) > 1:
         parser.error("choose one capture mode")

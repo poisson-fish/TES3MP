@@ -25,19 +25,23 @@ Other inherited checks:
   `build/logs/m4-knockout-presentation-getup.log`, `build/logs/m4-knockout-presentation-loop.log`.
 - Drain Attribute/Skill: `build/logs/m4-stat-drains-unit.log`, `build/logs/m4-stat-drains-test.log`.
 
-Inherited: `--knockout` two-client capture passed at 10% loss/100 ms delay/jitter,
-including reconnect/restart: `build/m4-knockout-live-05/result.json`
-(`build/logs/m4-knockout-live-05.log`). Inspected screenshots show prone/get-up/upright
-players. Focused `expanded-effects` and validator passed:
-`build/logs/m4-knockout-live-fixture-test.log`, `build/logs/m4-knockout-live-validator.log`.
-
-New: NPC fatigue passed impairment/reconnect/restart: `build/m4-npc-knockout-live-03/result.json`.
-Both clients' inspected screenshots show exhaustion/get-up/upright. Synthetic vanilla
-actors/spells. Fixture/validators passed (`build/logs/m4-npc-knockout-fixture.log`,
-`build/logs/m4-npc-knockout-validator.log`, `build/logs/m4-knockout-player-validator.log`).
+Inherited fatigue captures: players `build/m4-knockout-live-05/result.json`,
+NPC `build/m4-npc-knockout-live-03/result.json`. Synthetic vanilla actors/spells;
+both clients' inspected exhaustion/get-up/upright screenshots passed 10% loss/100 ms
+delay/jitter, reconnect/restart. Fixture/validators passed.
 Humanoid/female/beast/Argonian exhaustion/physical-knockdown sampling passed
 (`build/logs/m4-knockout-body-presentation.log`): resource clocks only.
-Physical hits and other bodies remain unverified live.
+
+New: NPC physical sword-hit knockdown/get-up passed two-client captures at 10%
+loss/100 ms delay/jitter, reconnect and restart: `build/m4-physical-female-live-04/result.json`,
+`build/m4-physical-khajiit-live-03/result.json`, `build/m4-physical-argonian-live-03/result.json`.
+Inspected both clients' down/get-up/upright screenshots. Synthetic vanilla
+placements/stats; stock sword/rolls/clips. Damage retention, advancing clocks and
+hit deduplication passed; missed reconnect windows are recorded, not credited.
+New native bodies immediately apply retained combat before another packet arrives.
+Validator/builds passed (`build/logs/m4-physical-validator.log`,
+`build/logs/m4-physical-client-build.log`, `build/logs/m4-physical-fixture-build.log`).
+Player physical-hit recovery and male/creature/custom-body live coverage remain.
 
 Inherited desktop evidence, 10% loss/100 ms delay/jitter:
 `build/m4-cast-vanilla-live-10/result.json`, `build/m4-cast-tr-live-02/result.json`,
@@ -45,7 +49,7 @@ Inherited desktop evidence, 10% loss/100 ms delay/jitter:
 `build/m4-swing-vanilla-live-07/result.json`.
 Synthetic placements; these captures do not verify new effects.
 
-**M4 incomplete. Next: step 4's physical-hit knockdown and other-body live presentation,
+**M4 incomplete. Next: step 4's player physical-hit knockdown and remaining body presentation,
 then attribute/resource effects.**
 The following 100 built-in effects remain outside general native casting:
 
@@ -77,14 +81,10 @@ The following 100 built-in effects remain outside general native casting:
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-This accounts for 143 built-in IDs with the existing 43; it does not establish
-arbitrary scripted/mod support. Allowlisting is not completion. All effects need
-applicable actor/object targeting, AI, ranges/areas/order, source types, stacking,
-defenses/cures/expiry, derived stats/equipment/controls/presentation, life ownership
-and atomic retry/reconnect/restart integration. Powers, abilities and diseases
-remain outside the general spell entry point. Respect stock context restrictions.
-Resolve multi-NPC/summon and player-life prerequisites when required; step 5 is
-not the sole next task. Live effect acceptance remains. Ranged recovery,
-contacts, NPC execution, controls/rendering and overlapping desktop combat under
-disruption/restart follow. Plain ranged sources/body proxies and inherited movement
-remain limitations. Movement/collision cutover follows; TR Lua awaits M5.
+Existing 43 plus these 100 cover 143 IDs, not arbitrary scripted/mod support.
+Allowlisting is insufficient: PLAN's applicable integration and live acceptance
+remain required. Powers/abilities/diseases remain outside general casting; preserve
+stock restrictions. Resolve multi-NPC/summon/player-life prerequisites as needed.
+Ranged completion and overlapping combat precede movement/collision cutover.
+Plain ranged sources/body proxies and inherited movement remain limitations;
+TR Lua awaits M5.

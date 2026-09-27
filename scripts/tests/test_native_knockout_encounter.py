@@ -1,10 +1,60 @@
 import copy
 import unittest
 
-from scripts.native_knockout_encounter import validate_observations
+from scripts.native_knockout_encounter import validate_observations, validate_physical_observations
 
 
 class KnockoutEvidenceTests(unittest.TestCase):
+    def test_physical_requires_health_hit_progress_recovery_and_consistent_observers(self):
+        hit = dict(attacker=1, target=7, attacker_revision=2, target_revision=3,
+                   hit=True, damage=12, stat=0, died=False)
+        rows = [dict(tick=tick, player_hits=[hit] if tick == 1 else [],
+                     actors=[dict(id=7, health=100, fatigue=100, dead=False,
+                                  knockout=dict(state=state, frame=frame, paralyzed=False))])
+                for tick, state, frame in ((1, 3, 10), (2, 3, 50), (3, 1, 0))]
+        valid = [{"Alice": rows, "Bob": copy.deepcopy(rows)}]
+        self.assertEqual(validate_physical_observations(valid)["matching_health_hits"], 1)
+        restored = copy.deepcopy(valid)
+        for role in restored[0]:
+            restored[0][role][0]["player_hits"] = []
+        validate_physical_observations(restored, require_hit=False)
+        with self.assertRaises(RuntimeError):
+            validate_physical_observations(restored)
+        for mutation in ("missing", "dead", "fatigue", "paralyzed", "divergence", "frozen", "rewound",
+                         "no_recovery", "duplicate", "wrong_stat", "wrong_target", "wrong_outcome"):
+            changed = copy.deepcopy(valid)
+            bob = changed[0]["Bob"]
+            actor = bob[1]["actors"][0]
+            if mutation == "missing":
+                changed[0]["Bob"] = []
+            elif mutation == "dead":
+                actor["dead"] = True
+            elif mutation == "fatigue":
+                actor["fatigue"] = -1
+            elif mutation == "paralyzed":
+                actor["knockout"]["paralyzed"] = True
+            elif mutation == "divergence":
+                actor["knockout"]["frame"] += 1
+            elif mutation == "frozen":
+                for role in changed[0]:
+                    changed[0][role][1]["actors"][0]["knockout"]["frame"] = 10
+            elif mutation == "rewound":
+                for role in changed[0]:
+                    reset = copy.deepcopy(changed[0][role][1])
+                    reset["actors"][0]["knockout"]["frame"] = 1
+                    changed[0][role].insert(2, reset)
+            elif mutation == "no_recovery":
+                bob.pop()
+            elif mutation == "duplicate":
+                bob[1]["player_hits"] = [copy.deepcopy(hit)]
+            elif mutation in ("wrong_stat", "wrong_target"):
+                for role in changed[0]:
+                    changed[0][role][0]["player_hits"][0]["stat" if mutation == "wrong_stat" else "target"] = 2
+            else:
+                bob[0]["player_hits"][0]["damage"] += 1
+            with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                validate_physical_observations(changed)
+
     def test_npc_recovery_requires_both_observers_and_stable_living_actor(self):
         rows = [dict(tick=tick, actors=[dict(id=7, fatigue=fatigue, dead=False,
                     knockout=dict(state=state, frame=frame, paralyzed=False))])

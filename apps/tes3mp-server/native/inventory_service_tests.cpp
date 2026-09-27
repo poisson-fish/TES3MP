@@ -5614,7 +5614,8 @@ namespace TES3MP::Native::Testing
                 }
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
-            if (encounterProfile == "vanilla-melee")
+            const bool physicalKnockdown = encounterProfile.starts_with("vanilla-knockdown-");
+            if (encounterProfile == "vanilla-melee" || physicalKnockdown)
             {
                 const auto weapon = ESM::RefId::stringRefId("iron longsword");
                 require(base.store().get<ESM::Weapon>().search(weapon), "Encounter weapon missing");
@@ -5622,7 +5623,27 @@ namespace TES3MP::Native::Testing
                 npc.mInventory.mList = {{1, weapon}, {1, ESM::RefId::stringRefId("common_shirt_01")}};
                 npc.mNpdt.mHealth = 10000; npc.mNpdt.mMana = 10000; npc.mNpdt.mFatigue = 10000;
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
-                std::ofstream(scratch / "encounter.txt") << "profile vanilla-melee\nweapon iron longsword\n";
+                if (physicalKnockdown)
+                {
+                    const auto body = encounterProfile.substr(std::string_view("vanilla-knockdown-").size());
+                    require(body == "male" || body == "female" || body == "khajiit" || body == "argonian",
+                        "Unknown knockdown body profile");
+                    const auto race = ESM::RefId::stringRefId(body == "khajiit" ? "khajiit"
+                        : body == "argonian" ? "argonian" : "dark elf");
+                    const ESM::NPC* appearance = nullptr;
+                    for (const auto& candidate : base.store().get<ESM::NPC>())
+                        if (candidate.mRace == race && candidate.isMale() == (body != "female")
+                            && !candidate.mHead.empty() && (!appearance || candidate.mId < appearance->mId))
+                            appearance = &candidate;
+                    require(appearance, "Knockdown body appearance missing");
+                    npc.mRace = appearance->mRace; npc.mHead = appearance->mHead; npc.mHair = appearance->mHair;
+                    npc.mFlags = (npc.mFlags & ~ESM::NPC::Female) | (appearance->mFlags & ESM::NPC::Female);
+                    // Lower the stock threshold without replacing hit/knockdown rolls,
+                    // weapon records or authored animation durations.
+                    npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
+                }
+                std::ofstream(scratch / "encounter.txt") << "profile " << encounterProfile
+                    << "\nweapon iron longsword\n";
             }
             else if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
             {
@@ -5833,6 +5854,15 @@ namespace TES3MP::Native::Testing
                 }
             }
             out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            if (physicalKnockdown)
+            {
+                auto observer = npc;
+                observer.mId = ESM::RefId::stringRefId("npc_knockdown_observer");
+                // Keep camera players above the stock knockdown damage threshold
+                // while the independent NPC target retains its vulnerable stats.
+                observer.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 255;
+                out.startRecord(ESM::NPC::sRecordId, 0); observer.save(out); out.endRecord(ESM::NPC::sRecordId);
+            }
             if (participantHits)
             {
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);

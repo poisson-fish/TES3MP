@@ -1181,6 +1181,17 @@ namespace TES3MP::OpenMWAdapter
                         remote=nativeRemotes.try_emplace(motion->placement,ptr.getCell(),std::move(actor),metrics).first;
                         remote->second.source=ptr; remote->second.equipment=std::move(appearance);
                         world->disable(ptr);
+                        // Combat may arrive before the appearance/motion baseline.
+                        // A replacement body must immediately sample that committed
+                        // state, even if the next combat packet is lost or delayed.
+                        if (combatSnapshot)
+                        {
+                            const auto combat = std::ranges::find_if(combatSnapshot->actors(),
+                                [&](const auto& state) { return state.actorId.value() == member.actor.value(); });
+                            if (combat != combatSnapshot->actors().end()
+                                && applyNativeActorCombat(*remote->second.actor, *combat) != ProviderResult::Accepted)
+                                return ProviderResult::PresentationFailed;
+                        }
                     }
                     if (motion->tick > remote->second.tick)
                     {
@@ -1747,6 +1758,33 @@ namespace TES3MP::OpenMWAdapter
                 : ProviderResult::PresentationFailed;
         }
 
+        ProviderResult applyNativeActorCombat(MWRender::ReplicatedActor& actor, const ActorCombatSnapshot& combat)
+        {
+            auto ptr = actor.ptr();
+            auto& stats = ptr.getClass().getCreatureStats(ptr);
+            if (!combat.dead && stats.isDead()) stats.resurrect();
+            auto health = stats.getHealth();
+            health.setBase(combat.maximumHealth);
+            health.setCurrent(combat.health);
+            stats.setHealth(health);
+            auto fatigue = stats.getFatigue();
+            fatigue.setBase(combat.maximumFatigue);
+            fatigue.setCurrent(combat.fatigue, true, true);
+            stats.setFatigue(fatigue);
+            auto magicka = stats.getMagicka();
+            magicka.setBase(combat.maximumMagicka);
+            magicka.setCurrent(combat.magicka, true, true);
+            stats.setMagicka(magicka);
+            if (combat.knockout.state) stats.setKnockedDown(combat.knockout.state >= 2);
+            setParalyzed(stats, combat.knockout.paralyzed);
+            if (!replicatedActorResultAccepted(actor.setKnockout(combat.knockout.state, combat.knockout.frame))
+                || !replicatedActorResultAccepted(actor.setCast(combat.castPhase >= 3 && !combat.dead,
+                    combat.castRange, combat.castStop ? float(combat.castElapsed) / combat.castStop : 0.f))
+                || !replicatedActorResultAccepted(actor.setDead(combat.dead)))
+                return ProviderResult::PresentationFailed;
+            return ProviderResult::Accepted;
+        }
+
         ProviderResult applyCombat(
             const LatestWinsCombatSnapshot& snapshot, std::span<const ReliableCombatEventBatch> events)
         {
@@ -1867,30 +1905,7 @@ namespace TES3MP::OpenMWAdapter
                 const auto combat = std::ranges::lower_bound(
                     snapshot.actors(), *actorId, {}, &ActorCombatSnapshot::actorId);
                 if (combat == snapshot.actors().end() || combat->actorId != *actorId) continue;
-                auto ptr = remote.actor->ptr();
-                auto& stats = ptr.getClass().getCreatureStats(ptr);
-                if (!combat->dead && stats.isDead()) stats.resurrect();
-                auto health = stats.getHealth();
-                health.setBase(combat->maximumHealth);
-                health.setCurrent(combat->health);
-                stats.setHealth(health);
-                auto fatigue = stats.getFatigue();
-                fatigue.setBase(combat->maximumFatigue);
-                fatigue.setCurrent(combat->fatigue, true, true);
-                stats.setFatigue(fatigue);
-                auto magicka = stats.getMagicka();
-                magicka.setBase(combat->maximumMagicka);
-                magicka.setCurrent(combat->magicka, true, true);
-                stats.setMagicka(magicka);
-                if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
-                setParalyzed(stats, combat->knockout.paralyzed);
-                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
-                        combat->knockout.state, combat->knockout.frame)))
-                    return ProviderResult::PresentationFailed;
-                if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
-                        combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
-                    return ProviderResult::PresentationFailed;
-                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                if (applyNativeActorCombat(*remote.actor, *combat) != ProviderResult::Accepted)
                     return ProviderResult::PresentationFailed;
             }
             for (auto& [entity, remote] : remotes)
