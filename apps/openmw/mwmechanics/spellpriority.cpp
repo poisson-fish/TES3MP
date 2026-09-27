@@ -254,6 +254,19 @@ namespace MWMechanics
         return rating;
     }
 
+    std::optional<float> rateCastingInterferenceEffect(const ESM::ENAMstruct& effect,
+        const CreatureStats* enemy, bool enemyParalyzed)
+    {
+        if (effect.mEffectID != ESM::MagicEffect::Sound && effect.mEffectID != ESM::MagicEffect::Silence)
+            return std::nullopt;
+        if (!enemy || enemyParalyzed || enemy->getKnockedDown() || enemy->getDrawState() != DrawState::Spell)
+            return 0.f;
+        if (effect.mEffectID == ESM::MagicEffect::Sound
+            && enemy->getMagicEffects().getOrDefault(ESM::MagicEffect::Silence).getMagnitude() > 0)
+            return 0.f;
+        return 1.f;
+    }
+
     float rateDispelEffect(bool self, int positive, int negative)
     {
         const int diff = self ? negative - positive : positive - negative;
@@ -469,38 +482,11 @@ namespace MWMechanics
             if (stats.getDrawState() != MWMechanics::DrawState::Weapon)
                 return 0.f;
         }
-        else if (effect.mEffectID == ESM::MagicEffect::Sound)
+        else if (effect.mEffectID == ESM::MagicEffect::Sound || effect.mEffectID == ESM::MagicEffect::Silence)
         {
-            if (enemy.isEmpty())
-                return 0.f;
-
-            const CreatureStats& stats = enemy.getClass().getCreatureStats(enemy);
-
-            // Enemy can't cast spells
-            if (stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Silence).getMagnitude() > 0)
-                return 0.f;
-
-            if (stats.isParalyzed() || stats.getKnockedDown())
-                return 0.f;
-
-            // Enemy doesn't cast spells
-            if (stats.getDrawState() != MWMechanics::DrawState::Spell)
-                return 0.f;
-        }
-        else if (effect.mEffectID == ESM::MagicEffect::Silence)
-        {
-            if (enemy.isEmpty())
-                return 0.f;
-
-            const CreatureStats& stats = enemy.getClass().getCreatureStats(enemy);
-
-            // Enemy can't cast spells
-            if (stats.isParalyzed() || stats.getKnockedDown())
-                return 0.f;
-
-            // Enemy doesn't cast spells
-            if (stats.getDrawState() != MWMechanics::DrawState::Spell)
-                return 0.f;
+            const auto* stats = enemy.isEmpty() ? nullptr : &enemy.getClass().getCreatureStats(enemy);
+            rating = *rateCastingInterferenceEffect(effect, stats, stats && stats->isParalyzed());
+            if (rating == 0.f) return 0.f;
         }
         else if (effect.mEffectID == ESM::MagicEffect::RestoreAttribute)
             return 0.f; // TODO: implement based on attribute damage

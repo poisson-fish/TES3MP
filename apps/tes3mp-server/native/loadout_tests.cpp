@@ -6773,13 +6773,13 @@ int main(int argc, char** argv)
                 {}, true, false, true, false, false, false, true);
             std::cout << "PASS stat-drains\n"; return 0;
         }
-        if (argc == 5 && (std::string_view(argv[1]) == "interrupted-casts" || std::string_view(argv[1]) == "player-cast-lifecycle"))
+        if (argc == 5 && (std::string_view(argv[1]) == "interrupted-casts" || std::string_view(argv[1]) == "player-cast-lifecycle" || std::string_view(argv[1]) == "casting-interference"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true, false, false, true, false,
                 false, true, false, true, false, false, false, false, false, false, false, false,
-                {}, false, false, true, false, true, false, false, false, false, std::string_view(argv[1]) == "player-cast-lifecycle");
+                {}, false, false, true, false, true, false, false, false, false, std::string_view(argv[1]) != "interrupted-casts", std::string_view(argv[1]) == "casting-interference");
             std::cout << "PASS " << argv[1] << "\n"; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "reconnect-combat")

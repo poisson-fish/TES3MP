@@ -4167,6 +4167,10 @@ namespace TES3MP::Native
                 addTimedResistance(caster, timedEffects, 2);
                 addTimedResistance(victim, timedEffects, actor(enemy->playerId()));
                 if (mBinding.mKnockoutRules) victim.setKnockedDown(combat->knockedDown[actor(enemy->playerId())]);
+                // The native player casting lifecycle supplies the authoritative
+                // spell activity used by stock Silence/Sound target priorities.
+                if (mBinding.mPlayerCastLifecycle && combat->playerCasts[actor(enemy->playerId())])
+                    victim.setDrawState(MWMechanics::DrawState::Spell);
                 AiMagicContext selection{caster, &victim};
                 selection.expandedEffects = mBinding.mExpandedEffects;
                 for (const auto& effect : timedEffects)

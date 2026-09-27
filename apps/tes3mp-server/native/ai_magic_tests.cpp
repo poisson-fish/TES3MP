@@ -449,6 +449,74 @@ namespace
         rejects(std::span(oversized), std::span<const AiMagicItem>{});
         near(caster.getMagicka().getCurrent(), 100.f, "Rejected selection mutated caster");
     }
+    void interference()
+    {
+        MWWorld::ESMStore store; content(store);
+        MWMechanics::NpcStats caster(store); initialize(caster);
+        auto ordinary = spell("ordinary", ESM::MagicEffect::RestoreHealth, ESM::RT_Self);
+        ordinary.mData.mFlags = 0;
+        auto always = ordinary; always.mData.mFlags = ESM::Spell::F_Always;
+        for (auto effect : {ESM::MagicEffect::Silence, ESM::MagicEffect::Sound})
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mSchool = ESM::Skill::Illusion; record.mData.mBaseCost = 10.f;
+            record.mData.mFlags = ESM::MagicEffect::Harmful;
+            if (effect == ESM::MagicEffect::Silence) record.mData.mFlags |= ESM::MagicEffect::NoMagnitude;
+            store.insertStatic(record);
+            auto interference = spell("interference", effect, ESM::RT_Touch,
+                effect == ESM::MagicEffect::Silence ? 0 : 1000);
+            require(!prepareInstantSpell(interference, store, true)
+                && prepareInstantSpell(interference, store, true, true), "Interference admission lost version/NoMagnitude rules");
+            caster.getMagicEffects() = {};
+            near(MWMechanics::getSpellSuccessChance(ordinary, caster, store), 100.f, "Control spell is not certain");
+            caster.getMagicEffects().add(MWMechanics::EffectKey(effect),
+                MWMechanics::EffectParam(effect == ESM::MagicEffect::Silence ? 1.f : 1000.f));
+            near(MWMechanics::getSpellSuccessChance(ordinary, caster, store), 0.f, "Interference did not prevent ordinary success");
+            near(MWMechanics::getSpellSuccessChance(always, caster, store),
+                effect == ESM::MagicEffect::Silence ? 0.f : 100.f, "Always flag ignored stock interference precedence");
+            auto prepared = prepareInstantSpell(ordinary, store, true, true);
+            Misc::Rng::Generator rng{17}, expected{17};
+            Misc::Rng::roll0to99(expected);
+            const auto before = caster.getMagicka().getCurrent();
+            const auto result = launchInstantSpell(*prepared, caster, store, rng, false, false);
+            require(!result.succeeded && Misc::Rng::serialize(rng) == Misc::Rng::serialize(expected),
+                "Failed spell changed stock success-roll consumption");
+            near(caster.getMagicka().getCurrent(), before - prepared->cost, "Failed spell was not charged once");
+            ESM::Enchantment item; item.blank(); item.mEffects = ordinary.mEffects;
+            item.mData.mType = ESM::Enchantment::WhenUsed; item.mData.mCost = 5; item.mData.mCharge = 50;
+            require(prepareEnchantmentCast(item, caster, -1.f, store, true, true)->affordable,
+                "Interference blocked enchanted item");
+            caster.getMagicEffects() = {};
+            MWMechanics::NpcStats enemy(store); initialize(enemy);
+            const std::array spells{AiMagicSpell{&interference}};
+            AiMagicContext context{caster, &enemy}; context.expandedEffects = true;
+            require(!prepareAiMagicCast(context, spells, {}, store), "AI targeted a non-caster with interference");
+            enemy.setDrawState(MWMechanics::DrawState::Spell);
+            require(bool(prepareAiMagicCast(context, spells, {}, store)), "AI skipped interference against a caster");
+            enemy.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Silence), MWMechanics::EffectParam(1.f));
+            near(*MWMechanics::rateCastingInterferenceEffect(interference.mEffects.mList[0].mData, &enemy, false),
+                effect == ESM::MagicEffect::Silence ? 1.f : 0.f, "AI ignored stock Sound redundancy rule");
+            require(!prepareAiMagicCast(context, spells, {}, store), "AI ignored redundant Sound or active NoMagnitude effect");
+            enemy.getMagicEffects() = {};
+            enemy.setKnockedDown(true);
+            require(!prepareAiMagicCast(context, spells, {}, store), "AI targeted knocked-down caster with interference");
+            enemy.setKnockedDown(false);
+            enemy.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Paralyze), MWMechanics::EffectParam(1.f));
+            require(!prepareAiMagicCast(context, spells, {}, store), "AI targeted paralyzed caster with interference");
+            context.enemy = nullptr;
+            require(!prepareAiMagicCast(context, spells, {}, store), "AI interference invented an enemy");
+        }
+        // Sound is subtracted before the fatigue multiplier and final cap.
+        caster.getMagicEffects() = {};
+        caster.getSkill(ESM::Skill::Destruction).setBase(25.f);
+        auto fatigue = caster.getFatigue(); fatigue.setCurrent(50.f); caster.setFatigue(fatigue);
+        const float before = MWMechanics::getSpellSuccessChance(ordinary, caster, store, false, false);
+        caster.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Sound), MWMechanics::EffectParam(10.f));
+        caster.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Sound), MWMechanics::EffectParam(5.f));
+        near(MWMechanics::getSpellSuccessChance(ordinary, caster, store, false, false),
+            before - 15.f * caster.getFatigueTerm(store), "Stacked Sound lost stock fatigue scaling");
+    }
+
     void launch()
     {
         MWWorld::ESMStore store; content(store);
@@ -579,7 +647,8 @@ int main(int argc, char** argv)
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "weapons") weapons();
+        if (filter == "interference") interference();
+        else if (filter == "weapons") weapons();
         else if (filter == "expanded-effects") expandedEffects();
         else if (filter == "stat-drains") statDrains();
         else if (filter == "combat-modifiers") combatModifiers();

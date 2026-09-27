@@ -17,28 +17,30 @@ Inherited body evidence:
 Synthetic fixtures; authored models. Logs: `build/logs/m4-custom-*`.
 Corpse poses untested; creatures require walking bipeds, no spells/equipped weapon.
 
-Player/NPC casts share durable wind-up/release/recovery and fractional presentation
-without callbacks. Bound resources, source/target life and concurrent casts persist. Revalidation
-precedes atomic magicka/charge/CastOnce payment. Incapacitation, source/target loss
-and disconnect interrupt; inactive/saturated areas pause. Recovery outlives targets.
-Custom casting has resource checks only.
+Player/NPC casts share durable wind-up/release/recovery and fractional presentation.
+Release revalidates before atomic payment. Incapacitation, source/target loss and
+disconnect interrupt independently; inactive/saturated areas pause. Custom casting
+has resource checks only.
 
-New: `build/m4-player-cast-vanilla-live-02`, `build/m4-player-cast-tr-item-live-01`:
-`result.json`, `presentation-validation.json`, TR `payment-validation.json`.
-Synthetic actors/placements, unchanged Fireball/TR spell/WhenUsed; both desktops
-inspected. Eight 60-FPS traces: player casts ~1x stock.
-100 ms +/-25 ms, 10% loss, extra 125 ms delays, reconnect/restart during concurrent
-wind-up. Unpaid interruption; converged unique payment totals; no duplicate outcomes.
-`build/logs/player-cast-*`: focused checks/builds.
+Inherited desktop captures: `build/m4-player-cast-vanilla-live-02`,
+`build/m4-player-cast-tr-item-live-01`.
 
-**Next: implement Silence/Sound interference through this casting lifecycle.**
+Silence/Sound use OpenMW success/target priorities at release. Silence defeats
+Always spells; Sound stacks before fatigue scaling and spares Always spells.
+Failed spells pay once; items remain usable. NPC targeting uses authoritative cast activity.
 
-100 effects remain:
+New headless evidence: `build/logs/interference-*`. Player/NPC wind-up arrivals, expiry, concurrent
+casts, exact payments, failed writes, reconnect and disk-image restart.
+No interference desktop capture.
+
+**Next: elemental shields.**
+
+98 effects remain:
 
 - Attribute/resources (8): DamageAttribute, DamageSkill, RestoreAttribute,
   RestoreSkill, FortifyHealth, FortifyMagicka, FortifyFatigue, FortifyMaximumMagicka.
-- Defense/interference (7): FireShield, LightningShield, FrostShield, Silence,
-  Sound, DisintegrateWeapon, DisintegrateArmor.
+- Defense/equipment (5): FireShield, LightningShield, FrostShield,
+  DisintegrateWeapon, DisintegrateArmor.
 - Concealment/detection (7): Invisibility, Chameleon, Light, NightEye,
   DetectAnimal, DetectEnchantment, DetectKey.
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
@@ -63,6 +65,6 @@ wind-up. Unpaid interruption; converged unique payment totals; no duplicate outc
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-43 implemented + 100 remaining = 143 IDs. Scripts, powers/abilities/diseases,
+45 implemented + 98 remaining = 143 IDs. Scripts, powers/abilities/diseases,
 multi-NPC/summons/player lives remain unproven. Ranged/overlapping combat precedes
 movement cutover; plain ranged sources/body proxies remain. TR Lua awaits M5.

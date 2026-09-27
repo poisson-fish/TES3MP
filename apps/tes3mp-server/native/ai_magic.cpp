@@ -63,6 +63,8 @@ namespace TES3MP::Native
                         return std::nullopt;
                     auto priority = MWMechanics::rateCommonEffect(effect, context.caster, 0.f);
                     if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
+                    if (!priority) priority = MWMechanics::rateCastingInterferenceEffect(effect, context.enemy,
+                        context.enemy && context.enemy->getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0.f);
                     if (!priority && effect.mEffectID == ESM::MagicEffect::AbsorbMagicka)
                         priority = MWMechanics::rateAbsorbMagicka(context.enemy, 0.f);
                     if (!priority && effect.mEffectID == ESM::MagicEffect::Dispel)
@@ -132,6 +134,8 @@ namespace TES3MP::Native
             {
                 auto priority = MWMechanics::rateCommonEffect(effect, context.caster, magickaPriority);
                 if (!priority) priority = MWMechanics::rateStatDamageEffect(effect, context.enemy, context.enemy);
+                if (!priority) priority = MWMechanics::rateCastingInterferenceEffect(effect, context.enemy,
+                    context.enemy && context.enemy->getMagicEffects().getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude() > 0.f);
                 if (!priority && effect.mEffectID == ESM::MagicEffect::AbsorbMagicka)
                     priority = MWMechanics::rateAbsorbMagicka(context.enemy, magickaPriority);
                 if (!priority && effect.mEffectID == ESM::MagicEffect::Dispel)

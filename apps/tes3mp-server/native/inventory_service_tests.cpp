@@ -5440,7 +5440,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         writePlacementFixtureModels(scratch);
@@ -6040,6 +6040,25 @@ namespace TES3MP::Native::Testing
                     damage.mEffects.populate({{ESM::MagicEffect::DamageFatigue, {}, {}, ESM::RT_Touch, 0, 0, 1000, 1000}});
                     npc.mSpells.mList.push_back(damage.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); damage.save(out); out.endRecord(ESM::Spell::sRecordId);
+                }
+            }
+            if (castingInterference)
+            {
+                for (auto& skill : npc.mNpdt.mSkills) skill = 100;
+                npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower)] = 0;
+                npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)] = 0;
+                // Stock MGEF records, including Silence's NoMagnitude flag.
+                for (bool silence : {false, true}) for (bool brief : {false, true})
+                {
+                    ESM::Spell interference; interference.blank();
+                    interference.mId = ESM::RefId::stringRefId(std::string("interference_")
+                        + (silence ? "silence" : "sound") + (brief ? "_brief" : ""));
+                    interference.mData.mType = ESM::Spell::ST_Spell;
+                    interference.mData.mFlags = ESM::Spell::F_Always; interference.mData.mCost = 1;
+                    interference.mEffects.populate({{silence ? ESM::MagicEffect::Silence : ESM::MagicEffect::Sound,
+                        {}, {}, ESM::RT_Touch, 0, brief ? 0 : 2, silence ? 0 : 1000, silence ? 0 : 1000}});
+                    npc.mSpells.mList.push_back(interference.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); interference.save(out); out.endRecord(ESM::Spell::sRecordId);
                 }
             }
             const auto observerAppearance = npc;
@@ -7479,7 +7498,7 @@ namespace TES3MP::Native::Testing
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
-                    Transform(placed[i].transform().cell(), Position3((i ? -160 : 60)*1024, -400*1024, 1024),
+                    Transform(placed[i].transform().cell(), Position3((i ? (castingInterference ? 100 : -160) : 60)*1024, -400*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
@@ -8034,7 +8053,8 @@ namespace TES3MP::Native::Testing
                 for (unsigned char c : name) value = (value ^ c) * 1099511628211ull;
                 return value;
             };
-            const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t time, std::string_view name, bool item = false) {
+            const auto proposal = [&](auto& runtime, uint64_t owner, uint64_t time, std::string_view name, bool item = false,
+                uint64_t recipient = 0) {
                 const auto view = runtime.projectInventory(authority, id<SessionId>(owner), id<ServerTick>(time), id<CanonicalRevision>(time));
                 require(view && !view->playerInventory.empty(), "Interrupted cast inventory missing");
                 const auto& inventory = view->playerInventory.front();
@@ -8046,12 +8066,12 @@ namespace TES3MP::Native::Testing
                     require(stack != inventory.stacks.end(), "Interrupted cast item missing");
                     selected = stack->stackId.value();
                 }
-                const bool target = item || name == "npc_target_damage" || name == "interrupt_touch";
+                const bool target = recipient || item || name == "npc_target_damage" || name == "interrupt_touch";
                 ClientMagicUseCommand use{id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
                     id<CommandId>(time), id<CanonicalRevision>(time),
                     item ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell, selected,
-                    target ? MagicUseTargetKind::Actor : MagicUseTargetKind::Self,
-                    target ? view->equipment->motions.front().placement : 0,
+                    recipient && recipient < 3 ? MagicUseTargetKind::Player : target ? MagicUseTargetKind::Actor : MagicUseTargetKind::Self,
+                    recipient && recipient < 3 ? recipient : target ? view->equipment->motions.front().placement : 0,
                     id<ServerTick>(time), CombatRevision::initial(), CombatRevision::initial(), inventory.revision};
                 const auto* player = authority.findPlayer(id<PlayerId>(owner));
                 return ServerCommandProposal(id<SessionId>(owner), SessionGeneration::initial(), CommandSequence::initial(),
@@ -8059,6 +8079,236 @@ namespace TES3MP::Native::Testing
                     EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
             };
             const auto initial = bytes(service);
+            if (castingInterference)
+            {
+                for (bool silence : {false, true}) for (int mode : {0, 1, 2, 3, 4, 5})
+                {
+                    const bool brief = mode == 4, disconnect = mode == 5, item = mode == 2 || mode == 3;
+                    const std::string interference = std::string("interference_") + (silence ? "silence" : "sound")
+                        + (brief ? "_brief" : "");
+                    const std::string_view selected = mode == 1 ? "npc_instant_restore" : mode == 2 ? "npc_used_shirt"
+                        : mode == 3 ? "npc_once_shirt" : "npc_ordinary_restore";
+                    InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, initial);
+                    auto& runtime = campaign.service(); runtime.synchronizeCells(authority);
+                    std::unique_ptr<InventoryHost> restarted;
+                    auto currentPlayers = authority;
+                    uint64_t arrival = 0, release = 0, expiry = 0;
+                    bool expired = false, cancelled = false, recovered = false;
+                    std::optional<std::pair<uint64_t, uint32_t>> paidItem;
+                    std::vector<std::byte> affectedWindup;
+                    const auto originalInventory = runtime.projectInventory(authority, id<SessionId>(2), id<ServerTick>(1), id<CanonicalRevision>(1));
+                    const auto itemState = [&](const auto& view) {
+                        std::pair<uint64_t, uint32_t> value{};
+                        for (const auto& stack : view.playerInventory.front().stacks)
+                            if (stack.prototypeId == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(selected))))
+                            { value.first += stack.count; value.second = stack.enchantmentCharge; }
+                        return value;
+                    };
+                    for (uint64_t time = 1; time <= 120; ++time)
+                    {
+                        if (disconnect && arrival && !cancelled)
+                        {
+                            std::vector<CanonicalSessionProgress> sessions(authority.activeSessions().begin(), authority.activeSessions().end());
+                            sessions.erase(sessions.begin() + 1);
+                            currentPlayers = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), sessions));
+                            runtime.synchronizeCells(currentPlayers);
+                        }
+                        else if (disconnect && cancelled && currentPlayers.activeSessions().size() == 1)
+                        {
+                            std::vector<CanonicalSessionProgress> sessions(authority.activeSessions().begin(), authority.activeSessions().end());
+                            const auto& priorSession = sessions[1];
+                            sessions[1] = CanonicalSessionProgress(priorSession.sessionId(), id<SessionGeneration>(2),
+                                priorSession.playerId(), priorSession.entityId(), {});
+                            currentPlayers = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), sessions));
+                            runtime.synchronizeCells(currentPlayers);
+                            require(!runtime.prepareMagicUse(currentPlayers, proposal(runtime, 2, time, selected, item), id<ServerTick>(time)),
+                                "Reconnected caster admitted an old-session command");
+                        }
+                        const auto before = bytes(runtime); const auto prior = read(before);
+                        const auto request = [&](auto& owner) -> std::unique_ptr<PreparedNativeInventory> {
+                            if (time == 1) return owner.prepareMagicUse(currentPlayers,
+                                proposal(owner, 1, time, interference, false, 2), id<ServerTick>(time));
+                            if (time == 6) return owner.prepareMagicUse(currentPlayers,
+                                proposal(owner, 2, time, selected, item), id<ServerTick>(time));
+                            return {};
+                        };
+                        auto command = request(runtime);
+                        if (time == 1 || time == 6) require(bool(command), "Interference cast was not admitted");
+                        auto step = runtime.prepareNativeTick(currentPlayers, id<ServerTick>(time), 1.f/30, std::move(command));
+                        require(bool(step), "Interference tick missing");
+                        const auto events = runtime.projectCombatEvents(currentPlayers, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        if (currentPlayers.activeSessions().size() == 2)
+                        {
+                            const auto peer = runtime.projectCombatEvents(currentPlayers, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                            require(bool(events) == bool(peer) && (!events || std::ranges::equal(events->magicEvents(), peer->magicEvents())),
+                                "Interference observers diverged");
+                        }
+                        std::vector<std::byte> candidate;
+                        require(step->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                            "Rejected interference tick leaked effects/payment/RNG");
+                        const auto state = read(candidate);
+                        const auto effect = std::ranges::find_if(state.timedEffects, [&](const auto& value) {
+                            return value.actor == 1 && value.source == source(interference);
+                        });
+                        if (!arrival && effect != state.timedEffects.end())
+                        {
+                            arrival = time; expiry = effect->expiresTick; affectedWindup = candidate;
+                            require(state.combat->playerCasts[1] && state.combat->playerCasts[1]->phase == ActorCampaignCast::WindUp,
+                                "Interference did not arrive during wind-up");
+                            require(effect->magnitude == (silence ? 1.f : 1000.f)
+                                && state.combat->actors[0][9][2] == read(initial).combat->actors[0][9][2] - 1,
+                                "Stock interference magnitude or independent source payment changed");
+                        }
+                        if (arrival && effect == state.timedEffects.end()) expired = true;
+                        if (arrival && disconnect && !state.combat->playerCasts[1])
+                        {
+                            cancelled = true;
+                            require(state.combat->actors[1][9][2] == read(initial).combat->actors[1][9][2],
+                                "Disconnected interfered cast spent magicka");
+                        }
+                        if (state.combat->playerCasts[1] && state.combat->playerCasts[1]->phase == ActorCampaignCast::Released)
+                        {
+                            require(!release && arrival && events, "Interfered cast released twice or before effect arrival");
+                            release = time;
+                            const auto event = std::ranges::find_if(events->magicEvents(), [](const auto& value) {
+                                const auto* player = std::get_if<PlayerId>(&value.caster); return player && player->value() == 2;
+                            });
+                            const bool success = brief || item || (!silence && mode == 1);
+                            require(event != events->magicEvents().end() && event->castSucceeded == success
+                                && event->selfMagickaDelta == (item ? 0.f : -1.f)
+                                && state.combat->actors[1][9][2] == read(initial).combat->actors[1][9][2] - (item ? 0.f : 1.f),
+                                "Release did not use current interference with exactly one payment");
+                            require(brief ? time >= expiry && expired : time < expiry && !expired,
+                                "Release fixture missed expiry boundary");
+                            require(success || (event->selfHealthDelta == 0 && state.projectiles.empty()),
+                                "Failed spell applied effects or launched a projectile");
+                            if (item)
+                            {
+                                const auto inventory = runtime.projectInventory(currentPlayers, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                                const auto start = itemState(*originalInventory), paid = itemState(*inventory);
+                                require(mode == 3 ? paid.first + 1 == start.first
+                                    : paid.first == start.first && std::bit_cast<float>(paid.second)
+                                        == 20.f - MWMechanics::getEffectiveEnchantmentCastCost(2.f, 100.f),
+                                    "Interference changed enchanted-item payment");
+                                paidItem = paid;
+                            }
+                        }
+                        if (release && !state.combat->playerCasts[1]) recovered = true;
+                        if (restarted)
+                        {
+                            auto& other = restarted->service(); other.synchronizeCells(currentPlayers);
+                            auto next = other.prepareNativeTick(currentPlayers, id<ServerTick>(time), 1.f/30, request(other));
+                            require(next && next->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(other) == candidate,
+                                "Restart/reconnect changed interference outcome, payment or RNG");
+                        }
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(runtime) == candidate,
+                            "Interference durability retry changed candidate");
+                        if (time == arrival)
+                        {
+                            const auto path = scratch / "interference-windup.bin";
+                            { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(candidate.data()), candidate.size()); }
+                            std::ifstream in(path, std::ios::binary);
+                            const std::vector<char> saved(std::istreambuf_iterator<char>{in}, {});
+                            const auto disk = std::as_bytes(std::span(saved));
+                            require(std::ranges::equal(candidate, disk), "Wind-up disk image differs");
+                            restarted = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, disk);
+                            require(bytes(restarted->service()) == candidate, "Interference wind-up restart was not exact");
+                        }
+                        // Recovery and reconnect must never produce a second payment.
+                        if (release && time > release)
+                        {
+                            require(state.combat->actors[1][9][2] == prior.combat->actors[1][9][2], "Recovery/reconnect repeated payment");
+                            if (paidItem)
+                            {
+                                const auto inventory = runtime.projectInventory(currentPlayers, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
+                                require(itemState(*inventory) == *paidItem, "Recovery/restart repeated item payment");
+                            }
+                        }
+                    }
+                    require(arrival && expired && (disconnect ? cancelled && !release : release && recovered),
+                        "Interference lifecycle did not complete");
+                    require(!read(bytes(runtime)).combat->playerCasts[0], "Interference blocked the other caster's recovery");
+                    // Uncertain durability must fail closed even with active interference and two wind-ups.
+                    InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, affectedWindup);
+                    uncertain.service().synchronizeCells(authority);
+                    auto failed = uncertain.service().prepareNativeTick(authority, id<ServerTick>(arrival + 1), 1.f/30, {});
+                    require(failed && failed->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                        && uncertain.service().inventoryImage().empty(), "Uncertain interference did not fail closed");
+                    std::cout << "interference=" << (silence ? "silence" : "sound") << " mode=" << mode
+                        << " arrival=" << arrival << " release=" << release << " expiry=" << expiry
+                        << " atomic=exact concurrent=independent restart=exact observers=converged\n";
+                }
+                // A third caster uses the same release-time rule. Put the Touch
+                // source near the NPC; the second player's independent cast survives.
+                std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+                nearby[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[0], id<ServerTick>(2),
+                    Transform(nearby[0].transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                        nearby[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+                for (bool silence : {false, true})
+                {
+                    InventoryHost campaign(descriptor, testContentManifest(), *registry, *crypto, initial);
+                    auto& runtime = dynamic_cast<InventoryService&>(campaign.service()); runtime.synchronizeCells(authority);
+                    const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+                    std::unique_ptr<InventoryHost> restart;
+                    uint64_t arrival = 0; bool released = false, peerReleased = false;
+                    const std::string name = silence ? "interference_silence" : "interference_sound";
+                    for (uint64_t time = 1; time < 60 && !(released && peerReleased); ++time)
+                    {
+                        std::unique_ptr<PreparedNativeInventory> request;
+                        if (time == 1) request = runtime.prepareMagicUse(authority, proposal(runtime, 1, time, name, false, 3), id<ServerTick>(time));
+                        if (time == 6) request = runtime.prepareMagicUse(authority, proposal(runtime, 2, time, "npc_ordinary_restore"), id<ServerTick>(time));
+                        std::optional<ActorMagicCast> npc;
+                        if (time == 6) npc = ActorMagicCast{view->equipment->motions.front().placement, 1, time,
+                            MagicUseSourceKind::Spell, source("npc_ordinary_restore"), MagicUseTargetKind::Self, 0};
+                        const auto before = bytes(runtime);
+                        auto step = runtime.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(request), npc);
+                        require(bool(step), "NPC interference tick missing");
+                        std::vector<std::byte> candidate;
+                        require(step->commit([&](auto data) { candidate.assign(data.begin(), data.end()); return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "NPC interference leaked before durability");
+                        const auto state = read(candidate);
+                        if (!arrival && std::ranges::any_of(state.timedEffects, [&](const auto& effect) { return effect.actor == 2 && effect.source == source(name); }))
+                        {
+                            arrival = time;
+                            require(state.casting && state.casting->phase == ActorCampaignCast::WindUp, "NPC interference missed wind-up");
+                        }
+                        const auto events = runtime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        if (events) for (const auto& event : events->magicEvents())
+                        {
+                            if (std::holds_alternative<ActorId>(event.caster) && event.sourceId == source("npc_ordinary_restore"))
+                            {
+                                require(arrival && !released && !event.castSucceeded && event.selfMagickaDelta == -1.f
+                                    && state.combat->actors[2][9][2] == read(initial).combat->actors[2][9][2] - 1,
+                                    "NPC interference failed to charge exactly one failed spell");
+                                released = true;
+                            }
+                            if (const auto* player = std::get_if<PlayerId>(&event.caster); player && player->value() == 2)
+                            {
+                                require(!peerReleased && event.castSucceeded && event.selfMagickaDelta == -1.f,
+                                    "NPC interference cancelled unrelated player cast");
+                                peerReleased = true;
+                            }
+                        }
+                        if (restart)
+                        {
+                            auto other = restart->service().prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {});
+                            require(other && other->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && bytes(restart->service()) == candidate, "NPC interference restart changed payment or RNG");
+                        }
+                        require(step->commit(accepted) == CanonicalDurabilityResult::Committed, "NPC interference retry failed");
+                        if (arrival == time)
+                        {
+                            restart = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                            restart->service().synchronizeCells(authority);
+                        }
+                    }
+                    require(arrival && released && peerReleased, "NPC interference lifecycle did not finish");
+                    std::cout << "interference=" << (silence ? "silence" : "sound") << " npc=failed-paid player=success restart=exact\n";
+                }
+                return;
+            }
             if (playerCastLifecycle)
             {
                 for (int kind : {0, 1, 2})

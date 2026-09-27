@@ -28,6 +28,8 @@ namespace MWMechanics
         const CreatureStats& actor, float restoreMagickaPriority);
     std::optional<float> rateStatDamageEffect(const ESM::ENAMstruct& effect,
         const CreatureStats* enemy, const NpcStats* enemyNpc);
+    std::optional<float> rateCastingInterferenceEffect(const ESM::ENAMstruct& effect,
+        const CreatureStats* enemy, bool enemyParalyzed);
     float rateDispelEffect(bool self, int positive, int negative);
     float rateAbsorbMagicka(const CreatureStats* enemy, float restoreMagickaPriority);
     float adjustEffectRating(const ESM::ENAMstruct& effect, float rating,

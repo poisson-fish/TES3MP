@@ -25,7 +25,8 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::DrainMagicka || id == ESM::MagicEffect::DrainFatigue
             || id == ESM::MagicEffect::AbsorbHealth || id == ESM::MagicEffect::AbsorbMagicka
             || id == ESM::MagicEffect::AbsorbFatigue || id == ESM::MagicEffect::AbsorbAttribute
-            || id == ESM::MagicEffect::AbsorbSkill;
+            || id == ESM::MagicEffect::AbsorbSkill
+            || id == ESM::MagicEffect::Silence || id == ESM::MagicEffect::Sound;
     }
     bool supportedCombatModifier(ESM::RefId effect)
     {
@@ -259,6 +260,9 @@ namespace TES3MP::Native
         if (!spell.source || caster.getHealth().getCurrent() <= 0
             || caster.getMagicka().getCurrent() < spell.cost)
             throw std::invalid_argument("Native spell became stale before tick composition");
+        // Use the release-time overlay, including Silence/Sound acquired during
+        // wind-up. Stock spell failure still pays; incapacitation is cancelled
+        // independently by the composed tick before reaching this launch.
         const bool succeeded = Misc::Rng::roll0to99(rng)
             < MWMechanics::getSpellSuccessChance(*spell.source, caster, content, true, false);
         auto magicka = caster.getMagicka();
