@@ -941,6 +941,48 @@ namespace MWRender
         return true;
     }
 
+    bool Animation::setCommittedCast(bool active, unsigned range, float frame, unsigned release, unsigned stop)
+    {
+        if (range > 2 || !std::isfinite(frame) || frame < 0
+            || (active && (!release || release >= stop || frame >= stop))) return false;
+        struct RestoreCallbacks
+        {
+            Context& context;
+            TextKeyListener*& listener;
+            Context previousContext;
+            TextKeyListener* previousListener;
+            ~RestoreCallbacks() { context = previousContext; listener = previousListener; }
+        } restore{mContext, mTextKeyListener, mContext, mTextKeyListener};
+        mContext = Context::ReplicatedActor;
+        mTextKeyListener = nullptr;
+        if (!active)
+        {
+            if (mCommittedCast) disable("spellcast");
+            mCommittedCast = false;
+            return true;
+        }
+        const std::array<std::string, 3> names{"self", "touch", "target"};
+        const std::string start = names[range] + (frame < release ? " start" : " release");
+        const std::string end = names[range] + (frame < release ? " release" : " stop");
+        const float completion = frame < release ? frame / release : (frame - release) / (stop - release);
+        if (mCommittedCast)
+            if (const auto found = mStates.find("spellcast"); found != mStates.end()
+                && found->second.mStartKey == start && found->second.mStopKey == end)
+            {
+                auto& state = found->second;
+                state.setTime(std::lerp(state.mStartTime, state.mStopTime, completion));
+                state.mPlaying = state.getTime() < state.mStopTime;
+                return true;
+            }
+        disable("spellcast");
+        mCommittedCast = false;
+        play("spellcast", MWMechanics::Priority_Weapon, BlendMask_All, false, 0.f,
+            start, end, completion, 0, false);
+        if (!getInfo("spellcast")) return false;
+        mCommittedCast = true;
+        return true;
+    }
+
     bool Animation::setCommittedKnockout(unsigned pose, unsigned frame)
     {
         return pose <= 3 && setCommittedBody(pose, float(frame));
@@ -972,6 +1014,7 @@ namespace MWRender
         mCommittedHitGroup = hitGroup;
         if (group.empty()) return true;
         setCommittedMelee({}, 0, 0, 0, 0);
+        setCommittedCast(false, 0, 0, 0, 0);
         // Missing bound clips retain incapacity on the server and use no visual clip.
         if (!hasAnimation(group)) return true;
         if (mCommittedKnockoutGroup.empty() || !mStates.contains(group))
@@ -2079,7 +2122,7 @@ namespace MWRender
     void Animation::animationEnded(AnimState& state) const
     {
         if (mContext == Context::ReplicatedActor || state.mGroupname == mCommittedMeleeGroup
-            || state.mGroupname == mCommittedKnockoutGroup)
+            || state.mGroupname == mCommittedKnockoutGroup || (mCommittedCast && state.mGroupname == "spellcast"))
             return;
         MWBase::Environment::get().getLuaManager()->animationEnded(
             mPtr, state.mGroupname, state.getTime(), state.getCompletion(), state.mStartKey, state.mStopKey);

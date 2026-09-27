@@ -1,4 +1,4 @@
-"""Observed V42 encounter acceptance; uses normal desktop intents over impaired UDP."""
+"""Observed V52 casting timeline; uses normal desktop intents over impaired UDP."""
 
 from dataclasses import asdict
 import json
@@ -32,7 +32,14 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
         control = evidence[role].with_suffix(".ndjson.control")
         temporary = control.with_suffix(".tmp")
         temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
-        temporary.replace(control)
+        for attempt in range(40):
+            try:
+                temporary.replace(control)
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(.01)  # Windows reader briefly owns the control file.
 
     def command(role, action):
         submit(role, action)
@@ -81,7 +88,19 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
              and samples("Bob")[-1]["generation"] > generation, "Bob reconnects to durable combat")
     # Removing the nearer player makes the NPC select the second participant.
     prior_bob_health = samples("Bob")[-1]["health"]
+    interruption = wait_for(lambda: next((r for r in samples("Alice")[-1:]
+        if any(a["cast_phase"] == 3 and a["cast_elapsed"] <= a["cast_release"] - 15
+               for a in r["actors"])), None), "pre-release cast before target disconnect")
     command("Alice", "disconnectbrief")
+    interrupted_actor = interruption["actors"][0]
+    cancelled = wait_for(lambda: next((r for r in samples("Bob")
+        if r["tick"] > interruption["tick"] and r["actors"]
+        and r["actors"][0]["cast_id"] != interrupted_actor["cast_id"]), None), "cast cancelled on target disconnect")
+    if abs(cancelled["actors"][0]["magicka"] - interrupted_actor["magicka"]) > .01:
+        raise RuntimeError("pre-release interruption spent NPC magicka")
+    if any(a["cast_id"] == interrupted_actor["cast_id"] and a["cast_phase"] >= 4
+           for role in evidence for r in samples(role) for a in r["actors"]):
+        raise RuntimeError("interrupted cast reached release")
     wait_for(lambda: samples("Bob")[-1]["health"] < prior_bob_health,
              "NPC independently damages the remaining player")
     wait_for(lambda: samples("Alice")[-1]["generation"] > initial["Alice"]["generation"],
@@ -188,10 +207,11 @@ def verify_cast_encounter(output, evidence, processes, relay, manifest, content,
         finished.add(role)
         if processes[role].returncode:
             raise RuntimeError(f"{role} did not finish cleanly")
-    report = dict(success=True, scenario="V42 concurrent autonomous real-record casting",
+    report = dict(success=True, scenario="V52 shared cast timeline and concurrent real-record casting",
                   synthetic_actor_and_placements=True, unchanged_gameplay_records=content,
                   manifest=manifest, initial=initial, concurrent=concurrent, windup=windup, observed_windup=observed_windup,
-                  restored=restored, final=final, observed_phases=sorted(phases), matching_ticks=matched, aligned_samples=aligned, matching_animation_clocks=timing_matches,
+                  restored=restored, final=final, interruption=interruption, cancelled=cancelled,
+                  observed_phases=sorted(phases), matching_ticks=matched, aligned_samples=aligned, matching_animation_clocks=timing_matches,
                   pre_restart_events=before_events, post_restart_events={role: events(role) for role in evidence},
                   relay=asdict(relay.stop()), screenshots=[p.name for p in output.glob("*.png")])
     output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

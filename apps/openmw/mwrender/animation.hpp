@@ -228,6 +228,7 @@ namespace MWRender
 
         TextKeyListener* mTextKeyListener;
         std::string mCommittedMeleeGroup;
+        bool mCommittedCast = false;
         std::string mCommittedKnockoutGroup;
         unsigned mCommittedKnockoutState = 0;
         float mCommittedKnockoutFrame = 0;
@@ -416,6 +417,7 @@ namespace MWRender
         bool setCommittedMelee(std::string_view group, unsigned phase, unsigned direction,
             float strength, float completion);
         bool hasCommittedMelee() const { return !mCommittedMeleeGroup.empty(); }
+        bool setCommittedCast(bool active, unsigned range, float frame, unsigned release, unsigned stop);
         // 0 releases authority, 1 upright, 2 knockout, 3 knockdown; frame is at 30 Hz.
         bool setCommittedKnockout(unsigned state, unsigned frame);
         // The general body sampler additionally accepts state 4 and a stock hit group (1..16).

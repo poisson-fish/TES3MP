@@ -449,7 +449,10 @@ namespace TES3MP::OpenMWAdapter
                             << ",\"direction\":" << unsigned(p.direction) << ",\"strength\":" << p.strength
                             << ",\"completion\":" << p.completion << ",\"group\":\"" << p.group
                             << "\",\"body_action\":" << p.bodyAction << ",\"body\":" << unsigned(p.bodyState)
-                            << ",\"frame\":" << p.bodyFrame << ",\"clip_time\":" << rendered.clipTime << '}';
+                            << ",\"frame\":" << p.bodyFrame << ",\"clip_time\":" << rendered.clipTime
+                            << ",\"cast\":" << p.cast << ",\"cast_phase\":" << unsigned(p.castPhase)
+                            << ",\"cast_range\":" << unsigned(p.castRange) << ",\"cast_frame\":" << p.castFrame
+                            << ",\"cast_release\":" << p.castRelease << ",\"cast_stop\":" << p.castStop << '}';
                     }
                     mOutput << "]}\n";
                     ++mPresentationFrames;

@@ -84,6 +84,68 @@ namespace TES3MP::Native::Testing
         };
     }
 
+    void checkCastPresentation(const std::filesystem::path& config, const std::filesystem::path& settings)
+    {
+        const auto directory = config.string();
+        const char* arguments[]{"cast-presentation", "--config", directory.c_str()};
+        Loadout loadout(readLoadoutOptions(3, arguments));
+        const auto& npc = *loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("npc_door_actor"));
+        const auto placed = loadout.placedActors(ESM::RefId::stringRefId("NPC Door Contact Test")).at(0);
+        InteriorActorScene scene(loadout, "NPC Door Contact Test", placed.mIdentity,
+            "meshes/base_anim.nif", "meshes/base_animkna.nif");
+        scene.enableNavigation(settings.string());
+        const auto casts = scene.bindCastAnimations();
+        require(casts.resourceIdentity == scene.bindHitAnimations(npc.mId, true).resourceIdentity,
+            "Cast/body resource identities differ");
+        Settings::SettingsFileParser().loadSettingsFile(settings, Settings::Manager::mDefaultSettings);
+        Settings::StaticValues::initDefaults(); Settings::StaticValues::init();
+        Settings::game().mSmoothAnimTransitions.set(false);
+        VFS::Manager vfs;
+        VFS::registerArchives(&vfs, Files::Collections(loadout.options().mDataPaths),
+            loadout.options().mArchives, true, &loadout.encoder());
+        Resource::ResourceSystem resources(&vfs, 0, &loadout.encoder());
+        const bool beast = loadout.store().get<ESM::Race>().find(npc.mRace)->mData.mFlags & ESM::Race::Beast;
+        Pose local(resources), peer(resources), reconnect(resources);
+        for (auto* pose : {&local, &peer, &reconnect})
+            if (!npc.mModel.empty()) pose->npcSources(npc, beast);
+            else pose->reloadSources(beast ? (npc.mRace.contains("argonian") ? 3 : 2) : npc.isMale() ? 0 : 1);
+        Listener listener; local.setTextKeyListener(&listener);
+        const std::array<std::string, 3> ranges{"self", "touch", "target"};
+        for (unsigned range = 0; range < ranges.size(); ++range)
+        {
+            const auto timing = casts.ranges[range];
+            const std::string prefix = "spellcast: " + ranges[range];
+            const float start = local.getTextKeyTime(prefix + " start");
+            const float release = local.getTextKeyTime(prefix + " release");
+            const float stop = local.getTextKeyTime(prefix + " stop");
+            require(start >= 0 && release > start && stop > release
+                && timing.releaseTicks == unsigned(std::ceil((release - start) * 30.f))
+                && timing.stopTicks == unsigned(std::ceil((stop - start) * 30.f)),
+                "Server/desktop cast range keys differ");
+            for (float frame = 0; frame < timing.stopTicks; frame += .25f)
+            {
+                for (auto* pose : {&local, &peer, &reconnect})
+                    require(pose->setCommittedCast(true, range, frame, timing.releaseTicks, timing.stopTicks),
+                        "Cast pose rejected");
+                const float expected = frame < timing.releaseTicks
+                    ? std::lerp(start, release, frame / timing.releaseTicks)
+                    : std::lerp(release, stop, (frame - timing.releaseTicks) / (timing.stopTicks - timing.releaseTicks));
+                local.runAnimation(10.f); peer.runAnimation(.001f);
+                for (auto* pose : {&local, &peer, &reconnect})
+                    require(std::abs(pose->getCurrentTime("spellcast") - expected) < .001f,
+                        "Cast advanced locally or sampled the wrong section");
+                require(reconnect.setCommittedCast(false, 0, 0, 0, 0), "Cast reset failed");
+            }
+            require(local.setCommittedBody(4, 0, 1) && !local.getInfo("spellcast"),
+                "Interruption retained cast priority");
+            local.setCommittedBody(1, 0);
+            require(!local.setCommittedCast(true, range, 0, 0, timing.stopTicks)
+                && !local.setCommittedCast(true, range, float(timing.stopTicks), timing.releaseTicks, timing.stopTicks)
+                && listener.calls == 0 && local.listenerIs(&listener), "Invalid pose or callbacks escaped");
+        }
+        std::cout << casts.resourceIdentity << "cast ranges=3 fractional=120Hz release+recovery+interruption+reconnect callbacks=none\n";
+    }
+
     void checkCustomBodyResources(const std::filesystem::path& config, const std::filesystem::path& settings)
     {
         const auto directory = config.string();

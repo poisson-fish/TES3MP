@@ -1790,8 +1790,8 @@ namespace TES3MP::OpenMWAdapter
             if (combat.knockout.state) stats.setKnockedDown(combat.knockout.state >= 2);
             setParalyzed(stats, combat.knockout.paralyzed);
             if ((actorTimeline.empty() && !replicatedActorResultAccepted(actor.setKnockout(combat.knockout.state, combat.knockout.frame)))
-                || !replicatedActorResultAccepted(actor.setCast(combat.castPhase >= 3 && !combat.dead,
-                    combat.castRange, combat.castStop ? float(combat.castElapsed) / combat.castStop : 0.f))
+                || (actorTimeline.empty() && !replicatedActorResultAccepted(actor.setCast(combat.castPhase >= 3 && !combat.dead,
+                    combat.castRange, combat.castStop ? float(combat.castElapsed) / combat.castStop : 0.f)))
                 || !replicatedActorResultAccepted(actor.setDead(combat.dead)))
                 return ProviderResult::PresentationFailed;
             return ProviderResult::Accepted;
@@ -1928,7 +1928,7 @@ namespace TES3MP::OpenMWAdapter
                 if (actorTimeline.empty() && !replicatedActorResultAccepted(remote.actor->setKnockout(
                         combat->knockout.state, combat->knockout.frame)))
                     return ProviderResult::PresentationFailed;
-                if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
+                if (actorTimeline.empty() && !replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
                         combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
                     return ProviderResult::PresentationFailed;
                 const auto deathResult = remote.actor->setDead(combat->dead);
@@ -2124,14 +2124,18 @@ namespace TES3MP::OpenMWAdapter
                     if (!animation) return false;
                     const auto& p = *pose;
                     const bool dead = ptr.getClass().getCreatureStats(ptr).isDead() || p.dead;
+                    const bool casting = !dead && p.bodyState == 1 && p.castPhase >= 3;
                     if (!animation->setCommittedMelee(p.group, dead || p.bodyState >= 2 ? 0 : p.phase,
                             p.direction, p.strength, p.completion)
+                        || !animation->setCommittedCast(casting, p.castRange, p.castFrame, p.castRelease, p.castStop)
                         || !animation->setCommittedBody(dead ? 1 : p.bodyState,
                             dead ? 0.f : p.bodyFrame, p.hitGroup)) return false;
                     const auto group = p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
-                        : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup) : p.group;
+                        : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup) : casting ? "spellcast" : p.group;
                     const float clipTime = group.empty() ? -1.f : animation->getCurrentTime(group);
-                    const float clipStart = group.empty() ? -1.f : animation->getTextKeyTime(group + ": start");
+                    const std::array<std::string, 3> ranges{"self", "touch", "target"};
+                    const float clipStart = group.empty() ? -1.f : animation->getTextKeyTime(group + ": "
+                        + (casting ? ranges[p.castRange] + " start" : "start"));
                     // First/third-person resources have different absolute KF origins.
                     poseEvidence.push_back({p, actorTimeline.tick(), clipTime < 0 ? -1.f
                         : clipTime - std::max(0.f, clipStart)});

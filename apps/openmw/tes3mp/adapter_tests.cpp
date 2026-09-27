@@ -877,6 +877,52 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "cast-presentation")
+    {
+        ActorPresentationTimeline timeline;
+        ActorPresentationSnapshot pose;
+        pose.id = 9; pose.kind = 2;
+        ActorCombatSnapshot actor{*ActorId::fromValue(9)};
+        actor.castId = 10; actor.castPhase = 3; actor.castRange = 2;
+        actor.castElapsed = 8; actor.castRelease = 10; actor.castStop = 20;
+        std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+        for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = ReplicatedCombatSkill(i);
+        auto observe = [&](uint64_t tick, uint64_t generation = 1) {
+            const auto snapshot = std::get<LatestWinsCombatSnapshot>(LatestWinsCombatSnapshot::create(
+                *SessionId::fromValue(1), *SessionGeneration::fromValue(generation), *ServerTick::fromValue(tick),
+                *CanonicalRevision::fromValue(tick), *PlayerId::fromValue(1), CombatRevision::initial(),
+                100, 100, 100, 100, 100, 100, false, std::span(&actor, 1), skills, {}, {}, {}, {}, std::span(&pose, 1)));
+            timeline.observe(std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(snapshot))));
+        };
+        const auto advance = [&](uint64_t ns) { timeline.advance(MonotonicInstant::fromNanoseconds(ns)); };
+        observe(100); advance(0);
+        actor.castElapsed = 12; actor.castPhase = 5; observe(104);
+        advance(50'000'000);
+        require(timeline.sample(2,9)->castFrame == 9.5f && timeline.sample(2,9)->castPhase == 3);
+        advance(100'000'000);
+        require(timeline.sample(2,9)->castFrame == 11 && timeline.sample(2,9)->castPhase == 5);
+        advance(1'000'000'000);
+        require(timeline.sample(2,9)->castFrame == 12); // Starvation cannot finish recovery.
+        observe(108); advance(1'050'000'000);
+        require(timeline.sample(2,9)->castFrame == 12); // Inactive simulation pauses.
+        actor.castId = 0; actor.castPhase = actor.castRange = 0;
+        actor.castElapsed = actor.castRelease = actor.castStop = 0;
+        pose.bodyState = 4; pose.bodyAction = 110; pose.hitGroup = 1; pose.bodyStop = 10;
+        observe(110); advance(2'000'000'000);
+        require(!timeline.sample(2,9)->cast && timeline.sample(2,9)->bodyState == 4);
+        pose.bodyState = 1; pose.bodyAction = 0; pose.hitGroup = 0; pose.bodyStop = 0;
+        actor.castId = 111; actor.castPhase = 5; actor.castElapsed = 15;
+        actor.castRelease = 10; actor.castStop = 20;
+        observe(120, 2);
+        require(timeline.sample(2,9)->cast == 111 && timeline.sample(2,9)->castFrame == 15);
+        pose.life = 2; actor.castId = 121; actor.castPhase = 3; actor.castElapsed = 1;
+        observe(124, 2); advance(3'000'000'000); advance(3'050'000'000);
+        require(timeline.sample(2,9)->life == 1 && timeline.sample(2,9)->castFrame == 15);
+        advance(4'000'000'000);
+        require(timeline.sample(2,9)->life == 2 && timeline.sample(2,9)->castFrame == 1);
+        std::cout << "PASS cast-presentation: release/recovery, loss, pause, interruption, generation and life\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "actor-presentation")
     {
         ActorPresentationTimeline timeline;

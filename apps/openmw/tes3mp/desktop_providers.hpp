@@ -1,6 +1,8 @@
 #ifndef OPENMW_TES3MP_DESKTOP_PROVIDERS_HPP
 #define OPENMW_TES3MP_DESKTOP_PROVIDERS_HPP
 
+#include "actor_presentation.hpp"
+
 #include "providers.hpp"
 #include "remote_motion.hpp"
 
@@ -187,7 +189,7 @@ namespace TES3MP::OpenMWAdapter
         // native actors, in OpenMW units, with their last committed sample tick.
         struct ActorPoseEvidence
         {
-            ActorPresentationSnapshot pose;
+            ActorPresentationPose pose;
             double tick;
             float clipTime;
         };
