@@ -87,6 +87,7 @@ namespace MWRender
             ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         ReplicatedActorResult setReplicatedActorDead(const MWWorld::Ptr& ptr, bool dead) noexcept;
         ReplicatedActorResult setReplicatedActorCast(const MWWorld::Ptr& ptr, bool active, unsigned range, float completion) noexcept;
+        ReplicatedActorResult setReplicatedActorKnockout(const MWWorld::Ptr& ptr, unsigned state, unsigned frame) noexcept;
         ReplicatedActorResult setReplicatedActorMelee(const MWWorld::Ptr& ptr, std::string_view group,
             unsigned phase, unsigned direction, float strength, float completion) noexcept;
         ReplicatedActorResult playReplicatedActorAction(

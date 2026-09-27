@@ -7515,6 +7515,23 @@ namespace TES3MP::Native::Testing
                 word(seed, frameOffset + 3 * 8 + i * 8, physical);
                 word(seed, downOffset + i * 8, 1);
             }
+            const auto checkPoses = [&](auto& host, uint64_t time) {
+                const auto state = read(bytes(host));
+                const auto alice = host.projectCombat(authority, id<SessionId>(1), id<ServerTick>(time), id<CanonicalRevision>(time));
+                const auto bob = host.projectCombat(authority, id<SessionId>(2), id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(alice && bob && alice->actors().size() == 1 && bob->actors().size() == 1
+                    && alice->players().size() == 1 && bob->players().size() == 1, "Knockout projection absent");
+                const std::array projected{alice->selfKnockout(), bob->selfKnockout(), alice->actors()[0].knockout};
+                for (size_t i = 0; i < 3; ++i)
+                    require(projected[i].state == (state.combat->knockedDown[i] ? (physical ? 3 : 2) : 1)
+                        && projected[i].frame == state.combat->knockoutFrame[i], "Pose disagrees with durable body clock");
+                require(alice->selfKnockout() == bob->players()[0].knockout
+                    && bob->selfKnockout() == alice->players()[0].knockout
+                    && projected[2] == bob->actors()[0].knockout, "Observers disagree on knockout pose");
+                const auto decoded = decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(*alice));
+                require(std::holds_alternative<LatestWinsCombatSnapshot>(decoded)
+                    && std::get<LatestWinsCombatSnapshot>(decoded) == *alice, "Wire lost durable knockout pose");
+            };
             InventoryHost exhausted(descriptor, testContentManifest(), *registry, *crypto, seed);
             auto& runtime = exhausted.service(); runtime.synchronizeCells(authority);
             auto first = runtime.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {});
@@ -7522,6 +7539,7 @@ namespace TES3MP::Native::Testing
             require(first && first->commit([&](auto data) { proposed.assign(data.begin(), data.end());
                     return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
                 && bytes(runtime) == seed, "Rejected get-up changed committed animation or fatigue");
+            checkPoses(runtime, 1); // Rejected writes must still project the original frame.
             auto state = read(proposed);
             for (size_t i = 0; i < 3; ++i)
                 require(state.combat->actors[i][10][2] >= 0 && state.combat->knockedDown[i]
@@ -7543,6 +7561,7 @@ namespace TES3MP::Native::Testing
             auto pause = paused.service().prepareNativeTick(offline, id<ServerTick>(2), 1.f/30, {});
             require(pause && pause->commit(accepted) == CanonicalDurabilityResult::Committed,
                 "Offline get-up tick failed");
+            checkPoses(paused.service(), 2);
             const auto pausedImage = bytes(paused.service());
             const auto pausedState = read(pausedImage);
             require(pausedState.combat->knockoutFrame[0] == 1 && pausedState.combat->knockoutFrame[1] == 1,
@@ -7571,6 +7590,7 @@ namespace TES3MP::Native::Testing
                             "Zero-base fatigue allowed get-up despite positive current fatigue");
                         looped[i] = looped[i] || after.combat->knockoutFrame[i] <= previousFrames[i];
                     }
+                    checkPoses(runtime, nextTick);
                     previousFrames = after.combat->knockoutFrame;
                     if (std::ranges::all_of(looped, [](bool done) { return done; })) { ++nextTick; break; }
                 }
@@ -7594,6 +7614,8 @@ namespace TES3MP::Native::Testing
                 require(tick && resumed && tick->commit(accepted) == CanonicalDurabilityResult::Committed
                     && resumed->commit(accepted) == CanonicalDurabilityResult::Committed
                     && bytes(*recovering) == bytes(*recoveringRestart), "Mid-get-up restart changed canonical outcome");
+                checkPoses(*recovering, time);
+                checkPoses(*recoveringRestart, time);
                 const auto current = bytes(*recovering); const auto after = read(current);
                 for (size_t i = 0; i < 3; ++i)
                     if (!after.combat->knockedDown[i])

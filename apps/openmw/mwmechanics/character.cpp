@@ -391,9 +391,33 @@ namespace MWMechanics
             return;
         const auto world = MWBase::Environment::get().getWorld();
         auto& stats = charClass.getCreatureStats(mPtr);
-        bool knockout = isFatigueKnockout(stats.getFatigue().getBase(), stats.getFatigue().getCurrent());
+        const unsigned committed = mAnimation->committedKnockoutState();
+        if (committed)
+        {
+            // The server owns both exhaustion and the get-up tail, even after fatigue returns.
+            // Never let the local hit clock clear or loop a sampled committed pose.
+            if (committed >= 2)
+            {
+                if (!mCurrentHit.empty() && mCurrentHit != "knockout" && mCurrentHit != "knockdown")
+                    clearStateAnimation(mCurrentHit);
+                mCurrentHit.clear();
+                mHitState = committed == 2 ? CharState_KnockOut : CharState_KnockDown;
+                if (!mCurrentWeapon.empty()) clearStateAnimation(mCurrentWeapon);
+                setAttackingOrSpell(false);
+                mReadyToHit = false;
+                mUpperBodyState = UpperBodyState::WeaponEquipped;
+                return;
+            }
+            if (isKnockedOut() || isKnockedDown())
+            {
+                mHitState = CharState_None;
+                mCurrentHit.clear();
+                resetCurrentIdleState();
+            }
+        }
+        bool knockout = !committed && isFatigueKnockout(stats.getFatigue().getBase(), stats.getFatigue().getCurrent());
         bool recovery = stats.getHitRecovery();
-        bool knockdown = stats.getKnockedDown();
+        bool knockdown = !committed && stats.getKnockedDown();
         bool block = stats.getBlock() && !knockout && !recovery && !knockdown;
         bool isSwimming = world->isSwimming(mPtr);
 
@@ -1241,7 +1265,7 @@ namespace MWMechanics
 
     bool CharacterController::updateWeaponState()
     {
-        if (mAnimation->hasCommittedMelee())
+        if (mAnimation->hasCommittedMelee() || mAnimation->committedKnockoutState() >= 2)
         {
             // Input still predicts new swings between commits. A committed swing
             // cannot run the local hit/release state machine a second time.

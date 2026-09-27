@@ -14,6 +14,8 @@ table CombatSnapshotHeader {
   self_maximum_fatigue:float = 0 (id: 10);
   self_magicka:float = 0 (id: 11);
   self_maximum_magicka:float = 0 (id: 12);
+  self_knockout_state:ubyte (id: 13);
+  self_knockout_frame:ushort (id: 14);
 }
 
 struct ActorCombatSnapshot {
@@ -32,6 +34,8 @@ struct ActorCombatSnapshot {
   cast_elapsed:ushort;
   cast_release:ushort;
   cast_stop:ushort;
+  knockout_state:ubyte;
+  knockout_frame:ushort;
 }
 
 struct PlayerCombatSnapshot {
@@ -44,6 +48,8 @@ struct PlayerCombatSnapshot {
   magicka:float;
   maximum_magicka:float;
   dead:bool;
+  knockout_state:ubyte;
+  knockout_frame:ushort;
 }
 
 struct CombatSkillSnapshot {
@@ -99,5 +105,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C4";
+file_identifier "T3C5";
 file_extension "t3cs";

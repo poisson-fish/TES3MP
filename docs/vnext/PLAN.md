@@ -68,7 +68,8 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    unrelated tick rollback, and complete life-indexed death attribution within the
    save byte budget. Preserve focused failure/recovery and death/loot deduplication
    checks; M5 owns personal quest credit and rewards.
-   Finish knockout/get-up presentation, unarmed fatigue/health damage while down,
+   Retain committed knockout/get-up presentation and prove it on both desktops.
+   Finish unarmed fatigue/health damage while down,
    hit recovery, armor, block, resistances and wear. Broaden effects/enchantments,
    including Reflect, Spell Absorption, Paralyze, Dispel and drain/absorb effects.
    Generalize beyond one selected NPC: simulate neighboring combatants once each

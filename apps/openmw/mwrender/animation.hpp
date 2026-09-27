@@ -228,6 +228,8 @@ namespace MWRender
 
         TextKeyListener* mTextKeyListener;
         std::string mCommittedMeleeGroup;
+        std::string mCommittedKnockoutGroup;
+        unsigned mCommittedKnockoutState = 0;
 
         osg::ref_ptr<RotateController> mHeadController;
         osg::ref_ptr<RotateController> mSpineController;
@@ -412,6 +414,9 @@ namespace MWRender
         bool setCommittedMelee(std::string_view group, unsigned phase, unsigned direction,
             float strength, float completion);
         bool hasCommittedMelee() const { return !mCommittedMeleeGroup.empty(); }
+        // 0 releases authority, 1 upright, 2 knockout, 3 knockdown; frame is at 30 Hz.
+        bool setCommittedKnockout(unsigned state, unsigned frame);
+        unsigned committedKnockoutState() const { return mCommittedKnockoutState; }
 
         /** Adjust the speed multiplier of an already playing animation.
          */

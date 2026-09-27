@@ -94,6 +94,7 @@ namespace MWRender
         ReplicatedActorResult setDead(bool dead) noexcept;
         ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept;
         ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept;
+        ReplicatedActorResult setKnockout(unsigned state, unsigned frame) noexcept;
         ReplicatedActorResult setMelee(std::string_view group, unsigned phase, unsigned direction,
             float strength, float completion) noexcept;
         const MWWorld::Ptr& ptr() const noexcept;

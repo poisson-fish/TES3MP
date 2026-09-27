@@ -92,6 +92,15 @@ namespace TES3MP
         friend constexpr bool operator==(ClientMeleeAttackCommand, ClientMeleeAttackCommand) noexcept = default;
     };
 
+    // 0: legacy/local presentation, 1: upright, 2: fatigue knockout, 3: hit knockdown.
+    // Frame is the committed 30 Hz offset from the bound clip's start key.
+    struct KnockoutSnapshot
+    {
+        std::uint8_t state = 0;
+        std::uint16_t frame = 0;
+        friend constexpr bool operator==(KnockoutSnapshot, KnockoutSnapshot) noexcept = default;
+    };
+
     struct ActorCombatSnapshot
     {
         ActorId actorId;
@@ -106,6 +115,7 @@ namespace TES3MP
         std::uint64_t castId = 0;
         std::uint8_t castPhase = 0, castRange = 0;
         std::uint16_t castElapsed = 0, castRelease = 0, castStop = 0;
+        KnockoutSnapshot knockout;
         friend constexpr bool operator==(ActorCombatSnapshot, ActorCombatSnapshot) noexcept = default;
         friend constexpr auto operator<=>(const ActorCombatSnapshot& lhs, const ActorCombatSnapshot& rhs) noexcept
         {
@@ -124,6 +134,7 @@ namespace TES3MP
         float magicka = 0.f;
         float maximumMagicka = 0.f;
         bool dead = false;
+        KnockoutSnapshot knockout;
         friend constexpr bool operator==(PlayerCombatSnapshot, PlayerCombatSnapshot) noexcept = default;
         friend constexpr auto operator<=>(const PlayerCombatSnapshot& lhs, const PlayerCombatSnapshot& rhs) noexcept
         {
@@ -176,7 +187,7 @@ namespace TES3MP
             std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
             std::span<const PlayerCombatSnapshot> players = {},
             std::span<const ActiveMagicEffectSnapshot> activeEffects = {},
-            std::span<const PlayerSwingSnapshot> swings = {});
+            std::span<const PlayerSwingSnapshot> swings = {}, KnockoutSnapshot selfKnockout = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
@@ -190,6 +201,7 @@ namespace TES3MP
         float selfMagicka() const noexcept { return mSelfMagicka; }
         float selfMaximumMagicka() const noexcept { return mSelfMaximumMagicka; }
         bool selfDead() const noexcept { return mSelfDead; }
+        KnockoutSnapshot selfKnockout() const noexcept { return mSelfKnockout; }
         std::span<const ActorCombatSnapshot> actors() const noexcept { return mActors; }
         std::span<const CombatSkillSnapshot> selfSkills() const noexcept { return mSkills; }
         std::span<const PlayerCombatSnapshot> players() const noexcept { return mPlayers; }
@@ -203,7 +215,8 @@ namespace TES3MP
             float selfMaximumHealth, float selfFatigue, float selfMaximumFatigue, float selfMagicka,
             float selfMaximumMagicka, bool selfDead, std::vector<ActorCombatSnapshot> actors,
             std::vector<CombatSkillSnapshot> skills, std::vector<PlayerCombatSnapshot> players,
-            std::vector<ActiveMagicEffectSnapshot> activeEffects, std::vector<PlayerSwingSnapshot> swings)
+            std::vector<ActiveMagicEffectSnapshot> activeEffects, std::vector<PlayerSwingSnapshot> swings,
+            KnockoutSnapshot selfKnockout)
             : mSession(session)
             , mGeneration(generation)
             , mTick(tick)
@@ -222,6 +235,7 @@ namespace TES3MP
             , mPlayers(std::move(players))
             , mActiveEffects(std::move(activeEffects))
             , mSwings(std::move(swings))
+            , mSelfKnockout(selfKnockout)
         {
         }
         SessionId mSession;
@@ -242,6 +256,7 @@ namespace TES3MP
         std::vector<PlayerCombatSnapshot> mPlayers;
         std::vector<ActiveMagicEffectSnapshot> mActiveEffects;
         std::vector<PlayerSwingSnapshot> mSwings;
+        KnockoutSnapshot mSelfKnockout;
     };
 
     struct MeleeCombatEvent

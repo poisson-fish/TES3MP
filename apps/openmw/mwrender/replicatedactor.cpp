@@ -680,6 +680,20 @@ namespace MWRender
         catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
     }
 
+    ReplicatedActorResult Objects::setReplicatedActorKnockout(const MWWorld::Ptr& ptr,
+        unsigned state, unsigned frame) noexcept
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
+            return ReplicatedActorResult::LifecycleViolation;
+        try
+        {
+            return found->second->setCommittedKnockout(state, frame)
+                ? ReplicatedActorResult::Accepted : ReplicatedActorResult::ResourceLoadFailed;
+        }
+        catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
+    }
+
     ReplicatedActorResult Objects::setReplicatedActorMelee(const MWWorld::Ptr& ptr, std::string_view group,
         unsigned phase, unsigned direction, float strength, float completion) noexcept
     {
@@ -764,6 +778,8 @@ namespace MWRender
 
         ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept
         { return mRendering.getObjects().setReplicatedActorCast(mPtr, active, range, completion); }
+        ReplicatedActorResult setKnockout(unsigned state, unsigned frame) noexcept
+        { return mRendering.getObjects().setReplicatedActorKnockout(mPtr, state, frame); }
         ReplicatedActorResult setMelee(std::string_view group, unsigned phase, unsigned direction,
             float strength, float completion) noexcept
         { return mRendering.getObjects().setReplicatedActorMelee(mPtr, group, phase, direction, strength, completion); }
@@ -809,6 +825,12 @@ namespace MWRender
     {
         if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
         return mImpl->setCast(active, range, completion);
+    }
+
+    ReplicatedActorResult ReplicatedActor::setKnockout(unsigned state, unsigned frame) noexcept
+    {
+        if (!mImpl) return ReplicatedActorResult::LifecycleViolation;
+        return mImpl->setKnockout(state, frame);
     }
 
     ReplicatedActorResult ReplicatedActor::setMelee(std::string_view group, unsigned phase, unsigned direction,

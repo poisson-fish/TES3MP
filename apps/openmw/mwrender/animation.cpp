@@ -941,6 +941,44 @@ namespace MWRender
         return true;
     }
 
+    bool Animation::setCommittedKnockout(unsigned pose, unsigned frame)
+    {
+        if (pose > 3 || frame >= 1800 || (pose < 2 && frame)) return false;
+        struct RestoreCallbacks
+        {
+            Context& context;
+            TextKeyListener*& listener;
+            Context previousContext;
+            TextKeyListener* previousListener;
+            ~RestoreCallbacks() { context = previousContext; listener = previousListener; }
+        } restore{mContext, mTextKeyListener, mContext, mTextKeyListener};
+        mContext = Context::ReplicatedActor;
+        mTextKeyListener = nullptr;
+        const std::string group = pose == 2 ? "knockout" : pose == 3 ? "knockdown" : "";
+        if (group != mCommittedKnockoutGroup)
+        {
+            if (!mCommittedKnockoutGroup.empty()) disable(mCommittedKnockoutGroup);
+            mCommittedKnockoutGroup.clear();
+        }
+        mCommittedKnockoutState = pose;
+        if (group.empty()) return true;
+        setCommittedMelee({}, 0, 0, 0, 0);
+        // Missing bound clips retain incapacity on the server and use no visual clip.
+        if (!hasAnimation(group)) return true;
+        if (mCommittedKnockoutGroup.empty() || !mStates.contains(group))
+        {
+            disable(group);
+            play(group, MWMechanics::Priority_Knockdown, BlendMask_All, false, 0.f,
+                "start", "stop", 0.f, 0, false);
+            if (!getInfo(group)) return false;
+            mCommittedKnockoutGroup = group;
+        }
+        auto& state = mStates.find(group)->second;
+        state.setTime(std::min(state.mStopTime, state.mStartTime + float(frame) / 30.f));
+        state.mPlaying = state.getTime() < state.mStopTime;
+        return true;
+    }
+
     void Animation::play(std::string_view groupname, const AnimPriority& priority, int blendMask, bool autodisable,
         float speedmult, std::string_view start, std::string_view stop, float startpoint, uint32_t loops,
         bool loopfallback)
@@ -2031,7 +2069,8 @@ namespace MWRender
 
     void Animation::animationEnded(AnimState& state) const
     {
-        if (mContext == Context::ReplicatedActor || state.mGroupname == mCommittedMeleeGroup)
+        if (mContext == Context::ReplicatedActor || state.mGroupname == mCommittedMeleeGroup
+            || state.mGroupname == mCommittedKnockoutGroup)
             return;
         MWBase::Environment::get().getLuaManager()->animationEnded(
             mPtr, state.mGroupname, state.getTime(), state.getCompletion(), state.mStartKey, state.mStopKey);

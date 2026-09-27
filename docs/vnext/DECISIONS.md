@@ -75,8 +75,8 @@ V39-V42 admit actions every eight committed ticks, selecting the nearest visible
 living player with ID ties. Stock ratings compare weapons/ammunition, equipped
 WhenUsed and spells; unsupported plans reject. Source/life/target, payment, RNG,
 KF release/recovery, effects and concurrent player casts persist together. Inactive
-areas pause; launch revalidates source/life/target/visibility. T3C4 requires capability
-22; T3C2 events retain caster life. V46 projects committed swing sections/interruption;
+areas pause; launch revalidates source/life/target/visibility. T3C5 requires capability
+23; T3C2 events retain caster life. V46 projects committed swing sections/interruption;
 reconnect samples without replaying gameplay keys or Lua completion callbacks.
 Clients never advance the authoritative animation clock.
 

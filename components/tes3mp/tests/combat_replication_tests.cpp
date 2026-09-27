@@ -287,6 +287,47 @@ namespace
             && std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) == snapshot;
     }
 
+    bool knockout_states_round_trip_and_reject_invalid_values()
+    {
+        TES3MP::KnockoutSnapshot pose{2, 17};
+        bool dead = false;
+        auto create = [&] {
+            const std::array actors{TES3MP::ActorCombatSnapshot{value<TES3MP::ActorId>(1),
+                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, 0, 0, dead, 0, 0, 0, 0, 0, 0, pose}};
+            const std::array players{TES3MP::PlayerCombatSnapshot{value<TES3MP::PlayerId>(2),
+                TES3MP::CombatRevision::initial(), 100, 100, 10, 100, 0, 0, dead, pose}};
+            return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+                TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+                value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 10, 100, 0, 0, dead,
+                actors, skills(), players, {}, {}, pose);
+        };
+        for (auto state : {0, 1, 2, 3})
+            for (auto frame : {0, 17, 1799})
+            {
+                pose = {static_cast<std::uint8_t>(state), static_cast<std::uint16_t>(state >= 2 ? frame : 0)};
+                auto made = create();
+                if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+                const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+                auto wire = TES3MP::encodeLatestWinsCombatSnapshot(snapshot);
+                auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(wire);
+                if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+                    || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
+                wire[11] = std::byte('4'); // The previous struct layout must not decode.
+                if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(
+                        TES3MP::decodeLatestWinsCombatSnapshot(wire))) return false;
+            }
+        for (auto invalid : {TES3MP::KnockoutSnapshot{4, 0}, TES3MP::KnockoutSnapshot{1, 1},
+                TES3MP::KnockoutSnapshot{0, 1}, TES3MP::KnockoutSnapshot{2, 1800}})
+        {
+            pose = invalid;
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        }
+        dead = true; pose = {2, 0};
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        pose = {1, 0};
+        return std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(create());
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -305,7 +346,8 @@ int main()
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
             && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing()
-            && swing_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()
+            && swing_states_round_trip_and_reject_invalid_values()
+            && knockout_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()
         ? 0
         : 1;
 }

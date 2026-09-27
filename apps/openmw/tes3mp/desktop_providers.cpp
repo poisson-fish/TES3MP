@@ -976,6 +976,7 @@ namespace TES3MP::OpenMWAdapter
                     if (auto* animation = world->getAnimation(world->getPlayerPtr()))
                     {
                         animation->setCommittedMelee({}, 0, 0, 0, 0);
+                        animation->setCommittedKnockout(0, 0);
                         const auto ptr = world->getPlayerPtr();
                         animation->showWeapons(ptr.getClass().getCreatureStats(ptr).getDrawState()
                             == MWMechanics::DrawState::Weapon);
@@ -1772,6 +1773,11 @@ namespace TES3MP::OpenMWAdapter
                                     swing.direction, swing.strength, swing.completion)))
                                 return ProviderResult::PresentationFailed;
             }
+            const auto knockout = snapshot.selfKnockout();
+            auto* animation = world->getAnimation(player);
+            if (!animation || !animation->setCommittedKnockout(knockout.state, knockout.frame))
+                return ProviderResult::PresentationFailed;
+            if (knockout.state) playerStats.setKnockedDown(knockout.state >= 2);
             auto sound = MWBase::Environment::get().getSoundManager();
             if (!snapshot.selfDead() && playerStats.isDead())
                 MWBase::Environment::get().getMechanicsManager()->resurrect(player);
@@ -1828,6 +1834,10 @@ namespace TES3MP::OpenMWAdapter
                 actorMagicka.setBase(combat->maximumMagicka);
                 actorMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(actorMagicka);
+                if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
+                        combat->knockout.state, combat->knockout.frame)))
+                    return ProviderResult::PresentationFailed;
                 if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
                         combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
                     return ProviderResult::PresentationFailed;
@@ -1862,6 +1872,10 @@ namespace TES3MP::OpenMWAdapter
                 magicka.setBase(combat->maximumMagicka);
                 magicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(magicka);
+                if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
+                        combat->knockout.state, combat->knockout.frame)))
+                    return ProviderResult::PresentationFailed;
                 if (!replicatedActorResultAccepted(remote.actor->setCast(combat->castPhase >= 3 && !combat->dead,
                         combat->castRange, combat->castStop ? float(combat->castElapsed) / combat->castStop : 0.f)))
                     return ProviderResult::PresentationFailed;
@@ -1893,6 +1907,10 @@ namespace TES3MP::OpenMWAdapter
                 remoteMagicka.setBase(combat->maximumMagicka);
                 remoteMagicka.setCurrent(combat->magicka, true, true);
                 stats.setMagicka(remoteMagicka);
+                if (combat->knockout.state) stats.setKnockedDown(combat->knockout.state >= 2);
+                if (!replicatedActorResultAccepted(remote.actor->setKnockout(
+                        combat->knockout.state, combat->knockout.frame)))
+                    return ProviderResult::PresentationFailed;
                 const auto deathResult = remote.actor->setDead(combat->dead);
                 if (!replicatedActorResultAccepted(deathResult))
                 {

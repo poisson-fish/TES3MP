@@ -4529,11 +4529,16 @@ namespace TES3MP::Native
             moving ? moving->tick : mActorTick)).value();
         const size_t selfIndex = actor(player->playerId());
         const auto self = loadCombatStats(mRuntime.mStore, combat.actors[selfIndex], effects, selfIndex);
+        const auto knockout = [&](size_t index) -> KnockoutSnapshot {
+            if (!mBinding.mKnockoutAnimation) return {};
+            return {uint8_t(combat.knockedDown[index] ? (combat.hitKnockdown[index] ? 3 : 2) : 1),
+                uint16_t(combat.knockoutFrame[index])};
+        };
         const auto snapshot = [&](const auto& stats, auto id) {
             return PlayerCombatSnapshot{id, combatRevision, stats.getHealth().getCurrent(),
                 stats.getHealth().getModified(), stats.getFatigue().getCurrent(),
                 stats.getFatigue().getModified(), stats.getMagicka().getCurrent(),
-                stats.getMagicka().getModified(), stats.getHealth().getCurrent() <= 0};
+                stats.getMagicka().getModified(), stats.getHealth().getCurrent() <= 0, knockout(actor(id))};
         };
         std::vector<PlayerCombatSnapshot> others;
         for (size_t index = 0; index < 2; ++index)
@@ -4576,6 +4581,7 @@ namespace TES3MP::Native
                 npc.getFatigue().getCurrent(), npc.getFatigue().getModified(),
                 npc.getMagicka().getCurrent(), npc.getMagicka().getModified(),
                 npc.getHealth().getCurrent() <= 0});
+            visible.back().knockout = knockout(2);
             const auto& casting = moving ? moving->casting : mNpcCast;
             if (casting)
             {
@@ -4603,7 +4609,7 @@ namespace TES3MP::Native
             player->playerId(), combatRevision, self.getHealth().getCurrent(), self.getHealth().getModified(),
             self.getFatigue().getCurrent(), self.getFatigue().getModified(), self.getMagicka().getCurrent(),
             self.getMagicka().getModified(), self.getHealth().getCurrent() <= 0,
-            visible, skills, others, {}, swings);
+            visible, skills, others, {}, swings, knockout(selfIndex));
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
     }

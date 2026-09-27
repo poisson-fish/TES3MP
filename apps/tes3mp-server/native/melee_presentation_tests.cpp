@@ -41,7 +41,7 @@ namespace TES3MP::Native::Testing
         };
     }
 
-    void checkMeleePresentation(const std::filesystem::path& data, const std::filesystem::path& settings)
+    void checkMeleePresentation(const std::filesystem::path& data, const std::filesystem::path& settings, bool knockout)
     {
         Settings::SettingsFileParser().loadSettingsFile(settings, Settings::Manager::mDefaultSettings);
         Settings::StaticValues::initDefaults();
@@ -55,6 +55,41 @@ namespace TES3MP::Native::Testing
         Listener listener;
         Pose local(resources), peer(resources), reconnect(resources);
         local.setTextKeyListener(&listener);
+        if (knockout)
+        {
+            for (unsigned pose : {2u, 3u})
+            {
+                const std::string group = pose == 2 ? "knockout" : "knockdown";
+                const float start = local.getTextKeyTime(group + ": start");
+                const float stop = local.getTextKeyTime(group + ": stop");
+                require(start >= 0 && stop > start, "Knockout resource missing");
+                const unsigned frames = unsigned(std::ceil((stop - start) * 30.f));
+                // Late baselines, loop rewind, get-up tail, repeated/lost commits.
+                for (unsigned frame : {0u, frames / 2, 1u, frames - 1})
+                {
+                    require(local.setCommittedMelee("handtohand", 1, 0, .5f, .5f)
+                        && local.setCommittedKnockout(pose, frame)
+                        && peer.setCommittedKnockout(pose, frame), "Committed knockout rejected");
+                    const float time = local.getCurrentTime(group);
+                    require(std::abs(time - std::min(stop, start + float(frame) / 30.f)) < .0001f,
+                        "Knockout sampled wrong committed frame");
+                    local.runAnimation(10.f); peer.runAnimation(.01f);
+                    require(!local.hasCommittedMelee() && local.getCurrentTime(group) == time
+                        && peer.getCurrentTime(group) == time, "Wall time advanced knockout or retained swing");
+                    require(reconnect.setCommittedKnockout(0, 0) && reconnect.setCommittedKnockout(pose, frame)
+                        && reconnect.getCurrentTime(group) == time, "Reconnect restarted knockout");
+                    require(listener.calls == 0 && local.listenerIs(&listener), "Knockout replayed gameplay callbacks");
+                }
+                require(local.setCommittedKnockout(1, 0) && !local.getInfo(group)
+                    && local.committedKnockoutState() == 1, "Upright commit retained knockout");
+            }
+            require(!local.setCommittedKnockout(4, 0) && !local.setCommittedKnockout(1, 1)
+                && !local.setCommittedKnockout(2, 1800) && local.committedKnockoutState() == 1,
+                "Invalid knockout mutated presentation");
+            require(local.setCommittedKnockout(0, 0) && !local.committedKnockoutState(),
+                "Disconnect retained knockout authority");
+            return;
+        }
         for (const auto group : {"handtohand", "weapononehand", "weapontwohand", "weapontwowide", "bowandarrow", "crossbow", "throwweapon"})
             for (unsigned direction = 0; direction < 3; ++direction)
                 for (float strength : {0.f, .5f, 1.f})
