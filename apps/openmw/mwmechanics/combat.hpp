@@ -2,6 +2,9 @@
 #define OPENMW_MECHANICS_COMBAT_H
 
 #include <utility>
+#include <array>
+#include <optional>
+#include <components/misc/rng.hpp>
 
 namespace osg
 {
@@ -11,10 +14,15 @@ namespace osg
 namespace MWWorld
 {
     class Ptr;
+    class ESMStore;
 }
 
 namespace MWMechanics
 {
+    class CreatureStats;
+    std::array<std::optional<float>, 3> elementalShieldDamage(const MWWorld::ESMStore& store,
+        const CreatureStats& attacker, float destruction, const CreatureStats& victim,
+        Misc::Rng::Generator& rng);
 
     bool applyOnStrikeEnchantment(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, const MWWorld::Ptr& object,
         const osg::Vec3f& hitPosition, const bool fromProjectile = false);

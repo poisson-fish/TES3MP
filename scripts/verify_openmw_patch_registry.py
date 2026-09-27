@@ -24,7 +24,9 @@ def verify(root: Path) -> None:
                 raise ValueError(f"invalid or duplicate registered path: {item}")
             covered.add(item)
         for item in patch["tests"]:
-            if item.startswith("scripts/") and not (root / item).is_file():
+            # Entries may record a focused invocation with flags or an evidence
+            # annotation. Validate its script path, not the entire command text.
+            if item.startswith("scripts/") and not (root / item.split(maxsplit=1)[0]).is_file():
                 raise ValueError(f"missing registered test: {item}")
     result = subprocess.run(
         ["git", "-C", str(root), "diff", "--name-only", data["baseline_commit"], "--", "apps/openmw"],

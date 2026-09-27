@@ -17,9 +17,35 @@
 
 namespace TES3MP::Native
 {
+    bool permanentStatEffect(ESM::RefId id)
+    {
+        return id == ESM::MagicEffect::DamageAttribute || id == ESM::MagicEffect::RestoreAttribute
+            || id == ESM::MagicEffect::DamageSkill || id == ESM::MagicEffect::RestoreSkill;
+    }
+    int fortifyDynamicStat(ESM::RefId id)
+    {
+        if (id == ESM::MagicEffect::FortifyHealth) return 0;
+        if (id == ESM::MagicEffect::FortifyMagicka) return 1;
+        if (id == ESM::MagicEffect::FortifyFatigue) return 2;
+        return -1;
+    }
+    void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
+        float magnitude, const MWWorld::ESMStore& content)
+    {
+        const bool restore = effect.mEffectID == ESM::MagicEffect::RestoreAttribute
+            || effect.mEffectID == ESM::MagicEffect::RestoreSkill;
+        if (!effect.mAttribute.empty())
+            MWMechanics::applyAttributeDamage(target, effect.mAttribute, restore ? -magnitude : magnitude,
+                content.get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat());
+        else MWMechanics::applySkillDamage(target, effect.mSkill, restore ? -magnitude : magnitude);
+    }
     bool expandedCombatEffect(ESM::RefId id)
     {
-        return id == ESM::MagicEffect::Reflect || id == ESM::MagicEffect::SpellAbsorption
+        return permanentStatEffect(id) || fortifyDynamicStat(id) >= 0
+            || id == ESM::MagicEffect::FortifyMaximumMagicka
+            || id == ESM::MagicEffect::FireShield || id == ESM::MagicEffect::LightningShield
+            || id == ESM::MagicEffect::FrostShield
+            || id == ESM::MagicEffect::Reflect || id == ESM::MagicEffect::SpellAbsorption
             || id == ESM::MagicEffect::Paralyze || id == ESM::MagicEffect::ResistParalysis
             || id == ESM::MagicEffect::Dispel || id == ESM::MagicEffect::DrainHealth
             || id == ESM::MagicEffect::DrainMagicka || id == ESM::MagicEffect::DrainFatigue
@@ -137,7 +163,12 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::ResistPoison
                 || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::ResistParalysis
                 || effect.mEffectID == ESM::MagicEffect::Reflect
-                || effect.mEffectID == ESM::MagicEffect::SpellAbsorption));
+                || effect.mEffectID == ESM::MagicEffect::SpellAbsorption
+                || effect.mEffectID == ESM::MagicEffect::FireShield
+                || effect.mEffectID == ESM::MagicEffect::LightningShield
+                || effect.mEffectID == ESM::MagicEffect::FrostShield
+                || fortifyDynamicStat(effect.mEffectID) >= 0
+                || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka));
             if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
                 || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude))
                 || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
@@ -161,10 +192,14 @@ namespace TES3MP::Native
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
             const bool attribute = actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FortifyAttribute
                 || effect.mEffectID == ESM::MagicEffect::DrainAttribute
-                || (expandedEffects && effect.mEffectID == ESM::MagicEffect::AbsorbAttribute));
+                || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::AbsorbAttribute
+                    || effect.mEffectID == ESM::MagicEffect::DamageAttribute
+                    || effect.mEffectID == ESM::MagicEffect::RestoreAttribute)));
             const bool skill = actorLifecycle && (effect.mEffectID == ESM::MagicEffect::FortifySkill
                 || effect.mEffectID == ESM::MagicEffect::DrainSkill
-                || (expandedEffects && effect.mEffectID == ESM::MagicEffect::AbsorbSkill));
+                || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::AbsorbSkill
+                    || effect.mEffectID == ESM::MagicEffect::DamageSkill
+                    || effect.mEffectID == ESM::MagicEffect::RestoreSkill)));
             if (!magic || !supportedInstantEffect(effect, actorLifecycle, expandedEffects)
                 || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
                 || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty())

@@ -76,6 +76,15 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    ranges/areas/order, stacking, defenses/cures/expiry, derived stats, equipment,
    controls, visuals, life ownership, atomic retry and reconnect/restart.
    Preserve stock restrictions; allowlisting alone is insufficient.
+   Implement behavior families through shared stock/server handlers and parameterized
+   lifecycle checks, not per-ID sessions. Start with elemental shields and stat/resource
+   effects; follow dependencies through conditions, concealment/detection, movement,
+   AI, objects/travel, bound equipment and summons. Summons require multi-actor ownership.
+   Keep gameplay, source-type and presentation evidence distinct. Reuse OpenMW's
+   record-driven cast/hit/loop visuals and audio through committed events and active
+   snapshots; reconnect restores loops without replaying impacts. Special visibility
+   and lighting effects use engine consumers. Check family members and semantic
+   exceptions; share stacking/expiry, atomic failure, reconnect and restart fixtures.
    Generalize beyond one selected NPC: simulate neighboring combatants once each
    and persist player death/respawn generations with stale-life rejection.
    Then complete ranged execution: durable receipt recycling, ammunition recovery,

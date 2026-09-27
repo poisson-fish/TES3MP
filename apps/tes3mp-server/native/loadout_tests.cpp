@@ -6755,14 +6755,17 @@ int main(int argc, char** argv)
                 {}, false, false, true, false, false, true);
             std::cout << "PASS death-history\n"; return 0;
         }
-        if (argc == 5 && std::string_view(argv[1]) == "expanded-effects")
+        if (argc == 5 && (std::string_view(argv[1]) == "expanded-effects"
+            || std::string_view(argv[1]) == "elemental-shields" || std::string_view(argv[1]) == "permanent-stats"
+            || std::string_view(argv[1]) == "fortify-resources"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true, false, false, true, false,
                 false, true, false, true, false, false, false, false, false, false, false, false,
-                {}, true, false, true, false, false, false, false, true);
-            std::cout << "PASS expanded-effects\n"; return 0;
+                {}, true, false, true, false, false, false, false, true, false, false, false,
+                std::string_view(argv[1]) == "expanded-effects" ? std::string_view{} : std::string_view(argv[1]));
+            std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "stat-drains")
         {

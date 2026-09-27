@@ -308,28 +308,25 @@ namespace MWMechanics
             skillValue, unaware, victimStats.isParalyzed());
     }
 
-    void applyElementalShields(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
+    std::array<std::optional<float>, 3> elementalShieldDamage(const MWWorld::ESMStore& store,
+        const CreatureStats& attackerStats, float destruction, const CreatureStats& victimStats,
+        Misc::Rng::Generator& prng)
     {
-        // Don't let elemental shields harm the player in god mode.
-        bool godmode = attacker == getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState();
-        if (godmode)
-            return;
-        auto& prng = MWBase::Environment::get().getWorld()->getPrng();
+        std::array<std::optional<float>, 3> result{};
+        size_t index = 0;
         static const std::array<ESM::RefId, 3> elementalShieldEffects{ ESM::MagicEffect::FireShield,
             ESM::MagicEffect::LightningShield, ESM::MagicEffect::FrostShield };
         for (const auto elementalShieldEffect : elementalShieldEffects)
         {
-            float magnitude = victim.getClass()
-                                  .getCreatureStats(victim)
-                                  .getMagicEffects()
+            const size_t slot = index++;
+            float magnitude = victimStats.getMagicEffects()
                                   .getOrDefault(elementalShieldEffect)
                                   .getMagnitude();
 
             if (!magnitude)
                 continue;
 
-            CreatureStats& attackerStats = attacker.getClass().getCreatureStats(attacker);
-            float saveTerm = attacker.getClass().getSkill(attacker, ESM::Skill::Destruction)
+            float saveTerm = destruction
                 + 0.2f * attackerStats.getAttribute(ESM::Attribute::Willpower).getModified()
                 + 0.1f * attackerStats.getAttribute(ESM::Attribute::Luck).getModified();
 
@@ -353,13 +350,27 @@ namespace MWMechanics
 
             x = std::min(100.f, x + elementResistance);
 
-            static const float fElementalShieldMult = MWBase::Environment::get()
-                                                          .getESMStore()
-                                                          ->get<ESM::GameSetting>()
+            const float fElementalShieldMult = store.get<ESM::GameSetting>()
                                                           .find("fElementalShieldMult")
                                                           ->mValue.getFloat();
             x = fElementalShieldMult * magnitude * (1.f - 0.01f * x);
+            result[slot] = x;
+        }
+        return result;
+    }
 
+    void applyElementalShields(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
+    {
+        auto& world = *MWBase::Environment::get().getWorld();
+        if (attacker == getPlayer() && world.getGodModeState()) return;
+        auto& attackerStats = attacker.getClass().getCreatureStats(attacker);
+        const auto damage = elementalShieldDamage(*MWBase::Environment::get().getESMStore(),
+            attackerStats, attacker.getClass().getSkill(attacker, ESM::Skill::Destruction),
+            victim.getClass().getCreatureStats(victim), world.getPrng());
+        for (const auto value : damage)
+        {
+            if (!value) continue;
+            float x = *value;
             // Note swapped victim and attacker, since the attacker takes the damage here.
             x = scaleDamage(x, victim, attacker);
 

@@ -85,10 +85,9 @@ namespace
     {
         auto& creatureStats = target.getClass().getCreatureStats(target);
         auto attribute = effect.getSkillOrAttribute();
-        auto attr = creatureStats.getAttribute(attribute);
         if (effect.mEffectId == ESM::MagicEffect::DamageAttribute)
-            magnitude = std::min(attr.getModified(), magnitude);
-        MWMechanics::modifyAttributeDamage(creatureStats, attribute, magnitude);
+            MWMechanics::applyAttributeDamage(creatureStats, attribute, magnitude);
+        else MWMechanics::modifyAttributeDamage(creatureStats, attribute, magnitude);
     }
 
     void restoreAttribute(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
@@ -106,10 +105,9 @@ namespace
     void damageSkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
     {
         auto& npcStats = target.getClass().getNpcStats(target);
-        auto& skill = npcStats.getSkill(effect.getSkillOrAttribute());
         if (effect.mEffectId == ESM::MagicEffect::DamageSkill)
-            magnitude = std::min(skill.getModified(), magnitude);
-        MWMechanics::modifySkillDamage(npcStats, effect.getSkillOrAttribute(), magnitude);
+            MWMechanics::applySkillDamage(npcStats, effect.getSkillOrAttribute(), magnitude);
+        else MWMechanics::modifySkillDamage(npcStats, effect.getSkillOrAttribute(), magnitude);
     }
 
     void restoreSkill(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, float magnitude)
@@ -410,6 +408,17 @@ namespace
 
 namespace MWMechanics
 {
+    void applyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
+        std::optional<float> baseMagickaMultiplier)
+    {
+        modifyAttributeDamage(stats, attribute, std::min(stats.getAttribute(attribute).getModified(), magnitude),
+            baseMagickaMultiplier);
+    }
+
+    void applySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude)
+    {
+        modifySkillDamage(stats, skill, std::min(stats.getSkill(skill).getModified(), magnitude));
+    }
     EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
         bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng)
     {

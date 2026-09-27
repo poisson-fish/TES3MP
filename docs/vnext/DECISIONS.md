@@ -1,7 +1,7 @@
 # Durable decisions
 
 CURRENT.md records implementation. M4 runtime decisions are approved;
-script-scoping proposals remain labeled. Replace superseded rules; append no history.
+script-scoping proposals remain labeled.
 
 ## Product, authority and reuse
 
@@ -152,19 +152,15 @@ descriptor-bound delay of authoritative 30 Hz ticks (capture: 27,000). Game-time
 skips and downtime do not count. Restore actor/inventory together with fresh item
 identities. Wider spawn policy awaits evidence.
 
-Separate three kinds of state:
-
 | State | Ownership and lifetime |
 |---|---|
-| NPC body, combat/AI, current corpse and inventory | Shared current life; reconstructed through an authoritative respawn transaction. |
-| Character's credit, choices, relationship and reward history | Personal and durable; never cleared merely because the NPC returns. |
-| Stable placed identity plus life generation | Server-owned; distinguishes another legitimate kill from replaying the previous death. |
+| NPC body, combat/AI, corpse and inventory | Shared life; authoritative respawn. |
+| Character credit, choices, relationships and rewards | Personal; survives NPC revival. |
+| Placement identity and life generation | Server-owned; separates new deaths from replays. |
 
-Reset health/effects, AI and placement through engine behavior. Preserve personal
-story locals. Define corpse cleanup/loot explicitly: no refilling looted corpses or
-targeting new lives with old requests; fresh loot gets fresh identities. Renewable
-loot is an economy choice; quest rewards remain one-time. Camping can still delay
-access indefinitely and needs a separate fairness policy.
+Reset health/effects, AI and placement through engine behavior; preserve story locals.
+Never refill looted corpses or apply stale-life requests. Fresh loot needs fresh
+identities. Renewable loot and camping fairness need policies; quest rewards remain one-time.
 
 [Stock NPC respawn](../../apps/openmw/mwclass/npc.cpp) checks flags/delays and restores
 actor data/placement; V25 uses bounded placement and its own durable deadline.
@@ -199,13 +195,11 @@ even before quest acceptance. Proposed credit includes the initiating character 
 eligible consenting helpers; define summons/environmental attribution explicitly.
 A keeps credit after revival; uninvolved B receives no narrative death event.
 
-For B's personal script, a reference temporarily lost to another's combat/death is
-unavailable. Health/liveness, lookup, existence and enumeration queries must not
-silently expose it as a permanent missing/dead dependency. Defer the invocation
-before committing anything; wake it on lifecycle change, revalidate and rerun from
-the last committed state. This covers polling as well as event handlers. Physical
-rendering/combat still show the real corpse. B's own attributable failures retain
-normal consequences. Do not infer success/failure from numeric journal indices.
+For B's script, another's combat/death makes a reference temporarily unavailable.
+Health/liveness, lookup, existence and enumeration must preserve that distinction.
+Defer polling/handlers without committing; wake on lifecycle change, revalidate and
+rerun from committed state. Rendering/combat show the corpse; B's own failures retain
+normal consequences. Journal numbers cannot establish success/failure.
 
 Deferral is distinct from failure: it must not disable a global/local script.
 Persist the wake dependency and event identity; bound queues/retries and report
@@ -214,13 +208,11 @@ unavailability/offline suspension; raw time reads must use a consistent story cl
 Persistent scripted removal uses the scoped rule above, not an endless respawn wait.
 Indirect observations require coverage.
 
-**Atomic execution:** stage globals, locals, journal, inventories, reference changes,
-RNG, consumed events, timers and presentation together. A late unavailable read,
-stale life, unsupported opcode, budget exhaustion or failed durability discards the
-whole invocation. Receipts deduplicate retries of an invocation, not all executions
-of that script; legitimate recurring events still run. Content's preserved flags
-govern one-time rewards. Lua tables/closures/callback state need demonstrable isolation;
-catching an exception or staging only engine calls is insufficient.
+**Atomic execution:** stage globals, locals, journal, inventories, references, RNG,
+events, timers and presentation together. Unavailable reads, stale lives, unsupported
+opcodes, exhausted budgets or failed durability discard the invocation. Deduplicate
+invocation retries; preserve legitimate recurrence and content's one-time reward
+flags. Isolate Lua tables/closures/callbacks, not merely engine calls or exceptions.
 
 **Owning seams:** [interpreter context](../../apps/openmw/mwscript/interpretercontext.cpp),
 [dialogue operations](../../apps/openmw/mwscript/dialogueextensions.cpp),
@@ -235,13 +227,11 @@ rules, not an assumed quest-item classifier. Preserve v8 until explicit migratio
 
 ## Integrity and migration
 
-**Atomic coherent persistence.** Bound and validate input before allocation/mutation.
-Stage script/presentation effects; rejected preparation or durability failure cannot
-leak effects or success. Copying engine objects or catching exceptions is not isolation.
-Legitimate missed attacks/failed casts may retain prescribed costs. Durability
-precedes installation, which precedes publication. Restore the complete content/
-version-bound world/player relationship off to the side. No checkpoint-only
-acknowledgment, silent resets or parallel canonical files.
+**Atomic coherent persistence.** Validate before allocation/mutation. Stage gameplay,
+scripts and presentation; rejection leaks nothing. Copies/exception handling alone
+cannot isolate mutations. Misses/failed casts retain prescribed costs. Persist before
+installation/publication; restore content/version-bound world/player state atomically.
+No checkpoint-only acknowledgments, silent resets or parallel canonical files.
 
 **Borrowed lifetime.** Ptr copies retain weak destruction witnesses. Construction
 starts a new lifetime; assignment preserves the destination. Check witnesses

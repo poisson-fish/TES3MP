@@ -25,22 +25,22 @@ has resource checks only.
 Inherited desktop captures: `build/m4-player-cast-vanilla-live-02`,
 `build/m4-player-cast-tr-item-live-01`.
 
-Silence/Sound use OpenMW success/target priorities at release. Silence defeats
-Always spells; Sound stacks before fatigue scaling and spares Always spells.
-Failed spells pay once; items remain usable. NPC targeting uses authoritative cast activity.
+Silence defeats Always; Sound stacks before fatigue and spares Always. Failed
+spells pay once; items remain usable. Inherited evidence: `build/logs/interference-*`.
 
-New headless evidence: `build/logs/interference-*`. Player/NPC wind-up arrivals, expiry, concurrent
-casts, exact payments, failed writes, reconnect and disk-image restart.
-No interference desktop capture.
+Elemental shields share stock resistance/retaliation. Damage/Restore Attribute/Skill
+preserve permanent changes; Fortify Health/Magicka/Fatigue applies once and reverses
+on removal. FortifyMaximumMagicka rescales current magicka. Shared family checks:
+`build/logs/effect-family-{rules,shields-04,stats-03,fortify-02}.log` cover stacking, expiry, atomic retry, disconnect and
+disk restart. Synthetic headless evidence; no new desktop capture.
 
-**Next: elemental shields.**
+**Next: conditions/cures through shared source removal and disease lifecycle.**
+Follow PLAN's family strategy. General cast/hit/loop VFX integration remains required;
+existing casting animations do not establish effect-specific visuals.
 
-98 effects remain:
+87 effects remain:
 
-- Attribute/resources (8): DamageAttribute, DamageSkill, RestoreAttribute,
-  RestoreSkill, FortifyHealth, FortifyMagicka, FortifyFatigue, FortifyMaximumMagicka.
-- Defense/equipment (5): FireShield, LightningShield, FrostShield,
-  DisintegrateWeapon, DisintegrateArmor.
+- Defense/equipment (2): DisintegrateWeapon, DisintegrateArmor.
 - Concealment/detection (7): Invisibility, Chameleon, Light, NightEye,
   DetectAnimal, DetectEnchantment, DetectKey.
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
@@ -65,6 +65,7 @@ No interference desktop capture.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-45 implemented + 98 remaining = 143 IDs. Scripts, powers/abilities/diseases,
+56 implemented + 87 remaining = 143 IDs; bounded gameplay coverage, not visual/source completion.
+Scripts, powers/abilities/diseases,
 multi-NPC/summons/player lives remain unproven. Ranged/overlapping combat precedes
 movement cutover; plain ranged sources/body proxies remain. TR Lua awaits M5.

@@ -1,5 +1,7 @@
 #include "ai_magic.hpp"
 #include "loadout.hpp"
+#include <apps/openmw/mwmechanics/combat.hpp>
+#include <apps/openmw/mwmechanics/spellresistance.hpp>
 #include <apps/openmw/mwmechanics/spelleffects.hpp>
 #include <apps/openmw/mwmechanics/weaponpriority.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
@@ -449,6 +451,57 @@ namespace
         rejects(std::span(oversized), std::span<const AiMagicItem>{});
         near(caster.getMagicka().getCurrent(), 100.f, "Rejected selection mutated caster");
     }
+    void effectFamilyRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        setting(store, "fElementalShieldMult", .1f); setting(store, "fNPCbaseMagickaMult", 1.f);
+        MWMechanics::NpcStats attacker(store), victim(store); initialize(attacker); initialize(victim);
+        const std::array shields{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield, ESM::MagicEffect::FrostShield};
+        const std::array elements{ESM::MagicEffect::FireDamage, ESM::MagicEffect::ShockDamage, ESM::MagicEffect::FrostDamage};
+        const std::array resist{ESM::MagicEffect::ResistFire, ESM::MagicEffect::ResistShock, ESM::MagicEffect::ResistFrost};
+        const std::array weak{ESM::MagicEffect::WeaknessToFire, ESM::MagicEffect::WeaknessToShock, ESM::MagicEffect::WeaknessToFrost};
+        for (size_t i = 0; i < shields.size(); ++i)
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = shields[i]; store.insertStatic(record);
+            auto cast = spell("shield", shields[i], ESM::RT_Self, 20);
+            require(prepareInstantSpell(cast, store, true, true).has_value()
+                && !prepareInstantSpell(cast, store, true, false), "Shield admission bypassed expanded domain");
+            ESM::Enchantment constant; constant.blank(); constant.mId = id("shield_constant");
+            constant.mData.mType = ESM::Enchantment::ConstantEffect; constant.mEffects = cast.mEffects;
+            constant.mEffects.mList.front().mData.mDuration = 0;
+            if (i) store.overrideRecord(constant); else store.insertStatic(constant);
+            require(prepareConstantEffects(constant.mId, store, true).has_value(), "Shield constant rejected");
+            victim.getMagicEffects() = {}; attacker.getMagicEffects() = {};
+            victim.getMagicEffects().add(MWMechanics::EffectKey(shields[i]), MWMechanics::EffectParam(20.f));
+            victim.getMagicEffects().add(MWMechanics::EffectKey(shields[i]), MWMechanics::EffectParam(30.f));
+            near(MWMechanics::getEffectResistanceAttribute(elements[i], &victim.getMagicEffects()), 50.f, "Shield resistance failed to stack");
+            for (float resistance : {-50.f, 0.f, 50.f, 150.f})
+            {
+                attacker.getMagicEffects() = {};
+                attacker.getMagicEffects().add(MWMechanics::EffectKey(resistance < 0 ? weak[i] : resist[i]),
+                    MWMechanics::EffectParam(std::abs(resistance)));
+                Misc::Rng::Generator rng{123}, expectedRng{123};
+                const float save = 100.f + .2f * 40.f + .1f * 40.f;
+                const float protection = std::min(100.f, std::max(0.f, save * 1.25f - Misc::Rng::roll0to99(expectedRng)) + resistance);
+                const auto damage = MWMechanics::elementalShieldDamage(store, attacker, 100.f, victim, rng);
+                near(damage[i].value(), 5.f * (1.f - .01f * protection), "Shield save/resistance formula changed");
+                require(Misc::Rng::serialize(rng) == Misc::Rng::serialize(expectedRng), "Shield consumed wrong RNG count");
+                for (size_t j = 0; j < shields.size(); ++j) if (j != i) require(!damage[j], "Shield damaged unrelated element");
+            }
+        }
+        victim.getMagicEffects() = {};
+        Misc::Rng::Generator rng{123}; const auto before = Misc::Rng::serialize(rng);
+        MWMechanics::elementalShieldDamage(store, attacker, 0.f, victim, rng);
+        require(Misc::Rng::serialize(rng) == before, "Absent shields rolled RNG");
+        MWMechanics::applyAttributeDamage(victim, ESM::Attribute::Intelligence, 100.f, 1.f);
+        near(victim.getAttribute(ESM::Attribute::Intelligence).getDamage(), 40.f, "Attribute damage exceeded modified value");
+        MWMechanics::applyAttributeDamage(victim, ESM::Attribute::Intelligence, -100.f, 1.f);
+        near(victim.getAttribute(ESM::Attribute::Intelligence).getDamage(), 0.f, "Attribute restore exceeded damage");
+        MWMechanics::applySkillDamage(victim, ESM::Skill::ShortBlade, 200.f);
+        near(victim.getSkill(ESM::Skill::ShortBlade).getDamage(), 100.f, "Skill damage exceeded modified value");
+        MWMechanics::applySkillDamage(victim, ESM::Skill::ShortBlade, -200.f);
+        near(victim.getSkill(ESM::Skill::ShortBlade).getDamage(), 0.f, "Skill restore exceeded damage");
+    }
     void interference()
     {
         MWWorld::ESMStore store; content(store);
@@ -647,7 +700,8 @@ int main(int argc, char** argv)
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "interference") interference();
+        if (filter == "effect-family-rules") effectFamilyRules();
+        else if (filter == "interference") interference();
         else if (filter == "weapons") weapons();
         else if (filter == "expanded-effects") expandedEffects();
         else if (filter == "stat-drains") statDrains();

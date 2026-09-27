@@ -150,6 +150,8 @@ namespace MWMechanics
             || effect.mEffectID == ESM::MagicEffect::FortifyFatigue
             || effect.mEffectID == ESM::MagicEffect::FortifySkill
             || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
+            || effect.mEffectID == ESM::MagicEffect::RestoreAttribute
+            || effect.mEffectID == ESM::MagicEffect::RestoreSkill
             || effect.mEffectID == ESM::MagicEffect::FortifyAttack)
             return 0.f;
         if (effect.mEffectID == ESM::MagicEffect::RestoreHealth
@@ -191,7 +193,10 @@ namespace MWMechanics
                 rating = priority;
             }
         }
-        else if (effect.mEffectID != ESM::MagicEffect::Paralyze
+        else if (effect.mEffectID != ESM::MagicEffect::FireShield
+            && effect.mEffectID != ESM::MagicEffect::LightningShield
+            && effect.mEffectID != ESM::MagicEffect::FrostShield
+            && effect.mEffectID != ESM::MagicEffect::Paralyze
             && effect.mEffectID != ESM::MagicEffect::DrainHealth
             && effect.mEffectID != ESM::MagicEffect::DrainMagicka
             && effect.mEffectID != ESM::MagicEffect::DrainFatigue
@@ -488,10 +493,6 @@ namespace MWMechanics
             rating = *rateCastingInterferenceEffect(effect, stats, stats && stats->isParalyzed());
             if (rating == 0.f) return 0.f;
         }
-        else if (effect.mEffectID == ESM::MagicEffect::RestoreAttribute)
-            return 0.f; // TODO: implement based on attribute damage
-        else if (effect.mEffectID == ESM::MagicEffect::RestoreSkill)
-            return 0.f; // TODO: implement based on skill damage
         else if (effect.mEffectID == ESM::MagicEffect::Burden)
         {
             if (enemy.isEmpty())

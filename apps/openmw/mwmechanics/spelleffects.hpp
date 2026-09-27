@@ -31,6 +31,10 @@ namespace MWMechanics
     void modifyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
         std::optional<float> baseMagickaMultiplier = {});
     void modifySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude);
+    // Permanent Damage/Restore caps differ from temporary Drain/Absorb overlays.
+    void applyAttributeDamage(CreatureStats& stats, ESM::RefId attribute, float magnitude,
+        std::optional<float> baseMagickaMultiplier = {});
+    void applySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude);
     // The stat mutation used by Restore Health. Explicit stats let a server
     // stage the same OpenMW effect before publishing it to a live actor.
     void restoreHealth(CreatureStats& stats, float magnitude);

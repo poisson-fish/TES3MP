@@ -5440,9 +5440,13 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
+        const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
+            ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
+            ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
+            ESM::MagicEffect::FortifyMagicka, ESM::MagicEffect::FortifyFatigue, ESM::MagicEffect::FortifyMaximumMagicka};
         writePlacementFixtureModels(scratch);
         writeDoorFixtureModel(scratch);
         auto actorSettings = settings;
@@ -6023,6 +6027,27 @@ namespace TES3MP::Native::Testing
                 // Live presentation fixture: expiry restores fatigue and permits the authored get-up tail.
                 spell("expanded_knockout", {effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Self, 10, 1000)});
                 spell("expanded_knockout_touch", {effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Touch, 10, 1000)});
+                if (!effectFamily.empty()) for (const auto id : familyEffects)
+                {
+                    auto entry = effect(id, ESM::RT_Self, 1, 12);
+                    if (id == ESM::MagicEffect::DamageAttribute || id == ESM::MagicEffect::RestoreAttribute)
+                        entry.mAttribute = ESM::Attribute::Strength;
+                    if (id == ESM::MagicEffect::DamageSkill || id == ESM::MagicEffect::RestoreSkill)
+                        entry.mSkill = ESM::Skill::ShortBlade;
+                    const auto name = "family_" + std::to_string(ESM::MagicEffect::refIdToIndex(id));
+                    spell(name, {entry}, true);
+                    entry.mDuration = 0; spell(name + "_instant", {entry});
+                    entry.mDuration = 1; entry.mRange = ESM::RT_Touch; spell(name + "_touch", {entry});
+                    if (id == ESM::MagicEffect::FireShield || id == ESM::MagicEffect::LightningShield || id == ESM::MagicEffect::FrostShield)
+                    {
+                        entry.mDuration = 10; entry.mRange = ESM::RT_Self; spell(name + "_melee", {entry});
+                        entry.mRange = ESM::RT_Touch; spell(name + "_melee_touch", {entry}); entry.mRange = ESM::RT_Self;
+                        entry.mDuration = 1;
+                        const auto damageId = id == ESM::MagicEffect::FireShield ? ESM::MagicEffect::FireDamage
+                            : id == ESM::MagicEffect::LightningShield ? ESM::MagicEffect::ShockDamage : ESM::MagicEffect::FrostDamage;
+                        spell(name + "_resistance", {entry, entry, effect(damageId, ESM::RT_Self, 0, 10)});
+                    }
+                }
             }
             if (interruptedCasts) for (bool lethal : {false, true})
             {
@@ -6075,7 +6100,8 @@ namespace TES3MP::Native::Testing
                     << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
                     << "\nmelee weapononehand\n";
             }
-            out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources")
+            { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
             {
@@ -6169,6 +6195,14 @@ namespace TES3MP::Native::Testing
                 {
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
                 }
+            }
+            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources")
+            {
+                // The melee fixture must not select the unrelated lethal spell/item fixtures.
+                npc.mSpells.mList.clear(); npc.mInventory.mList.clear();
+                npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 100;
+                npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Destruction)] = 0;
+                out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             }
             if (constantEffects)
                 for (size_t i = 0; i < (generalConstants ? 4u : 2u); ++i)
@@ -7571,6 +7605,225 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (!effectFamily.empty())
+            {
+                const auto connected = authority;
+                for (size_t index = 0; index < familyEffects.size(); ++index)
+                {
+                    if ((effectFamily == "elemental-shields" && index >= 3)
+                        || (effectFamily == "permanent-stats" && (index < 3 || index >= 7))
+                        || (effectFamily == "fortify-resources" && index < 7)) continue;
+                    const auto effectId = familyEffects[index];
+                    const auto name = "family_" + std::to_string(ESM::MagicEffect::refIdToIndex(effectId));
+                    auto initialImage = seed;
+                    const auto setStat = [&](size_t stat, size_t field, float value) {
+                        const auto offset = statsOffset + (stat * 5 + field) * 8;
+                        const uint64_t bits = std::bit_cast<uint32_t>(value);
+                        for (unsigned i = 0; i < 8; ++i) initialImage.at(offset + i) = std::byte(bits >> (i * 8));
+                    };
+                    const size_t damagedStat = index < 5 ? 0 : 11 + ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade);
+                    const bool restore = effectId == ESM::MagicEffect::RestoreAttribute || effectId == ESM::MagicEffect::RestoreSkill;
+                    if (restore) setStat(damagedStat, 3, 20.f);
+                    InventoryHost running(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+                    auto& runtime = running.service(); runtime.synchronizeCells(authority);
+                    std::unique_ptr<InventoryHost> restarted;
+                    ActorCampaign last;
+                    for (uint64_t tick = 1; tick <= 34; ++tick)
+                    {
+                        if (tick == 4)
+                        {
+                            std::vector<CanonicalSessionProgress> sessions;
+                            for (const auto& session : connected.activeSessions()) if (session.playerId() != id<PlayerId>(1)) sessions.push_back(session);
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(connected.players(), sessions));
+                        }
+                        if (tick == 5) authority = connected;
+                        runtime.synchronizeCells(authority);
+                        const auto before = bytes(runtime);
+                        const auto pending = advance(runtime, tick, tick <= 2 ? name : std::string_view{}, 1, 0, tick == 2);
+                        std::vector<std::byte> candidate;
+                        require(pending->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(runtime) == before, "Family rejection leaked stats/effects/payment/RNG");
+                        auto retry = advance(runtime, tick, tick <= 2 ? name : std::string_view{}, 1, 0, tick == 2);
+                        require(retry->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(runtime) == candidate,
+                            "Family retry changed candidate");
+                        last = read(candidate);
+                        if (tick == 1 || tick == 2)
+                            require(last.timedEffects.size() == tick, "Family sources did not stack");
+                        if (tick == 4) require(last.timedEffects.front().expiresTick == 32, "Offline effect clock did not pause");
+                        if (tick == 32) require(last.timedEffects.size() == 1, "Family first source expired incorrectly");
+                        if (tick == 33) require(last.timedEffects.empty(), "Family second source did not expire independently");
+                        if (effectId == ESM::MagicEffect::FortifyHealth && tick <= 3)
+                            require(last.combat->actors[0][8][2] == (tick == 1 ? 52.f : 64.f), "Fortify Health repeated or failed to stack");
+                        if (effectId == ESM::MagicEffect::FortifyMagicka && tick <= 3)
+                            require(last.combat->actors[0][9][2] == (tick == 1 ? 37.f : 49.f), "Fortify Magicka repeated or lost payment");
+                        if (effectId == ESM::MagicEffect::FortifyMaximumMagicka)
+                        {
+                            const float maximum = (drainMagickaMultiplier + 1.2f * last.timedEffects.size())
+                                * last.combat->actors[0][1][0];
+                            require(std::abs(last.combat->actors[0][9][0] - maximum) < .001f
+                                && std::abs(last.combat->actors[0][9][2] - maximum * .25f) < .001f,
+                                "Maximum magicka lost stock ratio or stacked/expired multiplier");
+                        }
+                        if (effectId == ESM::MagicEffect::FortifyFatigue && tick == 3)
+                            require(last.combat->actors[0][10][2] > 84.f && last.combat->actors[0][10][2] < 87.f,
+                                "Fortify Fatigue did not apply once per source");
+                        if (restarted)
+                        {
+                            restarted->service().synchronizeCells(authority);
+                            commit(restarted->service(), tick);
+                            require(bytes(restarted->service()) == candidate, "Family reconnect/restart diverged");
+                        }
+                        if (tick == 2)
+                        {
+                            const auto path = scratch / "family-active.bin";
+                            { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(candidate.data()), candidate.size()); }
+                            std::ifstream in(path, std::ios::binary);
+                            const std::vector<char> saved(std::istreambuf_iterator<char>{in}, {});
+                            restarted = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, std::as_bytes(std::span(saved)));
+                            require(bytes(restarted->service()) == candidate, "Family disk restart rerolled state");
+                        }
+                    }
+                    if (permanentStatEffect(effectId))
+                    {
+                        const auto prior = read(initialImage).combat->actors[0][damagedStat];
+                        const float expected = restore ? 0.f : std::min(24.f, std::max(0.f, prior[0] + prior[1] - prior[3])) + prior[3];
+                        require(std::abs(last.combat->actors[0][damagedStat][3] - expected) < .001f,
+                            "Permanent stat change vanished on expiry or exceeded stock cap");
+                    }
+                    if (effectId == ESM::MagicEffect::FortifyHealth)
+                        require(last.combat->actors[0][8][2] == 40.f, "Fortify Health expiry failed to remove bonus");
+                    if (effectId == ESM::MagicEffect::FortifyMagicka)
+                        require(last.combat->actors[0][9][2] == 25.f, "Fortify Magicka expiry failed to remove bonus");
+                    if (effectId == ESM::MagicEffect::FortifyHealth)
+                    {
+                        std::vector<CanonicalPlayerEntityState> nearby(connected.players().begin(), connected.players().end());
+                        nearby[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[0], id<ServerTick>(1),
+                            Transform(nearby[0].transform().cell(), Position3(60 * 1024, -64 * 1024, 1024), nearby[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                        authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, connected.activeSessions()));
+                        auto buffed = make();
+                        const auto npc = buffed->service().projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1))->equipment->motions.front().placement;
+                        commit(buffed->service(), 1, name + "_touch", 1, npc, false, true);
+                        auto injured = bytes(buffed->service());
+                        const auto offset = statsOffset + (2 * ActorCampaignCombat::StatCount * 5 + 8 * 5 + 2) * 8;
+                        const uint64_t bits = std::bit_cast<uint32_t>(3.f);
+                        for (unsigned i = 0; i < 8; ++i) injured.at(offset + i) = std::byte(bits >> (i * 8));
+                        authority = connected;
+                        InventoryHost expiring(descriptor, testContentManifest(), *registry, *crypto, injured);
+                        expiring.service().synchronizeCells(authority);
+                        for (uint64_t tick = 2; tick < 31; ++tick) commit(expiring.service(), tick);
+                        const auto before = bytes(expiring.service());
+                        auto death = advance(expiring.service(), 31); std::vector<std::byte> candidate;
+                        require(death->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(expiring.service()) == before, "Fortify expiry death leaked on rejection");
+                        const auto dead = read(candidate);
+                        require(dead.combat->actors[2][8][2] <= 0 && dead.life->deaths.size() == 1
+                            && dead.life->deaths.front().killer == 1 && dead.life->respawnTick == 34,
+                            "Fortify expiry lost lethal removal or attribution");
+                        commit(expiring.service(), 31);
+                        InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                        require(bytes(recovered.service()) == bytes(expiring.service()), "Fortify expiry death restart diverged");
+                    }
+                    if (permanentStatEffect(effectId))
+                    {
+                        InventoryHost instant(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+                        instant.service().synchronizeCells(authority);
+                        const auto state = commit(instant.service(), 1, name + "_instant");
+                        require(state.timedEffects.empty(), "Instant permanent stat effect acquired a lifetime");
+                        const auto prior = read(initialImage).combat->actors[0][damagedStat];
+                        const float expected = restore ? 8.f : std::min(12.f, std::max(0.f, prior[0] + prior[1] - prior[3])) + prior[3];
+                        require(std::abs(state.combat->actors[0][damagedStat][3] - expected) < .001f,
+                            "Instant permanent stat mutation lost stock cap");
+                    }
+                    if (index < 3)
+                    {
+                        auto resistant = make();
+                        const auto state = commit(resistant->service(), 1, name + "_resistance");
+                        require(std::abs(state.combat->actors[0][8][2] - 32.4f) < .001f,
+                            "Stacked elemental shields did not resist ordered elemental damage");
+                        // Exercise both melee callers: shields retaliate even against unarmed hits.
+                        for (bool npcAttacks : {false, true})
+                        {
+                            std::vector<CanonicalPlayerEntityState> nearby(connected.players().begin(), connected.players().end());
+                            for (auto& entity : nearby)
+                                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(1),
+                                    Transform(entity.transform().cell(), Position3(60 * 1024, -64 * 1024, 1024),
+                                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, connected.activeSessions()));
+                            auto meleeImage = initialImage;
+                            if (npcAttacks)
+                            {
+                                const auto offset = statsOffset + (2 * ActorCampaignCombat::StatCount * 5 + 8 * 5 + 2) * 8;
+                                const uint64_t bits = std::bit_cast<uint32_t>(1.5f);
+                                for (unsigned i = 0; i < 8; ++i) meleeImage.at(offset + i) = std::byte(bits >> (i * 8));
+                            }
+                            InventoryHost meleeHost(descriptor, testContentManifest(), *registry, *crypto, meleeImage);
+                            auto& meleeRuntime = dynamic_cast<InventoryService&>(meleeHost.service()); meleeRuntime.synchronizeCells(authority);
+                            bool hit = false;
+                            for (uint64_t tick = 1; tick <= 240 && !hit; ++tick)
+                            {
+                                const auto prior = read(bytes(meleeRuntime));
+                                const auto prepare = [&]() {
+                                    const auto view = meleeRuntime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                                    const auto actorId = view->equipment->motions.front().placement;
+                                    std::unique_ptr<PreparedNativeInventory> command;
+                                    if (tick == 1)
+                                        command = meleeRuntime.prepareMagicUse(authority, proposal(meleeRuntime, 1, tick,
+                                            name + (npcAttacks ? "_melee" : "_melee_touch"), npcAttacks ? 0 : actorId, false, !npcAttacks), id<ServerTick>(tick));
+                                    else if (!npcAttacks && !prior.timedEffects.empty())
+                                    {
+                                        const auto* player = authority.findPlayer(id<PlayerId>(1));
+                                        ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                                            id<CommandId>(tick), id<CanonicalRevision>(tick), id<ActorId>(actorId), id<ServerTick>(tick),
+                                            CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                                        const ServerCommandProposal request(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                                            id<CommandId>(tick), id<CanonicalRevision>(tick), EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                            MeleeAttackCommandProposal(attack));
+                                        command = meleeRuntime.prepareMeleeAttack(authority, request, id<ServerTick>(tick));
+                                    }
+                                    return meleeRuntime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(command));
+                                };
+                                const auto before = bytes(meleeRuntime);
+                                auto pending = prepare(); require(bool(pending), "Shield melee tick missing");
+                                const auto events = meleeRuntime.projectCombatEvents(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                                if (events) hit = npcAttacks
+                                    ? std::ranges::any_of(events->actorEvents(), [](const auto& event) { return event.hit; })
+                                    : std::ranges::any_of(events->events(), [](const auto& event) { return event.hit; });
+                                std::vector<std::byte> candidate;
+                                require(pending->commit([&](auto image) { candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(meleeRuntime) == before, "Shield melee leaked before durability");
+                                auto retry = prepare();
+                                require(retry && retry->commit(accepted) == CanonicalDurabilityResult::Committed && bytes(meleeRuntime) == candidate,
+                                    "Shield melee retry changed damage/RNG");
+                                if (hit)
+                                {
+                                    const size_t attacker = npcAttacks ? 2 : 0;
+                                    require(read(candidate).combat->actors[attacker][8][2] < prior.combat->actors[attacker][8][2],
+                                        "Elemental shield did not retaliate against melee attacker");
+                                    if (npcAttacks)
+                                    {
+                                        const auto dead = read(candidate);
+                                        require(dead.life->deaths.size() == 1 && dead.life->deaths.front().killer == 1
+                                            && dead.life->deaths.front().killerKind == 1 && dead.life->respawnTick == tick + 3,
+                                            "Lethal shield retaliation lost defender attribution/deadline");
+                                    }
+                                    InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                                    require(bytes(recovered.service()) == candidate, "Shield retaliation restart changed state");
+                                }
+                            }
+                            require(hit, "Shield melee fixture never landed a hit");
+                            authority = connected;
+                        }
+                    }
+                    InventoryHost uncertain(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+                    uncertain.service().synchronizeCells(authority);
+                    auto failed = advance(uncertain.service(), 1, name);
+                    require(failed->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                        && uncertain.service().inventoryImage().empty(), "Family uncertain write did not fail closed");
+                    std::cout << "family-effect=" << ESM::MagicEffect::refIdToIndex(effectId)
+                        << " spell+item stack=independent expiry=verified rejected=atomic reconnect=paused disk-restart=exact\n";
+                }
+                return;
+            }
             // Negative dynamic resources, one-time drains, independent item lifetimes, exact restart and expiry.
             {
                 auto running = make(); auto& runtime = running->service();

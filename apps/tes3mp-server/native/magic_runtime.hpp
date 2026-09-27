@@ -16,6 +16,10 @@ namespace TES3MP::Native
     // Modifiers consumed by shared hit chance/evasion and armor calculations.
     bool expandedCombatEffect(ESM::RefId effect);
     bool supportedCombatModifier(ESM::RefId effect);
+    bool permanentStatEffect(ESM::RefId effect);
+    int fortifyDynamicStat(ESM::RefId effect);
+    void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
+        float magnitude, const MWWorld::ESMStore& content);
     // Source-neutral bounded effect plan. Spell and enchantment records both
     // carry an ESM::EffectList; non-self targets require authoritative contact.
     // In V35 the composed actor tick installs timed effect instances separately.

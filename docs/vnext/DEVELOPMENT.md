@@ -8,6 +8,8 @@
    history/retired documents only for specific unanswered questions.
 3. Advance bounded connected behavior, preserving the migration base and one
    canonical writer. Do not create another plan.
+   For effects, finish a behavior family using shared OpenMW handlers and reusable,
+   parameterized checks. Session size follows dependencies, not an effect-ID quota.
 4. Run the smallest affected check individually; stop, fix and rerun on failure.
 5. Review the diff. Retire superseded code only after replacement/failure checks.
    Replace CURRENT's handoff for changed behavior, limitations or evidence;
