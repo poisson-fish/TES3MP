@@ -15,6 +15,7 @@
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
 #include <apps/openmw/mwmechanics/pathfinding.hpp>
+#include <apps/openmw/mwmechanics/pathgrid.hpp>
 #include <apps/openmw/mwmechanics/breathing.hpp>
 #include <apps/openmw/mwmechanics/dooravoidance.hpp>
 #include <apps/openmw/mwmechanics/steering.hpp>
@@ -34,6 +35,8 @@
 #include <components/esm3/loadland.hpp>
 #include <components/bullethelpers/heightfield.hpp>
 #include <components/misc/convert.hpp>
+#include <components/misc/coordinateconverter.hpp>
+#include <components/misc/pathgridutils.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/bulletshapemanager.hpp>
 #include <components/resource/resourcesystem.hpp>
@@ -967,6 +970,45 @@ namespace TES3MP::Native
         return result;
     }
 
+    std::vector<std::array<float, 3>> InteriorActorScene::fleePathgridDestinations() const
+    {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        const auto& position = mImpl->mActor->mPosition;
+        ESM::RefId cellId = mImpl->mCells.front();
+        if (mImpl->mCells.size() > 1)
+        {
+            const int x = int(std::floor(position.x() / 8192.f));
+            const int y = int(std::floor(position.y() / 8192.f));
+            const auto found = std::ranges::find_if(mImpl->mCells, [&](ESM::RefId id) {
+                const auto* exterior = id.getIf<ESM::ESM3ExteriorCellRefId>();
+                return exterior && exterior->getX() == x && exterior->getY() == y;
+            });
+            if (found == mImpl->mCells.end()) return {};
+            cellId = *found;
+        }
+        const auto* cell = mImpl->mReferences.getCell(cellId).getCell();
+        const auto* pathgrid = mImpl->mStore.get<ESM::Pathgrid>().search(*cell);
+        if (!pathgrid || pathgrid->mPoints.empty()) return {};
+        if (pathgrid->mPoints.size() > 2048)
+            throw std::length_error("Flee pathgrid exceeds bound");
+        MWMechanics::PathgridGraph graph(*pathgrid);
+        const auto converter = Misc::makeCoordinateConverter(*cell);
+        osg::Vec3f local = position;
+        converter.toLocal(local);
+        const size_t closest = Misc::getClosestPoint(*pathgrid, local);
+        std::vector<std::array<float, 3>> result;
+        result.reserve(pathgrid->mPoints.size() - 1);
+        for (size_t i = 0; i < pathgrid->mPoints.size(); ++i)
+        {
+            if (i == closest || !graph.isPointConnected(closest, i)) continue;
+            auto point = pathgrid->mPoints[i];
+            converter.toWorld(point);
+            const std::array<float, 3> candidate{float(point.mX), float(point.mY), float(point.mZ)};
+            if (candidate != std::array<float, 3>{} && contains(candidate)) result.push_back(candidate);
+        }
+        return result;
+    }
+
     void InteriorActorScene::travelTo(const std::array<float, 3>& destination, bool retainUnavailable)
     {
         if (retainUnavailable)
@@ -1119,6 +1161,8 @@ namespace TES3MP::Native
     std::span<const char> InteriorActorScene::Prepared::image() const { return mState->bytes; }
     bool InteriorActorScene::Prepared::pathUnavailable() const
     { return !mState->path.isPathConstructed() && !mState->path.checkPathCompleted(); }
+    bool InteriorActorScene::Prepared::pathCompleted() const
+    { return mState->path.checkPathCompleted(); }
 
     std::vector<char> InteriorActorScene::image() const
     { return mImpl ? mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel) : mDormant->image; }
@@ -1315,6 +1359,41 @@ namespace TES3MP::Native
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
             {doors.begin(), doors.end()}, std::move(travel)})));
+    }
+
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareBlindRun(
+        const ActorMovement& movement, std::span<const ActorSceneDoor> doors,
+        const std::array<float, 3>& enemy)
+    {
+        if (!mImpl || !mImpl->mNavigator) throw std::logic_error("Flee movement unavailable");
+        mImpl->validateDoors(doors);
+        for (float value : enemy)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Flee enemy position outside bounds");
+        if (!movement.enabled || !std::isfinite(movement.walkSpeed)
+            || movement.walkSpeed < 0 || movement.walkSpeed > 4096)
+            throw std::invalid_argument("Flee speed outside bounds");
+        auto frame = std::make_unique<MWPhysics::ActorFrameData>(mImpl->movementFrame(*mImpl->mActor, movement));
+        auto path = mImpl->mPath;
+        auto travel = mImpl->mTravel;
+        std::vector<uint64_t> contacts;
+        struct RestoreDoors
+        {
+            Impl& scene;
+            ~RestoreDoors() { scene.applyDoors(scene.mDoors); }
+        } restore{*mImpl};
+        mImpl->applyDoors(doors);
+        for (int step = 0; step < 2; ++step)
+        {
+            frame->mRotation.y() = std::atan2(frame->mPosition.x() - enemy[0],
+                frame->mPosition.y() - enemy[1]);
+            mImpl->simulate(*frame, contacts, {0, mImpl->movementSpeed(*frame, movement), 0});
+            mImpl->updateBreath(*frame, travel, movement);
+        }
+        auto bytes = mImpl->encode(*frame, path, contacts, travel);
+        return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
+            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts),
+            std::move(bytes), {doors.begin(), doors.end()}, std::move(travel)})));
     }
     bool InteriorActorScene::canInstall(const Prepared& prepared) const noexcept
     { return mImpl && prepared.mState->lifetime == mImpl->mLifetime; }

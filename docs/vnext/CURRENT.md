@@ -4,48 +4,51 @@
 NPC/biped/doors: 60 Hz; commits: 30 Hz; neighbors freeze.
 **V57, T3D1/capability 29.**
 
-Inherited captures cover dancer, khajiit, and tsaesci TR bodies;
-corpse poses and armed creatures remain untested.
+Inherited captures cover dancer, khajiit, and tsaesci TR bodies.
 
 Player/NPC casts retain timing, payment and interruption. Silence/Sound,
 shields, stats, cures, Dispel, diseases/curses, Corprus/Vampirism, SunDamage,
-rest and Disintegration have synthetic checks under `build/logs/`; custom casts
-have vanilla/TR desktop captures. VFX and desktop effects remain incomplete.
+rest and Disintegration have synthetic checks; custom casts have vanilla/TR
+desktop captures. VFX remains incomplete.
 
-Invisibility/Chameleon use stock hit and awareness; casts/attacks break temporary
-Invisibility. T3D1 projects seven visibility effects and Charm. Lifecycle checks:
+Invisibility/Chameleon use stock hit and awareness; casts/attacks break
+Invisibility. T3D1 projects seven visibility effects and Charm. Checks:
 `build/logs/{concealment-campaign-09,visibility-campaign-03,visibility-protocol-03}.log`.
-Two desktops confirmed visibility, detection, expiry and reconnect:
+Two desktops confirmed visibility and expiry:
 `build/m4-visibility-desktop-live-08/result.json`. Detached AI lacks sneak stance.
 
-V56 admits eight movement effects into spell/constant sources; T3D1 projects
-player magnitudes. NPC motion/breath derive from committed state; drowning carries
-life attribution. Solver, source and deep-water checks:
+V56 admits eight movement effects; T3D1 projects player magnitudes. NPC
+motion/breath derive from committed state; drowning carries life attribution. Checks:
 `build/logs/{movement-npc-service-17,movement-deep-05}.log`.
-Two desktops converged across dry-room and deep-water expiry/restart captures:
+Dry-room and deep-water desktop captures:
 `build/m4-movement-desktop-live-06/result.json`,
 `build/m4-movement-deep-desktop-live-03/result.json`. NPC AI has no jump request.
 
-The twelve AI/disposition IDs enter bounded timed spell/WhenUsed sources.
-V57 also admits AI effects from equipped constants and authored, AI-only Self
-abilities for the selected NPC or unarmed biped creature and both players.
-Stock and server share target checks and Fight/Flee arithmetic. The selected
-NPC or undead creature applies distance and disposition to aggression, health
-and Flee to attack choice, and runs away through a durable 30-tick navigation
-destination. Calm, Frenzy, Demoralize, Rally and TurnUndead affect those choices;
-level-gated Command follows a player caster. T3D1 projects committed Charm into
-OpenMW MagicEffects, which stock derived dialogue disposition reads. NPC Charm
-also affects the server's aggression disposition. Synthetic rules, protocol,
-NPC/creature source, expiry, rejection and restart checks:
-`build/logs/{ai-rules-final,ai-protocol-test,ai-player-charm-02,ai-passive-creature-02}.log`.
-Desktop build: `build/logs/ai-desktop-build.log`.
-No dialogue capture. Aggression disposition omits faction, crime,
-disease, drawn-weapon and werewolf modifiers. Flee navigation uses an away
-destination rather than stock pathgrid/random blind run. Mixed passive spells,
-non-player Command casters and multiple active combatants remain open.
+Twelve AI/disposition IDs enter timed spells, WhenUsed, equipped constants and
+authored AI-only abilities for the selected NPC/creature and both players.
+Server and stock share target checks and Fight/Flee arithmetic. The selected
+actor applies distance, disposition, health and Flee to combat choice. Flee
+selects a connected pathgrid point or runs blindly for one second; pathgrid
+runs persist until completion or distant LOS loss. Calm, Frenzy, Demoralize, Rally,
+TurnUndead and level-gated Command affect AI. T3D1 projects committed Charm
+into stock dialogue; NPC Charm affects server aggression. Checks:
+`build/logs/{ai-rules-final,ai-protocol-test,ai-player-charm-02,ai-passive-creature-02,ai-flee-test-11}.log`.
+Committed player disease adds stock's disposition term; offline passive AI
+abilities no longer expire. A two-desktop capture shows stock dialogue
+disposition 45→80→45 with Charm 35 and expiry:
+`build/m4-charm-dialogue-live-14/result.json` and its three window PNGs.
+Test automation opened the replicated NPC's stock dialogue directly; ordinary
+activation did not focus that NPC. The remote display now accepts constant
+enchanted equipment.
+Aggression still lacks canonical faction, crime/bounty, drawn-weapon and
+werewolf modifiers. Flee lacks stock attack-distance trigger and exact
+actor-bound distance checks.
+Mixed passive spells, non-player Command casters and multiple active combatants
+remain open.
 
-**Next: close aggression/Flee fidelity; validate dialogue live.**
-Player movement cutover stays after combat and collision requirements.
+**Next: bind canonical player social/draw/werewolf state to aggression, then
+finish Flee distance gates and ordinary NPC dialogue activation.**
+Player movement cutover follows combat and collision.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

@@ -673,7 +673,9 @@ void MWWorld::InventoryStore::applyAuthoritativeAppearance(std::span<const std::
         const auto allowed = item.getClass().getEquipmentSlots(item);
         if (std::ranges::find(allowed.first, slot) == allowed.first.end()
             || !item.getClass().getScript(item).empty()
-            || (!item.getClass().getEnchantment(item).empty() && !inventoryItemRecord(content, record).mWhenUsed))
+            || (!item.getClass().getEnchantment(item).empty()
+                && !inventoryItemRecord(content, record).mWhenUsed
+                && !inventoryItemRecord(content, record).mConstant))
             throw std::invalid_argument("Remote appearance has an unsupported record or slot");
         const auto current = getSlot(slot);
         if (current == end() || current->getCellRef().getRefId() != record || current->getCellRef().getCount() != 1)
@@ -702,7 +704,8 @@ void MWWorld::InventoryStore::applyAuthoritativeEquipment(
         if (slot < 0 || slot >= Slots || !item.hasLiveReference() || item.getContainerStore() != this
             || slots[slot] != end() || !item.getClass().getScript(item).empty()
             || (!item.getClass().getEnchantment(item).empty()
-                && (!content || !inventoryItemRecord(*content, item.getCellRef().getRefId()).mWhenUsed)))
+                && (!content || (!inventoryItemRecord(*content, item.getCellRef().getRefId()).mWhenUsed
+                    && !inventoryItemRecord(*content, item.getCellRef().getRefId()).mConstant))))
             throw std::invalid_argument("Remote equipment has invalid ownership, slot or unsupported effects");
         const auto allowed = item.getClass().getEquipmentSlots(item);
         if (std::ranges::find(allowed.first, slot) == allowed.first.end() || item.getCellRef().getCount() < 1

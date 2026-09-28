@@ -130,6 +130,9 @@ namespace TES3MP::Native
         void enableNavigation(const std::string& settingsFile);
         void enableMovementEffects();
         std::vector<std::array<float, 3>> pathTo(const std::array<float, 3>& destination) const;
+        // Stock AiCombat candidates: connected pathgrid points other than the
+        // closest point. An empty result selects the one-second blind run.
+        std::vector<std::array<float, 3>> fleePathgridDestinations() const;
         void travelTo(const std::array<float, 3>& destination, bool retainUnavailable = false);
         ActorSceneSnapshot navigate(float speed);
         bool arrived() const;
@@ -144,12 +147,15 @@ namespace TES3MP::Native
             ActorSceneSnapshot snapshot() const;
             std::span<const char> image() const;
             bool pathUnavailable() const;
+            bool pathCompleted() const;
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});
         std::unique_ptr<Prepared> prepareNavigation(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors = {},
             std::optional<std::array<float, 3>> destination = {});
+        std::unique_ptr<Prepared> prepareBlindRun(const ActorMovement& movement,
+            std::span<const ActorSceneDoor> doors, const std::array<float, 3>& enemy);
         void setFacing(Prepared& prepared, float yaw) const;
         bool canInstall(const Prepared& prepared) const noexcept;
         void install(Prepared& prepared) noexcept;

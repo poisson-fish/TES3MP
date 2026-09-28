@@ -35,6 +35,7 @@
 #include <components/esm3/readerscache.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadland.hpp>
+#include <components/esm3/loadpgrd.hpp>
 #include <components/esm3/formatversion.hpp>
 #include <iostream>
 #include <bit>
@@ -5944,6 +5945,10 @@ namespace TES3MP::Native::Testing
                 distance.mValue.setInteger(30);
                 out.startRecord(ESM::GameSetting::sRecordId, 0); distance.save(out);
                 out.endRecord(ESM::GameSetting::sRecordId);
+                ESM::GameSetting fleeDistance; fleeDistance.mId = ESM::RefId::stringRefId("fFleeDistance");
+                fleeDistance.mValue = ESM::Variant(3000.f);
+                out.startRecord(ESM::GameSetting::sRecordId, 0); fleeDistance.save(out);
+                out.endRecord(ESM::GameSetting::sRecordId);
             }
             if (weaponExecution)
             {
@@ -6109,6 +6114,7 @@ namespace TES3MP::Native::Testing
                         ESM::RT_Target, 5, 300)});
                     if (effectFamily == "ai-disposition")
                     {
+                        spell("ai_charm_dialogue", {effect(ESM::MagicEffect::Charm, ESM::RT_Target, 20, 35)});
                         spell("ai_item_charm", {effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 40)}, true);
                         spell("ai_charm_fight", {effect(ESM::MagicEffect::FrenzyHumanoid, ESM::RT_Target, 5, 100),
                             effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 100)});
@@ -6643,6 +6649,18 @@ namespace TES3MP::Native::Testing
                     placed.mPos = {{x, y, 1}, {0, 0, 0}}; placed.save(out);
                 }
             out.endRecord(ESM::Cell::sRecordId);
+            if (effectFamily == "ai-disposition")
+            {
+                ESM::Pathgrid grid; grid.blank(); grid.mCell = cell.mId;
+                grid.mPoints = {{60, -32, 1}, {60, 200, 1}, {60, 300, 1}};
+                grid.mPoints[0].mConnectionNum = 2;
+                grid.mPoints[1].mConnectionNum = 1;
+                grid.mPoints[2].mConnectionNum = 1;
+                grid.mEdges = {{0, 1}, {1, 0}, {0, 2}, {2, 0}};
+                grid.mData.mPoints = uint16_t(grid.mPoints.size());
+                out.startRecord(ESM::Pathgrid::sRecordId, 0); grid.save(out);
+                out.endRecord(ESM::Pathgrid::sRecordId);
+            }
             cell.mName = "NPC Door Path Test"; cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
             for (auto record : {placedActor, floor.mId, door.mId})
@@ -6661,6 +6679,32 @@ namespace TES3MP::Native::Testing
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
             Loadout loadout(readLoadoutOptions(3, arguments));
+            if (effectFamily == "ai-disposition")
+            {
+                const auto combatRoom = ESM::RefId::stringRefId("NPC Door Contact Test");
+                const auto combatActor = loadout.placedActors(combatRoom).at(0);
+                InteriorActorScene gridded(loadout, "NPC Door Contact Test", combatActor.mIdentity,
+                    "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                require(gridded.fleePathgridDestinations().size() == 2,
+                    "Connected flee pathgrid candidates missing from content");
+                const auto room = ESM::RefId::stringRefId("NPC Door Path Test");
+                const auto actor = loadout.placedActors(room).at(0);
+                InteriorActorScene blind(loadout, "NPC Door Path Test", actor.mIdentity,
+                    "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                blind.enableNavigation(settings.string());
+                require(blind.fleePathgridDestinations().empty(),
+                    "Pathgrid-free room did not select stock blind flee");
+                ActorMovement run; run.enabled = true; run.walkSpeed = 120.f;
+                const auto initial = blind.snapshot();
+                const auto image = blind.image();
+                auto prepared = blind.prepareBlindRun(run, {}, {0, -400, 1});
+                require(blind.image() == image && prepared->snapshot().mPosition[1] > initial.mPosition[1],
+                    "Prepared blind flee mutated the scene or failed to run away");
+                const auto expected = prepared->snapshot();
+                blind.install(*prepared);
+                require(blind.snapshot().mPosition == expected.mPosition,
+                    "Blind flee install diverged from its prepared physics frame");
+            }
             if (effectLifecycle && strike)
             {
                 const auto& content = loadout.store();
@@ -8076,6 +8120,19 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
             {
                 const bool creatureTarget = effectFamily == "ai-creature";
+                {
+                    auto idle = make();
+                    const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(
+                        authority.players(), std::span<const CanonicalSessionProgress>{}));
+                    auto offlineWorld = specialWorld();
+                    for (uint64_t frame = 1; frame <= 3; ++frame)
+                    {
+                        auto pending = idle->service().prepareNativeTick(offline, id<ServerTick>(frame),
+                            1.f/30.f, {}, &offlineWorld);
+                        require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Offline AI passive source exhausted its timeless deadline");
+                    }
+                }
                 auto running = make(); auto& runtime = running->service();
                 const auto inventory = runtime.projectInventory(authority, id<SessionId>(1),
                     id<ServerTick>(1), id<CanonicalRevision>(1));
@@ -8183,6 +8240,10 @@ namespace TES3MP::Native::Testing
                         if (read(bytes(service)).combat->fleeTarget) decided = frame;
                     }
                     require(decided, "Committed Demoralize did not select stock Flee over attack");
+                    const auto chosen = read(bytes(service)).combat->fleeDestination;
+                    require(chosen == std::array<float, 3>{60, 200, 1}
+                            || chosen == std::array<float, 3>{60, 300, 1},
+                        "Flee did not choose a connected stock pathgrid point");
                     const auto origin = service.travelDiagnostics();
                     require(bool(origin), "Flee origin missing");
                     const auto saved = bytes(service);
@@ -8193,15 +8254,17 @@ namespace TES3MP::Native::Testing
                     require(rejected->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                         == CanonicalDurabilityResult::Rejected && bytes(service) == saved,
                         "Rejected flee movement changed committed path");
-                    for (uint64_t frame = decided + 1; frame <= decided + 22; ++frame)
+                    for (uint64_t frame = decided + 1; frame <= decided + 31; ++frame)
                     {
                         (void)commit(service, frame); (void)commit(restart.service(), frame);
                         require(bytes(service) == bytes(restart.service()),
                             "Flee movement diverged after restart");
                     }
+                    require(read(bytes(service)).combat->fleeDestination == chosen,
+                        "Active pathgrid flee changed destination at the blind-run deadline");
                     const auto moved = service.travelDiagnostics();
                     require(moved && moved->position[1] > origin->position[1] + 20.f,
-                        "Flee destination did not move the actor away from the player");
+                        "Flee pathgrid destination did not move the actor");
                 }
                 {
                     auto injured = make(); auto& service = injured->service();

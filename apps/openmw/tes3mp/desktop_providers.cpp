@@ -2151,16 +2151,16 @@ namespace TES3MP::OpenMWAdapter
                     return true;
                 };
                 if (!apply(world->getPlayerPtr(), world->getAnimation(world->getPlayerPtr()), 1, combatSnapshot->selfPlayerId().value()))
-                    return ProviderResult::PresentationFailed;
+                { Log(Debug::Error) << "TES3MP self combat presentation rejected"; return ProviderResult::PresentationFailed; }
                 for (auto& [id, remote] : nativeRemotes)
                     if (remote.actor && remote.actor->ptr().getRefData().getBaseNode() && !apply(remote.actor->ptr(), remote.actor->animation(), 2, id))
-                        return ProviderResult::PresentationFailed;
+                    { Log(Debug::Error) << "TES3MP NPC combat presentation rejected"; return ProviderResult::PresentationFailed; }
                 for (auto& [id, remote] : remotes)
                     if (remote.actor && remote.lastObserved && !apply(remote.actor->ptr(), remote.actor->animation(), 1, remote.lastObserved->playerId().value()))
-                        return ProviderResult::PresentationFailed;
+                    { Log(Debug::Error) << "TES3MP peer combat presentation rejected"; return ProviderResult::PresentationFailed; }
                 for (auto& [id, remote] : actorRemotes)
                     if (remote.actor && remote.lastObserved && !apply(remote.actor->ptr(), remote.actor->animation(), 2, remote.lastObserved->actorId().value()))
-                        return ProviderResult::PresentationFailed;
+                    { Log(Debug::Error) << "TES3MP actor combat presentation rejected"; return ProviderResult::PresentationFailed; }
             }
             if (combatSnapshot)
             {
@@ -2203,7 +2203,8 @@ namespace TES3MP::OpenMWAdapter
                     if (pose.kind == 1 && pose.id == combatSnapshot->selfPlayerId().value())
                     {
                         auto ptr = world->getPlayerPtr();
-                        if (!apply(pose, ptr, world->getAnimation(ptr))) return ProviderResult::PresentationFailed;
+                        if (!apply(pose, ptr, world->getAnimation(ptr)))
+                        { Log(Debug::Error) << "TES3MP self effect presentation rejected"; return ProviderResult::PresentationFailed; }
                         world->getRenderingManager()->setNightEyeFactor(std::min(1.f, pose.visibility[3] / 100.f));
                         continue;
                     }
@@ -3093,8 +3094,17 @@ namespace TES3MP::OpenMWAdapter
             const auto result
                 = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection, receivedAt, localReconciliation);
             if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP authoritative presentation rejected: " << int(result);
                 mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP authoritative presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {
@@ -3109,8 +3119,17 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto result = mImpl->advance(now);
             if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP presentation advance rejected: " << int(result);
                 mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP presentation advance exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {
@@ -3126,8 +3145,17 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto result = mImpl->applyActors(snapshot, observedActors, receivedAt);
             if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP actor presentation rejected: " << int(result);
                 mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP actor presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {
@@ -3182,8 +3210,17 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto result = mImpl->applyInventory(player, containers, groundItems, equipment, receivedAt);
             if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP inventory presentation rejected: " << int(result);
                 mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP inventory presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {
@@ -3200,7 +3237,10 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto result = mImpl->applyCombat(snapshot, events);
             if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP combat presentation rejected: " << int(result);
                 mImpl->clear();
+            }
             return result;
         }
         catch (const std::exception& error)

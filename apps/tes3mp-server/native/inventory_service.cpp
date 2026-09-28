@@ -3577,6 +3577,7 @@ namespace TES3MP::Native
         const auto doors = actorDoorFrames(command.get());
         ActorMovement movement;
         auto navigationDestination = mBinding.mTravelDestination;
+        std::optional<std::array<float, 3>> blindFleeEnemy;
         if (active && mCombat && mBinding.mMovementEffects)
         {
             const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
@@ -3605,13 +3606,23 @@ namespace TES3MP::Native
                     if (mBinding.mNavigatingActor->contains(follow)) navigationDestination = follow;
                 }
             }
-            else if (mBinding.mAiDecisions && mCombat->fleeTarget && mCombat->fleeUntil > tick.value())
+            else if (mBinding.mAiDecisions && mCombat->fleeTarget
+                && (mCombat->fleeDestination != std::array<float, 3>{}
+                    || mCombat->fleeUntil > tick.value()))
             {
                 const auto fleeingFrom = PlayerId::fromValue(mCombat->fleeTarget);
                 const auto* player = fleeingFrom ? players.findPlayer(*fleeingFrom) : nullptr;
-                if (player && player->transform().cell() == actorCell(before)
-                    && mBinding.mNavigatingActor->contains(mCombat->fleeDestination))
-                    navigationDestination = mCombat->fleeDestination;
+                if (player && player->transform().cell() == actorCell(before))
+                {
+                    if (mCombat->fleeDestination == std::array<float, 3>{})
+                    {
+                        const auto position = player->transform().position();
+                        blindFleeEnemy = {float(double(position.x()) / 1024),
+                            float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                    }
+                    else if (mBinding.mNavigatingActor->contains(mCombat->fleeDestination))
+                        navigationDestination = mCombat->fleeDestination;
+                }
             }
         }
         if (active && mBinding.mMovementEffects)
@@ -3641,7 +3652,9 @@ namespace TES3MP::Native
                 || mCombat->knockedDown[2];
             movement.enabled = true;
             const bool fleeing = mBinding.mAiDecisions && mCombat->fleeTarget
-                && mCombat->fleeUntil > tick.value() && navigationDestination == mCombat->fleeDestination;
+                && (mCombat->fleeDestination != std::array<float, 3>{}
+                    || mCombat->fleeUntil > tick.value())
+                && (blindFleeEnemy || navigationDestination == mCombat->fleeDestination);
             movement.walkSpeed = inert ? 0.f : fleeing
                 ? MWClass::npcRunSpeed(walk, athletics, setting("fAthleticsRunBonus"),
                     setting("fBaseRunMultiplier")) : walk;
@@ -3663,7 +3676,8 @@ namespace TES3MP::Native
             movement.unconscious = mCombat->knockedDown[2];
         }
         auto step = active ? (mBinding.mMovementEffects
-            ? mBinding.mNavigatingActor->prepareNavigation(movement, doors, navigationDestination)
+            ? blindFleeEnemy ? mBinding.mNavigatingActor->prepareBlindRun(movement, doors, *blindFleeEnemy)
+                : mBinding.mNavigatingActor->prepareNavigation(movement, doors, navigationDestination)
             : mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)) : nullptr;
         if (step && mBinding.mTravelerNeighborhood && !mBinding.mNavigatingActor->contains(step->snapshot().mPosition))
         { step.reset(); report.status = Diagnostics::Status::Boundary; }
@@ -3684,12 +3698,42 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        const auto fleeOutOfSight = [&] {
+            if (!combat || !combat->fleeTarget || combat->fleeDestination == std::array<float, 3>{})
+                return false;
+            const auto id = PlayerId::fromValue(combat->fleeTarget);
+            const auto* enemy = id ? players.findPlayer(*id) : nullptr;
+            if (!enemy || enemy->transform().cell() != actorCell(before)) return false;
+            const auto place = enemy->transform().position();
+            const std::array<float, 3> from{before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f};
+            const std::array<float, 3> to{float(double(place.x()) / 1024),
+                float(double(place.y()) / 1024), float(double(place.z()) / 1024) + 110.f};
+            const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+            const float fleeDistance = mRuntime.mStore.get<ESM::GameSetting>()
+                .find("fFleeDistance")->mValue.getFloat();
+            if (!std::isfinite(fleeDistance) || fleeDistance < 0.f || fleeDistance > 1e7f)
+                throw std::invalid_argument("Native flee distance outside bounds");
+            return dx*dx + dy*dy + dz*dz > fleeDistance * fleeDistance
+                && !mBinding.mNavigatingActor->lineOfSight(from, to);
+        };
+        if (combat && active && combat->fleeTarget && combat->fleeDestination != std::array<float, 3>{}
+            && ((navigationDestination == combat->fleeDestination && step && step->pathCompleted())
+                || fleeOutOfSight()))
+        { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
         if (combat && mBinding.mAiDecisions && combat->fleeTarget
-            && (combat->fleeUntil <= tick.value() || combat->actors[2][8][2] <= 0
+            && ((combat->fleeDestination == std::array<float, 3>{}
+                    && combat->fleeUntil <= tick.value()) || combat->actors[2][8][2] <= 0
                 || !std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
                     return session.playerId().value() == combat->fleeTarget;
                 })))
         { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
+        if (combat && active && step && combat->fleeTarget
+            && combat->fleeDestination != std::array<float, 3>{})
+        {
+            if (tick.value() > UINT64_MAX - 30)
+                throw std::invalid_argument("Native flee deadline exhausted");
+            combat->fleeUntil = tick.value() + 30;
+        }
         if (mBinding.mRangedFlight && combat)
             std::erase_if(combat->arrows, [&](const auto& arrow) {
                 // Retain a receipt throughout the accepted input window. Once
@@ -3882,8 +3926,9 @@ namespace TES3MP::Native
             const auto id = effect.effectIndex || effect.source
                 ? ESM::MagicEffect::indexToRefId(int(effect.effectIndex))
                 : ESM::MagicEffect::ResistMagicka;
-            if (effect.sourceKind == 3 && id != ESM::MagicEffect::DisintegrateWeapon
-                && id != ESM::MagicEffect::DisintegrateArmor) continue; // Other equipped sources are overlays.
+            if ((effect.sourceKind == 3 && id != ESM::MagicEffect::DisintegrateWeapon
+                    && id != ESM::MagicEffect::DisintegrateArmor) || effect.sourceKind == 5)
+                continue; // Equipped and authored passive sources are timeless overlays.
             bool paused = effect.actor == 2 && !active;
             if (effect.actor < mBinding.mPlayers.size())
                 paused = std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
@@ -5066,6 +5111,12 @@ namespace TES3MP::Native
                 disposition += settings.find("fDispPersonalityMult")->mValue.getFloat()
                     * (stats.getAttribute(ESM::Attribute::Personality).getModified()
                         - settings.find("fDispPersonalityBase")->mValue.getFloat());
+                if (std::ranges::any_of(combat->conditions, [&](const auto& condition) {
+                    if (condition.actor != actor(player.playerId())) return false;
+                    const auto* spell = spellBySource(mRuntime.mStore, condition.source);
+                    return spell && (spell->mData.mType == ESM::Spell::ST_Disease
+                        || spell->mData.mType == ESM::Spell::ST_Blight);
+                })) disposition += settings.find("fDispDiseaseMod")->mValue.getFloat();
                 disposition = float(MWMechanics::dispositionWithCharm(disposition, 0.f));
             }
             const auto position = player.transform().position();
@@ -5276,30 +5327,27 @@ namespace TES3MP::Native
                 if (flee)
                 {
                     melee = mIdleMelee; target = 0; contact = false;
+                    if (tick.value() > UINT64_MAX - 30)
+                        throw std::invalid_argument("Native flee deadline exhausted");
                     if (combat->fleeTarget != enemy->playerId().value() || combat->fleeUntil <= tick.value())
                     {
-                        if (tick.value() > UINT64_MAX - 30)
-                            throw std::invalid_argument("Native flee deadline exhausted");
-                        const auto position = enemy->transform().position();
-                        const float dx = before.mPosition[0] - float(double(position.x()) / 1024);
-                        const float dy = before.mPosition[1] - float(double(position.y()) / 1024);
-                        const float length = std::hypot(dx, dy);
-                        const float directionX = length > 1.f ? dx / length : 1.f;
-                        const float directionY = length > 1.f ? dy / length : 0.f;
-                        float stride = std::clamp(movement.walkSpeed * 2.f, 96.f, 512.f);
                         std::array<float, 3> destination{};
-                        do
+                        const auto fleeingActor = mRuntime.ownerPtr(mCombatNpcOwner);
+                        const auto points = fleeingActor.getClass().isPureWaterCreature(fleeingActor)
+                            ? std::vector<std::array<float, 3>>{}
+                            : mBinding.mNavigatingActor->fleePathgridDestinations();
+                        if (!points.empty())
                         {
-                            destination = {before.mPosition[0] + stride * directionX,
-                                before.mPosition[1] + stride * directionY, before.mPosition[2]};
-                            if (mBinding.mNavigatingActor->contains(destination)) break;
-                            stride *= .5f;
-                        } while (stride >= 24.f);
-                        if (!mBinding.mNavigatingActor->contains(destination)) destination = before.mPosition;
+                            Misc::Rng::Generator rng{combat->rng};
+                            destination = points[Misc::Rng::rollDice(points.size(), rng)];
+                            combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                        }
                         combat->fleeTarget = enemy->playerId().value();
                         combat->fleeUntil = tick.value() + 30;
                         combat->fleeDestination = destination;
                     }
+                    else if (combat->fleeDestination != std::array<float, 3>{})
+                        combat->fleeUntil = tick.value() + 30;
                 }
                 else if (selected)
                 {

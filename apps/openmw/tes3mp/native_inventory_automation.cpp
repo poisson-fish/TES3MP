@@ -362,7 +362,8 @@ namespace TES3MP::OpenMWAdapter
                 || strength < 0.f || strength > 1.f)
                 throw std::runtime_error("Traversal swing arguments invalid");
         }
-        else if (action == "activate" || action == "put" || action == "cast" || action == "castactor")
+        else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
+            || action == "dialogue" || action == "dialoguestart")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
@@ -401,6 +402,43 @@ namespace TES3MP::OpenMWAdapter
             if (focus.isEmpty() || focus.getCellRef().getRefId() != ESM::RefId::stringRefId(record))
                 throw std::runtime_error("Traversal activation focus differs from requested record");
             world->getPlayer().activate();
+        }
+        else if (action == "dialoguestart" || action == "dialogue")
+        {
+            std::vector<MWWorld::Ptr> targets;
+            mPresentation.appendMeleeTargets(targets);
+            MWWorld::Ptr speaker;
+            for (const auto& ptr : targets)
+                if (ptr.getCellRef().getRefId() == ESM::RefId::stringRefId(record))
+                {
+                    if (!speaker.isEmpty()) throw std::runtime_error("Traversal dialogue speaker is ambiguous");
+                    speaker = ptr;
+                }
+            if (speaker.isEmpty()) throw std::runtime_error("Traversal dialogue speaker missing");
+            if (action == "dialoguestart")
+            {
+                if (wm->isGuiMode()) throw std::runtime_error("Traversal dialogue start requires game focus");
+                wm->pushGuiMode(MWGui::GM_Dialogue, speaker);
+            }
+            if (!wm->containsMode(MWGui::GM_Dialogue))
+                throw std::runtime_error("Traversal dialogue window is not open");
+            const auto charm = speaker.getClass().getCreatureStats(speaker).getMagicEffects()
+                .getOrDefault(ESM::MagicEffect::Charm).getMagnitude();
+            const int disposition = MWBase::Environment::get().getMechanicsManager()
+                ->getDerivedDisposition(speaker);
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"traversal_dialogue_effect\",\"sequence\":" << sequence
+                    << ",\"charm\":" << charm << ",\"disposition\":" << disposition << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+        }
+        else if (action == "dialogueclose")
+        {
+            if (!wm->containsMode(MWGui::GM_Dialogue))
+                throw std::runtime_error("Traversal dialogue window is not open");
+            wm->removeGuiMode(MWGui::GM_Dialogue);
         }
         else if (action == "attack" || action == "swing")
         {
