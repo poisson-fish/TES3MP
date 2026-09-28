@@ -113,6 +113,11 @@ V53 adds participant-bound player casts to this clock. Release revalidation/paym
 and interruption commit atomically; offline casts pause. T3C8/capability 26;
 fresh campaigns.
 
+T3C9/capability 27 carries bounded aggregate visibility magnitudes with actor
+presentation. Clients feed stock Light, NightEye and Detect consumers; snapshots
+restore loops and expiry after reconnect. An action suppresses an equipped
+Invisibility effect without deleting its durable source or rerolling magnitude.
+
 **Movement smoothness (target).** Cut over after smooth replication and unified
 engine collision. Until then validate inherited combat contacts on the server.
 Start with stock physics; tune snapshot frequency separately. Interpolate remote

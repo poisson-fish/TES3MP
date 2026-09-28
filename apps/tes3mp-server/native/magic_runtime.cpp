@@ -94,7 +94,10 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::StuntedMagicka
             || id == ESM::MagicEffect::DisintegrateWeapon
             || id == ESM::MagicEffect::DisintegrateArmor
-            || id == ESM::MagicEffect::Invisibility || id == ESM::MagicEffect::Chameleon;
+            || id == ESM::MagicEffect::Invisibility || id == ESM::MagicEffect::Chameleon
+            || id == ESM::MagicEffect::Light || id == ESM::MagicEffect::NightEye
+            || id == ESM::MagicEffect::DetectAnimal || id == ESM::MagicEffect::DetectEnchantment
+            || id == ESM::MagicEffect::DetectKey;
     }
     bool supportedCombatModifier(ESM::RefId effect)
     {
@@ -222,6 +225,11 @@ namespace TES3MP::Native
                 || fortifyDynamicStat(effect.mEffectID) >= 0
                 || effect.mEffectID == ESM::MagicEffect::Invisibility
                 || effect.mEffectID == ESM::MagicEffect::Chameleon
+                || effect.mEffectID == ESM::MagicEffect::Light
+                || effect.mEffectID == ESM::MagicEffect::NightEye
+                || effect.mEffectID == ESM::MagicEffect::DetectAnimal
+                || effect.mEffectID == ESM::MagicEffect::DetectEnchantment
+                || effect.mEffectID == ESM::MagicEffect::DetectKey
                 || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka));
             if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
                 || (magic->mData.mFlags & ESM::MagicEffect::Harmful)

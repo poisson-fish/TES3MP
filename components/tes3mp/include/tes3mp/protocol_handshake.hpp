@@ -44,7 +44,7 @@ namespace TES3MP
     inline constexpr std::uint32_t KnockoutPresentationCapabilityValue = 23;
     inline constexpr std::uint32_t ExpandedCombatEffectsCapabilityValue = 24;
 
-    inline constexpr std::uint32_t ActorPresentationCapabilityValue = 26;
+    inline constexpr std::uint32_t ActorPresentationCapabilityValue = 27;
 
     class CapabilityId
     {

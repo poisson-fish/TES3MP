@@ -560,7 +560,8 @@ namespace TES3MP::Native
                             || previous->caster != caster.id || previous->casterKind != caster.kind
                             || previous->casterLife != caster.life || previous->resistance != 0
                             || previous->durationTicks != 0 || previous->expiresTick != UINT64_MAX
-                            || (noMagnitude ? previous->magnitude != 1.f
+                            || (noMagnitude ? (previous->magnitude != 1.f
+                                    && !(entry.mEffectID == ESM::MagicEffect::Invisibility && previous->magnitude == 0.f))
                                 : previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax)
                             || std::floor(previous->magnitude) != previous->magnitude)
                             throw std::invalid_argument("Native constant effect disagrees with source");
@@ -3496,11 +3497,16 @@ namespace TES3MP::Native
         };
         const auto breakInvisibility = [&](size_t index) {
             const auto previous = timedEffects;
+            const auto invisibility = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
             std::erase_if(timedEffects, [&](const auto& effect) {
-                return effect.actor == index && effect.sourceKind != 3
-                    && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
+                return effect.actor == index && effect.sourceKind != 3 && effect.effectIndex == invisibility;
             });
-            if (timedEffects.size() != previous.size())
+            // Stock purges the applied equipment effect while retaining its source
+            // spell. It cannot reapply until that item is unequipped and equipped.
+            for (auto& effect : timedEffects)
+                if (effect.actor == index && effect.sourceKind == 3 && effect.effectIndex == invisibility)
+                    effect.magnitude = 0.f;
+            if (timedEffects != previous)
                 updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
         };
         const auto retaliate = [&](MWMechanics::NpcStats& attacker, const MWMechanics::NpcStats& victim,
@@ -5827,6 +5833,14 @@ namespace TES3MP::Native
                 p.kind = index < 2 ? 1 : 2;
                 p.life = index < 2 ? 1 : (moving && moving->life ? moving->life->generation : mLife->generation);
                 p.dead = combat.actors[index][8][2] <= 0;
+                const std::array visibleEffects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
+                    ESM::MagicEffect::Light, ESM::MagicEffect::NightEye, ESM::MagicEffect::DetectAnimal,
+                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey};
+                for (const auto& effect : effects)
+                    if (effect.actor == index)
+                        for (size_t i = 0; i < visibleEffects.size(); ++i)
+                            if (effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(visibleEffects[i])))
+                                p.visibility[i] += effect.magnitude;
                 const auto setSwing = [&](const MeleeAnimation& clip, uint64_t action) {
                     p.action = action; p.group = clip.group(); p.phase = uint8_t(unsigned(clip.snapshot().mPhase) + 1);
                     p.direction = uint8_t(clip.direction()); p.strength = clip.snapshot().mStrength;

@@ -989,6 +989,15 @@ namespace TES3MP::OpenMWAdapter
                         animation->setCommittedKnockout(0, 0);
                         const auto ptr = world->getPlayerPtr();
                         setParalyzed(ptr.getClass().getCreatureStats(ptr), false);
+                        auto& magic = ptr.getClass().getCreatureStats(ptr).getMagicEffects();
+                        for (const auto id : {ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
+                                ESM::MagicEffect::Light, ESM::MagicEffect::NightEye,
+                                ESM::MagicEffect::DetectAnimal, ESM::MagicEffect::DetectEnchantment,
+                                ESM::MagicEffect::DetectKey})
+                            magic.add(MWMechanics::EffectKey(id),
+                                MWMechanics::EffectParam(-magic.getOrDefault(id).getModifier()));
+                        animation->setLightEffect(0.f);
+                        world->getRenderingManager()->setNightEyeFactor(0.f);
                         animation->showWeapons(ptr.getClass().getCreatureStats(ptr).getDrawState()
                             == MWMechanics::DrawState::Weapon);
                     }
@@ -2115,9 +2124,9 @@ namespace TES3MP::OpenMWAdapter
             actorTimeline.advance(now);
             poseEvidence.clear();
             const auto presentationTick = actorTimeline.empty() ? std::optional<double>{} : actorTimeline.tick();
+            auto world = MWBase::Environment::get().getWorld();
             if (!actorTimeline.empty() && combatSnapshot)
             {
-                auto world = MWBase::Environment::get().getWorld();
                 const auto apply = [&](const MWWorld::Ptr& ptr, MWRender::Animation* animation, uint8_t kind, uint64_t id) {
                     const auto pose = actorTimeline.sample(kind, id);
                     if (!pose || ptr.isEmpty()) return true;
@@ -2152,6 +2161,58 @@ namespace TES3MP::OpenMWAdapter
                 for (auto& [id, remote] : actorRemotes)
                     if (remote.actor && remote.lastObserved && !apply(remote.actor->ptr(), remote.actor->animation(), 2, remote.lastObserved->actorId().value()))
                         return ProviderResult::PresentationFailed;
+            }
+            if (combatSnapshot)
+            {
+                const std::array effects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
+                    ESM::MagicEffect::Light, ESM::MagicEffect::NightEye, ESM::MagicEffect::DetectAnimal,
+                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey};
+                const auto apply = [&](const ActorPresentationSnapshot& pose, const MWWorld::Ptr& ptr,
+                    MWRender::Animation* animation) {
+                    if (ptr.isEmpty() || !animation) return false;
+                    auto& magic = ptr.getClass().getCreatureStats(ptr).getMagicEffects();
+                    for (size_t i = 0; i < effects.size(); ++i)
+                    {
+                        const auto current = magic.getOrDefault(effects[i]);
+                        const float actual = i == 0 ? current.getModifier() : current.getMagnitude();
+                        magic.add(MWMechanics::EffectKey(effects[i]),
+                            MWMechanics::EffectParam(pose.visibility[i] - actual));
+                    }
+                    animation->setLightEffect(pose.visibility[2]);
+                    const float invisibility = pose.visibility[0] > 0.f
+                        ? (pose.kind == 1 && pose.id == combatSnapshot->selfPlayerId().value() ? 0.25f : 0.05f)
+                        : 1.f;
+                    const float chameleon = pose.visibility[1] > 0.f
+                        ? std::clamp(1.f - pose.visibility[1] / 100.f, 0.25f, 0.75f) : 1.f;
+                    animation->setAlpha(invisibility * chameleon);
+                    return true;
+                };
+                for (const auto& pose : combatSnapshot->presentation())
+                {
+                    if (pose.kind == 1 && pose.id == combatSnapshot->selfPlayerId().value())
+                    {
+                        auto ptr = world->getPlayerPtr();
+                        if (!apply(pose, ptr, world->getAnimation(ptr))) return ProviderResult::PresentationFailed;
+                        world->getRenderingManager()->setNightEyeFactor(std::min(1.f, pose.visibility[3] / 100.f));
+                        continue;
+                    }
+                    bool found = false;
+                    if (pose.kind == 2)
+                    {
+                        const auto native = nativeRemotes.find(pose.id);
+                        if (native != nativeRemotes.end() && native->second.actor)
+                            found = apply(pose, native->second.actor->ptr(), native->second.actor->animation());
+                        for (auto& [id, remote] : actorRemotes)
+                            if (!found && remote.actor && remote.lastObserved
+                                && remote.lastObserved->actorId().value() == pose.id)
+                                found = apply(pose, remote.actor->ptr(), remote.actor->animation());
+                    }
+                    else for (auto& [id, remote] : remotes)
+                        if (!found && remote.actor && remote.lastObserved
+                            && remote.lastObserved->playerId().value() == pose.id)
+                            found = apply(pose, remote.actor->ptr(), remote.actor->animation());
+                    // Appearance may follow the combat snapshot; its next render samples it.
+                }
             }
             for (auto& [identity, remote] : leveledActors)
             {

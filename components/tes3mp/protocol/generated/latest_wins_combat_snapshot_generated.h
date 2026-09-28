@@ -831,7 +831,8 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
     VT_CAST_RANGE = 44,
     VT_CAST_ELAPSED = 46,
     VT_CAST_RELEASE = 48,
-    VT_CAST_STOP = 50
+    VT_CAST_STOP = 50,
+    VT_VISIBILITY = 52
   };
   uint64_t id() const {
     return GetField<uint64_t>(VT_ID, 0);
@@ -905,6 +906,9 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   uint16_t cast_stop() const {
     return GetField<uint16_t>(VT_CAST_STOP, 0);
   }
+  const ::flatbuffers::Vector<float> *visibility() const {
+    return GetPointer<const ::flatbuffers::Vector<float> *>(VT_VISIBILITY);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -933,6 +937,8 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
            VerifyField<uint16_t>(verifier, VT_CAST_ELAPSED, 2) &&
            VerifyField<uint16_t>(verifier, VT_CAST_RELEASE, 2) &&
            VerifyField<uint16_t>(verifier, VT_CAST_STOP, 2) &&
+           VerifyOffset(verifier, VT_VISIBILITY) &&
+           verifier.VerifyVector(visibility()) &&
            verifier.EndTable();
   }
 };
@@ -1013,6 +1019,9 @@ struct ActorPresentationSnapshotBuilder {
   void add_cast_stop(uint16_t cast_stop) {
     fbb_.AddElement<uint16_t>(ActorPresentationSnapshot::VT_CAST_STOP, cast_stop, 0);
   }
+  void add_visibility(::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility) {
+    fbb_.AddOffset(ActorPresentationSnapshot::VT_VISIBILITY, visibility);
+  }
   explicit ActorPresentationSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1049,13 +1058,15 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     uint8_t cast_range = 0,
     uint16_t cast_elapsed = 0,
     uint16_t cast_release = 0,
-    uint16_t cast_stop = 0) {
+    uint16_t cast_stop = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility = 0) {
   ActorPresentationSnapshotBuilder builder_(_fbb);
   builder_.add_cast(cast);
   builder_.add_body_action(body_action);
   builder_.add_action(action);
   builder_.add_life(life);
   builder_.add_id(id);
+  builder_.add_visibility(visibility);
   builder_.add_group(group);
   builder_.add_body_frame(body_frame);
   builder_.add_rate(rate);
@@ -1103,8 +1114,10 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     uint8_t cast_range = 0,
     uint16_t cast_elapsed = 0,
     uint16_t cast_release = 0,
-    uint16_t cast_stop = 0) {
+    uint16_t cast_stop = 0,
+    const std::vector<float> *visibility = nullptr) {
   auto group__ = group ? _fbb.CreateString(group) : 0;
+  auto visibility__ = visibility ? _fbb.CreateVector<float>(*visibility) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateActorPresentationSnapshot(
       _fbb,
       id,
@@ -1130,7 +1143,8 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
       cast_range,
       cast_elapsed,
       cast_release,
-      cast_stop);
+      cast_stop,
+      visibility__);
 }
 
 struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -1279,7 +1293,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3C8";
+  return "T3C9";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

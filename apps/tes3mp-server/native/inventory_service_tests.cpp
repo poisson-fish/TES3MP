@@ -6039,6 +6039,14 @@ namespace TES3MP::Native::Testing
                     spell("conceal_invisibility", {effect(ESM::MagicEffect::Invisibility, ESM::RT_Self, 2, 0)});
                     spell("conceal_chameleon", {effect(ESM::MagicEffect::Chameleon, ESM::RT_Self, 2, 75)});
                 }
+                if (effectFamily == "constant-concealment")
+                    spell("conceal_action", {effect(ESM::MagicEffect::Chameleon, ESM::RT_Self, 2, 25)});
+                if (effectFamily == "visibility")
+                    for (const auto id : {ESM::MagicEffect::Light, ESM::MagicEffect::NightEye,
+                            ESM::MagicEffect::DetectAnimal, ESM::MagicEffect::DetectEnchantment,
+                            ESM::MagicEffect::DetectKey})
+                        spell("visibility_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                            {effect(id, ESM::RT_Self, 5, 20)});
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6185,7 +6193,8 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
                 && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
-                && effectFamily != "concealment" && !specialConditions)
+                && effectFamily != "concealment" && effectFamily != "visibility"
+                && effectFamily != "constant-concealment" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6278,6 +6287,19 @@ namespace TES3MP::Native::Testing
                 }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                     std::erase_if(beast.mSpells.mList, [](auto id) { return id.getRefIdString().starts_with("persistent_"); });
+                if (effectFamily == "constant-concealment")
+                {
+                    ESM::Enchantment enchantment; enchantment.blank();
+                    enchantment.mId = ESM::RefId::stringRefId("conceal_constant");
+                    enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+                    enchantment.mEffects.populate({{ESM::MagicEffect::Invisibility, {}, {}, ESM::RT_Self, 0, 0, 0, 0}});
+                    out.startRecord(ESM::Enchantment::sRecordId, 0); enchantment.save(out);
+                    out.endRecord(ESM::Enchantment::sRecordId);
+                    ESM::Clothing shirt; shirt.blank(); shirt.mId = ESM::RefId::stringRefId("conceal_constant_shirt");
+                    shirt.mData.mType = ESM::Clothing::Shirt; shirt.mEnchant = enchantment.mId;
+                    out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                    female.mInventory.mList = {{1, shirt.mId}};
+                }
                 for (const auto& participant : {female, beast})
                 {
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
@@ -6285,7 +6307,8 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
                 || effectFamily == "persistent-conditions" || effectFamily == "disintegration"
-                || effectFamily == "concealment" || specialConditions)
+                || effectFamily == "concealment" || effectFamily == "visibility"
+                || effectFamily == "constant-concealment" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
                 if (effectFamily == "persistent-conditions")
@@ -7615,7 +7638,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : playerCastLifecycle ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7649,7 +7672,9 @@ namespace TES3MP::Native::Testing
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
-        if (effectFamily == "persistent-conditions" || effectFamily == "concealment" || specialConditions)
+        if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
+            || effectFamily == "constant-concealment"
+            || effectFamily == "visibility" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -7744,6 +7769,41 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (effectFamily == "constant-concealment")
+            {
+                auto running = make(); auto& runtime = running->service();
+                const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
+                const auto constant = [&](auto& current) {
+                    const auto image = bytes(current);
+                    const auto state = read(image);
+                    const auto effect = std::ranges::find_if(state.timedEffects, [&](const auto& entry) {
+                        return entry.actor == 0 && entry.sourceKind == 3 && entry.effectIndex == index;
+                    });
+                    return effect == state.timedEffects.end() ? -1.f : effect->magnitude;
+                };
+                (void)commit(runtime, 1);
+                require(constant(runtime) == 1.f, "Constant Invisibility was not equipped");
+                const auto before = bytes(runtime);
+                auto pending = advance(runtime, 2, "conceal_action");
+                require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                    "Rejected action suppressed constant Invisibility");
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && constant(runtime) == 0.f, "Action did not suppress constant Invisibility");
+                const auto suppressed = bytes(runtime);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, suppressed);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == suppressed && constant(restart.service()) == 0.f,
+                    "Constant Invisibility suppression changed across restart");
+                for (uint64_t tick = 3; tick <= 45; ++tick)
+                {
+                    (void)commit(runtime, tick); (void)commit(restart.service(), tick);
+                    require(bytes(runtime) == bytes(restart.service()) && constant(runtime) == 0.f,
+                        "Constant Invisibility reapplied without replacing its source");
+                }
+                std::cout << "constant invisibility=action suppression rejection restart exact\n";
+                return;
+            }
             if (effectFamily == "concealment")
             {
                 auto baseline = make(); baseline->service().synchronizeCells(authority);
@@ -7819,6 +7879,67 @@ namespace TES3MP::Native::Testing
                     }
                 }
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
+                return;
+            }
+            if (effectFamily == "visibility")
+            {
+                const std::array ids{ESM::MagicEffect::Light, ESM::MagicEffect::NightEye,
+                    ESM::MagicEffect::DetectAnimal, ESM::MagicEffect::DetectEnchantment,
+                    ESM::MagicEffect::DetectKey};
+                for (size_t slot = 0; slot < ids.size(); ++slot)
+                {
+                    auto running = make(); auto& runtime = running->service();
+                    const auto name = "visibility_" + std::to_string(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const auto count = [&](const auto& current) {
+                        const auto image = bytes(current);
+                        return std::ranges::count_if(read(image).timedEffects, [&](const auto& effect) {
+                            return effect.actor == 0 && effect.effectIndex == index && effect.magnitude == 20.f;
+                        });
+                    };
+                    const auto projected = [&](auto& current, uint64_t tick) {
+                        const auto view = current.projectCombat(authority, id<SessionId>(1), id<ServerTick>(tick),
+                            id<CanonicalRevision>(tick));
+                        require(bool(view), "Visibility combat projection absent");
+                        const auto actor = std::ranges::find_if(view->presentation(),
+                            [](const auto& pose) { return pose.kind == 1 && pose.id == 1; });
+                        require(actor != view->presentation().end(), "Visibility player presentation absent");
+                        return actor->visibility[slot + 2];
+                    };
+                    uint64_t tick = 0;
+                    for (unsigned cast = 1; cast <= 2; ++cast)
+                    {
+                        for (unsigned frame = 0; frame < 120 && count(runtime) < cast; ++frame)
+                        {
+                            const auto before = bytes(runtime);
+                            auto pending = advance(runtime, ++tick, frame == 0 ? name : std::string_view{});
+                            require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                                "Rejected visibility tick leaked a source or payment");
+                            require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Visibility retry failed");
+                        }
+                        require(count(runtime) == cast && projected(runtime, tick) == 20.f * cast,
+                            "Visibility stacking or presentation changed");
+                        while (read(bytes(runtime)).combat->playerCasts[0])
+                            (void)commit(runtime, ++tick);
+                    }
+                    const auto saved = bytes(runtime);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved && projected(restart.service(), tick) == 40.f,
+                        "Visibility restart changed presentation");
+                    for (unsigned frame = 0; frame < 170; ++frame)
+                    {
+                        (void)commit(runtime, ++tick); (void)commit(restart.service(), tick);
+                        require(bytes(runtime) == bytes(restart.service())
+                            && projected(runtime, tick) == projected(restart.service(), tick),
+                            "Visibility expiry diverged after restart");
+                    }
+                    require(count(runtime) == 0 && projected(runtime, tick) == 0.f,
+                        "Visibility source survived expiry");
+                }
+                std::cout << "visibility five effects=stacking expiry rejection restart projection exact\n";
                 return;
             }
             if (effectFamily == "disintegration")

@@ -221,6 +221,9 @@ namespace TES3MP
                     || p.castElapsed >= p.castStop || (p.castPhase <= 2 && p.castElapsed)
                     || (p.castPhase < 4 ? p.castElapsed >= p.castRelease : p.castElapsed < p.castRelease)))
                 return error(Code::InvalidFloat, 0, 0, i);
+            if (std::ranges::any_of(p.visibility, [](float magnitude) {
+                    return !std::isfinite(magnitude) || magnitude < 0.f || magnitude > 512000.f;
+                })) return error(Code::InvalidFloat, 0, 0, i);
             if (p.phase > 4 || p.direction > 2 || p.bodyState < 1 || p.bodyState > 4 || p.hitGroup > 16
                 || !std::isfinite(p.strength) || p.strength < 0 || p.strength > 1
                 || !std::isfinite(p.completion) || p.completion < 0 || p.completion > 1
@@ -358,7 +361,8 @@ namespace TES3MP
             presentation.push_back(Snapshot::CreateActorPresentationSnapshot(builder, p.id, p.life, p.action,
                 p.bodyAction, p.kind, p.phase, p.direction, p.bodyState, p.hitGroup, p.strength, p.completion,
                 p.rate, p.bodyFrame, p.bodyStop, p.loopStart, p.loopStop, builder.CreateString(p.group), p.dead,
-                p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop));
+                p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop,
+                builder.CreateVector(p.visibility.data(), p.visibility.size())));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
@@ -595,12 +599,15 @@ namespace TES3MP
         for (size_t i = 0; i < presentationCount; ++i)
         {
             const auto* p = root->presentation()->Get(flatbuffers::uoffset_t(i));
-            if (!p || (p->group() && p->group()->size() > 64)) return error(Code::TooManyEntries, 0, 64, i);
+            if (!p || (p->group() && p->group()->size() > 64)
+                || !p->visibility() || p->visibility()->size() != 7)
+                return error(Code::TooManyEntries, 0, 7, i);
             presentation.push_back({p->id(), p->life(), p->action(), p->body_action(), p->kind(), p->phase(),
                 p->direction(), p->body_state(), p->hit_group(), p->strength(), p->completion(), p->rate(),
                 p->body_frame(), p->body_stop(), p->loop_start(), p->loop_stop(),
                 p->group() ? p->group()->str() : std::string{}, p->dead(),
                 p->cast(), p->cast_phase(), p->cast_range(), p->cast_elapsed(), p->cast_release(), p->cast_stop()});
+            std::copy(p->visibility()->begin(), p->visibility()->end(), presentation.back().visibility.begin());
         }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),

@@ -336,6 +336,7 @@ namespace
         TES3MP::ActorPresentationSnapshot p;
         p.id = 1; p.kind = 1; p.cast = 9; p.castPhase = 3; p.castRange = 2;
         p.castElapsed = 3; p.castRelease = 10; p.castStop = 20;
+        p.visibility = {1.f, 25.f, 40.f, 60.f, 80.f, 100.f, 120.f};
         const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
             value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 100, 100, false,
@@ -358,6 +359,9 @@ namespace
             }
             if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         }
+        p = valid;
+        p.visibility[2] = std::numeric_limits<float>::quiet_NaN();
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         p = valid;
         for (uint8_t phase = 1; phase <= 5; ++phase)
         {
