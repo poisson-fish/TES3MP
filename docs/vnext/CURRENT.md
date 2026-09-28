@@ -17,40 +17,42 @@ Inherited body captures:
 Synthetic model fixtures: `build/logs/m4-custom-*`. Corpse poses and armed/spellcasting
 creatures remain untested.
 
-Player/NPC casts retain timing, payment, interruption and inactivity pauses;
-custom casting checks resources only. Captures: `build/m4-player-cast-vanilla-live-02`,
+Player/NPC casts retain timing, payment, interruption and pauses;
+custom casts check resources only. Captures: `build/m4-player-cast-vanilla-live-02`,
 `build/m4-player-cast-tr-item-live-01`.
 
 Silence defeats Always; Sound stacks and spares Always. Failed spells pay once.
 Evidence: `build/logs/interference-*`.
 
-Elemental shields, permanent stat damage/restoration and reversible resource
-fortification: synthetic evidence in
+Elemental shields and stat/resource effects: synthetic evidence:
 `build/logs/effect-family-{rules,shields-04,stats-03,fortify-02}.log`.
 
 Cures and Dispel preserve source membership. V54 persists diseases, curses,
 contact and resistance/weakness. Synthetic atomic/restart evidence:
 `build/logs/persistent-conditions-20260927-06.log`.
 
-V55 persists Corprus worsening, cures, contact and Vampirism. SunDamage uses
-native hour, weather and exposure. Synthetic atomic/restart/sun checks:
+V55 persists Corprus/Vampirism and SunDamage with native time, weather and
+exposure. Synthetic checks:
 `build/logs/{special-conditions-09,environment-sun-03,special-admission-rules-02}.log`;
 V54 regression: `build/logs/persistent-regression-02.log`. No desktop capture.
 
-Native wait/rest stages actor recovery with the world skip. Wait restores
-fatigue; sleep also restores health and magicka using shared OpenMW rules.
-StuntedMagicka suppresses sleep magicka recovery through its active duration;
-its deadline advances with the skip. Synthetic rejection/restart:
+Native wait restores fatigue; rest also restores health/magicka through OpenMW
+rules. StuntedMagicka suppresses magicka recovery until its skip-advanced
+deadline. Synthetic rejection/restart:
 `build/logs/rest-recovery-08.log`; composition contract:
 `build/logs/rest-contract.log`. No desktop capture.
-Other timed effect deadlines still follow simulation ticks across skips.
-Passive sources and VFX remain pending.
+Other effects retain tick deadlines across skips. VFX remains pending.
 
-**Next: DisintegrateWeapon/DisintegrateArmor through the native equipment candidate.**
+DisintegrateWeapon/DisintegrateArmor reduce equipped condition in the native
+equipment candidate using OpenMW's fractional charge rule. Armor follows stock
+slot priority; zero condition unequips the item. Synthetic player/NPC instant/timed,
+breakage, rejection and restart evidence: `build/logs/disintegration-13.log`.
+Constant-source ticking is wired but unexercised; no desktop capture.
 
-71 effects remain:
+**Next: concealment/detection through engine consumers.**
 
-- Defense/equipment (2): DisintegrateWeapon, DisintegrateArmor.
+69 effects remain:
+
 - Concealment/detection (7): Invisibility, Chameleon, Light, NightEye,
   DetectAnimal, DetectEnchantment, DetectKey.
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
@@ -70,7 +72,7 @@ Passive sources and VFX remain pending.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-72 implemented + 71 remaining = 143 IDs; bounded gameplay, incomplete visuals/sources.
+74 implemented + 69 remaining = 143 IDs; bounded gameplay, incomplete visuals/sources.
 Scripts, passive sources, multi-NPC/summons/player lives remain unproven.
 Ranged/overlapping combat precedes movement cutover; plain ranged sources/body
 proxies remain. TR Lua awaits M5.

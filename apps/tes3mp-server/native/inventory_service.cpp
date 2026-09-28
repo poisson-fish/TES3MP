@@ -291,6 +291,37 @@ namespace TES3MP::Native
                 || id == ESM::MagicEffect::RestoreMagicka
                 || id == ESM::MagicEffect::RestoreFatigue;
         }
+
+        struct CandidateCondition
+        {
+            EquipmentRuntime::EquippedWeaponCondition item;
+            float remainder;
+        };
+        std::optional<CandidateCondition> equippedCandidateCondition(const PlainEquipmentValues& values,
+            int slot, const MWWorld::ESMStore& store)
+        {
+            if (slot < 0 || slot >= MWWorld::InventoryStore::Slots || !values.mSlots[slot].isSet()) return {};
+            const auto found = std::ranges::find(values.mObjects, values.mSlots[slot],
+                [](const auto& object) { return object.mRef.mRefNum; });
+            if (found == values.mObjects.end() || found->mRef.mCount <= 0)
+                throw std::invalid_argument("Native equipped candidate item missing");
+            const auto type = store.find(found->mRef.mRefID);
+            int maximum = 0;
+            if (slot == MWWorld::InventoryStore::Slot_CarriedRight && type == ESM::Weapon::sRecordId)
+            {
+                const auto& weapon = *store.get<ESM::Weapon>().find(found->mRef.mRefID);
+                if (!(MWMechanics::getWeaponType(weapon.mData.mType)->mFlags & ESM::WeaponType::HasHealth)) return {};
+                maximum = weapon.mData.mHealth;
+            }
+            else if (slot != MWWorld::InventoryStore::Slot_CarriedRight && type == ESM::Armor::sRecordId)
+                maximum = store.get<ESM::Armor>().find(found->mRef.mRefID)->mData.mHealth;
+            else return {};
+            const int condition = found->mRef.mChargeInt == -1 ? maximum : found->mRef.mChargeInt;
+            if (condition < 0 || condition > maximum || !std::isfinite(found->mRef.mChargeIntRemainder)
+                || found->mRef.mChargeIntRemainder <= -1.f || found->mRef.mChargeIntRemainder >= 1.f)
+                throw std::invalid_argument("Native equipped candidate condition invalid");
+            return CandidateCondition{{found->mRef.mRefNum, condition}, found->mRef.mChargeIntRemainder};
+        }
         uint64_t gameTimeMilliseconds(const CanonicalWorldState* world)
         {
             if (!world || !world->time().daysPassed
@@ -353,7 +384,9 @@ namespace TES3MP::Native
                     const auto id = effect.effectIndex
                         ? ESM::MagicEffect::indexToRefId(int(effect.effectIndex))
                         : ESM::MagicEffect::ResistMagicka;
-                    if (!timedDamage(id) && !timedRestore(id) && id != ESM::MagicEffect::FortifyMaximumMagicka)
+                    if (!timedDamage(id) && !timedRestore(id) && id != ESM::MagicEffect::FortifyMaximumMagicka
+                        && id != ESM::MagicEffect::DisintegrateWeapon
+                        && id != ESM::MagicEffect::DisintegrateArmor)
                         stats.getMagicEffects().add(MWMechanics::EffectKey(id),
                             MWMechanics::EffectParam(effect.magnitude));
                 }
@@ -621,7 +654,8 @@ namespace TES3MP::Native
             const std::array<ActorCasterIdentity, 3>& identities, const MWWorld::ESMStore& content,
             Misc::Rng::Generator& rng, bool uncappedFatigue, bool classicReflect,
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
-            bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {})
+            bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {},
+            const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {})
         {
             std::array owned{loadCombatStats(content, combat.actors[0], effects, 0),
                 loadCombatStats(content, combat.actors[1], effects, 1), loadCombatStats(content, combat.actors[2], effects, 2)};
@@ -649,7 +683,9 @@ namespace TES3MP::Native
                 for (size_t i = 0; i < 3; ++i) applyEffectStats(*states[i], content, {&effect, 1}, i, -1.f);
                 const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
                 auto& victim = *states[effect.actor];
-                if (!effect.argument && !timedDamage(id) && !timedRestore(id))
+                if (!effect.argument && !timedDamage(id) && !timedRestore(id)
+                    && id != ESM::MagicEffect::DisintegrateWeapon
+                    && id != ESM::MagicEffect::DisintegrateArmor)
                     victim.getMagicEffects().add(MWMechanics::EffectKey(id), MWMechanics::EffectParam(-effect.magnitude));
                 if (const int stat = drainDynamic(id); stat >= 0 && victim.getHealth().getCurrent() > 0)
                     MWMechanics::restoreDynamicStat(victim, stat, effect.magnitude);
@@ -769,12 +805,20 @@ namespace TES3MP::Native
                     return;
                 }
                 const int drain = drainDynamic(effect.mEffectID), absorb = absorbDynamic(effect.mEffectID);
+                const bool disintegration = effect.mEffectID == ESM::MagicEffect::DisintegrateWeapon
+                    || effect.mEffectID == ESM::MagicEffect::DisintegrateArmor;
                 const bool instant = sourceKind != 4 && effect.mDuration == 0 && (timedDamage(effect.mEffectID)
-                    || timedRestore(effect.mEffectID) || absorb >= 0 || permanentStatEffect(effect.mEffectID));
+                    || timedRestore(effect.mEffectID) || absorb >= 0 || permanentStatEffect(effect.mEffectID)
+                    || disintegration);
                 const auto deathTime = MWWorld::TimeStamp{};
                 if (instant)
                 {
-                    if (permanentStatEffect(effect.mEffectID))
+                    if (disintegration)
+                    {
+                        if (!disintegrate) throw std::invalid_argument("Native disintegration candidate unavailable");
+                        disintegrate(recipient, effect.mEffectID, magnitude);
+                    }
+                    else if (permanentStatEffect(effect.mEffectID))
                         applyPermanentStatEffect(victim, effect, magnitude, content);
                     else if (absorb >= 0)
                         MWMechanics::absorbDynamicStat(victim, author < 3 && states[author]->getHealth().getCurrent() > 0
@@ -807,7 +851,8 @@ namespace TES3MP::Native
                         && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
                         && effect.mEffectID != ESM::MagicEffect::Corprus)
                         applyCorprusOnce(victim, active, content, uncappedFatigue);
-                    if (!active.argument && !timedDamage(effect.mEffectID) && !timedRestore(effect.mEffectID))
+                    if (!active.argument && !timedDamage(effect.mEffectID) && !timedRestore(effect.mEffectID)
+                        && !disintegration)
                         victim.getMagicEffects().add(MWMechanics::EffectKey(effect.mEffectID), MWMechanics::EffectParam(magnitude));
                     if (drain >= 0) MWMechanics::adjustDynamicStatValue(victim, drain, -magnitude, true, false, &deathTime);
                     if (const int stat = fortifyDynamicStat(effect.mEffectID); stat >= 0)
@@ -3050,15 +3095,18 @@ namespace TES3MP::Native
         for (size_t index = 0; index < wear.size(); ++index)
         {
             const auto& change = wear[index];
-            if (change.owner >= mRuntime.ownerCount() || change.condition < 0
+            if (change.owner >= mRuntime.ownerCount())
+                throw std::invalid_argument("Native melee weapon wear owner invalid");
+            const auto selected = equippedCandidateCondition(candidateValues(change.owner), change.slot, mRuntime.mStore);
+            if (change.condition < 0
                 || change.condition > change.before.mCondition
                 || change.slot < 0 || change.slot >= MWWorld::InventoryStore::Slots
                 || std::ranges::any_of(wear.first(index), [&](const auto& earlier) {
                     return earlier.owner == change.owner && earlier.slot == change.slot;
                 })
-                || (change.slot == MWWorld::InventoryStore::Slot_CarriedRight
-                    ? mRuntime.equippedWeaponCondition(change.owner)
-                    : mRuntime.equippedArmorCondition(change.owner, change.slot)) != change.before)
+                || !selected || selected->item != change.before
+                || (change.remainder && (!std::isfinite(*change.remainder)
+                    || *change.remainder <= -1.f || *change.remainder >= 1.f)))
                 throw std::invalid_argument("Native melee weapon wear owner invalid");
             auto& owner = change.owner < 2 ? values.mActors[change.owner] : values.mContainers.at(change.owner - 2);
             if (owner.mSlots[change.slot] != change.before.mItem)
@@ -3067,6 +3115,7 @@ namespace TES3MP::Native
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == owner.mObjects.end()) throw std::invalid_argument("Native melee weapon missing");
             item->mRef.mChargeInt = change.condition;
+            if (change.remainder) item->mRef.mChargeIntRemainder = *change.remainder;
             if (change.condition == 0) owner.mSlots[change.slot] = {};
         }
         for (size_t index = 0; index < charges.size(); ++index)
@@ -3168,9 +3217,9 @@ namespace TES3MP::Native
             try
             {
                 for (const auto& change : wear)
-                    if ((change.slot == MWWorld::InventoryStore::Slot_CarriedRight
-                            ? service.mRuntime.equippedWeaponCondition(change.owner)
-                            : service.mRuntime.equippedArmorCondition(change.owner, change.slot)) != change.before)
+                    if (const auto current = equippedCandidateCondition(
+                            service.combatEquipmentValues(change.owner, command.get()), change.slot,
+                            service.mRuntime.mStore); !current || current->item != change.before)
                         return CanonicalDurabilityResult::Rejected;
                 for (const auto& charge : charges)
                 {
@@ -3202,9 +3251,10 @@ namespace TES3MP::Native
                     {
                         for (const auto& change : wear)
                             if (change.slot == MWWorld::InventoryStore::Slot_CarriedRight)
-                                service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition);
+                                service.mRuntime.installWeaponWear(change.owner, change.before.mItem, change.condition,
+                                    change.remainder);
                             else service.mRuntime.installArmorWear(change.owner, change.slot, change.before.mItem,
-                                change.condition);
+                                change.condition, change.remainder);
                         for (const auto& charge : charges)
                         {
                             if (charge.consume) service.mRuntime.installConsumedMagicItem(charge.owner, charge.item);
@@ -3346,6 +3396,43 @@ namespace TES3MP::Native
         auto projectiles = mProjectiles;
         auto timedEffects = mTimedEffects;
         auto casting = mNpcCast;
+        std::vector<WeaponWear> wear;
+        std::vector<ItemCharge> charges;
+        const auto stageDisintegrate = [&](size_t recipient, ESM::RefId effect, float magnitude) {
+            if (!std::isfinite(magnitude) || magnitude < 0.f || magnitude > 100000.f)
+                throw std::invalid_argument("Native disintegration magnitude invalid");
+            const size_t owner = recipient == 2 ? mCombatNpcOwner : recipient;
+            const auto values = combatEquipmentValues(owner, command.get());
+            const auto applySlot = [&](int slot) {
+                const auto selected = equippedCandidateCondition(values, slot, mRuntime.mStore);
+                if (!selected) return false;
+                auto staged = std::ranges::find_if(wear, [&](const auto& change) {
+                    return change.owner == owner && change.slot == slot;
+                });
+                const int beforeCondition = staged == wear.end() ? selected->item.mCondition : staged->condition;
+                if (!beforeCondition) return false;
+                const float remainder = staged != wear.end() && staged->remainder
+                    ? *staged->remainder : selected->remainder;
+                const auto afterCondition = MWMechanics::disintegrateCondition(beforeCondition, remainder, magnitude);
+                if (staged == wear.end())
+                    wear.push_back({owner, selected->item, afterCondition.condition, slot, afterCondition.remainder});
+                else
+                {
+                    staged->condition = afterCondition.condition;
+                    staged->remainder = afterCondition.remainder;
+                }
+                return true;
+            };
+            if (effect == ESM::MagicEffect::DisintegrateWeapon)
+            { applySlot(MWWorld::InventoryStore::Slot_CarriedRight); return; }
+            constexpr std::array priorities{
+                MWWorld::InventoryStore::Slot_CarriedLeft, MWWorld::InventoryStore::Slot_Cuirass,
+                MWWorld::InventoryStore::Slot_LeftPauldron, MWWorld::InventoryStore::Slot_RightPauldron,
+                MWWorld::InventoryStore::Slot_LeftGauntlet, MWWorld::InventoryStore::Slot_RightGauntlet,
+                MWWorld::InventoryStore::Slot_Helmet, MWWorld::InventoryStore::Slot_Greaves,
+                MWWorld::InventoryStore::Slot_Boots};
+            for (const int slot : priorities) if (applySlot(slot)) break;
+        };
         uint64_t target = mMeleeTarget;
         bool contact = mMeleeContacted;
         const auto resolveEffects = [&](const PreparedInstantEffects& plan, int range, size_t index,
@@ -3361,7 +3448,7 @@ namespace TES3MP::Native
                 {mBinding.mNavigatingActor->actorId(), 2, life->generation}}};
             auto result = resolveExpandedEffects(plan, range, index, victim, identity, source, kind, at,
                 *combat, effects, identities, content, rng, uncapped, mBinding.mClassicReflectedAbsorb,
-                ordinals, casterStats, false, sunExposure);
+                ordinals, casterStats, false, sunExposure, stageDisintegrate);
             if (result.deaths[2] && !life->respawnTick)
             {
                 const auto killer = *result.deaths[2];
@@ -3452,7 +3539,10 @@ namespace TES3MP::Native
         const uint64_t elapsedTicks = tick.value() - mActorTick;
         for (auto& effect : timedEffects)
         {
-            if (effect.sourceKind == 3) continue; // Equipped sources have no deadline.
+            const auto id = effect.effectIndex ? ESM::MagicEffect::indexToRefId(int(effect.effectIndex))
+                : ESM::MagicEffect::ResistMagicka;
+            if (effect.sourceKind == 3 && id != ESM::MagicEffect::DisintegrateWeapon
+                && id != ESM::MagicEffect::DisintegrateArmor) continue; // Other equipped sources are overlays.
             bool paused = effect.actor == 2 && !active;
             if (effect.actor < mBinding.mPlayers.size())
                 paused = std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
@@ -3460,19 +3550,20 @@ namespace TES3MP::Native
                 });
             if (paused)
             {
-                if (effect.sourceKind == 4) continue;
+                if (effect.sourceKind == 3 || effect.sourceKind == 4) continue;
                 if (effect.expiresTick > UINT64_MAX - elapsedTicks)
                     throw std::invalid_argument("Paused native timed effect deadline exhausted");
                 effect.expiresTick += elapsedTicks;
             }
             else if (mBinding.mActorEffectLifecycle && combat && effect.effectIndex)
             {
-                const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
                 const auto* source = effect.sourceKind == 4 ? spellBySource(mRuntime.mStore, effect.source) : nullptr;
                 const bool corprusOnce = mBinding.mSpecialConditions && source
                     && MWMechanics::Spells::hasCorprusEffect(source)
                     && (mRuntime.mStore.get<ESM::MagicEffect>().find(id)->mData.mFlags & ESM::MagicEffect::AppliedOnce);
-                if (!corprusOnce && (timedDamage(id) || timedRestore(id) || absorbDynamic(id) >= 0 || permanentStatEffect(id))
+                if (!corprusOnce && (timedDamage(id) || timedRestore(id) || absorbDynamic(id) >= 0
+                    || permanentStatEffect(id) || id == ESM::MagicEffect::DisintegrateWeapon
+                    || id == ESM::MagicEffect::DisintegrateArmor)
                     && combat->actors[size_t(effect.actor)][8][2] > 0)
                 {
                     const uint64_t from = std::max(mActorTick, effect.startTick);
@@ -3487,7 +3578,10 @@ namespace TES3MP::Native
                                 || id == ESM::MagicEffect::RestoreFatigue ? 2 : 0;
                         const float amount = effect.magnitude * float(until - from) / 30.f
                             * (id == ESM::MagicEffect::SunDamage ? sunExposure(size_t(effect.actor)) : 1.f);
-                        if (permanentStatEffect(id))
+                        if (id == ESM::MagicEffect::DisintegrateWeapon
+                            || id == ESM::MagicEffect::DisintegrateArmor)
+                            stageDisintegrate(size_t(effect.actor), id, amount);
+                        else if (permanentStatEffect(id))
                         {
                             ESM::ENAMstruct entry{}; entry.mEffectID = id;
                             if (effect.argument <= 8) entry.mAttribute = ESM::Attribute::indexToRefId(int(effect.argument) - 1);
@@ -3550,7 +3644,10 @@ namespace TES3MP::Native
             for (size_t actorIndex = 0; actorIndex < 3; ++actorIndex)
             {
                 const size_t owner = actorIndex == 2 ? mCombatNpcOwner : actorIndex;
-                const auto values = combatEquipmentValues(owner, command.get());
+                auto values = combatEquipmentValues(owner, command.get());
+                for (const auto& change : wear)
+                    if (change.owner == owner && !change.condition)
+                        values.mSlots[change.slot] = {};
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
                 if (reconcileConstants(values, actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
@@ -3588,7 +3685,7 @@ namespace TES3MP::Native
             const auto outcome = resolveExpandedEffects(*plan, ESM::RT_Self, index, victim, identities[index], member.source,
                 4, tick.value(), *combat, timedEffects, identities, mRuntime.mStore, rng,
                 mBinding.mUncappedDamageFatigue, mBinding.mClassicReflectedAbsorb,
-                {}, nullptr, authored, sunExposure);
+                {}, nullptr, authored, sunExposure, stageDisintegrate);
             if (member.nextWorseningMs && std::ranges::none_of(timedEffects, [&](const auto& effect) {
                     return effect.actor == index && effect.sourceKind == 4 && effect.source == member.source
                         && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Corprus));
@@ -3699,8 +3796,6 @@ namespace TES3MP::Native
         std::vector<MeleeCombatEvent> playerHits;
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<MagicUseCombatEvent> spellCasts;
-        std::vector<WeaponWear> wear;
-        std::vector<ItemCharge> charges;
         EquipmentBytes wornCore;
         const auto applyStrike = [&](MagicCasterContext context, const EquipmentRuntime::EquippedWeaponCondition& held,
             const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,

@@ -6027,6 +6027,12 @@ namespace TES3MP::Native::Testing
                     spell("rest_stunted", {effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 30, 1)});
                     spell("rest_stunted_long", {effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 300, 1)});
                 }
+                if (effectFamily == "disintegration")
+                {
+                    spell("dis_weapon", {effect(ESM::MagicEffect::DisintegrateWeapon, ESM::RT_Self, 0, 1000)});
+                    spell("dis_armor", {effect(ESM::MagicEffect::DisintegrateArmor, ESM::RT_Self, 0, 20)});
+                    spell("dis_armor_tick", {effect(ESM::MagicEffect::DisintegrateArmor, ESM::RT_Self, 2, 15)});
+                }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6171,7 +6177,8 @@ namespace TES3MP::Native::Testing
                     << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
                     << "\nmelee weapononehand\n";
             }
-            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources" && effectFamily != "persistent-conditions" && !specialConditions)
+            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
+                && effectFamily != "persistent-conditions" && effectFamily != "disintegration" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6269,7 +6276,8 @@ namespace TES3MP::Native::Testing
                     out.startRecord(ESM::NPC::sRecordId, 0); participant.save(out); out.endRecord(ESM::NPC::sRecordId);
                 }
             }
-            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources" || effectFamily == "persistent-conditions" || specialConditions)
+            if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
+                || effectFamily == "persistent-conditions" || effectFamily == "disintegration" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
                 if (effectFamily == "persistent-conditions")
@@ -6278,8 +6286,21 @@ namespace TES3MP::Native::Testing
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return id.getRefIdString() != "special_corprus" && id.getRefIdString() != "special_vampire";
                     });
-                else npc.mSpells.mList.clear();
+                else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
+                if (effectFamily == "disintegration")
+                {
+                    npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
+                    for (const auto [name, type] : {std::pair{"dis_shield", ESM::Armor::Shield},
+                            {"dis_cuirass", ESM::Armor::Cuirass}})
+                    {
+                        ESM::Armor armor; armor.blank(); armor.mId = ESM::RefId::stringRefId(name);
+                        armor.mData.mType = type; armor.mData.mHealth = type == ESM::Armor::Shield ? 20 : 80;
+                        armor.mData.mArmor = 60; armor.mData.mWeight = 5;
+                        npc.mInventory.mList.push_back({1, armor.mId});
+                        out.startRecord(ESM::Armor::sRecordId, 0); armor.save(out); out.endRecord(ESM::Armor::sRecordId);
+                    }
+                }
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Destruction)] = 0;
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
@@ -7713,6 +7734,122 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (effectFamily == "disintegration")
+            {
+                auto running = make(); auto& runtime = running->service();
+                uint64_t tick = 0;
+                const auto itemState = [&](auto& current, std::string_view name, EquipmentSlot slot) {
+                    const auto view = current.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(tick + 1), id<CanonicalRevision>(tick + 1));
+                    require(view && !view->playerInventory.empty(), "Disintegration inventory projection absent");
+                    const auto& inventory = view->playerInventory.front();
+                    const auto item = std::ranges::find(inventory.stacks,
+                        id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name))),
+                        &CanonicalItemStack::prototypeId);
+                    require(item != inventory.stacks.end(),
+                        ("Disintegration fixture item missing: " + std::string(name)).c_str());
+                    const bool equipped = std::ranges::any_of(inventory.equipment, [&](const auto& selected) {
+                        return selected.slot == slot && selected.stackId == item->stackId;
+                    });
+                    return std::pair{item->condition, equipped};
+                };
+                const auto weapon = itemState(runtime, "iron shortsword", EquipmentSlot::CarriedRight);
+                const auto shield = itemState(runtime, "dis_shield", EquipmentSlot::CarriedLeft);
+                const auto cuirass = itemState(runtime, "dis_cuirass", EquipmentSlot::Cuirass);
+                require(weapon.second && shield.second && cuirass.second,
+                    "Disintegration fixture equipment was not selected");
+                const auto cast = [&](auto& current, std::string_view spellName) {
+                    for (unsigned frame = 0; frame < 180; ++frame)
+                    {
+                        const auto before = bytes(current);
+                        auto pending = advance(current, ++tick, frame == 0 ? spellName : std::string_view{});
+                        std::vector<std::byte> proposed;
+                        require(pending->commit([&](auto image) { proposed.assign(image.begin(), image.end());
+                            return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                            && bytes(current) == before, "Rejected disintegration tick leaked condition or payment");
+                        const auto prior = read(before), candidate = read(proposed);
+                        const bool changed = !std::ranges::equal(prior.inventory, candidate.inventory);
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Disintegration retry failed");
+                        const auto state = read(bytes(current));
+                        if (changed) return;
+                        if (!state.combat->playerCasts[0]
+                            && (spellName != "dis_armor_tick" || state.timedEffects.empty())) break;
+                    }
+                    throw std::runtime_error("Disintegration did not reach equipped condition");
+                };
+                cast(runtime, "dis_armor");
+                require(itemState(runtime, "dis_shield", EquipmentSlot::CarriedLeft) == std::pair{0u, false}
+                    && itemState(runtime, "dis_cuirass", EquipmentSlot::Cuirass) == cuirass,
+                    "DisintegrateArmor did not break the priority shield only");
+                cast(runtime, "dis_armor");
+                require(itemState(runtime, "dis_cuirass", EquipmentSlot::Cuirass).first == 60,
+                    "DisintegrateArmor did not advance to the cuirass after breakage");
+                cast(runtime, "dis_weapon");
+                require(itemState(runtime, "iron shortsword", EquipmentSlot::CarriedRight) == std::pair{0u, false},
+                    "DisintegrateWeapon did not break and unequip the weapon");
+                const auto saved = bytes(runtime);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == saved
+                    && itemState(restart.service(), "dis_cuirass", EquipmentSlot::Cuirass).first == 60
+                    && itemState(restart.service(), "iron shortsword", EquipmentSlot::CarriedRight)
+                        == std::pair{0u, false}, "Disintegration restart changed condition or breakage");
+                auto fractional = make(); auto& fractionalService = fractional->service();
+                tick = 0;
+                cast(fractionalService, "dis_armor_tick");
+                require(itemState(fractionalService, "dis_shield", EquipmentSlot::CarriedLeft).first == 20,
+                    "First timed DisintegrateArmor fraction lowered whole condition");
+                const auto fractionalImage = bytes(fractionalService);
+                InventoryHost fractionalRestart(descriptor, testContentManifest(), *registry, *crypto, fractionalImage);
+                fractionalRestart.service().synchronizeCells(authority);
+                require(bytes(fractionalRestart.service()) == fractionalImage,
+                    "Fractional disintegration restart changed the equipment image");
+                for (int step = 0; step < 3; ++step)
+                {
+                    ++tick;
+                    (void)commit(fractionalService, tick);
+                    (void)commit(fractionalRestart.service(), tick);
+                    require(bytes(fractionalRestart.service()) == bytes(fractionalService),
+                        "Restart changed timed disintegration continuation");
+                }
+                require(itemState(fractionalRestart.service(), "dis_shield", EquipmentSlot::CarriedLeft).first == 18,
+                    "Restored timed disintegration lost fractional condition carry");
+                auto npcRunning = make(); auto& npcService = npcRunning->service();
+                tick = 0;
+                require(dynamic_cast<InventoryService&>(npcService).selectedNpcWeaponCondition().value_or(0) > 0,
+                    "Disintegration NPC fixture has no equipped weapon");
+                const auto initialView = npcService.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(1), id<CanonicalRevision>(1));
+                require(initialView && initialView->equipment && !initialView->equipment->motions.empty(),
+                    "Disintegration NPC target identity absent");
+                const uint64_t targetNpc = initialView->equipment->motions.front().placement;
+                bool npcBroken = false;
+                for (unsigned frame = 0; frame < 180; ++frame)
+                {
+                    const auto before = bytes(npcService);
+                    auto pending = dynamic_cast<InventoryService&>(npcService).prepareNativeTick(
+                        authority, id<ServerTick>(++tick), 1.f/30, {},
+                        frame == 0 ? std::optional{ActorMagicCast{targetNpc, 1, 1, MagicUseSourceKind::Spell,
+                            source("dis_weapon"), MagicUseTargetKind::Self, 0}} : std::nullopt);
+                    require(bool(pending), "NPC self-disintegration candidate absent");
+                    require(pending->commit([&](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(npcService) == before,
+                        "Rejected NPC disintegration leaked condition");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "NPC disintegration retry failed");
+                    if (!dynamic_cast<InventoryService&>(npcService).selectedNpcWeaponCondition())
+                    { npcBroken = true; break; }
+                }
+                require(npcBroken, "NPC DisintegrateWeapon did not break equipped weapon");
+                const auto npcImage = bytes(npcService);
+                InventoryHost npcRestart(descriptor, testContentManifest(), *registry, *crypto, npcImage);
+                require(bytes(npcRestart.service()) == npcImage
+                    && !dynamic_cast<InventoryService&>(npcRestart.service()).selectedNpcWeaponCondition(),
+                    "NPC disintegration restart restored the broken weapon");
+                std::cout << "disintegration player+npc=break armor=priority fraction=durable rejection=atomic restart=exact\n";
+                return;
+            }
             if (effectFamily == "rest-recovery")
             {
                 auto running = make(); auto& runtime = running->service();

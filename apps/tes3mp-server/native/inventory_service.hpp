@@ -188,6 +188,7 @@ namespace TES3MP::Native
             EquipmentRuntime::EquippedWeaponCondition before;
             int condition;
             int slot = MWWorld::InventoryStore::Slot_CarriedRight;
+            std::optional<float> remainder;
         };
         struct ItemCharge
         {

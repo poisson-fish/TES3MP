@@ -22,6 +22,13 @@ namespace MWMechanics
     EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
         bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng);
     bool rollDispel(float magnitude, Misc::Rng::Generator& rng);
+    struct DisintegratedCondition
+    {
+        int condition;
+        float remainder;
+    };
+    // The stock fractional charge rule, shared with detached equipment candidates.
+    DisintegratedCondition disintegrateCondition(int condition, float remainder, float magnitude);
     // Effect-specific cures remove matching applied effects, preserving source siblings.
     ESM::RefId curedEffect(ESM::RefId cure);
     void absorbDynamicStat(CreatureStats& target, CreatureStats* caster, int stat, float magnitude,

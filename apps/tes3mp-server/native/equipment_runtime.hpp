@@ -225,8 +225,10 @@ namespace TES3MP::Native
         std::optional<EquippedWeaponCondition> equippedWeaponCondition(size_t owner) const;
         std::optional<EquippedWeaponCondition> equippedArmorCondition(size_t owner, int slot) const;
         // Called only after the enclosing actor image has been durably accepted.
-        void installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept;
-        void installArmorWear(size_t owner, int slot, ESM::RefNum item, int condition) noexcept;
+        void installWeaponWear(size_t owner, ESM::RefNum item, int condition,
+            std::optional<float> remainder = {}) noexcept;
+        void installArmorWear(size_t owner, int slot, ESM::RefNum item, int condition,
+            std::optional<float> remainder = {}) noexcept;
         void installEnchantmentCharge(size_t owner, ESM::RefNum item, float charge) noexcept;
         void installConsumedMagicItem(size_t owner, ESM::RefNum item) noexcept;
         class PreparedRespawn

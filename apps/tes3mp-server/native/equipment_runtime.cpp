@@ -45,23 +45,27 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native equipped armor condition invalid");
         return EquippedWeaponCondition{item.getCellRef().getRefNum(), condition};
     }
-    void EquipmentRuntime::installWeaponWear(size_t owner, ESM::RefNum item, int condition) noexcept
+    void EquipmentRuntime::installWeaponWear(size_t owner, ESM::RefNum item, int condition,
+        std::optional<float> remainder) noexcept
     {
         auto* inventory = inventoryStorage(owner);
         auto& slot = inventory->mSlots[InventoryStore::Slot_CarriedRight];
         Ptr weapon = *slot;
         if (weapon.getCellRef().getRefNum() != item) std::terminate();
         weapon.getCellRef().setCharge(condition);
+        if (remainder) weapon.getCellRef().setChargeIntRemainder(*remainder);
         if (condition == 0) slot = inventory->end();
         ++mWorld.mPtrRegistry.mRevision;
     }
-    void EquipmentRuntime::installArmorWear(size_t owner, int index, ESM::RefNum item, int condition) noexcept
+    void EquipmentRuntime::installArmorWear(size_t owner, int index, ESM::RefNum item, int condition,
+        std::optional<float> remainder) noexcept
     {
         auto* inventory = inventoryStorage(owner);
         auto& slot = inventory->mSlots[index];
         Ptr armor = *slot;
         if (armor.getCellRef().getRefNum() != item) std::terminate();
         armor.getCellRef().setCharge(condition);
+        if (remainder) armor.getCellRef().setChargeIntRemainder(*remainder);
         if (condition == 0) slot = inventory->end();
         ++mWorld.mPtrRegistry.mRevision;
     }

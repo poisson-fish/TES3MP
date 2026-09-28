@@ -91,7 +91,9 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::AbsorbFatigue || id == ESM::MagicEffect::AbsorbAttribute
             || id == ESM::MagicEffect::AbsorbSkill
             || id == ESM::MagicEffect::Silence || id == ESM::MagicEffect::Sound
-            || id == ESM::MagicEffect::StuntedMagicka;
+            || id == ESM::MagicEffect::StuntedMagicka
+            || id == ESM::MagicEffect::DisintegrateWeapon
+            || id == ESM::MagicEffect::DisintegrateArmor;
     }
     bool supportedCombatModifier(ESM::RefId effect)
     {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadench.hpp>
@@ -34,6 +35,20 @@
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/worldmodel.hpp"
+
+MWMechanics::DisintegratedCondition MWMechanics::disintegrateCondition(
+    int condition, float remainder, float magnitude)
+{
+    remainder -= std::abs(magnitude - std::floor(magnitude));
+    if (remainder <= -1.f)
+    {
+        float whole = 0.f;
+        remainder = std::modf(remainder, &whole);
+        condition = std::max(0, condition + static_cast<int>(whole));
+    }
+    condition -= std::min(static_cast<int>(magnitude), condition);
+    return {condition, remainder};
+}
 
 namespace
 {
@@ -137,11 +152,10 @@ namespace
             if (charge == 0)
                 return false;
 
-            // Store remainder of disintegrate amount (automatically subtracted if > 1)
-            item->getCellRef().applyChargeRemainderToBeSubtracted(disintegrate - std::floor(disintegrate));
-
-            charge = item->getClass().getItemHealth(*item);
-            charge -= std::min(static_cast<int>(disintegrate), charge);
+            const auto changed = MWMechanics::disintegrateCondition(charge,
+                item->getCellRef().getChargeIntRemainder(), disintegrate);
+            charge = changed.condition;
+            item->getCellRef().setChargeIntRemainder(changed.remainder);
             item->getCellRef().setCharge(charge);
 
             if (charge == 0)
