@@ -3440,53 +3440,19 @@ namespace TES3MP::Native
         return result;
     }
 
-    class InventoryService::PlayerAiTransaction final : public PreparedNativeInventory
+    bool InventoryService::validPlayerAiState(size_t index, const ActorCampaignCombat::PlayerAi& state,
+        const PreparedNativeInventory* inventory) const
     {
-        InventoryService& service;
-        EquipmentBytes before;
-        ActorCampaignCombat staged;
-        bool consumed = false;
-    public:
-        PlayerAiTransaction(InventoryService& owner, size_t index, ActorCampaignCombat::PlayerAi state)
-            : service(owner), before(owner.mActorImage), staged(*owner.mCombat)
-        { staged.players[index] = std::move(state); }
-        bool changesInventory() const noexcept override { return false; }
-        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
-        {
-            if (consumed || before != service.mActorImage || service.inventoryImage().empty())
-                return CanonicalDurabilityResult::Rejected;
-            try
-            {
-                const auto actor = readActorCampaign(before).actor;
-                const auto sealed = service.sealActor(service.mImage, actor, service.mActorTick,
-                    service.mActorVelocity, service.mMelee, service.mMeleeTarget, service.mMeleeContacted,
-                    staged, service.mLife, service.mProjectiles, service.mTimedEffects, service.mNpcCast);
-                const auto result = persist(std::as_bytes(std::span(sealed)));
-                if (result == CanonicalDurabilityResult::Rejected) return result;
-                consumed = true;
-                if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
-                else { service.mCombat = std::move(staged); service.mActorImage = sealed; }
-                return result;
-            }
-            catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
-        }
-    };
-
-    std::unique_ptr<PreparedNativeInventory> InventoryService::preparePlayerAiState(
-        PlayerId player, ActorCampaignCombat::PlayerAi state)
-    {
-        if (!mBinding.mPlayerAi || !mCombat || inventoryImage().empty()) return {};
-        const size_t index = actor(player);
         if (state.factions.size() > 256 || state.bounty < 0 || state.bounty > 10'000'000
             || std::abs(int64_t(state.crimeDisposition)) > 1'000'000 || state.drawState > 2)
-            return {};
+            return false;
         ESM::RefId previous;
         for (const auto& faction : state.factions)
         {
             if (faction.id.empty() || faction.rank < 0 || faction.rank > 9
                 || faction.id.serializeText().size() > 256
                 || !mRuntime.mStore.get<ESM::Faction>().search(faction.id)
-                || (!previous.empty() && !(previous < faction.id))) return {};
+                || (!previous.empty() && !(previous < faction.id))) return false;
             previous = faction.id;
         }
         if (!state.selectedSpell.empty())
@@ -3494,17 +3460,17 @@ namespace TES3MP::Native
             const auto& spells = mRuntime.mStore.get<ESM::NPC>().find(mBinding.mActors[index].mBase)->mSpells.mList;
             if (state.selectedSpell.serializeText().size() > 256
                 || !mRuntime.mStore.get<ESM::Spell>().search(state.selectedSpell)
-                || std::ranges::find(spells, state.selectedSpell) == spells.end()) return {};
+                || std::ranges::find(spells, state.selectedSpell) == spells.end()) return false;
         }
-        if (state.selectedEnchantedItem && std::ranges::none_of(mRuntime.installedValues(index).mObjects,
+        if (state.selectedEnchantedItem && std::ranges::none_of(combatEquipmentValues(index, inventory).mObjects,
             [&](const auto& item) {
                 if (item.mRef.mCount <= 0 || wireId(item.mRef.mRefNum).value() != state.selectedEnchantedItem)
                     return false;
                 const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
                 return !record.mEnchant.empty()
                     && mRuntime.mStore.get<ESM::Enchantment>().search(record.mEnchant);
-            })) return {};
-        return std::make_unique<PlayerAiTransaction>(*this, index, std::move(state));
+            })) return false;
+        return true;
     }
 
     class InventoryService::ActorTransaction final : public PreparedNativeInventory
@@ -3661,7 +3627,8 @@ namespace TES3MP::Native
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
-        std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world)
+        std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world,
+        std::span<const PlayerAiUpdate> playerAiUpdates)
     try
     {
         if (mRuntime.mFailedClosed || mRuntime.mRestartActor) return {};
@@ -3830,6 +3797,20 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        if (!playerAiUpdates.empty())
+        {
+            if (!mBinding.mPlayerAi || !combat || playerAiUpdates.size() > 2) return {};
+            std::array<bool, 2> seen{};
+            for (const auto& update : playerAiUpdates)
+            {
+                const auto found = std::ranges::find(mBinding.mPlayers, update.player);
+                if (found == mBinding.mPlayers.end()) return {};
+                const size_t index = size_t(found - mBinding.mPlayers.begin());
+                if (seen[index] || !validPlayerAiState(index, update.state, command.get())) return {};
+                seen[index] = true;
+                combat->players[index] = update.state;
+            }
+        }
         if (mBinding.mPlayerAi && combat)
             for (size_t index = 0; index < 2; ++index)
             {

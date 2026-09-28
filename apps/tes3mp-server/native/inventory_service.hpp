@@ -172,7 +172,8 @@ namespace TES3MP::Native
         class TeleportTransaction;
         class AreaDoorTransaction;
         class ActorTransaction;
-        class PlayerAiTransaction;
+        bool validPlayerAiState(size_t index, const ActorCampaignCombat::PlayerAi& state,
+            const PreparedNativeInventory* inventory = nullptr) const;
         class AttackTransaction;
         class SpellTransaction;
         std::unique_ptr<SpellTransaction> preparePlayerMagicSource(PlayerId player,
@@ -273,6 +274,12 @@ namespace TES3MP::Native
         void retireCommittedEffects() noexcept;
 
     public:
+        // App-local trusted gameplay state, never client-authored social values.
+        struct PlayerAiUpdate
+        {
+            PlayerId player;
+            ActorCampaignCombat::PlayerAi state;
+        };
         class PreparedCommand
         {
             friend class InventoryService;
@@ -367,10 +374,8 @@ namespace TES3MP::Native
             const CanonicalWorldState& world, std::uint8_t hours, WaitRestMode mode) override;
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
-            std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr);
-        // Trusted gameplay/script mutation; never accepts client-authored social values.
-        std::unique_ptr<PreparedNativeInventory> preparePlayerAiState(
-            PlayerId player, ActorCampaignCombat::PlayerAi state);
+            std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
+            std::span<const PlayerAiUpdate> playerAiUpdates = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

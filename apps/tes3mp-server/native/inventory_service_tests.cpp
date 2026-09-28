@@ -8246,6 +8246,52 @@ namespace TES3MP::Native::Testing
                     if (!creatureTarget)
                     {
                         const auto factionId = ESM::RefId::stringRefId("ai_test_faction");
+                        {
+                            auto live = make(); auto& native = dynamic_cast<InventoryService&>(live->service());
+                            auto first = read(bytes(native)).combat->players[0];
+                            first.factions.push_back({factionId, 1, true});
+                            first.crimeDisposition = -100; first.bounty = 100;
+                            first.drawState = 1; first.werewolf = true;
+                            auto second = read(bytes(native)).combat->players[1];
+                            second.knownWerewolf = true;
+                            const std::array updates{
+                                InventoryService::PlayerAiUpdate{id<PlayerId>(1), first},
+                                InventoryService::PlayerAiUpdate{id<PlayerId>(2), second}};
+                            const auto liveWorld = specialWorld();
+                            const auto original = bytes(native);
+                            auto invalid = updates;
+                            invalid[1].state.factions.push_back({ESM::RefId::stringRefId("missing_faction"), 0, false});
+                            require(!native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                    {}, {}, &liveWorld, invalid) && bytes(native) == original,
+                                "Invalid live player state prepared an actor transaction");
+                            auto duplicated = updates; duplicated[1].player = id<PlayerId>(1);
+                            require(!native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                    {}, {}, &liveWorld, duplicated) && bytes(native) == original,
+                                "Duplicate live player update prepared an actor transaction");
+                            auto pending = native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &liveWorld, updates);
+                            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(native) == original,
+                                "Rejected live player state leaked actor or inventory mutation");
+                            require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Two live player states failed to join the actor transaction");
+                            const auto saved = bytes(native);
+                            const auto committed = read(saved).combat;
+                            require(committed && committed->players[0] == first && committed->players[1] == second,
+                                "Live player state crossed player identities");
+                            InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, saved);
+                            replay.service().synchronizeCells(authority);
+                            require(bytes(replay.service()) == saved, "Live player state changed on restart");
+                            for (uint64_t frame = 2; frame <= 75; ++frame)
+                            {
+                                (void)commit(native, frame); (void)commit(replay.service(), frame);
+                                require(bytes(native) == bytes(replay.service()),
+                                    "Live player aggression diverged after restart");
+                                if (read(bytes(native)).combat->npcAction) break;
+                            }
+                            require(read(bytes(native)).combat->npcAction != 0,
+                                "Live player modifiers did not reach stock aggression");
+                        }
                         for (const std::string_view modifier : {"faction", "crime", "bounty", "drawn",
                                 "werewolf", "known-werewolf"})
                         {
@@ -8270,7 +8316,11 @@ namespace TES3MP::Native::Testing
                                     + MWMechanics::werewolfFight(social.werewolf, social.knownWerewolf, 100),
                                 22.f, MWMechanics::fightDispositionBias(disposition, 3.f)),
                                 "Stock aggression modifier did not cross Fight threshold");
-                            auto update = service.preparePlayerAiState(id<PlayerId>(1), social);
+                            const std::array liveUpdate{
+                                InventoryService::PlayerAiUpdate{id<PlayerId>(1), social}};
+                            const auto liveWorld = specialWorld();
+                            auto update = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &liveWorld, liveUpdate);
                             const auto previous = bytes(service);
                             require(update && update->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                                     == CanonicalDurabilityResult::Rejected && bytes(service) == previous,
@@ -8283,8 +8333,8 @@ namespace TES3MP::Native::Testing
                             require(bytes(restart.service()) == saved
                                     && read(bytes(restart.service())).combat->players[0] == social,
                                 "Player aggression modifier changed on restart");
-                            bool attacked = false;
-                            for (uint64_t frame = 1; frame <= 75; ++frame)
+                            bool attacked = read(saved).combat->npcAction != 0;
+                            for (uint64_t frame = 2; frame <= 75 && !attacked; ++frame)
                             {
                                 (void)commit(service, frame); (void)commit(restart.service(), frame);
                                 require(bytes(service) == bytes(restart.service()),
@@ -8341,9 +8391,19 @@ namespace TES3MP::Native::Testing
                         auto itemState = read(bytes(service)).combat->players[0];
                         itemState.drawState = 2;
                         itemState.selectedEnchantedItem = item->stackId.value();
-                        auto itemSelection = native.preparePlayerAiState(id<PlayerId>(1), itemState);
+                        const auto liveWorld = specialWorld();
+                        auto invalidItem = itemState; invalidItem.selectedEnchantedItem = UINT64_MAX;
+                        const std::array invalidUpdate{
+                            InventoryService::PlayerAiUpdate{id<PlayerId>(1), invalidItem}};
+                        require(!native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &liveWorld, invalidUpdate),
+                            "Unowned selected item entered the live actor transaction");
+                        const std::array itemUpdate{
+                            InventoryService::PlayerAiUpdate{id<PlayerId>(1), itemState}};
+                        auto itemSelection = native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                            {}, {}, &liveWorld, itemUpdate);
                         require(itemSelection && itemSelection->commit(accepted) == CanonicalDurabilityResult::Committed,
-                            "Selected enchanted item did not commit");
+                            "Live selected enchanted item did not commit");
                         const auto selectedImage = bytes(service);
                         InventoryHost itemRestart(descriptor, testContentManifest(), *registry, *crypto, selectedImage);
                         itemRestart.service().synchronizeCells(authority);
@@ -8354,15 +8414,21 @@ namespace TES3MP::Native::Testing
                         selected.drawState = 2;
                         selected.selectedSpell = ESM::RefId::stringRefId("ai_flee_force");
                         selected.selectedEnchantedItem = 0;
-                        auto selection = native.preparePlayerAiState(id<PlayerId>(1), selected);
+                        const std::array spellUpdate{
+                            InventoryService::PlayerAiUpdate{id<PlayerId>(1), selected}};
+                        auto cast = service.prepareMagicUse(authority,
+                            proposal(service, 1, 2, "ai_flee_force", npc, false, true), id<ServerTick>(2));
+                        require(bool(cast), "Live Flee source cast did not prepare");
+                        auto selection = native.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30,
+                            std::move(cast), {}, &liveWorld, spellUpdate);
                         require(selection && selection->commit(accepted) == CanonicalDurabilityResult::Committed,
-                            "Selected stock target spell did not commit for Flee reach");
+                            "Live selected spell and cast did not commit together for Flee reach");
                     }
                     uint64_t decided = 0;
-                    for (uint64_t frame = 1; frame <= 90 && !decided; ++frame)
+                    for (uint64_t frame = creatureTarget ? 1 : 3; frame <= 90 && !decided; ++frame)
                     {
-                        (void)commit(service, frame, frame == 1 ? "ai_flee_force" : std::string{},
-                            1, npc, false, frame == 1);
+                        (void)commit(service, frame, creatureTarget && frame == 1 ? "ai_flee_force" : std::string{},
+                            1, npc, false, creatureTarget && frame == 1);
                         if (read(bytes(service)).combat->fleeTarget) decided = frame;
                     }
                     require(decided, "Committed Demoralize did not select stock Flee over attack");
