@@ -152,6 +152,7 @@ namespace TES3MP::Native
         std::vector<uint64_t> mContacts;
         std::string mFingerprint;
         ESM::RefId mActorBase;
+        VFS::Path::Normalized mBaseAnimation, mBeastAnimation;
         // Stock third-person base, male, female, beast and Argonian swim layers.
         std::array<VFS::Path::Normalized, 5> mHitModels;
         bool mAdditionalHitSources = false;
@@ -325,7 +326,8 @@ namespace TES3MP::Native
             : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
-              mReferences(loadout.store(), loadout.readers(), 1), mActorId(actor)
+              mReferences(loadout.store(), loadout.readers(), 1), mActorId(actor),
+              mBaseAnimation(baseAnimation), mBeastAnimation(beastAnimation)
         {
             if (cells.empty() || cells.size() > 9 || !actor
                 || baseAnimation.empty() || baseAnimation.size() > 1024
@@ -628,6 +630,27 @@ namespace TES3MP::Native
         return {frame.mPosition.x(),frame.mPosition.y(),frame.mPosition.z(),frame.mRotation.y()};
     }
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
+    float InteriorActorScene::selectedActorHalfExtentY() const
+    {
+        if (!mImpl) throw std::invalid_argument("Flee hull scene is unloaded");
+        return mImpl->mAgentBounds.mHalfExtents.y();
+    }
+    float InteriorActorScene::npcHalfExtentY(ESM::RefId race, float scale) const
+    {
+        if (!mImpl || !std::isfinite(scale) || scale <= 0.f || scale > 100.f)
+            throw std::invalid_argument("Flee target hull input invalid");
+        const auto* record = mImpl->mStore.get<ESM::Race>().search(race);
+        if (!record) throw std::invalid_argument("Flee target race absent from content");
+        auto model = VFS::Path::Normalized(MWClass::npcModel(*record,
+            mImpl->mBaseAnimation, mImpl->mBeastAnimation));
+        model = Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs);
+        if (!mImpl->mVfs.exists(model)) throw std::invalid_argument("Flee target collision model missing");
+        const auto shape = mImpl->mShapes->getInstance(model);
+        const float halfExtent = shape->mCollisionBox.mExtents.y() * scale;
+        if (!std::isfinite(halfExtent) || halfExtent <= 0.f || halfExtent > 1e7f)
+            throw std::invalid_argument("Flee target hull outside bounds");
+        return halfExtent;
+    }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
     bool InteriorActorScene::lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const
     {

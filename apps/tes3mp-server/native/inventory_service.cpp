@@ -5326,10 +5326,89 @@ namespace TES3MP::Native
                 }
                 if (flee)
                 {
+                    const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
                     melee = mIdleMelee; target = 0; contact = false;
                     if (tick.value() > UINT64_MAX - 30)
                         throw std::invalid_argument("Native flee deadline exhausted");
-                    if (combat->fleeTarget != enemy->playerId().value() || combat->fleeUntil <= tick.value())
+                    const auto enemyIndex = actor(enemy->playerId());
+                    const auto enemyValues = combatEquipmentValues(enemyIndex, command.get());
+                    const auto right = enemyValues.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+                    const auto held = std::ranges::find_if(enemyValues.mObjects,
+                        [&](const auto& item) { return item.mRef.mRefNum == right; });
+                    const auto* weapon = held == enemyValues.mObjects.end() ? nullptr
+                        : mRuntime.mStore.get<ESM::Weapon>().search(held->mRef.mRefID);
+                    float attackDistance = 1.f;
+                    if (const auto& cast = combat->playerCasts[enemyIndex]; cast)
+                    {
+                        const auto targetSpeed = [&](const auto& effects) {
+                            for (const auto& effect : effects.mList)
+                                if (effect.mData.mRange == ESM::RT_Target)
+                                    return mRuntime.mStore.get<ESM::MagicEffect>()
+                                        .find(effect.mData.mEffectID)->mData.mSpeed;
+                            return 1.f;
+                        };
+                        if (cast->sourceKind == uint64_t(MagicUseSourceKind::Spell))
+                        {
+                            if (const auto* spell = spellBySource(mRuntime.mStore, cast->source))
+                                attackDistance = targetSpeed(spell->mEffects);
+                        }
+                        else if (cast->sourceKind == uint64_t(MagicUseSourceKind::EnchantedItem))
+                        {
+                            const auto item = std::ranges::find_if(enemyValues.mObjects,
+                                [&](const auto& value) { return wireId(value.mRef.mRefNum).value() == cast->source; });
+                            if (item != enemyValues.mObjects.end())
+                            {
+                                const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item->mRef.mRefID);
+                                if (!record.mEnchant.empty())
+                                    if (const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>()
+                                            .search(record.mEnchant))
+                                        attackDistance = targetSpeed(enchantment->mEffects);
+                            }
+                        }
+                        attackDistance *= std::max(1000.f,
+                            settings.find("fTargetSpellMaxSpeed")->mValue.getFloat());
+                    }
+                    else if (weapon)
+                    {
+                        if (MWMechanics::getWeaponType(weapon->mData.mType)->mWeaponClass != ESM::WeaponType::Melee)
+                        {
+                            attackDistance = settings.find("fProjectileMaxSpeed")->mValue.getFloat();
+                            const auto ammoSlot = enemyValues.mSlots[MWWorld::InventoryStore::Slot_Ammunition];
+                            const auto ammo = std::ranges::find_if(enemyValues.mObjects,
+                                [&](const auto& item) { return item.mRef.mRefNum == ammoSlot; });
+                            if (ammo != enemyValues.mObjects.end())
+                                if (const auto* record = mRuntime.mStore.get<ESM::Weapon>().search(ammo->mRef.mRefID))
+                                    attackDistance *= record->mData.mSpeed;
+                        }
+                        else if (weapon->mData.mReach > 1) attackDistance = weapon->mData.mReach;
+                    }
+                    attackDistance = std::max(attackDistance, 1.f);
+                    const float combatDistance = settings.find("fCombatDistance")->mValue.getFloat()
+                        * (victim.isWerewolf() ? 1.f
+                            + settings.find("fCombatDistanceWerewolfMod")->mValue.getFloat() : 1.f);
+                    if (!std::isfinite(attackDistance) || attackDistance > 1e7f
+                        || !std::isfinite(combatDistance) || combatDistance <= 0.f
+                        || combatDistance > 1e7f)
+                        throw std::invalid_argument("Native flee attack distance outside bounds");
+                    if (attackDistance < combatDistance) attackDistance *= combatDistance;
+                    const auto enemyPlace = enemy->transform().position();
+                    const std::array<float, 3> enemyPosition{float(double(enemyPlace.x()) / 1024),
+                        float(double(enemyPlace.y()) / 1024), float(double(enemyPlace.z()) / 1024)};
+                    const float x = enemyPosition[0] - before.mPosition[0];
+                    const float y = enemyPosition[1] - before.mPosition[1];
+                    const float z = enemyPosition[2] - before.mPosition[2];
+                    const auto enemyPtr = mRuntime.ownerPtr(enemyIndex);
+                    const auto* enemyNpc = enemyPtr.get<ESM::NPC>();
+                    const bool trigger = MWMechanics::fleeWithinAttackDistance(
+                        mBinding.mNavigatingActor->lineOfSight(
+                            {before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f},
+                            {enemyPosition[0], enemyPosition[1], enemyPosition[2] + 110.f}),
+                        attackDistance, std::sqrt(x*x + y*y + z*z),
+                        mBinding.mNavigatingActor->selectedActorHalfExtentY(),
+                        mBinding.mNavigatingActor->npcHalfExtentY(enemyNpc->mBase->mRace,
+                            enemyPtr.getCellRef().getScale()));
+                    if (trigger && (combat->fleeTarget != enemy->playerId().value()
+                        || combat->fleeUntil <= tick.value()))
                     {
                         std::array<float, 3> destination{};
                         const auto fleeingActor = mRuntime.ownerPtr(mCombatNpcOwner);
@@ -5346,7 +5425,7 @@ namespace TES3MP::Native
                         combat->fleeUntil = tick.value() + 30;
                         combat->fleeDestination = destination;
                     }
-                    else if (combat->fleeDestination != std::array<float, 3>{})
+                    else if (trigger && combat->fleeDestination != std::array<float, 3>{})
                         combat->fleeUntil = tick.value() + 30;
                 }
                 else if (selected)

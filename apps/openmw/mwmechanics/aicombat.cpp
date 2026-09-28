@@ -20,6 +20,7 @@
 
 #include "actorutil.hpp"
 #include "aicombataction.hpp"
+#include "airating.hpp"
 #include "character.hpp"
 #include "combat.hpp"
 #include "creaturestats.hpp"
@@ -375,7 +376,11 @@ namespace MWMechanics
             {
                 float triggerDist = getMaxAttackDistance(target);
                 const MWWorld::Cell* cellVariant = storage.mCell->getCell();
-                if (storage.mLOS && (triggerDist >= 1000 || getDistanceMinusHalfExtents(actor, target) <= triggerDist))
+                const auto world = MWBase::Environment::get().getWorld();
+                const float centerDist = (actor.getRefData().getPosition().asVec3()
+                    - target.getRefData().getPosition().asVec3()).length();
+                if (fleeWithinAttackDistance(storage.mLOS, triggerDist, centerDist,
+                        world->getHalfExtents(actor).y(), world->getHalfExtents(target).y()))
                 {
                     const ESM::Pathgrid* pathgrid
                         = MWBase::Environment::get().getESMStore()->get<ESM::Pathgrid>().search(*cellVariant);

@@ -102,6 +102,10 @@ namespace TES3MP::Native
         // until native player hulls are bound.
         bool lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const;
         uint64_t actorId() const noexcept;
+        // The same resource hulls used by stock physics, for AiCombat's
+        // distance-minus-half-extents flee gate.
+        float selectedActorHalfExtentY() const;
+        float npcHalfExtentY(ESM::RefId race, float scale) const;
         const std::string& fingerprint() const;
         bool enchantedWeaponsAreMagical() const;
         bool onlyAppropriateAmmunitionBypassesResistance() const;

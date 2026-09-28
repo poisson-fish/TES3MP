@@ -28,6 +28,15 @@ namespace MWMechanics
     inline bool fleeOverAttack(float rating, float antiFleeRating)
     { return (rating >= 100.f ? rating : 0.f) > antiFleeRating; }
 
+    // AiCombat starts a flee run only while the target can attack, except for
+    // long-range targets. The distance is measured from actor hulls, not centers.
+    inline bool fleeWithinAttackDistance(bool lineOfSight, float attackDistance,
+        float centerDistance, float actorHalfExtentY, float targetHalfExtentY)
+    {
+        return lineOfSight && (attackDistance >= 1000.f
+            || centerDistance - actorHalfExtentY - targetHalfExtentY <= attackDistance);
+    }
+
     inline int dispositionWithCharm(float derivedWithoutCharm, float charm, bool clamp = true)
     {
         const int value = static_cast<int>(derivedWithoutCharm + charm);

@@ -4,6 +4,7 @@
 #include <components/esm3/loadstat.hpp>
 #include "inventory_service_tests.hpp"
 #include <apps/openmw/mwmechanics/weapontype.hpp>
+#include <apps/openmw/mwmechanics/airating.hpp>
 #include "inventory_service.hpp"
 #include "inventory_host.hpp"
 #include "actor_campaign.hpp"
@@ -6687,6 +6688,21 @@ namespace TES3MP::Native::Testing
                     "meshes/base_anim.nif", "meshes/base_animkna.nif");
                 require(gridded.fleePathgridDestinations().size() == 2,
                     "Connected flee pathgrid candidates missing from content");
+                const auto* target = loadout.store().get<ESM::NPC>().find(
+                    ESM::RefId::stringRefId("npc_hit_female"));
+                const float actorBound = gridded.selectedActorHalfExtentY();
+                const float targetBound = gridded.npcHalfExtentY(target->mRace, 1.f);
+                const float reach = loadout.store().get<ESM::GameSetting>()
+                    .find("fCombatDistance")->mValue.getFloat();
+                require(MWMechanics::fleeWithinAttackDistance(true, reach,
+                        reach + actorBound + targetBound, actorBound, targetBound)
+                    && !MWMechanics::fleeWithinAttackDistance(true, reach,
+                        reach + actorBound + targetBound + 1.f, actorBound, targetBound)
+                    && !MWMechanics::fleeWithinAttackDistance(false, reach,
+                        reach, actorBound, targetBound)
+                    && MWMechanics::fleeWithinAttackDistance(true, 1000.f,
+                        2000.f, actorBound, targetBound),
+                    "Stock Flee near/far, actor bounds, LOS or long-range trigger diverged");
                 const auto room = ESM::RefId::stringRefId("NPC Door Path Test");
                 const auto actor = loadout.placedActors(room).at(0);
                 InteriorActorScene blind(loadout, "NPC Door Path Test", actor.mIdentity,
