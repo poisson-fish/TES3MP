@@ -14,6 +14,20 @@
 
 namespace MWMechanics
 {
+    float magicConcealmentTarget(const CreatureStats& target)
+    {
+        const auto& effects = target.getMagicEffects();
+        return effects.getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude()
+            + (effects.getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude() > 0.f ? 100.f : 0.f);
+    }
+
+    bool isTargetMagicallyHidden(const CreatureStats& target)
+    {
+        const auto& effects = target.getMagicEffects();
+        return effects.getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude() > 0.f
+            || effects.getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude() >= 75.f;
+    }
+
     bool isFatigueKnockout(float baseFatigue, float currentFatigue)
     {
         return currentFatigue < 0 || baseFatigue == 0;

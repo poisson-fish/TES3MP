@@ -335,6 +335,45 @@ namespace
             "Blind and Sanctuary failed to compose with Fortify Attack");
     }
 
+    void concealment()
+    {
+        MWWorld::ESMStore store; content(store); setting(store, "fCombatInvisoMult", 1.f);
+        MWMechanics::NpcStats attacker(store), target(store); initialize(attacker); initialize(target);
+        for (const auto effect : {ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon})
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mFlags = effect == ESM::MagicEffect::Invisibility ? ESM::MagicEffect::NoMagnitude : 0;
+            store.insertStatic(record);
+            auto source = spell("concealment", effect, ESM::RT_Self,
+                effect == ESM::MagicEffect::Invisibility ? 0 : 75);
+            require(prepareInstantSpell(source, store, true, true).has_value()
+                && !prepareInstantSpell(source, store, true, false), "Concealment admission changed");
+            ESM::Enchantment constant; constant.blank(); constant.mId = effect;
+            constant.mData.mType = ESM::Enchantment::ConstantEffect;
+            constant.mEffects = source.mEffects;
+            constant.mEffects.mList.front().mData.mDuration = 0;
+            store.insertStatic(constant);
+            require(prepareConstantEffects(effect, store, true).has_value(), "Concealment constant rejected");
+        }
+        const float ordinary = MWMechanics::getHitChance(store, attacker, target, 40, false, false);
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Chameleon),
+            MWMechanics::EffectParam(74.f));
+        near(MWMechanics::magicConcealmentTarget(target), 74.f, "Chameleon awareness term changed");
+        require(!MWMechanics::isTargetMagicallyHidden(target), "Subthreshold Chameleon hid the target");
+        require(MWMechanics::getHitChance(store, attacker, target, 40, false, false) < ordinary,
+            "Chameleon did not reach stock hit chance");
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Chameleon),
+            MWMechanics::EffectParam(1.f));
+        require(MWMechanics::isTargetMagicallyHidden(target), "Stacked Chameleon missed the AI threshold");
+        target.getMagicEffects() = {};
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Invisibility),
+            MWMechanics::EffectParam(1.f));
+        near(MWMechanics::magicConcealmentTarget(target), 100.f, "Invisibility awareness term changed");
+        require(MWMechanics::isTargetMagicallyHidden(target)
+            && MWMechanics::getHitChance(store, attacker, target, 40, false, false) < ordinary,
+            "Invisibility missed engine consumers");
+    }
+
     void weapons()
     {
         MWWorld::ESMStore store; content(store);
@@ -799,6 +838,7 @@ int main(int argc, char** argv)
         const std::string_view filter = argv[1];
         if (filter == "condition-rules") conditionRules();
         else if (filter == "effect-family-rules") effectFamilyRules();
+        else if (filter == "concealment") concealment();
         else if (filter == "interference") interference();
         else if (filter == "weapons") weapons();
         else if (filter == "expanded-effects") expandedEffects();

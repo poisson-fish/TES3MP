@@ -1,4 +1,5 @@
 #include "actorutil.hpp"
+#include "meleestate.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -37,8 +38,6 @@ namespace MWMechanics
 
     bool isTargetMagicallyHidden(const MWWorld::Ptr& actor)
     {
-        const MagicEffects& magicEffects = actor.getClass().getCreatureStats(actor).getMagicEffects();
-        return (magicEffects.getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude() > 0)
-            || (magicEffects.getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude() >= 75);
+        return isTargetMagicallyHidden(actor.getClass().getCreatureStats(actor));
     }
 }

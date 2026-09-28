@@ -93,7 +93,8 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::Silence || id == ESM::MagicEffect::Sound
             || id == ESM::MagicEffect::StuntedMagicka
             || id == ESM::MagicEffect::DisintegrateWeapon
-            || id == ESM::MagicEffect::DisintegrateArmor;
+            || id == ESM::MagicEffect::DisintegrateArmor
+            || id == ESM::MagicEffect::Invisibility || id == ESM::MagicEffect::Chameleon;
     }
     bool supportedCombatModifier(ESM::RefId effect)
     {
@@ -219,9 +220,13 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::LightningShield
                 || effect.mEffectID == ESM::MagicEffect::FrostShield
                 || fortifyDynamicStat(effect.mEffectID) >= 0
+                || effect.mEffectID == ESM::MagicEffect::Invisibility
+                || effect.mEffectID == ESM::MagicEffect::Chameleon
                 || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka));
             if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
-                || (magic->mData.mFlags & (ESM::MagicEffect::Harmful | ESM::MagicEffect::NoMagnitude))
+                || (magic->mData.mFlags & ESM::MagicEffect::Harmful)
+                || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+                    && effect.mEffectID != ESM::MagicEffect::Invisibility)
                 || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
                 || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
                 || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())

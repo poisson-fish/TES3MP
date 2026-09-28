@@ -19,6 +19,11 @@ namespace MWMechanics
 {
     class CreatureStats;
 
+    // The magic portion of the stock awareness target. Detached server actors
+    // have no presentation node or sneak stance during the movement migration.
+    float magicConcealmentTarget(const CreatureStats& target);
+    bool isTargetMagicallyHidden(const CreatureStats& target);
+
     // Stock exhaustion also includes zero base fatigue, even when fortified.
     bool isFatigueKnockout(float baseFatigue, float currentFatigue);
 

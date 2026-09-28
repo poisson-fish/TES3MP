@@ -6760,7 +6760,8 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "elemental-shields" || std::string_view(argv[1]) == "permanent-stats"
             || std::string_view(argv[1]) == "fortify-resources" || std::string_view(argv[1]) == "condition-cures"
             || std::string_view(argv[1]) == "persistent-conditions" || std::string_view(argv[1]) == "special-conditions"
-            || std::string_view(argv[1]) == "rest-recovery" || std::string_view(argv[1]) == "disintegration"))
+            || std::string_view(argv[1]) == "rest-recovery" || std::string_view(argv[1]) == "disintegration"
+            || std::string_view(argv[1]) == "concealment"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),

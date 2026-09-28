@@ -49,11 +49,21 @@ slot priority; zero condition unequips the item. Synthetic player/NPC instant/ti
 breakage, rejection and restart evidence: `build/logs/disintegration-13.log`.
 Constant-source ticking is wired but unexercised; no desktop capture.
 
-**Next: concealment/detection through engine consumers.**
+Invisibility/Chameleon enter timed spells and constant enchantments.
+Detached stats feed stock hit chance and shared awareness; NPC targeting/cast
+revalidation uses committed RNG. Temporary Invisibility breaks on casts/attack
+release. Synthetic admission,
+stacking, timed application/expiry, rejection, AI targeting and restart:
+`build/logs/{concealment-rules-01,concealment-campaign-07}.log`.
+The detached AI still lacks sneak stance and a presentation node. Constant-effect
+Invisibility does not yet preserve stock suppression after an action; client
+transparency/VFX and desktop evidence remain pending.
 
-69 effects remain:
+**Next: finish concealment source/visual behavior, then Light and detection through engine consumers.**
 
-- Concealment/detection (7): Invisibility, Chameleon, Light, NightEye,
+67 effects remain:
+
+- Concealment/detection (5): Light, NightEye,
   DetectAnimal, DetectEnchantment, DetectKey.
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
   Jump, Levitate, SlowFall.
@@ -72,7 +82,7 @@ Constant-source ticking is wired but unexercised; no desktop capture.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-74 implemented + 69 remaining = 143 IDs; bounded gameplay, incomplete visuals/sources.
+76 implemented + 67 remaining = 143 IDs; bounded gameplay, incomplete visuals/sources.
 Scripts, passive sources, multi-NPC/summons/player lives remain unproven.
 Ranged/overlapping combat precedes movement cutover; plain ranged sources/body
 proxies remain. TR Lua awaits M5.

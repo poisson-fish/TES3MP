@@ -40,6 +40,7 @@
 #include <fstream>
 #include <iomanip>
 #include <stdexcept>
+#include <tuple>
 
 namespace TES3MP::ServerApp::Testing
 {
@@ -6033,6 +6034,11 @@ namespace TES3MP::Native::Testing
                     spell("dis_armor", {effect(ESM::MagicEffect::DisintegrateArmor, ESM::RT_Self, 0, 20)});
                     spell("dis_armor_tick", {effect(ESM::MagicEffect::DisintegrateArmor, ESM::RT_Self, 2, 15)});
                 }
+                if (effectFamily == "concealment")
+                {
+                    spell("conceal_invisibility", {effect(ESM::MagicEffect::Invisibility, ESM::RT_Self, 2, 0)});
+                    spell("conceal_chameleon", {effect(ESM::MagicEffect::Chameleon, ESM::RT_Self, 2, 75)});
+                }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6178,7 +6184,8 @@ namespace TES3MP::Native::Testing
                     << "\nmelee weapononehand\n";
             }
             if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
-                && effectFamily != "persistent-conditions" && effectFamily != "disintegration" && !specialConditions)
+                && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
+                && effectFamily != "concealment" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -6277,7 +6284,8 @@ namespace TES3MP::Native::Testing
                 }
             }
             if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
-                || effectFamily == "persistent-conditions" || effectFamily == "disintegration" || specialConditions)
+                || effectFamily == "persistent-conditions" || effectFamily == "disintegration"
+                || effectFamily == "concealment" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
                 if (effectFamily == "persistent-conditions")
@@ -6288,6 +6296,8 @@ namespace TES3MP::Native::Testing
                     });
                 else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
+                if (effectFamily == "concealment")
+                    npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 if (effectFamily == "disintegration")
                 {
                     npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
@@ -7639,7 +7649,7 @@ namespace TES3MP::Native::Testing
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
-        if (effectFamily == "persistent-conditions" || specialConditions)
+        if (effectFamily == "persistent-conditions" || effectFamily == "concealment" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -7734,6 +7744,83 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (effectFamily == "concealment")
+            {
+                auto baseline = make(); baseline->service().synchronizeCells(authority);
+                bool acquiredVisible = false;
+                for (uint64_t tick = 1; tick <= 20; ++tick)
+                {
+                    const auto state = commit(baseline->service(), tick);
+                    acquiredVisible |= state.melee && state.melee->target == 1;
+                }
+                require(acquiredVisible, "Concealment AI fixture never acquired its visible control target");
+                for (const auto [name, effectId, magnitude] : {
+                    std::tuple{std::string_view("conceal_invisibility"), ESM::MagicEffect::Invisibility, 1.f},
+                    std::tuple{std::string_view("conceal_chameleon"), ESM::MagicEffect::Chameleon, 75.f}})
+                {
+                    auto running = make(); auto& runtime = running->service();
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(effectId));
+                    const auto active = [&](const auto& current) {
+                        const auto image = bytes(current);
+                        const auto state = read(image);
+                        return std::ranges::count_if(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 0 && effect.effectIndex == index
+                                && effect.magnitude == magnitude;
+                        });
+                    };
+                    uint64_t tick = 0;
+                    bool installed = false;
+                    for (unsigned frame = 0; frame < 120; ++frame)
+                    {
+                        const auto before = bytes(runtime);
+                        auto pending = advance(runtime, ++tick, frame == 0 ? name : std::string_view{});
+                        require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                            "Rejected concealment tick leaked an effect or payment");
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Concealment retry failed");
+                        if (active(runtime)) { installed = true; break; }
+                    }
+                    require(installed && active(runtime) == 1, "Concealment did not install one source");
+                    const auto saved = bytes(runtime);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved && active(restart.service()) == 1,
+                        "Concealment restart changed the active source");
+                    for (unsigned frame = 0; frame < 65; ++frame)
+                    {
+                        ++tick; (void)commit(runtime, tick); (void)commit(restart.service(), tick);
+                        require(bytes(runtime) == bytes(restart.service()),
+                            "Concealment restart changed expiry or AI RNG");
+                        if (effectId == ESM::MagicEffect::Invisibility && active(runtime))
+                        {
+                            const auto image = bytes(runtime);
+                            const auto state = read(image);
+                            require(state.melee && state.melee->target != 1,
+                                "NPC acquired an invisible player through awareness");
+                        }
+                    }
+                    require(!active(runtime), "Concealment survived its expiry");
+                    if (effectId == ESM::MagicEffect::Invisibility)
+                    {
+                        InventoryHost action(descriptor, testContentManifest(), *registry, *crypto, saved);
+                        action.service().synchronizeCells(authority);
+                        uint64_t actionTick = tick - 65;
+                        for (unsigned frame = 0; frame < 45; ++frame)
+                        {
+                            const auto image = bytes(action.service());
+                            if (!read(image).combat->playerCasts[0]) break;
+                            (void)commit(action.service(), ++actionTick);
+                        }
+                        require(active(action.service()) == 1, "Invisibility expired before the next action");
+                        auto pending = advance(action.service(), ++actionTick, "conceal_chameleon");
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && !active(action.service()), "Casting did not break active Invisibility");
+                    }
+                }
+                std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
+                return;
+            }
             if (effectFamily == "disintegration")
             {
                 auto running = make(); auto& runtime = running->service();

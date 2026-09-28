@@ -541,6 +541,9 @@ namespace TES3MP::Native
                 for (size_t ordinal = 0; ordinal < plan.effects.size(); ++ordinal)
                 {
                     const auto& entry = plan.effects[ordinal];
+                    const bool noMagnitude = entry.mEffectID == ESM::MagicEffect::Invisibility
+                        && (content.get<ESM::MagicEffect>().find(entry.mEffectID)->mData.mFlags
+                            & ESM::MagicEffect::NoMagnitude);
                     const uint64_t argument = !entry.mAttribute.empty()
                         ? uint64_t(ESM::Attribute::refIdToIndex(entry.mAttribute) + 1)
                         : !entry.mSkill.empty() ? uint64_t(ESM::Skill::refIdToIndex(entry.mSkill) + 9) : 0;
@@ -557,7 +560,8 @@ namespace TES3MP::Native
                             || previous->caster != caster.id || previous->casterKind != caster.kind
                             || previous->casterLife != caster.life || previous->resistance != 0
                             || previous->durationTicks != 0 || previous->expiresTick != UINT64_MAX
-                            || previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax
+                            || (noMagnitude ? previous->magnitude != 1.f
+                                : previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax)
                             || std::floor(previous->magnitude) != previous->magnitude)
                             throw std::invalid_argument("Native constant effect disagrees with source");
                         effect = *previous;
@@ -565,7 +569,7 @@ namespace TES3MP::Native
                     else if (rng)
                     {
                         changed = true;
-                        effect.magnitude = MWMechanics::rollEffectMagnitude(
+                        effect.magnitude = noMagnitude ? 1.f : MWMechanics::rollEffectMagnitude(
                             float(entry.mMagnMin), float(entry.mMagnMax), *rng);
                     }
                     else if (tick) throw std::invalid_argument("Native saved constant effect missing");
@@ -3478,6 +3482,27 @@ namespace TES3MP::Native
             const auto death = updateEffectResources(*combat, index, mRuntime.mStore, previous, current, retainKnockout);
             if (index == 2 && death) recordEffectDeath(*death);
         };
+        const auto npcDetects = [&](size_t index) {
+            auto victim = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+            addTimedResistance(victim, timedEffects, index);
+            if (!MWMechanics::isTargetMagicallyHidden(victim)) return true;
+            // Stock canFight rolls awareness for a magically hidden target. The
+            // detached server actor has no presentation node or sneak stance,
+            // leaving the shared magic term as its awareness threshold.
+            Misc::Rng::Generator rng{combat->rng};
+            const bool detected = Misc::Rng::roll0to99(rng) >= MWMechanics::magicConcealmentTarget(victim);
+            combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+            return detected;
+        };
+        const auto breakInvisibility = [&](size_t index) {
+            const auto previous = timedEffects;
+            std::erase_if(timedEffects, [&](const auto& effect) {
+                return effect.actor == index && effect.sourceKind != 3
+                    && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
+            });
+            if (timedEffects.size() != previous.size())
+                updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
+        };
         const auto retaliate = [&](MWMechanics::NpcStats& attacker, const MWMechanics::NpcStats& victim,
             size_t attackerIndex, size_t victimIndex, Misc::Rng::Generator& rng) {
             if (!mBinding.mExpandedEffects) return;
@@ -4176,6 +4201,7 @@ namespace TES3MP::Native
                         combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     }
                     clip.release(swing.strength);
+                    breakInvisibility(owner);
                 }
                 const auto hit = clip.advance(seconds);
                 swing.state = clip.snapshot();
@@ -4230,7 +4256,10 @@ namespace TES3MP::Native
             }
         }
         else if (playerAttack && combat)
+        {
+            breakInvisibility(actor(playerAttacker));
             playerContacts.push_back({actor(playerAttacker), playerAttack->attackType, playerAttack->attackStrength, true});
+        }
         if (mBinding.mRangedFlight && combat
             && (!mBinding.mTravelerNeighborhood || (mBinding.worldDomains().size() <= mBinding.mTravelerCellBudget
                 && mBinding.mTravelerStepBudget >= 2)))
@@ -4454,15 +4483,20 @@ namespace TES3MP::Native
             if (mBinding.mPlayerCastLifecycle)
             {
                 if (combat->playerCasts[owner]) throw std::invalid_argument("Player already casting");
+                breakInvisibility(owner);
                 const auto& input = use->use;
                 combat->playerCasts[owner] = ActorCampaignCast{use->caster.value(), 1, input.commandId.value(),
                     uint64_t(input.sourceKind), input.sourceId, uint64_t(input.targetKind), input.targetId,
                     uint64_t(use->spell.effects.effects.front().mRange), 0, ActorCampaignCast::Selected,
                     input.targetKind == MagicUseTargetKind::Actor ? life->generation : 1};
             }
-            else casts.push_back({magicCaster(owner), use->use.sourceKind, use->use.sourceId,
-                use->use.targetKind, use->use.targetId, use->use.commandId.value(),
-                use->spell, use->charge, use->effectSource});
+            else
+            {
+                breakInvisibility(owner);
+                casts.push_back({magicCaster(owner), use->use.sourceKind, use->use.sourceId,
+                    use->use.targetKind, use->use.targetId, use->use.commandId.value(),
+                    use->spell, use->charge, use->effectSource});
+            }
         }
         const auto playerPosition = [&](size_t index) -> std::optional<std::array<float, 3>> {
             const auto* player = players.findPlayer(mBinding.mPlayers[index]);
@@ -4555,6 +4589,7 @@ namespace TES3MP::Native
                 if (!mBinding.mNavigatingActor->lineOfSight(
                     {before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f},
                     {float(double(position.x()) / 1024), float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 110.f})) return {};
+                if (!npcDetects(actor(*playerId))) return {};
             }
             const auto context = magicCaster(2);
             const auto caster = loadCombatStats(mRuntime.mStore, combat->actors[2], timedEffects, 2);
@@ -4691,6 +4726,7 @@ namespace TES3MP::Native
                     {before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f},
                     {float(double(place.x()) / 1024), float(double(place.y()) / 1024),
                         float(double(place.z()) / 1024) + 110.f})) continue;
+                if (!npcDetects(actor(playerId))) continue;
                 if (distance < nearest || (distance == nearest && enemy && playerId < enemy->playerId()))
                 { enemy = player; nearest = distance; }
             }
@@ -4896,6 +4932,7 @@ namespace TES3MP::Native
         {
             const auto candidate = prepareNpcCast(*actorCast);
             if (!candidate) throw std::invalid_argument("Native actor cast source or target became invalid");
+            breakInvisibility(2);
             if (mBinding.mNpcCastLifecycle)
             {
                 if (casting) throw std::invalid_argument("Native actor already casting");
@@ -5305,7 +5342,7 @@ namespace TES3MP::Native
                 return mBinding.mNavigatingActor->lineOfSight(
                     {after.mPosition[0], after.mPosition[1], after.mPosition[2] + 110.f},
                     {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
-                        float(double(position.z()) / 1024) + 110.f});
+                        float(double(position.z()) / 1024) + 110.f}) && npcDetects(index);
             };
             if (combat->actors[2][8][2] <= 0 || combat->knockedDown[2] || hasParalysis(timedEffects, 2) || combat->hitRecoveryTicks[2]
                 || combat->actors[index][8][2] <= 0 || !victim || victim->transform().cell() != actorCell(after)
@@ -5350,7 +5387,11 @@ namespace TES3MP::Native
                         strength = MWMechanics::resolveAttackStrength(strength, rng);
                         combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                     }
-                    if (melee->release(strength)) target = selected;
+                    if (melee->release(strength))
+                    {
+                        target = selected;
+                        breakInvisibility(2);
+                    }
                 }
             }
             const auto hit = melee->advance(seconds);

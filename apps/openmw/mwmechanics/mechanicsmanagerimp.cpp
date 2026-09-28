@@ -1,4 +1,5 @@
 #include "mechanicsmanagerimp.hpp"
+#include "meleestate.hpp"
 
 #include <cassert>
 
@@ -1652,11 +1653,7 @@ namespace MWMechanics
         osg::Vec3f pos2(observer.getRefData().getPosition().asVec3());
         float distTerm = fSneakDistBase + fSneakDistMult * (pos1 - pos2).length();
 
-        float chameleon = stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude();
-        float invisibility = stats.getMagicEffects().getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude();
-        float x = sneakTerm * distTerm * stats.getFatigueTerm() + chameleon;
-        if (invisibility > 0.f)
-            x += 100.f;
+        float x = sneakTerm * distTerm * stats.getFatigueTerm() + magicConcealmentTarget(stats);
 
         CreatureStats& observerStats = observer.getClass().getCreatureStats(observer);
         float obsAgility = observerStats.getAttribute(ESM::Attribute::Agility).getModified();

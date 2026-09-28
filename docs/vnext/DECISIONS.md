@@ -52,24 +52,19 @@ and persists selection/contact. Inherited player movement uses strict center
 reach until native hulls are bound.
 
 **Travel scheduling.** Simulate the player/traveler area union once per actor.
-Bound cells/work; persist destinations, completion, inactivity and stock Travel
-guards. No abstract fast-forward. V20 admission is atomic; saturation pauses both
-substeps without resetting travel. Stable placement IDs suppress duplicate local
-actors. Freeze offline players; exclude client velocity from legacy simulation.
+Bound work; persist destinations, completion and stock Travel guards. Saturation
+pauses substeps without resetting travel. Stable placement IDs prevent duplicate
+actors. Freeze offline players.
 
-**Composed ticks.** One isolated transaction owns ordered intents, simulation,
-resources, effects, wear, death/loot, RNG and receipts. Persist before installation
-and publication; measure overruns. WhenUsed pays at launch even on a later miss;
-source identities survive item movement. V17 stages doors against committed NPC
-hulls before both physics steps. Area images own angles; collision transforms
-are derived. Player reports supplement sensing until movement cutover. V18
-persists destination, avoidance, stuck position/direction and private RNG.
+**Composed ticks.** One transaction stages intents, simulation, resources, effects,
+wear, death/loot, RNG and receipts; persist before publication. WhenUsed pays at
+launch, and source identities survive item movement. Door contact precedes physics.
+Persist avoidance and private RNG.
 
-**Casting authority and recovery.** V38 retains caster kind, placement/player ID
-and launch life through flight, effects and death history. Players remain life 1;
-NPC respawn clears its body effects while attribution on others survives. Trusted
-NPC commands never enter client input. Death cancels NPC flights. Older images
-retain their layouts; new descriptor domains require fresh campaigns.
+**Casting authority and recovery.** Retain caster kind, ID and launch life through
+flight, effects and death history. NPC respawn clears body effects, while attribution
+on others survives. Trusted NPC commands never enter client input. Death cancels
+NPC flights. New descriptor domains require fresh campaigns.
 
 V39-V42 admit actions every eight committed ticks, selecting the nearest visible
 living player with ID ties. Stock ratings compare weapons/ammunition, equipped
@@ -110,10 +105,9 @@ equip selected carried weapons; recovery never re-equips. NPC clips bind layered
 groups/fallback, direction and speed. Completion resumes selection; breakage and
 passive-source removal commit together.
 
-**V52 actor presentation.** A fractional client cursor samples committed motion/action
-history without gameplay callbacks. Persist swing/body identities and selected hit
-clips; preserve life boundaries, pauses and starvation holds. T3C7/capability 25;
-fresh campaigns. Budget all four latest-state streams per pump, retaining backpressure.
+**V52 actor presentation.** Clients sample committed motion/action without gameplay
+callbacks. Persist swing/body clips and life boundaries; hold on pauses or starvation.
+T3C7/capability 25; fresh campaigns. Budget four latest-state streams per pump.
 
 V53 adds participant-bound player casts to this clock. Release revalidation/payment
 and interruption commit atomically; offline casts pause. T3C8/capability 26;
