@@ -5443,7 +5443,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool specialConditions = effectFamily == "special-conditions";
@@ -6064,7 +6064,8 @@ namespace TES3MP::Native::Testing
                             {effect(id, ESM::RT_Self, 5, id == ESM::MagicEffect::WaterBreathing
                                 || id == ESM::MagicEffect::WaterWalking ? 0 : 20)});
                         spell("movement_npc_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
-                            {effect(id, ESM::RT_Target, 5, id == ESM::MagicEffect::WaterBreathing
+                            {effect(id, ESM::RT_Target, deepMovement && id == ESM::MagicEffect::WaterBreathing ? 15 : 5,
+                                id == ESM::MagicEffect::WaterBreathing
                                 || id == ESM::MagicEffect::WaterWalking ? 0
                                 : id == ESM::MagicEffect::Burden ? 100 : 20)});
                     }
@@ -6455,6 +6456,12 @@ namespace TES3MP::Native::Testing
                     }
                 }
             }
+            if (deepMovement)
+            {
+                auto breath = *base.store().get<ESM::GameSetting>().find("fHoldBreathTime");
+                breath.mValue.setFloat(1.f);
+                out.startRecord(ESM::GameSetting::sRecordId, 0); breath.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+            }
             ESM::Static floor; floor.blank(); floor.mId = ESM::RefId::stringRefId("npc_door_floor");
             floor.mModel = "placement-floor.osgt";
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
@@ -6493,7 +6500,7 @@ namespace TES3MP::Native::Testing
             if (wetMovement)
             {
                 cell.mData.mFlags |= ESM::Cell::HasWater;
-                cell.mWater = 150.f;
+                cell.mWater = deepMovement ? 1000.f : 150.f;
                 cell.mHasWaterHeightSub = true;
             }
             if (specialConditions) cell.mRegion = base.store().get<ESM::Region>().begin()->mId;
@@ -7952,6 +7959,63 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily == "movement-effects")
             {
+                if (deepMovement)
+                {
+                    auto plain = make(); auto& baseline = plain->service();
+                    const auto health = [&](auto& current) { return read(bytes(current)).combat->actors[2][8][2]; };
+                    const float initial = health(baseline);
+                    for (uint64_t tick = 1; tick <= 90; ++tick) (void)commit(baseline, tick);
+                    require(health(baseline) < initial, "Deep content water did not cause authoritative drowning damage");
+
+                    auto protectedHost = make(); auto& protectedNpc = protectedHost->service();
+                    const auto inventory = protectedNpc.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(1), id<CanonicalRevision>(1));
+                    require(inventory && inventory->equipment && !inventory->equipment->motions.empty(),
+                        "Deep content NPC identity absent");
+                    const uint64_t npc = inventory->equipment->motions.front().placement;
+                    const auto breathIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterBreathing));
+                    uint64_t tick = 0;
+                    bool active = false;
+                    for (unsigned frame = 0; frame < 90 && !active; ++frame)
+                    {
+                        const auto state = commit(protectedNpc, ++tick,
+                            frame == 0 ? "movement_npc_0" : std::string_view{}, 1, npc, false, frame == 0);
+                        active = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.effectIndex == breathIndex && effect.magnitude > 0;
+                        });
+                    }
+                    require(active, "WaterBreathing did not reach the deep-water NPC");
+                    const float protectedHealth = health(protectedNpc);
+                    const auto saved = bytes(protectedNpc);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved, "Deep-water restart changed the active source or breath");
+                    bool expired = false, damagedAfterExpiry = false;
+                    for (unsigned frame = 0; frame < 600; ++frame)
+                    {
+                        const auto state = commit(protectedNpc, ++tick);
+                        (void)commit(restart.service(), tick);
+                        require(bytes(protectedNpc) == bytes(restart.service()),
+                            "Deep-water expiry or drowning diverged after restart");
+                        const bool stillActive = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.effectIndex == breathIndex && effect.magnitude > 0;
+                        });
+                        if (stillActive)
+                            require(health(protectedNpc) == protectedHealth,
+                                "Drowning damaged the NPC while WaterBreathing was active");
+                        else
+                        {
+                            expired = true;
+                            damagedAfterExpiry |= health(protectedNpc) < protectedHealth;
+                            if (damagedAfterExpiry) break;
+                        }
+                    }
+                    require(expired && damagedAfterExpiry,
+                        "Drowning did not resume after WaterBreathing expired in deep content water");
+                    std::cout << "deep-water content=1000 baseline-damage=" << initial - health(baseline)
+                        << " breathing=protected expiry=damage restart=exact\n";
+                    return;
+                }
                 if (!wetMovement)
                 {
                 const auto previousDescriptor = scratch / "native-v55.txt";

@@ -6763,6 +6763,7 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "rest-recovery" || std::string_view(argv[1]) == "disintegration"
             || std::string_view(argv[1]) == "concealment" || std::string_view(argv[1]) == "visibility"
             || std::string_view(argv[1]) == "movement-effects" || std::string_view(argv[1]) == "movement-wet"
+            || std::string_view(argv[1]) == "movement-deep"
             || std::string_view(argv[1]) == "constant-concealment"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
@@ -6771,8 +6772,10 @@ int main(int argc, char** argv)
                 false, true, false, true, false, false, false, false, false, false, false, false,
                 {}, std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
                 std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
-                    : std::string_view(argv[1]) == "movement-wet" ? std::string_view("movement-effects") : std::string_view(argv[1]),
-                std::string_view(argv[1]) == "movement-wet");
+                    : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep")
+                        ? std::string_view("movement-effects") : std::string_view(argv[1]),
+                std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep",
+                std::string_view(argv[1]) == "movement-deep");
             std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "stat-drains")
