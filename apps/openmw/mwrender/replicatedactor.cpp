@@ -620,7 +620,9 @@ namespace MWRender
         if (mReplicatedActors.contains(ptr.mRef) || mObjects.contains(ptr.mRef))
             return ReplicatedActorResult::LifecycleViolation;
 
-        insertBegin(ptr, false);
+        // Focus picking needs the replica's Ptr; other scene rays continue to
+        // exclude Mask_ReplicatedActor unless they explicitly opt in.
+        insertBegin(ptr, true);
         ptr.getRefData().getBaseNode()->setNodeMask(Mask_ReplicatedActor);
         ptr.getRefData().getBaseNode()->setAttitude(makeActorRootRotation(ptr.getRefData().getPosition()));
         try

@@ -795,7 +795,7 @@ namespace MWRender
 
     osg::ref_ptr<osgUtil::IntersectionVisitor> RenderingManager::getIntersectionVisitor(
         osgUtil::Intersector* intersector, bool ignorePlayer, bool ignoreActors,
-        std::span<const MWWorld::Ptr> ignoreList)
+        std::span<const MWWorld::Ptr> ignoreList, bool includeReplicatedActors)
     {
         if (!mIntersectionVisitor)
             mIntersectionVisitor = new IntersectionVisitorWithIgnoreList;
@@ -818,7 +818,7 @@ namespace MWRender
         mIntersectionVisitor->setFrameStamp(mViewer->getFrameStamp());
         mIntersectionVisitor->setIntersector(intersector);
 
-        mIntersectionVisitor->setTraversalMask(sceneQueryMask(ignorePlayer, ignoreActors));
+        mIntersectionVisitor->setTraversalMask(sceneQueryMask(ignorePlayer, ignoreActors, includeReplicatedActors));
         return mIntersectionVisitor;
     }
 
@@ -840,11 +840,13 @@ namespace MWRender
     }
 
     RenderingManager::RayResult RenderingManager::castCameraToViewportRay(
-        const float nX, const float nY, float maxDistance, bool ignorePlayer, bool ignoreActors)
+        const float nX, const float nY, float maxDistance, bool ignorePlayer, bool ignoreActors,
+        bool includeReplicatedActors)
     {
         auto intersector = cameraRayIntersector(mViewer->getCamera()->getProjectionMatrix(), nX, nY, maxDistance);
 
-        mViewer->getCamera()->accept(*getIntersectionVisitor(intersector, ignorePlayer, ignoreActors));
+        mViewer->getCamera()->accept(*getIntersectionVisitor(intersector, ignorePlayer, ignoreActors, {},
+            includeReplicatedActors));
 
         return getIntersectionResult(intersector);
     }

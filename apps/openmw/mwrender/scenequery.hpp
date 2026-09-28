@@ -22,7 +22,7 @@ namespace MWRender
     // Shared stock scene picking. No viewer, Environment, UI or graphics context required.
     SceneRayResult getIntersectionResult(osgUtil::LineSegmentIntersector* intersector,
         std::span<const MWWorld::Ptr> ignoreList = {});
-    unsigned int sceneQueryMask(bool ignorePlayer, bool ignoreActors);
+    unsigned int sceneQueryMask(bool ignorePlayer, bool ignoreActors, bool includeReplicatedActors = false);
     osg::ref_ptr<osgUtil::LineSegmentIntersector> cameraRayIntersector(
         const osg::Matrixd& projection, float x, float y, float maxDistance);
     SceneRayResult castSceneRay(osg::Node& root, const osg::Vec3f& from, const osg::Vec3f& to);

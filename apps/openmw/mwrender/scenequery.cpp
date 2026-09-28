@@ -134,15 +134,17 @@ namespace MWRender
         osgUtil::IntersectionVisitor::apply(transform);
     }
 
-    unsigned int sceneQueryMask(bool ignorePlayer, bool ignoreActors)
+    unsigned int sceneQueryMask(bool ignorePlayer, bool ignoreActors, bool includeReplicatedActors)
     {
         unsigned int mask = ~0u;
         mask &= ~(Mask_RenderToTexture | Mask_Sky | Mask_Debug | Mask_Effect | Mask_Water | Mask_SimpleWater
-            | Mask_Groundcover | Mask_ReplicatedActor);
+            | Mask_Groundcover);
+        if (!includeReplicatedActors)
+            mask &= ~Mask_ReplicatedActor;
         if (ignorePlayer)
             mask &= ~(Mask_Player);
         if (ignoreActors)
-            mask &= ~(Mask_Actor | Mask_Player);
+            mask &= ~(Mask_Actor | Mask_Player | Mask_ReplicatedActor);
 
         return mask;
     }

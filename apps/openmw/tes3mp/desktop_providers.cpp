@@ -22,6 +22,7 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwrender/replicatedactor.hpp"
+#include "../mwrender/vismask.hpp"
 #include "../mwrender/animation.hpp"
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwworld/cell.hpp"
@@ -37,6 +38,7 @@
 #include "../mwworld/player.hpp"
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/scene.hpp"
+#include "../mwworld/actiontalk.hpp"
 #include "../mwworld/worldmodel.hpp"
 
 #include <components/debug/debuglog.hpp>
@@ -49,6 +51,7 @@
 #include <components/esm3/loadskil.hpp>
 #include <components/esm3/loadweap.hpp>
 #include <tes3mp/fixed_tick_scheduler.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 
 #include <algorithm>
 #include <array>
@@ -613,6 +616,8 @@ namespace TES3MP::OpenMWAdapter
                 return true;
             }
             auto* presentation = dynamic_cast<const DesktopPresentation*>(mImpl->presentation);
+            if (presentation && presentation->activateReplicatedNpc(toActivate, player))
+                return true;
             auto capture = presentation ? presentation->inventoryPickup(toActivate) : std::nullopt;
             if (!capture)
                 return MWWorld::ContainerStore::isStorableType(toActivate.getType());
@@ -1479,6 +1484,32 @@ namespace TES3MP::OpenMWAdapter
                 (void)placement;
                 if (remote.actor) targets.push_back(remote.actor->ptr());
             }
+        }
+
+        bool activateReplicatedNpc(const MWWorld::Ptr& target, const MWWorld::Ptr& player) const
+        {
+            if (std::ranges::any_of(remotes, [&](const auto& entry) {
+                    return entry.second.actor && entry.second.actor->ptr() == target;
+                }) || std::ranges::any_of(actorRemotes, [&](const auto& entry) {
+                    return entry.second.actor && entry.second.actor->ptr() == target;
+                })) return true;
+            const auto remote = std::ranges::find_if(nativeRemotes, [&](const auto& entry) {
+                return entry.second.actor && entry.second.actor->ptr() == target;
+            });
+            if (remote == nativeRemotes.end()) return false;
+            // The replica is presentation owned. Never open a local corpse
+            // inventory or execute gameplay scripts through its ManualRef.
+            if (target.getType() != ESM::NPC::sRecordId || !combatSnapshot)
+                return true;
+            const auto id = ActorId::fromValue(remote->first);
+            if (!id) return true;
+            const auto state = std::ranges::lower_bound(combatSnapshot->actors(), *id,
+                {}, &ActorCombatSnapshot::actorId);
+            if (state == combatSnapshot->actors().end() || state->actorId != *id || state->dead)
+                return true;
+            auto action = target.getClass().activate(target, player);
+            if (dynamic_cast<MWWorld::ActionTalk*>(action.get())) action->execute(player);
+            return true;
         }
 
         std::optional<MeleeAttackCapture> captureMeleeAttack(
@@ -3310,6 +3341,17 @@ namespace TES3MP::OpenMWAdapter
     void DesktopPresentation::appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
     {
         mImpl->appendMeleeTargets(targets);
+    }
+
+    bool DesktopPresentation::activateReplicatedNpc(
+        const MWWorld::Ptr& target, const MWWorld::Ptr& player) const noexcept
+    {
+        try { return mImpl->activateReplicatedNpc(target, player); }
+        catch (...)
+        {
+            const auto* node = target.isEmpty() ? nullptr : target.getRefData().getBaseNode();
+            return node && (node->getNodeMask() & MWRender::Mask_ReplicatedActor);
+        }
     }
 
     std::optional<MeleeAttackCapture> DesktopPresentation::captureMeleeAttack(

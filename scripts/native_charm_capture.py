@@ -70,13 +70,13 @@ def verify_charm_capture(output, evidence, processes, relay, manifest):
     command("Alice", "pose 60 -100 1 .1 0")
     time.sleep(.35)
     command("Alice", "observe")
-    command("Alice", 'dialoguestart "npc_door_actor"')
+    command("Alice", 'activate "npc_door_actor"')
     baseline = dialogue("Alice")
     frames = [screenshot("Alice", "before-charm")]
     command("Alice", "dialogueclose")
     command("Alice", 'castactor "ai_charm_dialogue"')
     wait_for(lambda: all(charm(role) >= 35 for role in evidence), "Charm projected to both desktops")
-    command("Alice", 'dialoguestart "npc_door_actor"')
+    command("Alice", 'activate "npc_door_actor"')
     active = dialogue("Alice")
     frames.append(screenshot("Alice", "during-charm"))
     if not (baseline["charm"] == 0 and active["charm"] >= 35
@@ -84,7 +84,7 @@ def verify_charm_capture(output, evidence, processes, relay, manifest):
         raise RuntimeError("Stock dialogue disposition did not rise with committed Charm")
     command("Alice", "dialogueclose")
     wait_for(lambda: all(charm(role) == 0 for role in evidence), "Charm expired on both desktops", 35)
-    command("Alice", 'dialoguestart "npc_door_actor"')
+    command("Alice", 'activate "npc_door_actor"')
     expired = dialogue("Alice")
     frames.append(screenshot("Alice", "after-charm"))
     if expired["charm"] != 0 or expired["disposition"] != baseline["disposition"]:

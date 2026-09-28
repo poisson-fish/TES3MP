@@ -35,19 +35,19 @@ into stock dialogue; NPC Charm affects server aggression. Checks:
 `build/logs/{ai-rules-final,ai-protocol-test,ai-player-charm-02,ai-passive-creature-02,ai-flee-test-11}.log`.
 Committed player disease adds stock's disposition term; offline passive AI
 abilities no longer expire. A two-desktop capture shows stock dialogue
-disposition 45→80→45 with Charm 35 and expiry:
-`build/m4-charm-dialogue-live-14/result.json` and its three window PNGs.
-Test automation opened the replicated NPC's stock dialogue directly; ordinary
-activation did not focus that NPC. The remote display now accepts constant
-enchanted equipment.
+45→80→45 with Charm 35 and expiry:
+`build/m4-charm-activation-live-01/result.json` and three PNGs.
+Ordinary activation now focuses the replicated NPC and executes stock talk.
+Replica corpse inventory and scripts remain outside this path. Remote equipment
+accepts constants.
 Aggression still lacks canonical faction, crime/bounty, drawn-weapon and
 werewolf modifiers. Flee lacks stock attack-distance trigger and exact
 actor-bound distance checks.
 Mixed passive spells, non-player Command casters and multiple active combatants
 remain open.
 
-**Next: bind canonical player social/draw/werewolf state to aggression, then
-finish Flee distance gates and ordinary NPC dialogue activation.**
+**Next: bind canonical player faction, crime/bounty, draw and werewolf state
+to aggression, then finish Flee's stock attack-distance and actor-bound gates.**
 Player movement cutover follows combat and collision.
 
 62 effects remain to complete across applicable actors and sources:
