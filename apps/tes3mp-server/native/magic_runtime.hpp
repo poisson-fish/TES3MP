@@ -17,6 +17,7 @@ namespace TES3MP::Native
     // Modifiers consumed by shared hit chance/evasion and armor calculations.
     bool expandedCombatEffect(ESM::RefId effect);
     bool movementEffect(ESM::RefId effect);
+    bool aiDispositionEffect(ESM::RefId effect);
     bool supportedCombatModifier(ESM::RefId effect);
     bool permanentStatEffect(ESM::RefId effect);
     bool wholeSourceCure(ESM::RefId effect);

@@ -5447,7 +5447,8 @@ namespace TES3MP::Native::Testing
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool specialConditions = effectFamily == "special-conditions";
-        const bool movementEffects = effectFamily == "movement-effects";
+        const bool movementEffects = effectFamily == "movement-effects" || effectFamily == "ai-disposition"
+            || effectFamily == "ai-creature";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
             ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
@@ -5809,7 +5810,8 @@ namespace TES3MP::Native::Testing
                 }
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
-            const bool creatureEncounter = encounterProfile == "vanilla-knockdown-dremora";
+            const bool creatureEncounter = encounterProfile == "vanilla-knockdown-dremora"
+                || effectFamily == "ai-creature";
             const bool customBody = encounterProfile.starts_with("vanilla-knockdown-custom:");
             const bool physicalKnockdown = encounterProfile.starts_with("vanilla-knockdown-");
             if (encounterProfile == "vanilla-melee" || physicalKnockdown)
@@ -5997,7 +5999,7 @@ namespace TES3MP::Native::Testing
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
                     record.mData.mType = ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
-                    record.mData.mCost = effectFamily == "movement-effects" ? 0 : 5;
+                    record.mData.mCost = movementEffects ? 0 : 5;
                     record.mEffects.populate(effects);
                     npc.mSpells.mList.push_back(record.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); record.save(out); out.endRecord(ESM::Spell::sRecordId);
@@ -6069,6 +6071,19 @@ namespace TES3MP::Native::Testing
                                 || id == ESM::MagicEffect::WaterWalking ? 0
                                 : id == ESM::MagicEffect::Burden ? 100 : 20)});
                     }
+                if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                {
+                    for (const auto id : {ESM::MagicEffect::Charm, ESM::MagicEffect::CalmHumanoid,
+                            ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyHumanoid,
+                            ESM::MagicEffect::FrenzyCreature, ESM::MagicEffect::DemoralizeHumanoid,
+                            ESM::MagicEffect::DemoralizeCreature, ESM::MagicEffect::RallyHumanoid,
+                            ESM::MagicEffect::RallyCreature, ESM::MagicEffect::CommandHumanoid,
+                            ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead})
+                        spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                            {effect(id, ESM::RT_Target, 5, 100)});
+                    spell("ai_calm_stack", {effect(ESM::MagicEffect::CalmHumanoid, ESM::RT_Target, 5, 25)});
+                    spell("ai_calm_creature_stack", {effect(ESM::MagicEffect::CalmCreature, ESM::RT_Target, 5, 25)});
+                }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6200,6 +6215,9 @@ namespace TES3MP::Native::Testing
                 }
             }
             const auto observerAppearance = npc;
+            const auto aiPlayerSpells = npc.mSpells.mList;
+            if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                npc.mSpells.mList.clear();
             if (customBody)
             {
                 const auto name = encounterProfile.substr(std::string_view("vanilla-knockdown-custom:").size());
@@ -6230,6 +6248,7 @@ namespace TES3MP::Native::Testing
                 for (auto& attribute : creature.mData.mAttributes) attribute = 40;
                 creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
                 creature.mData.mCombat = 100;
+                if (effectFamily == "ai-creature") creature.mData.mType = ESM::Creature::Undead;
                 out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
                 std::ofstream(scratch / "encounter.txt", std::ios::app)
                     << "actor timeline_creature\ncreature dremora\nmodel " << creature.mModel << "\nmelee handtohand\n";
@@ -6256,6 +6275,8 @@ namespace TES3MP::Native::Testing
             {
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
+                if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                    female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
                 if ((encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
                 {
@@ -7711,7 +7732,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "movement-effects" ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7731,11 +7752,13 @@ namespace TES3MP::Native::Testing
                 << (participantHits ? "\"npc_hit_female\" \"npc_hit_beast\"" : "\"npc_door_actor\" \"npc_door_actor\"")
                 << "\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
-                << "npc \"npc_door_actor\" " << std::quoted(actorSettings.string())
+                << "npc " << std::quoted(effectFamily == "ai-creature" ? "timeline_creature" : "npc_door_actor")
+                << ' ' << std::quoted(actorSettings.string())
                 << (melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
                     : wetMovement ? "\ndestination 60 -500 1 120\n"
                     : "\ndestination 60 -240 1 120\n");
-            if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
+            if (melee) out << "processing 1 2\nmelee "
+                << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
         }
         if (playerCastLifecycle)
@@ -7749,7 +7772,8 @@ namespace TES3MP::Native::Testing
         }
         if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
             || effectFamily == "constant-concealment"
-            || effectFamily == "visibility" || effectFamily == "movement-effects" || specialConditions)
+            || effectFamily == "visibility" || effectFamily == "movement-effects"
+            || effectFamily == "ai-disposition" || effectFamily == "ai-creature" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -7955,6 +7979,126 @@ namespace TES3MP::Native::Testing
                     }
                 }
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
+                return;
+            }
+            if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+            {
+                const bool creatureTarget = effectFamily == "ai-creature";
+                auto running = make(); auto& runtime = running->service();
+                const auto inventory = runtime.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(1), id<CanonicalRevision>(1));
+                require(inventory && inventory->equipment && !inventory->equipment->motions.empty(),
+                    "AI target NPC identity absent");
+                const uint64_t npc = inventory->equipment->motions.front().placement;
+                const auto calmIndex = uint64_t(ESM::MagicEffect::refIdToIndex(creatureTarget
+                    ? ESM::MagicEffect::CalmCreature : ESM::MagicEffect::CalmHumanoid));
+                const auto count = [&](auto& current, uint64_t index) {
+                    return std::ranges::count_if(read(bytes(current)).timedEffects, [&](const auto& effect) {
+                        return effect.actor == 2 && effect.effectIndex == index;
+                    });
+                };
+                uint64_t tick = 1;
+                const auto name = "ai_" + std::to_string(calmIndex);
+                const auto before = bytes(runtime);
+                auto pending = advance(runtime, tick, name, 1, npc, false, true);
+                std::vector<std::byte> candidate;
+                require(pending->commit([&](auto image) {
+                    candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                    "Rejected AI cast changed committed source, cost or actor state");
+                require(pending->commit([&](auto image) {
+                    require(std::ranges::equal(image, candidate), "AI cast retry changed staged bytes");
+                    return CanonicalDurabilityResult::Committed;
+                }) == CanonicalDurabilityResult::Committed, "AI cast retry failed");
+                while (tick < 90 && !count(runtime, calmIndex)) (void)commit(runtime, ++tick);
+                require(count(runtime, calmIndex) == 1, "CalmHumanoid did not reach the NPC");
+                auto stacked = advance(runtime, ++tick, creatureTarget
+                    ? "ai_calm_creature_stack" : "ai_calm_stack", 2, npc, false, true);
+                require(stacked->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Second CalmHumanoid cast failed");
+                while (tick < 130 && count(runtime, calmIndex) < 2) (void)commit(runtime, ++tick);
+                require(count(runtime, calmIndex) == 2, "Independent CalmHumanoid sources did not stack");
+                const auto saved = bytes(runtime);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == saved, "AI source changed on restart");
+                for (unsigned frame = 0; frame < 175; ++frame)
+                {
+                    (void)commit(runtime, ++tick); (void)commit(restart.service(), tick);
+                    require(bytes(runtime) == bytes(restart.service()),
+                        "AI stacking, combat choice or expiry diverged after restart");
+                }
+                require(!count(runtime, calmIndex), "CalmHumanoid survived expiry");
+                const std::vector<ESM::RefId> valid = creatureTarget
+                    ? std::vector<ESM::RefId>{ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead,
+                        ESM::MagicEffect::FrenzyCreature, ESM::MagicEffect::DemoralizeCreature,
+                        ESM::MagicEffect::RallyCreature}
+                    : std::vector<ESM::RefId>{ESM::MagicEffect::Charm, ESM::MagicEffect::CommandHumanoid,
+                        ESM::MagicEffect::FrenzyHumanoid, ESM::MagicEffect::DemoralizeHumanoid,
+                        ESM::MagicEffect::RallyHumanoid};
+                for (const auto id : valid)
+                {
+                    auto isolated = make(); auto& service = isolated->service();
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
+                    const auto sourceName = "ai_" + std::to_string(index);
+                    bool applied = false;
+                    uint64_t appliedTick = 0;
+                    for (uint64_t frame = 1; frame < 90 && !applied; ++frame)
+                    {
+                        (void)commit(service, frame, frame == 1 ? sourceName : std::string_view{},
+                            1, npc, false, frame == 1);
+                        applied = count(service, index) != 0;
+                        if (applied) appliedTick = frame;
+                    }
+                    require(applied, "Valid NPC AI source did not commit");
+                    if (id == ESM::MagicEffect::CommandHumanoid || id == ESM::MagicEffect::CommandCreature)
+                    {
+                        auto ordinary = make(); auto& baseline = ordinary->service();
+                        for (uint64_t frame = 1; frame <= 100; ++frame) (void)commit(baseline, frame);
+                        for (uint64_t frame = appliedTick + 1; frame <= 100; ++frame) (void)commit(service, frame);
+                        const auto follower = service.travelDiagnostics();
+                        const auto plain = baseline.travelDiagnostics();
+                        require(follower && plain && follower->position[1] < plain->position[1] - 20.f,
+                            "Committed Command did not move the actor toward its caster");
+                        const auto commandImage = bytes(service);
+                        InventoryHost commandRestart(descriptor, testContentManifest(), *registry, *crypto, commandImage);
+                        commandRestart.service().synchronizeCells(authority);
+                        require(bytes(commandRestart.service()) == commandImage,
+                            "Command Follow destination changed on restart");
+                        auto rejectedFollow = advance(service, 101);
+                        require(rejectedFollow->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(service) == commandImage,
+                            "Rejected Command Follow movement changed the committed actor");
+                        for (uint64_t frame = 101; frame <= 255; ++frame)
+                        {
+                            (void)commit(service, frame);
+                            (void)commit(commandRestart.service(), frame);
+                            require(bytes(service) == bytes(commandRestart.service()),
+                                "Command Follow or resumed travel diverged after expiry/restart");
+                        }
+                        const auto resumed = service.travelDiagnostics();
+                        require(resumed && resumed->position[1] > follower->position[1] + 20.f,
+                            "Expired Command did not resume the authored travel destination");
+                    }
+                }
+                const std::vector<ESM::RefId> invalid = creatureTarget
+                    ? std::vector<ESM::RefId>{ESM::MagicEffect::Charm, ESM::MagicEffect::CalmHumanoid,
+                        ESM::MagicEffect::FrenzyHumanoid, ESM::MagicEffect::DemoralizeHumanoid,
+                        ESM::MagicEffect::RallyHumanoid, ESM::MagicEffect::CommandHumanoid}
+                    : std::vector<ESM::RefId>{ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyCreature,
+                        ESM::MagicEffect::DemoralizeCreature, ESM::MagicEffect::RallyCreature,
+                        ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead};
+                for (const auto id : invalid)
+                {
+                    auto isolated = make(); auto& service = isolated->service();
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
+                    for (uint64_t frame = 1; frame < 90; ++frame)
+                        (void)commit(service, frame, frame == 1
+                            ? "ai_" + std::to_string(index) : std::string{}, 1, npc, false, frame == 1);
+                    require(!count(service, index), "Wrong-target AI effect entered the actor");
+                }
+                std::cout << "AI " << (creatureTarget ? "undead creature" : "NPC")
+                    << " sources=typed stacking expiry rejection restart exact Follow=travel+return\n";
                 return;
             }
             if (effectFamily == "movement-effects")

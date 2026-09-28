@@ -4,82 +4,62 @@
 NPC/biped/doors: 60 Hz; commits: 30 Hz; neighbors freeze.
 **V56, T3D0/capability 28; fresh campaigns.**
 
-Inherited body captures:
-`build/m4-custom-<body>-<mode>-live-<suffix>`:
-
-| Body | Record | fatigue suffix | physical suffix |
-|---|---|---|---|
-| dancer | yakov | 03 | 02 |
-| khajiit-f | TR_m1_Carajhi | 01 | 03 |
-| khajiit-m | TR_m1_Batharra | 03 | 01 |
-| tsaesci | TR_m7_Qorinue-Najan | 01 | 01 |
-
+Inherited body captures: `build/m4-custom-<body>-<mode>-live-<suffix>`
+for dancer/yakov, khajiit-f/TR_m1_Carajhi,
+khajiit-m/TR_m1_Batharra and tsaesci/TR_m7_Qorinue-Najan.
 Corpse poses and armed/casting creatures untested.
 
-Player/NPC casts retain timing/payment/interruption; custom casts check resources.
-Captures: `build/m4-player-cast-vanilla-live-02`,
-`build/m4-player-cast-tr-item-live-01`.
-
-Silence defeats Always; Sound stacks and spares Always. Failed spells pay once.
-Evidence: `build/logs/interference-*`.
-
-Elemental shields and stat/resource effects:
+Player/NPC casts retain timing, payment and interruption; custom casts check
+resources: `build/m4-player-cast-{vanilla-live-02,tr-item-live-01}`.
+Silence defeats Always; Sound stacks; failed spells pay once:
+`build/logs/interference-*`. Shields/stats:
 `build/logs/effect-family-{rules,shields-04,stats-03,fortify-02}.log`.
-
-Cures/Dispel preserve sources. V54 persists diseases, curses, contact and
-resistance/weakness. Atomic/restart evidence:
-`build/logs/persistent-conditions-20260927-06.log`.
-
-V55 persists Corprus/Vampirism/SunDamage with native time/weather/exposure. Checks:
+Cures/Dispel preserve sources; V54 diseases/curses persist through contact,
+resistance and restart: `build/logs/persistent-conditions-20260927-06.log`.
+V55 Corprus/Vampirism/SunDamage use native time/weather:
 `build/logs/{special-conditions-09,environment-sun-03,special-admission-rules-02}.log`;
-V54 regression: `build/logs/persistent-regression-02.log`. No desktop capture.
+V54 regression: `build/logs/persistent-regression-02.log`.
+Wait restores fatigue; rest restores health/magicka; StuntedMagicka blocks
+recovery through skips: `build/logs/{rest-recovery-08,rest-contract}.log`.
+Other deadlines survive; VFX pending. Disintegration uses stock fractional
+condition/armor priority and unequips broken gear:
+`build/logs/disintegration-13.log`. Constant ticking and desktop unproven.
 
-Wait restores fatigue; rest restores health/magicka. StuntedMagicka blocks
-magicka recovery until its skip-advanced deadline. Rejection/restart:
-`build/logs/rest-recovery-08.log`; composition contract:
-`build/logs/rest-contract.log`. No desktop capture.
-Other deadlines survive skips; VFX pending.
-
-DisintegrateWeapon/Armor use OpenMW's fractional condition rule and stock armor
-priority; breakage unequips. Synthetic player/NPC instant/timed, rejection and
-restart: `build/logs/disintegration-13.log`. Constant ticking and desktop unproven.
-
-Invisibility/Chameleon use stock hit and shared awareness. Casts/attack release
-break temporary Invisibility and suppress an equipped constant source until
-replacement; rejected actions and restart preserve that state. Light, NightEye,
-DetectAnimal, DetectEnchantment and DetectKey enter timed and constant sources.
-T3D0 projects seven aggregate visibility magnitudes to client actor effects;
-OpenMW animation lighting/transparency, player night vision and reference
-detection consume them. Stacking, expiry, rejection, restart and snapshot:
+Invisibility/Chameleon use stock hit and awareness; casts/attack release break
+temporary Invisibility and suppress equipped sources until replacement. T3D0
+projects seven visibility effects from timed/constant sources to OpenMW rendering,
+night vision and detection. Lifecycle checks:
 `build/logs/{constant-concealment-01,concealment-campaign-09,visibility-campaign-03,visibility-protocol-03}.log`.
-Two impaired desktop clients confirmed Light and NightEye rendering, DetectAnimal,
-DetectEnchantment and DetectKey HUD widgets, Invisibility action break, expiry and
-reconnect: `build/m4-visibility-desktop-live-08/result.json`. The world screenshots
-omit the HUD; marker widget counts are recorded by the automation. Detached AI lacks
-sneak stance.
+Two impaired desktops confirmed rendering, three Detect widgets, action break,
+expiry and reconnect: `build/m4-visibility-desktop-live-08/result.json`.
+HUD counts came from automation; detached AI lacks sneak stance.
 
-V56 admits eight movement effects into spell/constant source lifetimes, including
-WaterBreathing's index zero; T3D0 projects player magnitudes. NPC frames derive
-stock movement and breath from sources, stats, inventory and cell water.
-Drowning damages NPCs; lethal events use the NPC's life for attribution. Old
-V56 images restore full breath.
-Stock solver water/jump/slow-fall checks: `build/logs/movement-npc-rules-09.log`;
-NPC source, Burden travel, rejection and restart:
-`build/logs/movement-npc-service-17.log`; wet-cell SwiftSwim speed,
-WaterWalking lift/restart and Burden slowdown:
-`build/logs/movement-npc-wet-11.log`; wire:
-`build/logs/movement-wire-test-03.log`. Two impaired desktops received all
-eight player/NPC effects and identical positions on 671 common NPC ticks:
-`build/m4-movement-desktop-live-06/result.json`. Its room was dry. Generated
-deep-water content proves drowning, WaterBreathing, expiry and exact host
-reconstruction: `build/logs/movement-deep-05.log`. Two impaired desktops also
-confirmed protection, expiry, convergent damage and process restart:
-`build/m4-movement-deep-desktop-live-03/result.json`. NPC AI issues no jump
-requests yet.
+V56 admits eight movement effects, including WaterBreathing index zero, into
+spell/constant sources; T3D0 projects player magnitudes. NPCs derive stock motion
+and breath from committed state; drowning carries life attribution. Old V56
+images restore full breath. Solver/source/wet/wire/deep-water checks:
+`build/logs/{movement-npc-rules-09,movement-npc-service-17,movement-npc-wet-11,movement-wire-test-03,movement-deep-05}.log`.
+Two impaired desktops converged across 671 dry-room NPC ticks and a separate
+deep-water expiry/restart capture:
+`build/m4-movement-desktop-live-06/result.json`,
+`build/m4-movement-deep-desktop-live-03/result.json`. NPC AI has no jump request.
 
-**Next: implement the AI/disposition effect family through stock handlers and
-committed sources.** Player movement cutover stays after combat and collision
-requirements.
+The twelve AI/disposition IDs now enter bounded timed spell/WhenUsed sources.
+Stock and server handlers share target-type checks and Fight/Flee deltas. The
+selected NPC and an undead biped creature consume Calm/Frenzy/Demoralize/Rally
+and TurnUndead in their combat choice; valid level-gated Command sources stage
+Follow navigation toward a player caster, then resume authored travel at expiry.
+Charm retains magnitude for the NPC, but dialogue does not consume it yet.
+Synthetic source/type rules: `build/logs/ai-rules-02.log`; NPC and undead creature
+stacking, expiry, rejected writes, Follow, restart:
+`build/logs/{ai-disposition-npc-10,ai-disposition-creature-06}.log`.
+Movement regression: `build/logs/ai-movement-regression-01.log`.
+No desktop capture. Stock distance/disposition aggression and low-health Flee
+rating, flee path, Charm dialogue, passive/constant AI sources, non-player
+Command casters and multiple active combatants remain open.
+
+**Next: finish stock Fight/Flee and Charm consumers across actors and sources.**
+Player movement cutover stays after combat and collision requirements.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

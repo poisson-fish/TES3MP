@@ -334,6 +334,55 @@ namespace
         near(MWMechanics::getHitChance(store, caster, victim, 40, false, false), ordinary + 5,
             "Blind and Sanctuary failed to compose with Fortify Attack");
     }
+    void aiDispositionRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        const std::array humanoid{ESM::MagicEffect::CalmHumanoid, ESM::MagicEffect::FrenzyHumanoid,
+            ESM::MagicEffect::DemoralizeHumanoid, ESM::MagicEffect::RallyHumanoid};
+        const std::array creature{ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyCreature,
+            ESM::MagicEffect::DemoralizeCreature, ESM::MagicEffect::RallyCreature};
+        for (size_t slot = 0; slot < humanoid.size(); ++slot)
+        {
+            for (const auto effect : {humanoid[slot], creature[slot]})
+            {
+                ESM::MagicEffect record; record.blank(); record.mId = effect;
+                record.mData.mSchool = ESM::Skill::Illusion; record.mData.mBaseCost = 1.f;
+                store.insertStatic(record);
+                auto source = spell("ai effect", effect, ESM::RT_Target);
+                require(!prepareInstantSpell(source, store, true, true, false, false)
+                    && bool(prepareInstantSpell(source, store, true, true, false, true)),
+                    "AI family crossed its committed-source gate");
+                const bool npc = effect == humanoid[slot];
+                require(MWMechanics::validAiEffectTarget(effect, npc, false, false, true)
+                    && !MWMechanics::validAiEffectTarget(effect, !npc, false, false, true)
+                    && !MWMechanics::validAiEffectTarget(effect, true, true, false, true),
+                    "AI Fight/Flee target type changed");
+                const auto delta = MWMechanics::aiDispositionDelta(effect, 10.f);
+                require(delta && delta->setting == (slot < 2 ? MWMechanics::AiSetting::Fight : MWMechanics::AiSetting::Flee)
+                    && delta->modifier == (slot == 0 || slot == 3 ? -10.f : 10.f),
+                    "AI Fight/Flee stock modifier changed");
+            }
+        }
+        for (const auto effect : {ESM::MagicEffect::Charm, ESM::MagicEffect::CommandHumanoid,
+                ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead})
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mSchool = ESM::Skill::Illusion; record.mData.mBaseCost = 1.f;
+            store.insertStatic(record);
+            require(bool(prepareInstantSpell(spell("ai special", effect, ESM::RT_Target), store,
+                true, true, false, true)), "AI special source rejected");
+        }
+        require(MWMechanics::validAiEffectTarget(ESM::MagicEffect::Charm, true, false, false, true)
+            && !MWMechanics::validAiEffectTarget(ESM::MagicEffect::Charm, false, false, false, true)
+            && MWMechanics::validAiEffectTarget(ESM::MagicEffect::CommandHumanoid, true, false, false, true)
+            && !MWMechanics::validAiEffectTarget(ESM::MagicEffect::CommandHumanoid, true, true, false, true)
+            && !MWMechanics::validAiEffectTarget(ESM::MagicEffect::CommandHumanoid, true, false, false, false)
+            && MWMechanics::validAiEffectTarget(ESM::MagicEffect::CommandCreature, false, false, false, true)
+            && !MWMechanics::validAiEffectTarget(ESM::MagicEffect::CommandCreature, true, false, false, true)
+            && MWMechanics::validAiEffectTarget(ESM::MagicEffect::TurnUndead, false, false, true, true)
+            && !MWMechanics::validAiEffectTarget(ESM::MagicEffect::TurnUndead, false, false, false, true),
+            "Charm, Command or TurnUndead target restriction changed");
+    }
 
     void concealment()
     {
@@ -837,6 +886,7 @@ int main(int argc, char** argv)
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
         if (filter == "condition-rules") conditionRules();
+        else if (filter == "ai-disposition-rules") aiDispositionRules();
         else if (filter == "effect-family-rules") effectFamilyRules();
         else if (filter == "concealment") concealment();
         else if (filter == "interference") interference();

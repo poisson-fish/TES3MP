@@ -78,6 +78,15 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::Feather || id == ESM::MagicEffect::Jump
             || id == ESM::MagicEffect::Levitate || id == ESM::MagicEffect::SlowFall;
     }
+    bool aiDispositionEffect(ESM::RefId id)
+    {
+        return id == ESM::MagicEffect::Charm || id == ESM::MagicEffect::CalmHumanoid
+            || id == ESM::MagicEffect::CalmCreature || id == ESM::MagicEffect::FrenzyHumanoid
+            || id == ESM::MagicEffect::FrenzyCreature || id == ESM::MagicEffect::DemoralizeHumanoid
+            || id == ESM::MagicEffect::DemoralizeCreature || id == ESM::MagicEffect::RallyHumanoid
+            || id == ESM::MagicEffect::RallyCreature || id == ESM::MagicEffect::CommandHumanoid
+            || id == ESM::MagicEffect::CommandCreature || id == ESM::MagicEffect::TurnUndead;
+    }
     bool expandedCombatEffect(ESM::RefId id)
     {
         return permanentStatEffect(id) || fortifyDynamicStat(id) >= 0 || wholeSourceCure(id)
@@ -130,6 +139,7 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
             return prior || (actorLifecycle && ((expandedEffects && expandedCombatEffect(effect.mEffectID))
                 || (movementEffects && movementEffect(effect.mEffectID))
+                || (movementEffects && aiDispositionEffect(effect.mEffectID))
                 || (persistentSpecial && (effect.mEffectID == ESM::MagicEffect::Corprus
                     || effect.mEffectID == ESM::MagicEffect::Vampirism))
                 || supportedCombatModifier(effect.mEffectID)

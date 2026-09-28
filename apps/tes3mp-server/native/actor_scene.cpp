@@ -1223,7 +1223,9 @@ namespace TES3MP::Native
             travel.hasDestination = boolean(); travel.destination = vector();
             travel.door = word(); travel.avoidance.mDuration = real(); travel.avoidance.mLastPos = vector();
             const auto direction = word(), random = word();
-            if (travel.hasDestination != mImpl->mTravel.hasDestination || travel.destination != mImpl->mTravel.destination
+            if (travel.hasDestination != mImpl->mTravel.hasDestination
+                || (travel.destination != mImpl->mTravel.destination
+                    && (!mImpl->mWaterNavigation || !contains({travel.destination.x(), travel.destination.y(), travel.destination.z()})))
                 || (travel.door && std::ranges::find(doors, travel.door, &ActorSceneDoor::mId) == doors.end())
                 || travel.avoidance.mDuration < 0 || travel.avoidance.mDuration > 1 || direction > 3
                 || random < Misc::Rng::Generator::min() || random > Misc::Rng::Generator::max())
@@ -1252,7 +1254,8 @@ namespace TES3MP::Native
     { return prepareNavigation(ActorMovement{.walkSpeed = speed}, doors); }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
-        const ActorMovement& movement, std::span<const ActorSceneDoor> doors)
+        const ActorMovement& movement, std::span<const ActorSceneDoor> doors,
+        std::optional<std::array<float, 3>> destination)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         mImpl->validateDoors(doors);
@@ -1269,6 +1272,22 @@ namespace TES3MP::Native
             ? mImpl->movementFrame(*mImpl->mActor, movement) : *mImpl->mActor);
         auto path = mImpl->mPath;
         auto travel = mImpl->mTravel;
+        if (destination)
+        {
+            for (float value : *destination)
+                if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                    throw std::invalid_argument("Interior follow destination outside bounds");
+            if (!contains(*destination))
+                throw std::invalid_argument("Interior follow destination outside processing neighborhood");
+            const osg::Vec3f selected((*destination)[0], (*destination)[1], (*destination)[2]);
+            if (!travel.hasDestination || (travel.destination - selected).length2() > 32.f * 32.f)
+            {
+                travel.hasDestination = true;
+                travel.destination = selected;
+                mImpl->syncNavigation(doors);
+                mImpl->rebuildPath(path, frame->mPosition, travel);
+            }
+        }
         std::vector<uint64_t> contacts;
         mImpl->syncNavigation(doors);
         if (mImpl->mAvoidanceEnabled)

@@ -50,6 +50,36 @@ MWMechanics::DisintegratedCondition MWMechanics::disintegrateCondition(
     return {condition, remainder};
 }
 
+bool MWMechanics::validAiEffectTarget(
+    ESM::RefId effect, bool npc, bool player, bool undead, bool casterActor)
+{
+    if (effect == ESM::MagicEffect::Charm) return npc;
+    if (effect == ESM::MagicEffect::CommandHumanoid) return casterActor && npc && !player;
+    if (effect == ESM::MagicEffect::CommandCreature) return casterActor && !npc && !player;
+    if (effect == ESM::MagicEffect::TurnUndead) return !npc && undead;
+    if (effect == ESM::MagicEffect::FrenzyHumanoid || effect == ESM::MagicEffect::CalmHumanoid
+        || effect == ESM::MagicEffect::DemoralizeHumanoid || effect == ESM::MagicEffect::RallyHumanoid)
+        return npc && !player;
+    if (effect == ESM::MagicEffect::FrenzyCreature || effect == ESM::MagicEffect::CalmCreature
+        || effect == ESM::MagicEffect::DemoralizeCreature || effect == ESM::MagicEffect::RallyCreature)
+        return !npc && !player;
+    return true;
+}
+
+std::optional<MWMechanics::AiDispositionDelta> MWMechanics::aiDispositionDelta(ESM::RefId effect, float magnitude)
+{
+    if (effect == ESM::MagicEffect::FrenzyHumanoid || effect == ESM::MagicEffect::FrenzyCreature)
+        return AiDispositionDelta{AiSetting::Fight, magnitude};
+    if (effect == ESM::MagicEffect::CalmHumanoid || effect == ESM::MagicEffect::CalmCreature)
+        return AiDispositionDelta{AiSetting::Fight, -magnitude};
+    if (effect == ESM::MagicEffect::DemoralizeHumanoid || effect == ESM::MagicEffect::DemoralizeCreature
+        || effect == ESM::MagicEffect::TurnUndead)
+        return AiDispositionDelta{AiSetting::Flee, magnitude};
+    if (effect == ESM::MagicEffect::RallyHumanoid || effect == ESM::MagicEffect::RallyCreature)
+        return AiDispositionDelta{AiSetting::Flee, -magnitude};
+    return std::nullopt;
+}
+
 namespace
 {
     enum Stats
@@ -67,15 +97,19 @@ namespace
         return MWMechanics::rollEffectMagnitude(effect.mMinMagnitude, effect.mMaxMagnitude, prng);
     }
 
-    ESM::ActiveEffect::Flags modifyAiSetting(const MWWorld::Ptr& target, const ESM::ActiveEffect& effect,
-        ESM::RefId creatureEffect, MWMechanics::AiSetting setting, float magnitude)
+    ESM::ActiveEffect::Flags modifyAiSetting(
+        const MWWorld::Ptr& target, const ESM::ActiveEffect& effect, bool removing = false)
     {
-        if (target == MWMechanics::getPlayer() || (effect.mEffectId == creatureEffect) == target.getClass().isNpc())
+        if (!MWMechanics::validAiEffectTarget(effect.mEffectId, target.getClass().isNpc(),
+                target == MWMechanics::getPlayer(), false, false))
             return ESM::ActiveEffect::Flag_Invalid;
+        const auto delta = MWMechanics::aiDispositionDelta(effect.mEffectId, effect.mMagnitude);
+        if (!delta) return ESM::ActiveEffect::Flag_Invalid;
         auto& creatureStats = target.getClass().getCreatureStats(target);
-        auto stat = creatureStats.getAiSetting(setting);
-        stat.setModifier(static_cast<int>(stat.getModifier() + magnitude));
-        creatureStats.setAiSetting(setting, stat);
+        auto stat = creatureStats.getAiSetting(delta->setting);
+        stat.setModifier(static_cast<int>(stat.getModifier()
+            + (removing ? -delta->modifier : delta->modifier)));
+        creatureStats.setAiSetting(delta->setting, stat);
         return ESM::ActiveEffect::Flag_Applied;
     }
 
@@ -619,8 +653,8 @@ namespace MWMechanics
             else if (effect.mEffectId == ESM::MagicEffect::CommandCreature
                 || effect.mEffectId == ESM::MagicEffect::CommandHumanoid)
             {
-                if (caster.isEmpty() || !caster.getClass().isActor() || target == getPlayer()
-                    || (effect.mEffectId == ESM::MagicEffect::CommandCreature) == target.getClass().isNpc())
+                if (!validAiEffectTarget(effect.mEffectId, target.getClass().isNpc(),
+                        target == getPlayer(), false, !caster.isEmpty() && caster.getClass().isActor()))
                     return ESM::ActiveEffect::Flag_Invalid;
                 else if (effect.mMagnitude >= target.getClass().getCreatureStats(target).getLevel())
                 {
@@ -659,26 +693,26 @@ namespace MWMechanics
             }
             else if (effect.mEffectId == ESM::MagicEffect::TurnUndead)
             {
-                if (target.getClass().isNpc()
-                    || target.get<ESM::Creature>()->mBase->mData.mType != ESM::Creature::Undead)
+                if (!validAiEffectTarget(effect.mEffectId, target.getClass().isNpc(), target == getPlayer(),
+                        !target.getClass().isNpc()
+                            && target.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead, false))
                     return ESM::ActiveEffect::Flag_Invalid;
                 else
                 {
                     auto& creatureStats = target.getClass().getCreatureStats(target);
                     Stat<int> stat = creatureStats.getAiSetting(AiSetting::Flee);
-                    stat.setModifier(static_cast<int>(stat.getModifier() + effect.mMagnitude));
+                    stat.setModifier(static_cast<int>(stat.getModifier()
+                        + aiDispositionDelta(effect.mEffectId, effect.mMagnitude)->modifier));
                     creatureStats.setAiSetting(AiSetting::Flee, stat);
                 }
             }
             else if (effect.mEffectId == ESM::MagicEffect::FrenzyCreature
                 || effect.mEffectId == ESM::MagicEffect::FrenzyHumanoid)
-                return modifyAiSetting(
-                    target, effect, ESM::MagicEffect::FrenzyCreature, AiSetting::Fight, effect.mMagnitude);
+                return modifyAiSetting(target, effect);
             else if (effect.mEffectId == ESM::MagicEffect::CalmCreature
                 || effect.mEffectId == ESM::MagicEffect::CalmHumanoid)
             {
-                ESM::ActiveEffect::Flags applied = modifyAiSetting(
-                    target, effect, ESM::MagicEffect::CalmCreature, AiSetting::Fight, -effect.mMagnitude);
+                ESM::ActiveEffect::Flags applied = modifyAiSetting(target, effect);
                 if (applied != ESM::ActiveEffect::Flag_Applied)
                     return applied;
                 if (effect.mMagnitude > 0)
@@ -689,15 +723,13 @@ namespace MWMechanics
             }
             else if (effect.mEffectId == ESM::MagicEffect::DemoralizeCreature
                 || effect.mEffectId == ESM::MagicEffect::DemoralizeHumanoid)
-                return modifyAiSetting(
-                    target, effect, ESM::MagicEffect::DemoralizeCreature, AiSetting::Flee, effect.mMagnitude);
+                return modifyAiSetting(target, effect);
             else if (effect.mEffectId == ESM::MagicEffect::RallyCreature
                 || effect.mEffectId == ESM::MagicEffect::RallyHumanoid)
-                return modifyAiSetting(
-                    target, effect, ESM::MagicEffect::RallyCreature, AiSetting::Flee, -effect.mMagnitude);
+                return modifyAiSetting(target, effect);
             else if (effect.mEffectId == ESM::MagicEffect::Charm)
             {
-                if (!target.getClass().isNpc())
+                if (!validAiEffectTarget(effect.mEffectId, target.getClass().isNpc(), target == getPlayer(), false, false))
                     return ESM::ActiveEffect::Flag_Invalid;
             }
             else if (effect.mEffectId == ESM::MagicEffect::Sound)
@@ -1093,19 +1125,19 @@ namespace MWMechanics
             {
                 auto& creatureStats = target.getClass().getCreatureStats(target);
                 Stat<int> stat = creatureStats.getAiSetting(AiSetting::Flee);
-                stat.setModifier(static_cast<int>(stat.getModifier() - effect.mMagnitude));
+                stat.setModifier(static_cast<int>(stat.getModifier()
+                    - aiDispositionDelta(effect.mEffectId, effect.mMagnitude)->modifier));
                 creatureStats.setAiSetting(AiSetting::Flee, stat);
             }
             else if (effect.mEffectId == ESM::MagicEffect::FrenzyCreature
                 || effect.mEffectId == ESM::MagicEffect::FrenzyHumanoid)
-                modifyAiSetting(target, effect, ESM::MagicEffect::FrenzyCreature, AiSetting::Fight, -effect.mMagnitude);
+                modifyAiSetting(target, effect, true);
             else if (effect.mEffectId == ESM::MagicEffect::CalmCreature
                 || effect.mEffectId == ESM::MagicEffect::CalmHumanoid)
-                modifyAiSetting(target, effect, ESM::MagicEffect::CalmCreature, AiSetting::Fight, effect.mMagnitude);
+                modifyAiSetting(target, effect, true);
             else if (effect.mEffectId == ESM::MagicEffect::DemoralizeCreature
                 || effect.mEffectId == ESM::MagicEffect::DemoralizeHumanoid)
-                modifyAiSetting(
-                    target, effect, ESM::MagicEffect::DemoralizeCreature, AiSetting::Flee, -effect.mMagnitude);
+                modifyAiSetting(target, effect, true);
             else if (effect.mEffectId == ESM::MagicEffect::NightEye)
             {
                 const MWMechanics::EffectParam nightEye = magnitudes.getOrDefault(effect.mEffectId);
@@ -1122,7 +1154,7 @@ namespace MWMechanics
             }
             else if (effect.mEffectId == ESM::MagicEffect::RallyCreature
                 || effect.mEffectId == ESM::MagicEffect::RallyHumanoid)
-                modifyAiSetting(target, effect, ESM::MagicEffect::RallyCreature, AiSetting::Flee, effect.mMagnitude);
+                modifyAiSetting(target, effect, true);
             else if (effect.mEffectId == ESM::MagicEffect::Sound)
             {
                 if (magnitudes.getOrDefault(effect.mEffectId).getModifier() <= 0.f && target == getPlayer())

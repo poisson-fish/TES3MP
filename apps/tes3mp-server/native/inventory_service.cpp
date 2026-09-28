@@ -185,6 +185,49 @@ namespace TES3MP::Native
             }
             return result;
         }
+        struct ActorDisposition
+        {
+            int fight = 0;
+            int flee = 0;
+            float charm = 0;
+            bool calm = false;
+            bool commanded = false;
+            bool fightModified = false;
+        };
+        ActorDisposition committedDisposition(const MWWorld::ESMStore& content, ESM::RefId base,
+            std::span<const ActorCampaignTimedEffect> effects, size_t actor)
+        {
+            const auto* npc = content.get<ESM::NPC>().search(base);
+            const auto* creature = content.get<ESM::Creature>().search(base);
+            if (!npc && !creature) throw std::invalid_argument("Native AI actor base missing");
+            ActorDisposition result;
+            result.fight = npc ? npc->mAiData.mFight : creature->mAiData.mFight;
+            result.flee = npc ? npc->mAiData.mFlee : creature->mAiData.mFlee;
+            const int level = npc ? npc->mNpdt.mLevel : creature->mData.mLevel;
+            int fightModifier = 0, fleeModifier = 0;
+            for (const auto& effect : effects)
+            {
+                if (effect.actor != actor || effect.magnitude <= 0) continue;
+                const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                if (!aiDispositionEffect(id)) continue;
+                if (!MWMechanics::validAiEffectTarget(id, npc != nullptr, false,
+                        creature && creature->mData.mType == ESM::Creature::Undead, true)) continue;
+                if (const auto delta = MWMechanics::aiDispositionDelta(id, effect.magnitude))
+                {
+                    auto& modifier = delta->setting == MWMechanics::AiSetting::Fight
+                        ? fightModifier : fleeModifier;
+                    modifier = static_cast<int>(modifier + delta->modifier);
+                    if (delta->setting == MWMechanics::AiSetting::Fight) result.fightModified = true;
+                }
+                if (id == ESM::MagicEffect::CalmHumanoid || id == ESM::MagicEffect::CalmCreature)
+                    result.calm = true;
+                if (id == ESM::MagicEffect::Charm) result.charm += effect.magnitude;
+                if ((id == ESM::MagicEffect::CommandHumanoid || id == ESM::MagicEffect::CommandCreature)
+                    && effect.magnitude >= level) result.commanded = true;
+            }
+            result.fight += fightModifier; result.flee += fleeModifier;
+            return result;
+        }
         ESM::StatState<float> combatStat(const std::array<float, 5>& fields)
         {
             ESM::StatState<float> value;
@@ -665,7 +708,8 @@ namespace TES3MP::Native
             Misc::Rng::Generator& rng, bool uncappedFatigue, bool classicReflect,
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
             bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {},
-            const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {})
+            const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {},
+            bool npcActor = true, bool undeadActor = false)
         {
             std::array owned{loadCombatStats(content, combat.actors[0], effects, 0),
                 loadCombatStats(content, combat.actors[1], effects, 1), loadCombatStats(content, combat.actors[2], effects, 2)};
@@ -711,6 +755,10 @@ namespace TES3MP::Native
                 size_t recipient, size_t author, ActorCasterIdentity attribution, bool protections) -> void {
                 auto& victim = *states[recipient];
                 if (victim.getHealth().getCurrent() <= 0) return;
+                if (aiDispositionEffect(effect.mEffectID)
+                    && !MWMechanics::validAiEffectTarget(effect.mEffectID,
+                        recipient < 2 || npcActor, recipient < 2, recipient == 2 && undeadActor,
+                        author < 3)) return;
                 const auto* magic = content.get<ESM::MagicEffect>().find(effect.mEffectID);
                 if (protections && recipient != author)
                 {
@@ -2387,7 +2435,16 @@ namespace TES3MP::Native
                 for (const auto& effect : decoded.timedEffects)
                 {
                     const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
-                    if ((!mBinding.mMovementEffects && movementEffect(id))
+                    if (aiDispositionEffect(id))
+                    {
+                        const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
+                        const bool npc = effect.actor < 2 || selected.getType() == ESM::NPC::sRecordId;
+                        const bool undead = effect.actor == 2 && !npc
+                            && selected.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead;
+                        if (!MWMechanics::validAiEffectTarget(id, npc, effect.actor < 2, undead, true))
+                            throw std::invalid_argument("Native saved AI effect target invalid");
+                    }
+                    if ((!mBinding.mMovementEffects && (movementEffect(id) || aiDispositionEffect(id)))
                         || (!mBinding.mSpecialConditions && (id == ESM::MagicEffect::SunDamage
                         || id == ESM::MagicEffect::ResistCorprusDisease
                         || id == ESM::MagicEffect::WeaknessToCorprusDisease
@@ -2395,7 +2452,7 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native saved special effect requires V55");
                     if (!timedDamage(id) && !timedRestore(id) && !supportedTimedStatus(id)
                         && !(mBinding.mExpandedEffects && expandedCombatEffect(id))
-                        && !(mBinding.mMovementEffects && movementEffect(id))
+                        && !(mBinding.mMovementEffects && (movementEffect(id) || aiDispositionEffect(id)))
                         && !(mBinding.mSpecialConditions && (id == ESM::MagicEffect::Corprus
                             || id == ESM::MagicEffect::Vampirism))
                         && !((mBinding.mNpcCastLifecycle || (mBinding.mConstantEffects && effect.sourceKind == 3))
@@ -3379,6 +3436,36 @@ namespace TES3MP::Native
         }
         const auto doors = actorDoorFrames(command.get());
         ActorMovement movement;
+        auto navigationDestination = mBinding.mTravelDestination;
+        if (active && mCombat && mBinding.mMovementEffects)
+        {
+            const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
+            const bool npc = selected.getType() == ESM::NPC::sRecordId;
+            const int level = npc ? selected.get<ESM::NPC>()->mBase->mNpdt.mLevel
+                : selected.get<ESM::Creature>()->mBase->mData.mLevel;
+            const auto commandIndex = uint64_t(ESM::MagicEffect::refIdToIndex(npc
+                ? ESM::MagicEffect::CommandHumanoid : ESM::MagicEffect::CommandCreature));
+            const ActorCampaignTimedEffect* controlling = nullptr;
+            for (const auto& effect : mTimedEffects)
+                if (effect.actor == 2 && effect.effectIndex == commandIndex
+                    && effect.magnitude >= level && effect.expiresTick > tick.value()
+                    && effect.casterKind == 1 && effect.casterLife == 1
+                    && (!controlling || effect.startTick > controlling->startTick
+                        || (effect.startTick == controlling->startTick && effect.source > controlling->source)))
+                    controlling = &effect;
+            if (controlling)
+            {
+                const auto id = PlayerId::fromValue(controlling->caster);
+                const auto* player = id ? players.findPlayer(*id) : nullptr;
+                if (player && player->transform().cell() == actorCell(before))
+                {
+                    const auto position = player->transform().position();
+                    const std::array<float, 3> follow{float(double(position.x()) / 1024),
+                        float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                    if (mBinding.mNavigatingActor->contains(follow)) navigationDestination = follow;
+                }
+            }
+        }
         if (active && mBinding.mMovementEffects)
         {
             if (!mCombat) throw std::logic_error("NPC movement requires committed actor stats");
@@ -3424,7 +3511,7 @@ namespace TES3MP::Native
             movement.unconscious = mCombat->knockedDown[2];
         }
         auto step = active ? (mBinding.mMovementEffects
-            ? mBinding.mNavigatingActor->prepareNavigation(movement, doors)
+            ? mBinding.mNavigatingActor->prepareNavigation(movement, doors, navigationDestination)
             : mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)) : nullptr;
         if (step && mBinding.mTravelerNeighborhood && !mBinding.mNavigatingActor->contains(step->snapshot().mPosition))
         { step.reset(); report.status = Diagnostics::Status::Boundary; }
@@ -3514,7 +3601,10 @@ namespace TES3MP::Native
                 {mBinding.mNavigatingActor->actorId(), 2, life->generation}}};
             auto result = resolveExpandedEffects(plan, range, index, victim, identity, source, kind, at,
                 *combat, effects, identities, content, rng, uncapped, mBinding.mClassicReflectedAbsorb,
-                ordinals, casterStats, false, sunExposure, stageDisintegrate);
+                ordinals, casterStats, false, sunExposure, stageDisintegrate,
+                mRuntime.ownerPtr(mCombatNpcOwner).getType() == ESM::NPC::sRecordId,
+                mRuntime.ownerPtr(mCombatNpcOwner).getType() == ESM::Creature::sRecordId
+                    && mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead);
             if (result.deaths[2] && !life->respawnTick)
             {
                 const auto killer = *result.deaths[2];
@@ -4767,7 +4857,15 @@ namespace TES3MP::Native
                 else if (advanceCast(state, timing)) casts.push_back(*candidate);
             }
         }
-        if (mBinding.mAutomaticNpcSpells && !automaticCast && !actorCast && step && active && !respawn && combat && life
+        const auto npcDisposition = mBinding.mMovementEffects && combat
+            ? committedDisposition(mRuntime.mStore, mRuntime.ownerPtr(mCombatNpcOwner).getCellRef().getRefId(),
+                timedEffects, 2) : ActorDisposition{};
+        const bool npcMayAttack = !npcDisposition.calm && !npcDisposition.commanded
+            && npcDisposition.flee < 100
+            && (!npcDisposition.fightModified || npcDisposition.fight >= 100);
+        if (mBinding.mWeaponMelee && target && !npcMayAttack)
+        { melee = mIdleMelee; target = 0; contact = false; }
+        if (mBinding.mAutomaticNpcSpells && npcMayAttack && !automaticCast && !actorCast && step && active && !respawn && combat && life
             && !life->respawnTick && combat->actors[2][8][2] > 0
             && !combat->knockedDown[2] && !hasParalysis(timedEffects, 2) && !combat->hitRecoveryTicks[2]
             && tick.value() / reactionTicks != mActorTick / reactionTicks

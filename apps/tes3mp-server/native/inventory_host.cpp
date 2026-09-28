@@ -560,6 +560,7 @@ namespace TES3MP::Native
                     return scene;
                 };
                 auto scene = createScene();
+                start.binding.mTravelDestination = start.navigation->destination;
                 start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
                 start.binding.mOnlyAppropriateAmmunitionBypassesResistance
                     = scene->onlyAppropriateAmmunitionBypassesResistance();

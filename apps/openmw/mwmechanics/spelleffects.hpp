@@ -18,6 +18,17 @@ namespace MWMechanics
 {
     class CreatureStats;
     class NpcStats;
+    enum class AiSetting;
+    struct AiDispositionDelta
+    {
+        AiSetting setting;
+        float modifier;
+    };
+    // Target restrictions and the Fight/Flee modifier used by stock active spells
+    // and detached authoritative actors. Command's level check is separate: a
+    // valid but too weak Command remains an active effect without a Follow package.
+    bool validAiEffectTarget(ESM::RefId effect, bool npc, bool player, bool undead, bool casterActor);
+    std::optional<AiDispositionDelta> aiDispositionDelta(ESM::RefId effect, float magnitude);
     enum class EffectProtection { None, Reflect, Absorb };
     EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
         bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng);

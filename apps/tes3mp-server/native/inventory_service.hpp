@@ -85,6 +85,7 @@ namespace TES3MP::Native
         std::function<void(const std::vector<bool>&)> mAreaActivity;
         std::optional<std::vector<ActorSpawnSelection>> mActorSelections;
         std::shared_ptr<InteriorActorScene> mNavigatingActor;
+        std::optional<std::array<float, 3>> mTravelDestination;
         std::optional<BoundMeleeAnimation> mBoundMelee;
         bool mMeleeContact = false;
         bool mCombatState = false;

@@ -112,6 +112,13 @@ effect index zero is distinguished from legacy ResistMagicka by its source ident
 The later player movement authority cutover remains subject to M4 collision and
 combat acceptance.
 
+**AI source navigation.** Shared stock target rules gate committed disposition
+effects. A valid Command on the selected actor follows its player caster using a
+staged OpenMW navigation destination in the actor image. Source expiry restores
+the descriptor's authored travel goal in the same composed tick; rejected writes
+retain the prior path and position. General combat aggression, flee routes and
+dialogue still require their owning actor/context consumers.
+
 **Movement smoothness (target).** Cut over after unified collision and smooth
 replication; validate inherited contacts meanwhile. Use stock physics, remote
 interpolation and bounded extrapolation. Predict locally with fixed steps; restore
