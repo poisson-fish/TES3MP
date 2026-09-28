@@ -1374,21 +1374,35 @@ namespace TES3MP::ServerApp
             bool waitRestApplied = false;
             if (waitRestCommit)
             {
-                if (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings)
+                if (mWiring->nativeInventory && mWiring->nativeInventory->hasNativeCombat())
                 {
-                    mFailure = "wait/rest composition incomplete";
-                    return false;
-                }
-                const auto& baseCombat = combatCandidate ? *combatCandidate : *mWiring->combat;
-                const auto& baseActors = actorCandidate ? *actorCandidate : *mWiring->actors;
-                auto recovered = applyAuthoritativeWaitRestRecovery(baseCombat, prepared.candidateState(), baseActors,
-                    *mWiring->meleeSettings, waitRestCommit->hours(), waitRestCommit->mode());
-                if (auto* value = std::get_if<CanonicalCombatWorld>(&recovered))
-                {
-                    combatCandidate = std::move(*value);
-                    waitRestApplied = true;
+                    if (!mWiring->world)
+                    {
+                        mFailure = "native wait/rest requires world time";
+                        return false;
+                    }
+                    const auto& baseWorld = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
+                    waitRestApplied = mWiring->reducer.stageNativeWaitRest(prepared, baseWorld,
+                        waitRestCommit->hours(), waitRestCommit->mode());
                 }
                 else
+                {
+                    if (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings)
+                    {
+                        mFailure = "wait/rest composition incomplete";
+                        return false;
+                    }
+                    const auto& baseCombat = combatCandidate ? *combatCandidate : *mWiring->combat;
+                    const auto& baseActors = actorCandidate ? *actorCandidate : *mWiring->actors;
+                    auto recovered = applyAuthoritativeWaitRestRecovery(baseCombat, prepared.candidateState(), baseActors,
+                        *mWiring->meleeSettings, waitRestCommit->hours(), waitRestCommit->mode());
+                    if (auto* value = std::get_if<CanonicalCombatWorld>(&recovered))
+                    {
+                        combatCandidate = std::move(*value);
+                        waitRestApplied = true;
+                    }
+                }
+                if (!waitRestApplied)
                 {
                     waitRestCommit.reset();
                     waitRestConsentsCandidate.clear();

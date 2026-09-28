@@ -357,6 +357,8 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             const CanonicalWorldState* world = nullptr) override;
+        bool stageWaitRestRecovery(PreparedNativeInventory& candidate, const CanonicalServerState& players,
+            const CanonicalWorldState& world, std::uint8_t hours, WaitRestMode mode) override;
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr);

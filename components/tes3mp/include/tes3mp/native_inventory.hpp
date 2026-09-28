@@ -4,6 +4,7 @@
 #include "canonical_persistence.hpp"
 #include "server_command_intake.hpp"
 #include "native_door.hpp"
+#include "wait_rest.hpp"
 #include <functional>
 
 namespace TES3MP
@@ -63,6 +64,8 @@ namespace TES3MP
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             const CanonicalWorldState* world = nullptr)
         { return command ? std::move(command) : prepareDoorStep(players, tick, seconds); }
+        virtual bool stageWaitRestRecovery(PreparedNativeInventory&, const CanonicalServerState&,
+            const CanonicalWorldState&, std::uint8_t, WaitRestMode) { return false; }
         virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };
 }

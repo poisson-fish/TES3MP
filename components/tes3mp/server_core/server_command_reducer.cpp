@@ -2113,6 +2113,17 @@ namespace TES3MP
     }
     catch (...) { return false; }
 
+    bool CanonicalCommandReducer::stageNativeWaitRest(PreparedBatch& prepared,
+        const CanonicalWorldState& world, std::uint8_t hours, WaitRestMode mode) noexcept
+    try
+    {
+        return prepared.result() && prepared.mBaseVersion == mStateVersion && mNativeInventory
+            && prepared.mNativeInventory
+            && mNativeInventory->stageWaitRestRecovery(*prepared.mNativeInventory, *prepared.mState,
+                world, hours, mode);
+    }
+    catch (...) { return false; }
+
     bool CanonicalCommandReducer::stageSimulationCandidates(PreparedBatch& prepared,
         const CanonicalInventoryWorld* baseInventory, std::optional<CanonicalInventoryWorld> inventory,
         const CanonicalCombatWorld* baseCombat, std::optional<CanonicalCombatWorld> combat,

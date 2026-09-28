@@ -53,6 +53,7 @@
 #include "creaturestats.hpp"
 #include "greetingstate.hpp"
 #include "movement.hpp"
+#include "meleestate.hpp"
 #include "npcstats.hpp"
 #include "steering.hpp"
 #include "summoning.hpp"
@@ -846,18 +847,9 @@ namespace MWMechanics
         if (stats.isDead())
             return;
 
-        const MWWorld::Store<ESM::GameSetting>& settings
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-
+        double restoreHours = hours;
         if (sleep)
         {
-            const auto [health, magicka] = getRestorationPerHourOfSleep(ptr);
-
-            DynamicStat<float> stat = stats.getHealth();
-            stat.setCurrent(static_cast<float>(stat.getCurrent() + health * hours));
-            stats.setHealth(stat);
-
-            double restoreHours = hours;
             const bool stunted
                 = stats.getMagicEffects().getOrDefault(ESM::MagicEffect::StuntedMagicka).getMagnitude() > 0;
             if (stunted)
@@ -877,37 +869,12 @@ namespace MWMechanics
                 else if (remainingTime == -1)
                     restoreHours = 0;
             }
-
-            if (restoreHours > 0)
-            {
-                stat = stats.getMagicka();
-                stat.setCurrent(static_cast<float>(stat.getCurrent() + magicka * restoreHours));
-                stats.setMagicka(stat);
-            }
         }
-
-        // Current fatigue can be above base value due to a fortify effect.
-        // In that case stop here and don't try to restore.
-        DynamicStat<float> fatigue = stats.getFatigue();
-        if (fatigue.getCurrent() >= fatigue.getBase())
-            return;
-
-        // Restore fatigue
-        static const float fFatigueReturnBase = settings.find("fFatigueReturnBase")->mValue.getFloat();
-        static const float fFatigueReturnMult = settings.find("fFatigueReturnMult")->mValue.getFloat();
-        static const float fEndFatigueMult = settings.find("fEndFatigueMult")->mValue.getFloat();
-
-        const float endurance = stats.getAttribute(ESM::Attribute::Endurance).getModified();
-
-        float normalizedEncumbrance = ptr.getClass().getNormalizedEncumbrance(ptr);
-        if (normalizedEncumbrance > 1)
-            normalizedEncumbrance = 1;
-
-        const float x
-            = (fFatigueReturnBase + fFatigueReturnMult * (1 - normalizedEncumbrance)) * (fEndFatigueMult * endurance);
-
-        fatigue.setCurrent(static_cast<float>(fatigue.getCurrent() + 3600 * x * hours));
-        stats.setFatigue(fatigue);
+        const auto fatigue = stats.getFatigue();
+        const float encumbrance = fatigue.getCurrent() >= fatigue.getBase()
+            ? 0.f : ptr.getClass().getNormalizedEncumbrance(ptr);
+        restoreWaitRestStats(stats, *MWBase::Environment::get().getESMStore(), hours, sleep,
+            encumbrance, restoreHours);
     }
 
     void Actors::calculateRestoration(const MWWorld::Ptr& ptr, float duration) const

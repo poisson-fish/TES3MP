@@ -90,7 +90,8 @@ namespace TES3MP::Native
             || id == ESM::MagicEffect::AbsorbHealth || id == ESM::MagicEffect::AbsorbMagicka
             || id == ESM::MagicEffect::AbsorbFatigue || id == ESM::MagicEffect::AbsorbAttribute
             || id == ESM::MagicEffect::AbsorbSkill
-            || id == ESM::MagicEffect::Silence || id == ESM::MagicEffect::Sound;
+            || id == ESM::MagicEffect::Silence || id == ESM::MagicEffect::Sound
+            || id == ESM::MagicEffect::StuntedMagicka;
     }
     bool supportedCombatModifier(ESM::RefId effect)
     {

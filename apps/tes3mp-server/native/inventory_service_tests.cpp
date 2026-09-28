@@ -6022,6 +6022,11 @@ namespace TES3MP::Native::Testing
                 spell("expanded_paralyze", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Touch, 1, 0)}, true);
                 spell("expanded_paralyze_self", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Self, 1, 0)});
                 spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
+                if (effectFamily == "rest-recovery")
+                {
+                    spell("rest_stunted", {effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 30, 1)});
+                    spell("rest_stunted_long", {effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 300, 1)});
+                }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -7708,6 +7713,113 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (effectFamily == "rest-recovery")
+            {
+                auto running = make(); auto& runtime = running->service();
+                const auto world = specialWorld();
+                auto pending = advance(runtime, 1);
+                const auto before = bytes(runtime);
+                const auto baseline = read(before);
+                require(runtime.stageWaitRestRecovery(*pending, authority, world, 1, WaitRestMode::Rest),
+                    "Native rest candidate rejected");
+                std::vector<std::byte> candidate;
+                require(pending->commit([&](auto image) {
+                    candidate.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                    "Rejected native rest changed committed actor resources");
+                const auto restored = read(candidate);
+                require(restored.combat->actors[0][8][2] > baseline.combat->actors[0][8][2]
+                    && restored.combat->actors[0][9][2] > baseline.combat->actors[0][9][2]
+                    && restored.combat->actors[0][10][2] >= baseline.combat->actors[0][10][2]
+                    && restored.combat->actors[1][8][2] > baseline.combat->actors[1][8][2],
+                    "Native rest omitted health, magicka, fatigue or second player");
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(runtime) == candidate, "Native rest did not persist the staged resources");
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, candidate);
+                require(read(bytes(restarted.service())).combat == restored.combat,
+                    "Native rest resources changed after restart");
+
+                auto waiting = make(); auto& waitRuntime = waiting->service();
+                auto waited = advance(waitRuntime, 1);
+                require(waitRuntime.stageWaitRestRecovery(*waited, authority, world, 2, WaitRestMode::Wait),
+                    "Native wait candidate rejected");
+                require(waited->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Native wait commit failed");
+                const auto waitedState = read(bytes(waitRuntime));
+                require(waitedState.combat->actors[0][8][2] == baseline.combat->actors[0][8][2]
+                    && waitedState.combat->actors[0][9][2] == baseline.combat->actors[0][9][2]
+                    && waitedState.combat->actors[0][10][2] >= baseline.combat->actors[0][10][2],
+                    "Waiting restored sleep-only resources or omitted fatigue");
+
+                auto affected = make(); auto& affectedRuntime = affected->service();
+                uint64_t activeTick = 0;
+                for (uint64_t tick = 1; tick < 90 && !activeTick; ++tick)
+                {
+                    const auto state = commit(affectedRuntime, tick, tick == 1 ? "rest_stunted" : "");
+                    if (!state.combat->playerCasts[0] && std::ranges::any_of(state.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                    })) activeTick = tick;
+                }
+                require(activeTick, "StuntedMagicka never became active");
+                const auto beforeSleep = read(bytes(affectedRuntime));
+                const auto active = std::ranges::find_if(beforeSleep.timedEffects, [](const auto& effect) {
+                    return effect.actor == 0 && effect.effectIndex
+                        == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                });
+                const double suppressedHours = double(active->expiresTick - (activeTick + 1))
+                    * world.time().timeScale() / (30.0 * 3600.0);
+                auto sleep = advance(affectedRuntime, activeTick + 1);
+                require(affectedRuntime.stageWaitRestRecovery(*sleep, authority, world, 1, WaitRestMode::Rest),
+                    "StuntedMagicka rest candidate rejected");
+                std::vector<std::byte> sleptImage;
+                require(sleep->commit([&](auto image) {
+                    sleptImage.assign(image.begin(), image.end()); return CanonicalDurabilityResult::Rejected;
+                }) == CanonicalDurabilityResult::Rejected
+                    && bytes(affectedRuntime) != sleptImage,
+                    "Rejected StuntedMagicka rest leaked recovery");
+                const auto slept = read(sleptImage);
+                const double fullGain = restored.combat->actors[0][9][2] - baseline.combat->actors[0][9][2];
+                const double expected = beforeSleep.combat->actors[0][9][2]
+                    + fullGain * std::max(0.0, 1.0 - suppressedHours);
+                require(slept.combat->actors[0][8][2] > beforeSleep.combat->actors[0][8][2]
+                    && slept.combat->actors[0][9][2] > beforeSleep.combat->actors[0][9][2]
+                    && std::abs(slept.combat->actors[0][9][2] - expected) < .01
+                    && std::ranges::none_of(slept.timedEffects, [](const auto& effect) {
+                        return effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                    }), "StuntedMagicka did not suppress only its active sleep interval");
+                require(sleep->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "StuntedMagicka rest did not commit");
+                InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, sleptImage);
+                require(read(bytes(resumed.service())).combat == slept.combat,
+                    "StuntedMagicka rest changed after restart");
+                auto lasting = make(); auto& lastingRuntime = lasting->service();
+                uint64_t lastingTick = 0;
+                for (uint64_t tick = 1; tick < 90 && !lastingTick; ++tick)
+                {
+                    const auto state = commit(lastingRuntime, tick, tick == 1 ? "rest_stunted_long" : "");
+                    if (!state.combat->playerCasts[0] && std::ranges::any_of(state.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                    })) lastingTick = tick;
+                }
+                require(lastingTick, "Long StuntedMagicka never became active");
+                const auto beforeLong = read(bytes(lastingRuntime));
+                auto longSleep = advance(lastingRuntime, lastingTick + 1);
+                require(lastingRuntime.stageWaitRestRecovery(*longSleep, authority, world, 1, WaitRestMode::Rest)
+                    && longSleep->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Long StuntedMagicka rest failed");
+                const auto afterLong = read(bytes(lastingRuntime));
+                require(afterLong.combat->actors[0][8][2] > beforeLong.combat->actors[0][8][2]
+                    && afterLong.combat->actors[0][9][2] == beforeLong.combat->actors[0][9][2]
+                    && std::ranges::any_of(afterLong.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                    }), "Long StuntedMagicka did not suppress the full sleep interval");
+                std::cout << "native rest recovery: rest+wait, timed StuntedMagicka, rejection, restart\n";
+                return;
+            }
             if (specialConditions)
             {
                 auto running = make(); auto& runtime = running->service();

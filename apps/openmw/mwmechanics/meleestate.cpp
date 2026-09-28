@@ -177,6 +177,39 @@ namespace MWMechanics
         actor.setFatigue(fatigue);
     }
 
+    void restoreWaitRestStats(CreatureStats& actor, const MWWorld::ESMStore& content,
+        double hours, bool sleep, float normalizedEncumbrance, double magickaHours)
+    {
+        if (!std::isfinite(hours) || hours < 0 || !std::isfinite(magickaHours) || magickaHours < 0
+            || !std::isfinite(normalizedEncumbrance))
+            throw std::invalid_argument("Invalid rest recovery input");
+        const auto& settings = content.get<ESM::GameSetting>();
+        if (sleep)
+        {
+            auto health = actor.getHealth();
+            health.setCurrent(static_cast<float>(health.getCurrent()
+                + 0.1 * actor.getAttribute(ESM::Attribute::Endurance).getModified() * hours));
+            actor.setHealth(health);
+            if (magickaHours > 0)
+            {
+                auto magicka = actor.getMagicka();
+                magicka.setCurrent(static_cast<float>(magicka.getCurrent()
+                    + settings.find("fRestMagicMult")->mValue.getFloat()
+                        * actor.getAttribute(ESM::Attribute::Intelligence).getModified() * magickaHours));
+                actor.setMagicka(magicka);
+            }
+        }
+        auto fatigue = actor.getFatigue();
+        if (fatigue.getCurrent() >= fatigue.getBase()) return;
+        const float encumbrance = std::min(normalizedEncumbrance, 1.f);
+        const float rate = (settings.find("fFatigueReturnBase")->mValue.getFloat()
+                + settings.find("fFatigueReturnMult")->mValue.getFloat() * (1 - encumbrance))
+            * settings.find("fEndFatigueMult")->mValue.getFloat()
+            * actor.getAttribute(ESM::Attribute::Endurance).getModified();
+        fatigue.setCurrent(static_cast<float>(fatigue.getCurrent() + 3600 * rate * hours));
+        actor.setFatigue(fatigue);
+    }
+
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier)
     {
         if (!hit) damage = 0.f;

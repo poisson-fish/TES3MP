@@ -48,6 +48,8 @@ namespace MWMechanics
     bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical);
     float applyNormalWeaponResistance(const CreatureStats& victim, float damage);
     void restoreCombatFatigue(CreatureStats& actor, const MWWorld::ESMStore& store, float seconds);
+    void restoreWaitRestStats(CreatureStats& actor, const MWWorld::ESMStore& store,
+        double hours, bool sleep, float normalizedEncumbrance, double magickaHours);
     bool rollHitKnockdown(const MWWorld::ESMStore& store, const CreatureStats& victim,
         float healthDamage, Misc::Rng::Generator& rng);
     int weaponConditionAfterHit(int condition, float damage, bool hit, float damageMultiplier);

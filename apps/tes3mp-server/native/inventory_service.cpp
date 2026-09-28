@@ -5487,6 +5487,72 @@ namespace TES3MP::Native
         throw;
     }
 
+    bool InventoryService::stageWaitRestRecovery(PreparedNativeInventory& candidate,
+        const CanonicalServerState& players, const CanonicalWorldState& world,
+        std::uint8_t hours, WaitRestMode mode)
+    try
+    {
+        auto* staged = dynamic_cast<ActorTransaction*>(&candidate);
+        if (!staged || &staged->service != this || staged->consumed || staged->before != mActorImage
+            || !staged->combat || !hours || hours > MaximumWaitRestHours
+            || (mode != WaitRestMode::Wait && mode != WaitRestMode::Rest)) return false;
+        if (staged->casting || !staged->projectiles.empty()
+            || std::ranges::any_of(staged->combat->swings, [](const auto& swing) { return swing && swing->pending(); })
+            || std::ranges::any_of(staged->combat->playerCasts, [](const auto& cast) { return bool(cast); })
+            || std::ranges::any_of(staged->combat->arrows, [](const auto& arrow) { return !arrow.terminal; })) return false;
+        const auto& npc = staged->actor ? staged->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+        if (staged->combat->actors[2][8][2] > 0 && staged->target)
+            for (const auto& session : players.activeSessions())
+            {
+                const auto* player = players.findPlayer(session.playerId());
+                if (player && session.playerId().value() == staged->target
+                    && player->transform().cell() == actorCell(npc)) return false;
+            }
+        auto recovered = *staged->combat;
+        auto effects = staged->timedEffects;
+        const auto stuntedIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+        const double timeScale = world.time().timeScale() > 0 ? world.time().timeScale() : 1.0;
+        const double skippedTicks = double(hours) * 3600.0 * 30.0 / timeScale;
+        if (!std::isfinite(skippedTicks) || skippedTicks < 0 || skippedTicks > double(UINT64_MAX)) return false;
+        for (const auto& session : players.activeSessions())
+        {
+            const auto* player = players.findPlayer(session.playerId());
+            if (!player) return false;
+            const size_t index = actor(player->playerId());
+            auto stats = loadCombatStats(mRuntime.mStore, recovered.actors[index], effects, index);
+            if (stats.getHealth().getCurrent() <= 0) return false;
+            double magickaHours = hours;
+            if (mode == WaitRestMode::Rest)
+                for (const auto& effect : effects)
+                {
+                    if (effect.actor != index || effect.effectIndex != stuntedIndex || effect.magnitude <= 0) continue;
+                    if (effect.sourceKind >= 3) { magickaHours = 0; break; }
+                    if (effect.expiresTick > staged->tick)
+                        magickaHours = std::min(magickaHours, std::max(0.0,
+                            double(hours) - double(effect.expiresTick - staged->tick) * timeScale / (30.0 * 3600.0)));
+                }
+            const float capacity = stats.getAttribute(ESM::Attribute::Strength).getModified()
+                * mRuntime.mStore.get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
+            const float weight = std::max(0.f, mRuntime.storage(index).getWeight());
+            const float encumbrance = weight == 0 ? 0.f : capacity == 0 ? 1.f + 1e-6f : weight / capacity;
+            MWMechanics::restoreWaitRestStats(stats, mRuntime.mStore, hours, mode == WaitRestMode::Rest,
+                encumbrance, magickaHours);
+            saveCombatStats(recovered.actors[index], stats, effects, index);
+        }
+        const auto advance = static_cast<uint64_t>(skippedTicks);
+        for (auto& effect : effects)
+            if (effect.effectIndex == stuntedIndex && effect.sourceKind < 3)
+            {
+                const auto remaining = effect.expiresTick - staged->tick;
+                effect.expiresTick = remaining <= advance ? staged->tick : effect.expiresTick - advance;
+            }
+        std::erase_if(effects, [&](const auto& effect) { return effect.expiresTick <= staged->tick; });
+        staged->combat = std::move(recovered);
+        staged->timedEffects = std::move(effects);
+        return true;
+    }
+    catch (...) { return false; }
+
     std::optional<ServerApp::InventoryInterestDelivery> InventoryService::projectInventory(
         const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
         const PreparedNativeInventory* candidate) const
