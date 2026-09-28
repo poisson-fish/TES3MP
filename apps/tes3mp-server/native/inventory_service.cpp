@@ -18,6 +18,7 @@
 #include <apps/openmw/mwclass/npcmovement.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
+#include <apps/openmw/mwmechanics/drawstate.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
 #include <apps/openmw/mwmechanics/spellresistance.hpp>
@@ -29,6 +30,7 @@
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadfact.hpp>
 #include <components/esm3/statstate.hpp>
 #include <components/misc/rng.hpp>
 #include <components/misc/constants.hpp>
@@ -2399,7 +2401,8 @@ namespace TES3MP::Native
                 || mBinding.mSpecialConditions != (magic == SpecialConditionsCampaignMagic
                     || hasMovementEffects(magic))
                 || mBinding.mMovementEffects != hasMovementEffects(magic)
-                || mBinding.mAiDecisions != hasAiDecisions(magic))
+                || mBinding.mAiDecisions != hasAiDecisions(magic)
+                || mBinding.mPlayerAi != hasPlayerAi(magic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2672,6 +2675,35 @@ namespace TES3MP::Native
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
             recoverAreas(std::as_bytes(decoded.inventory), references, decoded.actor,
                 [&](const EquipmentSessionValues& session) {
+                if (mBinding.mPlayerAi)
+                    for (size_t i = 0; i < 2; ++i)
+                    {
+                        const auto& social = decoded.combat->players[i];
+                        ESM::RefId previous;
+                        for (const auto& faction : social.factions)
+                        {
+                            if (!mRuntime.mStore.get<ESM::Faction>().search(faction.id)
+                                || (!previous.empty() && !(previous < faction.id)))
+                                throw std::invalid_argument("Saved player faction differs from content");
+                            previous = faction.id;
+                        }
+                        if (!social.selectedSpell.empty()
+                            && (!mRuntime.mStore.get<ESM::Spell>().search(social.selectedSpell)
+                                || std::ranges::find(mRuntime.mStore.get<ESM::NPC>()
+                                        .find(mBinding.mActors[i].mBase)->mSpells.mList,
+                                    social.selectedSpell) == mRuntime.mStore.get<ESM::NPC>()
+                                        .find(mBinding.mActors[i].mBase)->mSpells.mList.end()))
+                            throw std::invalid_argument("Saved player selected spell differs from content");
+                        if (social.selectedEnchantedItem && std::ranges::none_of(session.mActors[i].mObjects,
+                            [&](const auto& item) {
+                                if (item.mRef.mCount <= 0
+                                    || wireId(item.mRef.mRefNum).value() != social.selectedEnchantedItem) return false;
+                                const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
+                                return !record.mEnchant.empty()
+                                    && mRuntime.mStore.get<ESM::Enchantment>().search(record.mEnchant);
+                            }))
+                            throw std::invalid_argument("Saved player selected item differs from inventory");
+                    }
                 if (decoded.combat) for (const auto& arrow : decoded.combat->arrows)
                 {
                     const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(arrow.weapon));
@@ -2935,6 +2967,16 @@ namespace TES3MP::Native
             + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0)
             + (mBinding.mActorPresentation ? 7 * 8 : 0)
             + (mBinding.mAiDecisions ? 5 * 8 : 0) : 0;
+        size_t playerAiSize = 0;
+        if (mBinding.mPlayerAi && combat)
+            for (const auto& player : combat->players)
+            {
+                if (player.factions.size() > 256 || player.bounty < 0 || player.drawState > 2)
+                    throw std::invalid_argument("Native player AI state exceeds bounds");
+                playerAiSize += 8 + 7 * 8 + player.selectedSpell.serializeText().size();
+                for (const auto& faction : player.factions)
+                    playerAiSize += 24 + faction.id.serializeText().size();
+            }
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + (mBinding.mDurableCasters ? 5 : 3) * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
@@ -2970,11 +3012,12 @@ namespace TES3MP::Native
         if (core.empty() || actor.empty() || actor.size() > 65536
             || timedEffects.size() > (mBinding.mGeneralConstants ? MaximumActorTimedEffects : 16)
             || projectiles.size() > (mBinding.mMagicProjectileCollection ? MaximumActorProjectiles : 1)
-            || 56 + meleeSize + combatSize + lifeSize + projectileSize + timedSize + castSize + swingSize + actor.size() > MaximumNativeInventoryImageBytes
-            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
+            || 56 + meleeSize + combatSize + playerAiSize + lifeSize + projectileSize + timedSize + castSize + swingSize + actor.size() > MaximumNativeInventoryImageBytes
+            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mAiDecisions ? AiDecisionCampaignMagic
+        putAreaWord(result, mBinding.mPlayerAi ? PlayerAiCampaignMagic
+            : mBinding.mAiDecisions ? AiDecisionCampaignMagic
             : mBinding.mMovementEffects ? MovementEffectsCampaignMagic
             : mBinding.mSpecialConditions ? SpecialConditionsCampaignMagic
             : mBinding.mPersistentConditions ? PersistentConditionsCampaignMagic
@@ -3042,6 +3085,28 @@ namespace TES3MP::Native
             for (float value : combat->fleeDestination)
                 putAreaWord(result, std::bit_cast<uint32_t>(value));
         }
+        if (combat && mBinding.mPlayerAi)
+            for (const auto& player : combat->players)
+            {
+                putAreaWord(result, player.factions.size());
+                for (const auto& faction : player.factions)
+                {
+                    const auto id = faction.id.serializeText();
+                    if (id.empty() || id.size() > 256 || faction.rank < 0 || faction.rank > 9)
+                        throw std::invalid_argument("Native player faction state invalid");
+                    putAreaWord(result, id.size()); result.insert(result.end(), id.begin(), id.end());
+                    putAreaWord(result, faction.rank); putAreaWord(result, faction.expelled);
+                }
+                const auto spell = player.selectedSpell.serializeText();
+                if (spell.size() > 256)
+                    throw std::invalid_argument("Native player spell identity exceeds bound");
+                putAreaWord(result, player.bounty);
+                putAreaWord(result, std::bit_cast<uint32_t>(int32_t(player.crimeDisposition)));
+                putAreaWord(result, player.drawState);
+                putAreaWord(result, player.werewolf); putAreaWord(result, player.knownWerewolf);
+                putAreaWord(result, spell.size()); result.insert(result.end(), spell.begin(), spell.end());
+                putAreaWord(result, player.selectedEnchantedItem);
+            }
         if (life)
         {
             putAreaWord(result, life->generation); putAreaWord(result, life->bornTick);
@@ -3375,6 +3440,73 @@ namespace TES3MP::Native
         return result;
     }
 
+    class InventoryService::PlayerAiTransaction final : public PreparedNativeInventory
+    {
+        InventoryService& service;
+        EquipmentBytes before;
+        ActorCampaignCombat staged;
+        bool consumed = false;
+    public:
+        PlayerAiTransaction(InventoryService& owner, size_t index, ActorCampaignCombat::PlayerAi state)
+            : service(owner), before(owner.mActorImage), staged(*owner.mCombat)
+        { staged.players[index] = std::move(state); }
+        bool changesInventory() const noexcept override { return false; }
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        {
+            if (consumed || before != service.mActorImage || service.inventoryImage().empty())
+                return CanonicalDurabilityResult::Rejected;
+            try
+            {
+                const auto actor = readActorCampaign(before).actor;
+                const auto sealed = service.sealActor(service.mImage, actor, service.mActorTick,
+                    service.mActorVelocity, service.mMelee, service.mMeleeTarget, service.mMeleeContacted,
+                    staged, service.mLife, service.mProjectiles, service.mTimedEffects, service.mNpcCast);
+                const auto result = persist(std::as_bytes(std::span(sealed)));
+                if (result == CanonicalDurabilityResult::Rejected) return result;
+                consumed = true;
+                if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
+                else { service.mCombat = std::move(staged); service.mActorImage = sealed; }
+                return result;
+            }
+            catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
+        }
+    };
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::preparePlayerAiState(
+        PlayerId player, ActorCampaignCombat::PlayerAi state)
+    {
+        if (!mBinding.mPlayerAi || !mCombat || inventoryImage().empty()) return {};
+        const size_t index = actor(player);
+        if (state.factions.size() > 256 || state.bounty < 0 || state.bounty > 10'000'000
+            || std::abs(int64_t(state.crimeDisposition)) > 1'000'000 || state.drawState > 2)
+            return {};
+        ESM::RefId previous;
+        for (const auto& faction : state.factions)
+        {
+            if (faction.id.empty() || faction.rank < 0 || faction.rank > 9
+                || faction.id.serializeText().size() > 256
+                || !mRuntime.mStore.get<ESM::Faction>().search(faction.id)
+                || (!previous.empty() && !(previous < faction.id))) return {};
+            previous = faction.id;
+        }
+        if (!state.selectedSpell.empty())
+        {
+            const auto& spells = mRuntime.mStore.get<ESM::NPC>().find(mBinding.mActors[index].mBase)->mSpells.mList;
+            if (state.selectedSpell.serializeText().size() > 256
+                || !mRuntime.mStore.get<ESM::Spell>().search(state.selectedSpell)
+                || std::ranges::find(spells, state.selectedSpell) == spells.end()) return {};
+        }
+        if (state.selectedEnchantedItem && std::ranges::none_of(mRuntime.installedValues(index).mObjects,
+            [&](const auto& item) {
+                if (item.mRef.mCount <= 0 || wireId(item.mRef.mRefNum).value() != state.selectedEnchantedItem)
+                    return false;
+                const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
+                return !record.mEnchant.empty()
+                    && mRuntime.mStore.get<ESM::Enchantment>().search(record.mEnchant);
+            })) return {};
+        return std::make_unique<PlayerAiTransaction>(*this, index, std::move(state));
+    }
+
     class InventoryService::ActorTransaction final : public PreparedNativeInventory
     {
     public:
@@ -3698,6 +3830,16 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        if (mBinding.mPlayerAi && combat)
+            for (size_t index = 0; index < 2; ++index)
+            {
+                auto& selected = combat->players[index].selectedEnchantedItem;
+                if (!selected) continue;
+                const auto values = combatEquipmentValues(index, command.get());
+                if (std::ranges::none_of(values.mObjects, [&](const auto& item) {
+                    return item.mRef.mCount > 0 && wireId(item.mRef.mRefNum).value() == selected;
+                })) selected = 0;
+            }
         const auto fleeOutOfSight = [&] {
             if (!combat || !combat->fleeTarget || combat->fleeDestination == std::array<float, 3>{})
                 return false;
@@ -5098,6 +5240,7 @@ namespace TES3MP::Native
             const auto* npc = actorPtr.getType() == ESM::NPC::sRecordId
                 ? actorPtr.get<ESM::NPC>() : nullptr;
             float disposition = 50.f;
+            const auto& social = combat->players[actor(player.playerId())];
             if (npc)
             {
                 const auto stats = loadCombatStats(mRuntime.mStore,
@@ -5111,6 +5254,45 @@ namespace TES3MP::Native
                 disposition += settings.find("fDispPersonalityMult")->mValue.getFloat()
                     * (stats.getAttribute(ESM::Attribute::Personality).getModified()
                         - settings.find("fDispPersonalityBase")->mValue.getFloat());
+                if (mBinding.mPlayerAi && !npc->mBase->mFaction.empty())
+                {
+                    const auto factionReaction = [&](const ESM::RefId& other) {
+                        const auto* faction = mRuntime.mStore.get<ESM::Faction>().find(npc->mBase->mFaction);
+                        const auto found = faction->mReactions.find(other);
+                        return found == faction->mReactions.end() ? 0 : found->second;
+                    };
+                    float reaction = 0.f;
+                    int rank = 0;
+                    const auto same = std::ranges::find_if(social.factions, [&](const auto& entry) {
+                        return entry.id == npc->mBase->mFaction;
+                    });
+                    if (same != social.factions.end())
+                    {
+                        if (!same->expelled)
+                        { reaction = float(factionReaction(same->id)); rank = same->rank; }
+                    }
+                    else
+                        for (size_t i = 0; i < social.factions.size(); ++i)
+                        {
+                            const auto& entry = social.factions[i];
+                            if (entry.expelled) continue;
+                            const auto candidate = float(factionReaction(entry.id));
+                            if (i == 0 || candidate < reaction)
+                            { reaction = candidate; rank = entry.rank; }
+                        }
+                    disposition += MWMechanics::factionDisposition(rank, reaction,
+                        settings.find("fDispFactionRankMult")->mValue.getFloat(),
+                        settings.find("fDispFactionRankBase")->mValue.getFloat(),
+                        settings.find("fDispFactionMod")->mValue.getFloat());
+                }
+                if (mBinding.mPlayerAi)
+                {
+                    disposition += MWMechanics::crimeDisposition(social.crimeDisposition,
+                        social.bounty, settings.find("fDispCrimeMod")->mValue.getFloat());
+                    disposition += MWMechanics::weaponDrawnDisposition(
+                        social.drawState == uint64_t(MWMechanics::DrawState::Weapon),
+                        settings.find("fDispWeaponDrawn")->mValue.getFloat());
+                }
                 if (std::ranges::any_of(combat->conditions, [&](const auto& condition) {
                     if (condition.actor != actor(player.playerId())) return false;
                     const auto* spell = spellBySource(mRuntime.mStore, condition.source);
@@ -5129,7 +5311,11 @@ namespace TES3MP::Native
                 settings.find("fFightDistanceMultiplier")->mValue.getFloat());
             const float dispositionBias = MWMechanics::fightDispositionBias(disposition,
                 settings.find("fFightDispMult")->mValue.getFloat());
-            return MWMechanics::aggressiveAtDistance(npcDisposition.fight, distanceBias, dispositionBias);
+            const int fight = npcDisposition.fight + (mBinding.mPlayerAi && npc
+                && (social.werewolf || social.knownWerewolf)
+                ? MWMechanics::werewolfFight(social.werewolf, social.knownWerewolf,
+                    settings.find("iWerewolfFightMod")->mValue.getInteger()) : 0);
+            return MWMechanics::aggressiveAtDistance(fight, distanceBias, dispositionBias);
         };
         if (mBinding.mWeaponMelee && target && !npcMayAttack)
         { melee = mIdleMelee; target = 0; contact = false; }
@@ -5338,15 +5524,41 @@ namespace TES3MP::Native
                     const auto* weapon = held == enemyValues.mObjects.end() ? nullptr
                         : mRuntime.mStore.get<ESM::Weapon>().search(held->mRef.mRefID);
                     float attackDistance = 1.f;
-                    if (const auto& cast = combat->playerCasts[enemyIndex]; cast)
+                    const auto targetSpeed = [&](const auto& effects) {
+                        for (const auto& effect : effects.mList)
+                            if (effect.mData.mRange == ESM::RT_Target)
+                                return mRuntime.mStore.get<ESM::MagicEffect>()
+                                    .find(effect.mData.mEffectID)->mData.mSpeed;
+                        return 1.f;
+                    };
+                    const auto& selection = combat->players[enemyIndex];
+                    if (mBinding.mPlayerAi && !weapon && !selection.selectedSpell.empty()
+                        && selection.selectedEnchantedItem)
+                        attackDistance = settings.find("fHandToHandReach")->mValue.getFloat();
+                    else if (mBinding.mPlayerAi && selection.drawState == uint64_t(MWMechanics::DrawState::Spell))
                     {
-                        const auto targetSpeed = [&](const auto& effects) {
-                            for (const auto& effect : effects.mList)
-                                if (effect.mData.mRange == ESM::RT_Target)
-                                    return mRuntime.mStore.get<ESM::MagicEffect>()
-                                        .find(effect.mData.mEffectID)->mData.mSpeed;
-                            return 1.f;
-                        };
+                        if (!selection.selectedSpell.empty())
+                            attackDistance = targetSpeed(mRuntime.mStore.get<ESM::Spell>()
+                                .find(selection.selectedSpell)->mEffects);
+                        else if (selection.selectedEnchantedItem)
+                        {
+                            const auto item = std::ranges::find_if(enemyValues.mObjects, [&](const auto& value) {
+                                return wireId(value.mRef.mRefNum).value() == selection.selectedEnchantedItem;
+                            });
+                            if (item != enemyValues.mObjects.end())
+                            {
+                                const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item->mRef.mRefID);
+                                if (!record.mEnchant.empty())
+                                    attackDistance = targetSpeed(mRuntime.mStore.get<ESM::Enchantment>()
+                                        .find(record.mEnchant)->mEffects);
+                            }
+                        }
+                        attackDistance *= std::max(1000.f,
+                            settings.find("fTargetSpellMaxSpeed")->mValue.getFloat());
+                    }
+                    else if (!mBinding.mPlayerAi && combat->playerCasts[enemyIndex])
+                    {
+                        const auto& cast = combat->playerCasts[enemyIndex];
                         if (cast->sourceKind == uint64_t(MagicUseSourceKind::Spell))
                         {
                             if (const auto* spell = spellBySource(mRuntime.mStore, cast->source))
@@ -5384,7 +5596,7 @@ namespace TES3MP::Native
                     }
                     attackDistance = std::max(attackDistance, 1.f);
                     const float combatDistance = settings.find("fCombatDistance")->mValue.getFloat()
-                        * (victim.isWerewolf() ? 1.f
+                        * ((mBinding.mPlayerAi ? selection.werewolf : victim.isWerewolf()) ? 1.f
                             + settings.find("fCombatDistanceWerewolfMod")->mValue.getFloat() : 1.f);
                     if (!std::isfinite(attackDistance) || attackDistance > 1e7f
                         || !std::isfinite(combatDistance) || combatDistance <= 0.f

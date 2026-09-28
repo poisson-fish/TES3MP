@@ -117,6 +117,7 @@ namespace TES3MP::Native
         bool mSpecialConditions = false; // V55 game-time Corprus and weather-sensitive effects.
         bool mMovementEffects = false; // V56 committed movement effects; inherited player movement remains client-side.
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
+        bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
@@ -171,6 +172,7 @@ namespace TES3MP::Native
         class TeleportTransaction;
         class AreaDoorTransaction;
         class ActorTransaction;
+        class PlayerAiTransaction;
         class AttackTransaction;
         class SpellTransaction;
         std::unique_ptr<SpellTransaction> preparePlayerMagicSource(PlayerId player,
@@ -366,6 +368,9 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr);
+        // Trusted gameplay/script mutation; never accepts client-authored social values.
+        std::unique_ptr<PreparedNativeInventory> preparePlayerAiState(
+            PlayerId player, ActorCampaignCombat::PlayerAi state);
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

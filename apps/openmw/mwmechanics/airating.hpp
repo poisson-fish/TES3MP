@@ -13,6 +13,19 @@ namespace MWMechanics
     inline float fightDispositionBias(float disposition, float multiplier)
     { return (50.f - disposition) * multiplier; }
 
+    inline float factionDisposition(int rank, float reaction, float rankMultiplier,
+        float rankBase, float factionMultiplier)
+    { return (rankMultiplier * rank + rankBase) * factionMultiplier * reaction; }
+
+    inline float crimeDisposition(float crimeModifier, int bounty, float crimeMultiplier)
+    { return crimeModifier - crimeMultiplier * bounty; }
+
+    inline float weaponDrawnDisposition(bool drawn, float modifier)
+    { return drawn ? modifier : 0.f; }
+
+    inline int werewolfFight(bool werewolf, bool knownWerewolf, int modifier)
+    { return werewolf || knownWerewolf ? modifier : 0; }
+
     inline bool aggressiveAtDistance(int modifiedFight, float distanceBias, float dispositionBias)
     { return modifiedFight + static_cast<int>(distanceBias + dispositionBias) >= 100; }
 

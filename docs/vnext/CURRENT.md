@@ -2,7 +2,7 @@
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 NPC/biped/doors: 60 Hz; commits: 30 Hz; neighbors freeze.
-**V57, T3D1/capability 29.**
+**V58, T3D1/capability 29.**
 
 Player/NPC casts retain timing, payment and interruption. Condition, stat,
 resource and Disintegration effects have synthetic checks; custom casts have
@@ -33,19 +33,24 @@ abilities no longer expire. Stock dialogue 45→80→45 with Charm 35 and expiry
 `build/m4-charm-activation-live-01/result.json`.
 Ordinary activation now focuses the replicated NPC and executes stock talk.
 Remote equipment accepts constants.
-Aggression still lacks canonical faction, crime/bounty, drawn-weapon and
-werewolf modifiers. Flee now gates a new run on LOS and the target's attack
-distance using the loaded actor hulls; stock and server share the near/far
-boundary. Server reach covers equipped weapons and active spells/items;
-durable draw/selection state remains open.
+V58 persists content-bound player faction/rank/expulsion, crime disposition,
+bounty, draw state, werewolf flags and spell/item selection with the actor
+campaign. Trusted updates commit atomically; recovery validates content and
+inventory. Server aggression consumes the stock numeric modifiers and Flee
+reach consumes durable selection. The live player ingress for these fields is
+not wired yet; fresh campaigns start with empty/default values. Flee gates a
+new run on LOS and target reach using loaded actor hulls.
 Synthetic hull-bound near/far and committed Flee/restart checks:
-`build/logs/ai-flee-test-19.log`. A stock desktop comparison remains open.
+`build/logs/ai-flee-test-19.log`. Stock desktop Flee with LOS: 68/128 triggers,
+218/128 does not;
+`build/stock-flee-comparison/result.json` (temporary logging removed).
+V58 modifier/restart and V57 creature checks:
+`build/logs/{ai-player-test-07,ai-player-creature-03}.log`; stock OpenMW build:
+`build/logs/ai-player-openmw-build-02.log`.
 Mixed passive spells, non-player Command casters and multiple active combatants
 remain open.
 
-**Next: bind canonical player faction, crime/bounty, draw and werewolf state
-to aggression and Flee reach, including durable selection; compare
-near/far behavior against stock OpenMW.**
+**Next: wire trusted live player state into V58 updates.**
 Player movement cutover follows combat and collision.
 
 62 effects remain to complete across applicable actors and sources:

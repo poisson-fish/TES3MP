@@ -7,6 +7,8 @@
 
 namespace TES3MP::Native
 {
+    // V58 persists bounded, content-bound player AI context and selected source
+    // with the actor campaign for trusted updates and stock aggression/Flee reach.
     // V57 persists the selected actor's Flee interval and destination, admits
     // bounded passive AI abilities and constant AI effects, and projects Charm
     // in T3D1/capability 29. Fresh campaigns required; older layouts remain.

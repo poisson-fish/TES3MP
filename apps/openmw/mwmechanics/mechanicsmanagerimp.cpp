@@ -552,17 +552,17 @@ namespace MWMechanics
         static const float fDispFactionRankMult = gmst.find("fDispFactionRankMult")->mValue.getFloat();
         static const float fDispFactionRankBase = gmst.find("fDispFactionRankBase")->mValue.getFloat();
         static const float fDispFactionMod = gmst.find("fDispFactionMod")->mValue.getFloat();
-        x += (fDispFactionRankMult * rank + fDispFactionRankBase) * fDispFactionMod * reaction;
+        x += factionDisposition(rank, reaction, fDispFactionRankMult, fDispFactionRankBase, fDispFactionMod);
 
         static const float fDispCrimeMod = gmst.find("fDispCrimeMod")->mValue.getFloat();
         static const float fDispDiseaseMod = gmst.find("fDispDiseaseMod")->mValue.getFloat();
-        x -= fDispCrimeMod * playerStats.getBounty();
+        x += crimeDisposition(0.f, playerStats.getBounty(), fDispCrimeMod);
         if (playerStats.hasCommonDisease() || playerStats.hasBlightDisease())
             x += fDispDiseaseMod;
 
         static const float fDispWeaponDrawn = gmst.find("fDispWeaponDrawn")->mValue.getFloat();
-        if (playerStats.getDrawState() == MWMechanics::DrawState::Weapon)
-            x += fDispWeaponDrawn;
+        x += weaponDrawnDisposition(playerStats.getDrawState() == MWMechanics::DrawState::Weapon,
+            fDispWeaponDrawn);
 
         const float charm = ptr.getClass()
                  .getCreatureStats(ptr)
@@ -1903,7 +1903,10 @@ namespace MWMechanics
             {
                 const ESM::GameSetting* iWerewolfFightMod
                     = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>().find("iWerewolfFightMod");
-                fight += iWerewolfFightMod->mValue.getInteger();
+                fight += werewolfFight(target.getClass().getNpcStats(target).isWerewolf(),
+                    target == getPlayer()
+                        && MWBase::Environment::get().getWorld()->getGlobalInt(MWWorld::Globals::sPCKnownWerewolf),
+                    iWerewolfFightMod->mValue.getInteger());
             }
         }
 

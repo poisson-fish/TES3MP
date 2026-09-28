@@ -30,6 +30,7 @@
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadfact.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadclot.hpp>
 #include <components/esm3/loadmisc.hpp>
@@ -5935,7 +5936,7 @@ namespace TES3MP::Native::Testing
             {
                 for (const auto [name, value] : {std::pair{"fAIFleeHealthMult", 200.f},
                         {"fAIFleeFleeMult", 1.f}, {"fFightDistanceMultiplier", .05f},
-                        {"fFightDispMult", 1.f}})
+                        {"fFightDispMult", effectFamily == "ai-disposition" ? 3.f : 1.f}})
                 {
                     auto setting = *base.store().get<ESM::GameSetting>().find(name);
                     setting.mValue.setFloat(value);
@@ -5950,6 +5951,29 @@ namespace TES3MP::Native::Testing
                 fleeDistance.mValue = ESM::Variant(3000.f);
                 out.startRecord(ESM::GameSetting::sRecordId, 0); fleeDistance.save(out);
                 out.endRecord(ESM::GameSetting::sRecordId);
+                if (effectFamily == "ai-disposition")
+                {
+                    for (const auto [name, value] : {std::pair{"fDispCrimeMod", 1.f},
+                            {"fDispWeaponDrawn", -100.f}, {"fDispFactionRankMult", 0.f},
+                            {"fDispFactionRankBase", 1.f}, {"fDispFactionMod", 1.f}})
+                    {
+                        auto setting = *base.store().get<ESM::GameSetting>().find(name);
+                        setting.mValue.setFloat(value);
+                        out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out);
+                        out.endRecord(ESM::GameSetting::sRecordId);
+                    }
+                    ESM::GameSetting werewolf;
+                    werewolf.mId = ESM::RefId::stringRefId("iWerewolfFightMod");
+                    werewolf.mValue.setType(ESM::VT_Int);
+                    werewolf.mValue.setInteger(100);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); werewolf.save(out);
+                    out.endRecord(ESM::GameSetting::sRecordId);
+                    ESM::Faction faction; faction.blank();
+                    faction.mId = ESM::RefId::stringRefId("ai_test_faction");
+                    faction.mReactions[faction.mId] = -100;
+                    out.startRecord(ESM::Faction::sRecordId, 0); faction.save(out, false);
+                    out.endRecord(ESM::Faction::sRecordId);
+                }
             }
             if (weaponExecution)
             {
@@ -6097,6 +6121,8 @@ namespace TES3MP::Native::Testing
                 {
                     npc.mAiData.mFight = 20; npc.mAiData.mFlee = 0;
                     npc.mNpdt.mDisposition = 50; npc.mNpdt.mHealth = 200;
+                    if (effectFamily == "ai-disposition")
+                        npc.mFaction = ESM::RefId::stringRefId("ai_test_faction");
                     for (const auto id : {ESM::MagicEffect::Charm, ESM::MagicEffect::CalmHumanoid,
                             ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyHumanoid,
                             ESM::MagicEffect::FrenzyCreature, ESM::MagicEffect::DemoralizeHumanoid,
@@ -7884,7 +7910,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << ((effectFamily == "ai-disposition" || effectFamily == "ai-creature") ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "ai-disposition" ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8217,6 +8243,58 @@ namespace TES3MP::Native::Testing
                     for (uint64_t frame = 1; frame <= 75; ++frame) (void)commit(plain, frame);
                     require(!read(bytes(plain)).combat->npcAction,
                         "Low stock Fight acquired a distant player without a modifier");
+                    if (!creatureTarget)
+                    {
+                        const auto factionId = ESM::RefId::stringRefId("ai_test_faction");
+                        for (const std::string_view modifier : {"faction", "crime", "bounty", "drawn",
+                                "werewolf", "known-werewolf"})
+                        {
+                            auto candidate = make();
+                            auto& service = dynamic_cast<InventoryService&>(candidate->service());
+                            auto social = read(bytes(service)).combat->players[0];
+                            if (modifier == "faction") social.factions.push_back({factionId, 0, false});
+                            if (modifier == "crime") social.crimeDisposition = -100;
+                            if (modifier == "bounty") social.bounty = 100;
+                            if (modifier == "drawn") social.drawState = 1;
+                            if (modifier == "werewolf") social.werewolf = true;
+                            if (modifier == "known-werewolf") social.knownWerewolf = true;
+                            const float factionTerm = modifier == "faction"
+                                ? MWMechanics::factionDisposition(0, -100.f, 0.f, 1.f, 1.f) : 0.f;
+                            const float crimeTerm = MWMechanics::crimeDisposition(social.crimeDisposition,
+                                social.bounty, 1.f);
+                            const float drawnTerm = MWMechanics::weaponDrawnDisposition(
+                                social.drawState == 1, -100.f);
+                            const float disposition = float(MWMechanics::dispositionWithCharm(
+                                50.f + factionTerm + crimeTerm + drawnTerm, 0.f));
+                            require(MWMechanics::aggressiveAtDistance(20
+                                    + MWMechanics::werewolfFight(social.werewolf, social.knownWerewolf, 100),
+                                22.f, MWMechanics::fightDispositionBias(disposition, 3.f)),
+                                "Stock aggression modifier did not cross Fight threshold");
+                            auto update = service.preparePlayerAiState(id<PlayerId>(1), social);
+                            const auto previous = bytes(service);
+                            require(update && update->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(service) == previous,
+                                "Rejected player aggression update changed campaign");
+                            require(update->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Content-bound player AI modifier did not commit");
+                            const auto saved = bytes(service);
+                            InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                            restart.service().synchronizeCells(authority);
+                            require(bytes(restart.service()) == saved
+                                    && read(bytes(restart.service())).combat->players[0] == social,
+                                "Player aggression modifier changed on restart");
+                            bool attacked = false;
+                            for (uint64_t frame = 1; frame <= 75; ++frame)
+                            {
+                                (void)commit(service, frame); (void)commit(restart.service(), frame);
+                                require(bytes(service) == bytes(restart.service()),
+                                    "Player aggression modifier diverged after restart");
+                                attacked |= read(bytes(service)).combat->npcAction != 0;
+                                if (attacked) break;
+                            }
+                            require(attacked, "Committed player modifier did not trigger stock aggression");
+                        }
+                    }
                     auto fierce = make(); auto& fighter = fierce->service();
                     const auto frenzy = creatureTarget ? ESM::MagicEffect::FrenzyCreature
                         : ESM::MagicEffect::FrenzyHumanoid;
@@ -8248,6 +8326,38 @@ namespace TES3MP::Native::Testing
                 }
                 {
                     auto fleeing = make(); auto& service = fleeing->service();
+                    if (!creatureTarget)
+                    {
+                        auto& native = dynamic_cast<InventoryService&>(service);
+                        const auto inventory = service.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(inventory && !inventory->playerInventory.empty(),
+                            "Player selected-item inventory absent");
+                        const auto& stacks = inventory->playerInventory.front().stacks;
+                        const auto item = std::ranges::find(stacks,
+                            id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                ESM::RefId::stringRefId("ai_item_charm"))), &CanonicalItemStack::prototypeId);
+                        require(item != stacks.end(), "Content-bound selected enchantment absent");
+                        auto itemState = read(bytes(service)).combat->players[0];
+                        itemState.drawState = 2;
+                        itemState.selectedEnchantedItem = item->stackId.value();
+                        auto itemSelection = native.preparePlayerAiState(id<PlayerId>(1), itemState);
+                        require(itemSelection && itemSelection->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Selected enchanted item did not commit");
+                        const auto selectedImage = bytes(service);
+                        InventoryHost itemRestart(descriptor, testContentManifest(), *registry, *crypto, selectedImage);
+                        itemRestart.service().synchronizeCells(authority);
+                        require(bytes(itemRestart.service()) == selectedImage
+                                && read(selectedImage).combat->players[0] == itemState,
+                            "Selected enchanted item changed on restart");
+                        auto selected = read(bytes(service)).combat->players[0];
+                        selected.drawState = 2;
+                        selected.selectedSpell = ESM::RefId::stringRefId("ai_flee_force");
+                        selected.selectedEnchantedItem = 0;
+                        auto selection = native.preparePlayerAiState(id<PlayerId>(1), selected);
+                        require(selection && selection->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Selected stock target spell did not commit for Flee reach");
+                    }
                     uint64_t decided = 0;
                     for (uint64_t frame = 1; frame <= 90 && !decided; ++frame)
                     {
@@ -8257,15 +8367,23 @@ namespace TES3MP::Native::Testing
                     }
                     require(decided, "Committed Demoralize did not select stock Flee over attack");
                     const auto chosen = read(bytes(service)).combat->fleeDestination;
-                    require(chosen == std::array<float, 3>{60, 200, 1}
-                            || chosen == std::array<float, 3>{60, 300, 1},
-                        "Flee did not choose a connected stock pathgrid point");
+                    require(creatureTarget ? chosen == std::array<float, 3>{}
+                            : chosen == std::array<float, 3>{60, 200, 1}
+                                || chosen == std::array<float, 3>{60, 300, 1},
+                        ("Flee did not choose a connected stock pathgrid point: "
+                            + std::to_string(chosen[0]) + "," + std::to_string(chosen[1])
+                            + "," + std::to_string(chosen[2])).c_str());
                     const auto origin = service.travelDiagnostics();
                     require(bool(origin), "Flee origin missing");
                     const auto saved = bytes(service);
                     InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
                     restart.service().synchronizeCells(authority);
                     require(bytes(restart.service()) == saved, "Flee path changed on restart");
+                    if (!creatureTarget)
+                        require(read(bytes(restart.service())).combat->players[0].selectedSpell
+                                == ESM::RefId::stringRefId("ai_flee_force")
+                            && read(bytes(restart.service())).combat->players[0].drawState == 2,
+                            "Flee target spell or drawn state changed on restart");
                     auto rejected = advance(service, decided + 1);
                     require(rejected->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                         == CanonicalDurabilityResult::Rejected && bytes(service) == saved,
@@ -8276,7 +8394,10 @@ namespace TES3MP::Native::Testing
                         require(bytes(service) == bytes(restart.service()),
                             "Flee movement diverged after restart");
                     }
-                    require(read(bytes(service)).combat->fleeDestination == chosen,
+                    if (creatureTarget)
+                        require(!read(bytes(service)).combat->fleeTarget,
+                            "Pathgrid-free blind flee did not end after its stock interval");
+                    else require(read(bytes(service)).combat->fleeDestination == chosen,
                         "Active pathgrid flee changed destination at the blind-run deadline");
                     const auto moved = service.travelDiagnostics();
                     require(moved && moved->position[1] > origin->position[1] + 20.f,

@@ -1,7 +1,6 @@
 # Durable decisions
 
-CURRENT.md records implementation. M4 runtime decisions are approved;
-script-scoping proposals remain labeled.
+CURRENT.md records implementation; script-scoping proposals remain labeled.
 
 ## Product, authority and reuse
 
@@ -10,29 +9,27 @@ scripting, including TR; no independent formulas, catalogs or quest language.
 Keep baseline 0.51.0. TES3MP 0.8 compatibility is unnecessary; mod support requires
 evidence.
 
-**Independent networking; native runtime.** Keep components/tes3mp portable and
-engine-independent. An app-local runtime may extract gameplay shared with stock
-OpenMW callers. Preserve dependency checks.
+**Independent networking; native runtime.** Keep components/tes3mp portable.
+An app-local runtime may share gameplay with stock OpenMW. Preserve dependency
+checks.
 
-**One gameplay loadout.** OpenMW resolves configuration, encoding, load order,
-overrides/deletions and references. Bind plugins/scripts/settings/resources to
-server/client/save identity. Python may package/hash/cache, not reinterpret ESM.
-Unsupported behavior rejects visibly.
+**One gameplay loadout.** OpenMW resolves content. Bind plugins,
+scripts, settings and resources to campaign identity. Python may package and
+hash, never reinterpret ESM. Unsupported behavior rejects visibly.
 
-**One server authority.** The server owns actors, objects, player resources,
-time/weather and outcomes. Clients submit authenticated intent and present commits;
-prediction cannot author gameplay. Validate inherited combat movement. Schedule
-the player-area union independent of menus/scenes; NPCs have no client leases.
+**One server authority.** The server owns actors, objects, resources, time and
+outcomes. Clients submit authenticated intent and present commits. Validate
+inherited combat movement. Schedule player areas independently of menus; NPCs
+have no client leases.
 
 **M3 doors:** shared OpenMW rules own durable activation, reversal, angle and
 replication. Player contact reports bind session, placement, sequence and tick;
 expire after ten ticks; and invalidate on reconnect/reversal. They supplement
 server physics until movement cutover. Latency may clip; preserve persistence.
 
-**Presentation is separate.** Clients own UI, visuals and audio. Cosmetic assets may
-vary; collision and script resources enter gameplay identity. Reuse MWScript/Lua
-with bounded context and semantic serialization. Never persist pointers, render
-objects or sessions.
+**Presentation is separate.** Clients own UI, visuals and audio. Collision and
+script resources enter gameplay identity. Reuse MWScript/Lua with bounded context
+and semantic serialization. Never persist pointers, render objects or sessions.
 
 ## M4 actor simulation
 
@@ -41,16 +38,13 @@ snapshots and explicit activity/identity. AI, physics, combat, wear, charge, dea
 and loot share authoritative inventories. Preserve stock callers and dependency
 checks; avoid World/UI wrappers.
 
-**Gameplay animation.** Keep CPU movement, hit keys and projectile/spell releases;
-clients render commits. Bind timing/collision resources to gameplay identity;
-null presentation cannot suppress mechanics. V22 persists full-wind-up selection
-and rechecks reach at the KF hit key. Inherited movement uses center reach until
-native hulls are bound.
+**Gameplay animation.** Keep CPU movement, hit keys and releases; clients render
+commits. Bind timing/collision resources; null presentation cannot suppress
+mechanics. V22 persists wind-up selection and rechecks reach at the hit key.
 
 **Travel scheduling.** Simulate the player/traveler area union once per actor.
-Bound work; persist destinations, completion and stock Travel guards. Saturation
-pauses substeps without resetting travel. Stable placement IDs prevent duplicate
-actors. Freeze offline players.
+Persist destinations and stock guards. Saturation pauses substeps. Placement IDs
+prevent duplicates; offline players freeze.
 
 **Composed ticks.** One transaction stages intents, simulation, resources, effects,
 wear, death/loot, RNG and receipts; persist before publication. WhenUsed pays at
@@ -58,9 +52,8 @@ launch, and source identities survive item movement. Door contact precedes physi
 Persist avoidance and private RNG.
 
 **Casting authority and recovery.** Retain caster kind, ID and launch life through
-flight, effects and death history. NPC respawn clears body effects, while attribution
-on others survives. Trusted NPC commands never enter client input. Death cancels
-NPC flights. New descriptor domains require fresh campaigns.
+flight, effects and death. NPC respawn clears body effects; attribution on others
+survives. Trusted NPC commands never enter client input. Death cancels flights.
 
 V39-V42 select the nearest visible living player with ID ties every eight ticks.
 Stock ratings compare weapons/ammunition, equipped WhenUsed and spells; unsupported
@@ -69,16 +62,13 @@ together. Inactive areas pause; launch revalidates. T3C5/capability 23 and T3C2
 events retain caster life. V46 projects swing sections without replaying gameplay
 keys or Lua callbacks; clients never advance the authoritative clock.
 
-**Equipped passive sources.** Candidate equipment selects constant effects by item
-instance and effect ordinal before combat. Rolls persist while that instance stays
-equipped; replacement and respawn install new sources in the same transaction.
-Recovery checks arguments, source membership and magnitude bounds without rolling.
-Modifiers overlay detached combat stats and never accumulate in saved base state.
+**Equipped passive sources.** Select constants by item and effect ordinal before
+combat. Rolls persist while equipped; replacement and respawn install new sources.
+Recovery validates them without rolling. Modifiers overlay detached stats.
 
 **Combat latency.** Predict swing/cast presentation; the server owns consequences.
-Use server-time contacts pending latency measurements; full-world rewind is not
-selected. Replicate timestamped reliable action/life events and latest-wins motion.
-V31 compares projectile contacts against a 32-unit active player sphere until
+Use server-time contacts pending measurements. Replicate reliable action/life
+events and latest-wins motion. V31 uses a 32-unit active player sphere until
 shared hulls are bound.
 
 **Melee state.** Negative fatigue prevents attacks and routes unarmed damage to
@@ -119,11 +109,10 @@ the descriptor's authored travel goal in the same composed tick; rejected writes
 retain the prior path and position. General combat aggression, flee routes and
 dialogue still require their owning actor/context consumers.
 
-**Movement smoothness (target).** Cut over after unified collision and smooth
-replication; validate inherited contacts meanwhile. Use stock physics, remote
-interpolation and bounded extrapolation. Predict locally with fixed steps; restore
-acknowledged physics and replay input. Timestamp obstacles; blend corrections;
-reset on teleport, respawn and cell change. Measure jitter and overruns.
+**Movement smoothness (target).** Cut over after unified collision and replication.
+Use stock physics, interpolation and bounded extrapolation. Predict with fixed
+steps; restore acknowledged physics and replay input. Reset on teleport, respawn
+and cell change. Measure jitter and overruns.
 
 ## Cooperative progression design
 
@@ -286,6 +275,14 @@ abilities and equipped constants as durable sources; never reroll them on recove
 T3D1/capability 29 adds Charm to actor presentation so stock dialogue disposition
 consumes committed magnitude. Earlier campaign and wire versions retain their
 layouts; fresh V57 campaigns are required.
+
+**Player AI context (V58).** Store bounded player faction membership, crime,
+bounty, draw state, werewolf flags and spell/item selection in the actor campaign;
+validate faction/spell IDs against bound content and item selection against the
+committed inventory on recovery. Only trusted state updates may write these
+fields. Share stock numeric aggression terms while keeping the server the sole
+gameplay writer. V57 remains readable under its prior descriptor; V58 requires
+a fresh campaign rather than implicit migration.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

@@ -43,8 +43,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t SpecialConditionsCampaignMagic = 0x5450434154335354;
     inline constexpr uint64_t MovementEffectsCampaignMagic = 0x5550434154335354;
     inline constexpr uint64_t AiDecisionCampaignMagic = 0x5650434154335354;
+    inline constexpr uint64_t PlayerAiCampaignMagic = 0x5750434154335354;
+    inline constexpr bool hasPlayerAi(uint64_t magic) { return magic == PlayerAiCampaignMagic; }
     inline constexpr bool hasAiDecisions(uint64_t magic)
-    { return magic == AiDecisionCampaignMagic; }
+    { return magic == AiDecisionCampaignMagic || hasPlayerAi(magic); }
     inline constexpr bool hasMovementEffects(uint64_t magic)
     { return magic == MovementEffectsCampaignMagic || hasAiDecisions(magic); }
     inline constexpr bool hasPlayerCasts(uint64_t magic)
@@ -138,6 +140,24 @@ namespace TES3MP::Native
     }
     struct ActorCampaignCombat
     {
+        struct PlayerAi
+        {
+            struct Faction
+            {
+                ESM::RefId id;
+                int rank = 0;
+                bool expelled = false;
+                bool operator==(const Faction&) const = default;
+            };
+            std::vector<Faction> factions;
+            int bounty = 0, crimeDisposition = 0;
+            uint64_t drawState = 0;
+            bool werewolf = false, knownWerewolf = false;
+            ESM::RefId selectedSpell;
+            uint64_t selectedEnchantedItem = 0;
+            bool operator==(const PlayerAi&) const = default;
+        };
+        std::array<PlayerAi, 2> players;
         struct ConditionSource
         {
             uint64_t actor = 0, source = 0;
@@ -390,6 +410,43 @@ namespace TES3MP::Native
                     || (state.fleeUntil > tick && state.fleeUntil - tick > 30))))
                 throw std::invalid_argument("Native flee state invalid");
         }
+        if (hasPlayerAi(magic))
+            for (auto& player : combat->players)
+            {
+                const auto count = getAreaWord(bytes, offset);
+                if (count > 256 || count > (bytes.size() - offset) / 24)
+                    throw std::invalid_argument("Native player faction count invalid");
+                player.factions.reserve(size_t(count));
+                for (uint64_t i = 0; i < count; ++i)
+                {
+                    const auto length = getAreaWord(bytes, offset);
+                    if (!length || length > 256 || length > bytes.size() - offset)
+                        throw std::invalid_argument("Native player faction identity invalid");
+                    const auto id = ESM::RefId::deserializeText(
+                        std::string_view(bytes.data() + offset, size_t(length)));
+                    offset += size_t(length);
+                    const auto rank = getAreaWord(bytes, offset), expelled = getAreaWord(bytes, offset);
+                    if (id.empty() || rank > 9 || expelled > 1
+                        || std::ranges::any_of(player.factions, [&](const auto& entry) { return entry.id == id; }))
+                        throw std::invalid_argument("Native player faction state invalid");
+                    player.factions.push_back({id, int(rank), bool(expelled)});
+                }
+                const auto bounty = getAreaWord(bytes, offset), crime = getAreaWord(bytes, offset);
+                player.drawState = getAreaWord(bytes, offset);
+                const auto werewolf = getAreaWord(bytes, offset), known = getAreaWord(bytes, offset);
+                const auto spellLength = getAreaWord(bytes, offset);
+                if (bounty > INT32_MAX || crime > UINT32_MAX || player.drawState > 2
+                    || werewolf > 1 || known > 1 || spellLength > 256
+                    || spellLength > bytes.size() - offset)
+                    throw std::invalid_argument("Native player AI state invalid");
+                player.bounty = int(bounty); player.crimeDisposition = std::bit_cast<int32_t>(uint32_t(crime));
+                player.werewolf = bool(werewolf); player.knownWerewolf = bool(known);
+                if (spellLength)
+                    player.selectedSpell = ESM::RefId::deserializeText(
+                        std::string_view(bytes.data() + offset, size_t(spellLength)));
+                offset += size_t(spellLength);
+                player.selectedEnchantedItem = getAreaWord(bytes, offset);
+            }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
             || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
