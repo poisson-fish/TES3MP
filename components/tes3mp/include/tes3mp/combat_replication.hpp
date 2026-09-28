@@ -35,6 +35,10 @@ namespace TES3MP
         // Invisibility, Chameleon, Light, NightEye, DetectAnimal,
         // DetectEnchantment, DetectKey; aggregate magnitudes after source suppression.
         std::array<float, 7> visibility{};
+        // WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather, Jump,
+        // Levitate, SlowFall; committed magnitudes for inherited OpenMW movement.
+        std::array<float, 8> movement{};
+        bool movementOwned = false;
         friend bool operator==(const ActorPresentationSnapshot&, const ActorPresentationSnapshot&) = default;
     };
     inline constexpr std::size_t MaximumCombatSnapshotActors = 248;

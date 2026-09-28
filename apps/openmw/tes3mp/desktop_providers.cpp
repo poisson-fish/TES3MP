@@ -2167,6 +2167,9 @@ namespace TES3MP::OpenMWAdapter
                 const std::array effects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
                     ESM::MagicEffect::Light, ESM::MagicEffect::NightEye, ESM::MagicEffect::DetectAnimal,
                     ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey};
+                const std::array movementEffects{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
+                    ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden, ESM::MagicEffect::Feather,
+                    ESM::MagicEffect::Jump, ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall};
                 const auto apply = [&](const ActorPresentationSnapshot& pose, const MWWorld::Ptr& ptr,
                     MWRender::Animation* animation) {
                     if (ptr.isEmpty() || !animation) return false;
@@ -2178,6 +2181,13 @@ namespace TES3MP::OpenMWAdapter
                         magic.add(MWMechanics::EffectKey(effects[i]),
                             MWMechanics::EffectParam(pose.visibility[i] - actual));
                     }
+                    if (pose.movementOwned)
+                        for (size_t i = 0; i < movementEffects.size(); ++i)
+                        {
+                            const auto current = magic.getOrDefault(movementEffects[i]);
+                            magic.add(MWMechanics::EffectKey(movementEffects[i]),
+                                MWMechanics::EffectParam(pose.movement[i] - current.getMagnitude()));
+                        }
                     animation->setLightEffect(pose.visibility[2]);
                     const float invisibility = pose.visibility[0] > 0.f
                         ? (pose.kind == 1 && pose.id == combatSnapshot->selfPlayerId().value() ? 0.25f : 0.05f)

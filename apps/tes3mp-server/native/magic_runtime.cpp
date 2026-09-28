@@ -71,6 +71,13 @@ namespace TES3MP::Native
                 content.get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat());
         else MWMechanics::applySkillDamage(target, effect.mSkill, restore ? -magnitude : magnitude);
     }
+    bool movementEffect(ESM::RefId id)
+    {
+        return id == ESM::MagicEffect::WaterBreathing || id == ESM::MagicEffect::SwiftSwim
+            || id == ESM::MagicEffect::WaterWalking || id == ESM::MagicEffect::Burden
+            || id == ESM::MagicEffect::Feather || id == ESM::MagicEffect::Jump
+            || id == ESM::MagicEffect::Levitate || id == ESM::MagicEffect::SlowFall;
+    }
     bool expandedCombatEffect(ESM::RefId id)
     {
         return permanentStatEffect(id) || fortifyDynamicStat(id) >= 0 || wholeSourceCure(id)
@@ -107,7 +114,8 @@ namespace TES3MP::Native
     namespace
     {
         bool supportedInstantEffect(const ESM::ENAMstruct& effect, bool actorLifecycle,
-            bool expandedEffects = false, bool persistentSpecial = false, bool specialConditions = false)
+            bool expandedEffects = false, bool persistentSpecial = false, bool specialConditions = false,
+            bool movementEffects = false)
         {
             if (!specialConditions && (effect.mEffectID == ESM::MagicEffect::SunDamage
                 || effect.mEffectID == ESM::MagicEffect::ResistCorprusDisease
@@ -121,6 +129,7 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
             return prior || (actorLifecycle && ((expandedEffects && expandedCombatEffect(effect.mEffectID))
+                || (movementEffects && movementEffect(effect.mEffectID))
                 || (persistentSpecial && (effect.mEffectID == ESM::MagicEffect::Corprus
                     || effect.mEffectID == ESM::MagicEffect::Vampirism))
                 || supportedCombatModifier(effect.mEffectID)
@@ -194,7 +203,7 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId id,
-        const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions)
+        const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects)
     {
         const auto* enchantment = content.get<ESM::Enchantment>().search(id);
         if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
@@ -230,11 +239,14 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DetectAnimal
                 || effect.mEffectID == ESM::MagicEffect::DetectEnchantment
                 || effect.mEffectID == ESM::MagicEffect::DetectKey
-                || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka));
+                || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
+                || (movementEffects && movementEffect(effect.mEffectID))));
             if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
                 || (magic->mData.mFlags & ESM::MagicEffect::Harmful)
                 || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
-                    && effect.mEffectID != ESM::MagicEffect::Invisibility)
+                    && effect.mEffectID != ESM::MagicEffect::Invisibility
+                    && effect.mEffectID != ESM::MagicEffect::WaterBreathing
+                    && effect.mEffectID != ESM::MagicEffect::WaterWalking)
                 || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
                 || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
                 || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
@@ -247,7 +259,7 @@ namespace TES3MP::Native
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle, bool expandedEffects,
-        bool persistentSpecial, bool specialConditions)
+        bool persistentSpecial, bool specialConditions, bool movementEffects)
     {
         if (effects.mList.empty() || effects.mList.size() > 8) return std::nullopt;
         PreparedInstantEffects result;
@@ -266,7 +278,7 @@ namespace TES3MP::Native
                     || effect.mEffectID == ESM::MagicEffect::DamageSkill
                     || effect.mEffectID == ESM::MagicEffect::RestoreSkill)));
             if (!magic || !supportedInstantEffect(effect, actorLifecycle, expandedEffects,
-                    persistentSpecial, specialConditions)
+                    persistentSpecial, specialConditions, movementEffects)
                 || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
                 || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty())
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
@@ -295,13 +307,13 @@ namespace TES3MP::Native
 
     std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
         const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
-        bool actorLifecycle, bool expandedEffects, bool specialConditions)
+        bool actorLifecycle, bool expandedEffects, bool specialConditions, bool movementEffects)
     {
         if (enchantment.mData.mType != ESM::Enchantment::WhenUsed
             && enchantment.mData.mType != ESM::Enchantment::WhenStrikes
             && enchantment.mData.mType != ESM::Enchantment::CastOnce) return std::nullopt;
         auto effects = prepareInstantEffects(enchantment.mEffects, content, actorLifecycle, expandedEffects,
-            false, specialConditions);
+            false, specialConditions, movementEffects);
         if (!effects || !std::isfinite(charge) || (charge < 0 && charge != -1.f)) return std::nullopt;
         if (enchantment.mData.mType == ESM::Enchantment::CastOnce)
             return PreparedEnchantmentCast{std::move(*effects), charge, true, true};
@@ -319,11 +331,12 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool actorLifecycle, bool expandedEffects, bool specialConditions)
+        const MWWorld::ESMStore& content, bool actorLifecycle, bool expandedEffects, bool specialConditions,
+        bool movementEffects)
     {
         if (spell.mData.mType != ESM::Spell::ST_Spell) return std::nullopt;
         auto effects = prepareInstantEffects(spell.mEffects, content, actorLifecycle, expandedEffects,
-            false, specialConditions);
+            false, specialConditions, movementEffects);
         if (!effects) return std::nullopt;
         PreparedInstantSpell result;
         result.effects = std::move(*effects);

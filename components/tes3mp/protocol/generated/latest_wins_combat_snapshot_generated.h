@@ -832,7 +832,9 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
     VT_CAST_ELAPSED = 46,
     VT_CAST_RELEASE = 48,
     VT_CAST_STOP = 50,
-    VT_VISIBILITY = 52
+    VT_VISIBILITY = 52,
+    VT_MOVEMENT = 54,
+    VT_MOVEMENT_OWNED = 56
   };
   uint64_t id() const {
     return GetField<uint64_t>(VT_ID, 0);
@@ -909,6 +911,12 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   const ::flatbuffers::Vector<float> *visibility() const {
     return GetPointer<const ::flatbuffers::Vector<float> *>(VT_VISIBILITY);
   }
+  const ::flatbuffers::Vector<float> *movement() const {
+    return GetPointer<const ::flatbuffers::Vector<float> *>(VT_MOVEMENT);
+  }
+  bool movement_owned() const {
+    return GetField<uint8_t>(VT_MOVEMENT_OWNED, 0) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -939,6 +947,9 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
            VerifyField<uint16_t>(verifier, VT_CAST_STOP, 2) &&
            VerifyOffset(verifier, VT_VISIBILITY) &&
            verifier.VerifyVector(visibility()) &&
+           VerifyOffset(verifier, VT_MOVEMENT) &&
+           verifier.VerifyVector(movement()) &&
+           VerifyField<uint8_t>(verifier, VT_MOVEMENT_OWNED, 1) &&
            verifier.EndTable();
   }
 };
@@ -1022,6 +1033,12 @@ struct ActorPresentationSnapshotBuilder {
   void add_visibility(::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility) {
     fbb_.AddOffset(ActorPresentationSnapshot::VT_VISIBILITY, visibility);
   }
+  void add_movement(::flatbuffers::Offset<::flatbuffers::Vector<float>> movement) {
+    fbb_.AddOffset(ActorPresentationSnapshot::VT_MOVEMENT, movement);
+  }
+  void add_movement_owned(bool movement_owned) {
+    fbb_.AddElement<uint8_t>(ActorPresentationSnapshot::VT_MOVEMENT_OWNED, static_cast<uint8_t>(movement_owned), 0);
+  }
   explicit ActorPresentationSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1059,13 +1076,16 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     uint16_t cast_elapsed = 0,
     uint16_t cast_release = 0,
     uint16_t cast_stop = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<float>> movement = 0,
+    bool movement_owned = false) {
   ActorPresentationSnapshotBuilder builder_(_fbb);
   builder_.add_cast(cast);
   builder_.add_body_action(body_action);
   builder_.add_action(action);
   builder_.add_life(life);
   builder_.add_id(id);
+  builder_.add_movement(movement);
   builder_.add_visibility(visibility);
   builder_.add_group(group);
   builder_.add_body_frame(body_frame);
@@ -1078,6 +1098,7 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
   builder_.add_loop_stop(loop_stop);
   builder_.add_loop_start(loop_start);
   builder_.add_body_stop(body_stop);
+  builder_.add_movement_owned(movement_owned);
   builder_.add_cast_range(cast_range);
   builder_.add_cast_phase(cast_phase);
   builder_.add_dead(dead);
@@ -1115,9 +1136,12 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     uint16_t cast_elapsed = 0,
     uint16_t cast_release = 0,
     uint16_t cast_stop = 0,
-    const std::vector<float> *visibility = nullptr) {
+    const std::vector<float> *visibility = nullptr,
+    const std::vector<float> *movement = nullptr,
+    bool movement_owned = false) {
   auto group__ = group ? _fbb.CreateString(group) : 0;
   auto visibility__ = visibility ? _fbb.CreateVector<float>(*visibility) : 0;
+  auto movement__ = movement ? _fbb.CreateVector<float>(*movement) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateActorPresentationSnapshot(
       _fbb,
       id,
@@ -1144,7 +1168,9 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
       cast_elapsed,
       cast_release,
       cast_stop,
-      visibility__);
+      visibility__,
+      movement__,
+      movement_owned);
 }
 
 struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -1293,7 +1319,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3C9";
+  return "T3D0";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

@@ -114,6 +114,7 @@ namespace TES3MP::Native
         bool mPlayerCastLifecycle = false;
         bool mPersistentConditions = false; // V54 source membership survives selective cures.
         bool mSpecialConditions = false; // V55 game-time Corprus and weather-sensitive effects.
+        bool mMovementEffects = false; // V56 committed movement effects; inherited player movement remains client-side.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.

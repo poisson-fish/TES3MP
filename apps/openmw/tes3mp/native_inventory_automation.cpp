@@ -8,6 +8,7 @@
 #include "../mwgui/container.hpp"
 #include "../mwgui/countdialog.hpp"
 #include "../mwgui/inventorywindow.hpp"
+#include "../mwgui/hud.hpp"
 #include "../mwgui/itemview.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
@@ -491,6 +492,29 @@ namespace TES3MP::OpenMWAdapter
             const auto path = mTraversalControl.string() + "." + std::to_string(sequence) + ".png";
             if (!osgDB::writeImageFile(*image, path))
                 throw std::runtime_error("Traversal screenshot could not be written");
+        }
+        else if (action == "detect")
+        {
+            std::array<size_t, 3> counts{};
+            for (size_t i = 0; i < counts.size(); ++i)
+            {
+                std::vector<MWWorld::Ptr> references;
+                const auto type = i == 0 ? MWBase::World::Detect_Creature
+                    : i == 1 ? MWBase::World::Detect_Key : MWBase::World::Detect_Enchantment;
+                world->listDetectedReferences(world->getPlayerPtr(), references, type);
+                counts[i] = references.size();
+            }
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                const auto widgets = wm->getHud()->detectionMarkerCounts();
+                mOutput << "{\"event\":\"traversal_detect_markers\",\"sequence\":" << sequence
+                    << ",\"creatures\":" << counts[0] << ",\"keys\":" << counts[1]
+                    << ",\"enchantments\":" << counts[2]
+                    << ",\"widget_creatures\":" << widgets[2] << ",\"widget_keys\":" << widgets[1]
+                    << ",\"widget_enchantments\":" << widgets[0] << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
         }
         else if (action == "observe")
         {

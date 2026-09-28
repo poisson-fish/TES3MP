@@ -30,6 +30,8 @@
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadcont.hpp>
+#include <components/esm3/loadclot.hpp>
+#include <components/esm3/loadmisc.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadland.hpp>
@@ -5445,6 +5447,7 @@ namespace TES3MP::Native::Testing
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool specialConditions = effectFamily == "special-conditions";
+        const bool movementEffects = effectFamily == "movement-effects";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
             ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
@@ -6042,11 +6045,22 @@ namespace TES3MP::Native::Testing
                 if (effectFamily == "constant-concealment")
                     spell("conceal_action", {effect(ESM::MagicEffect::Chameleon, ESM::RT_Self, 2, 25)});
                 if (effectFamily == "visibility")
+                {
+                    spell("visibility_invisibility", {effect(ESM::MagicEffect::Invisibility, ESM::RT_Self, 8, 0)});
                     for (const auto id : {ESM::MagicEffect::Light, ESM::MagicEffect::NightEye,
                             ESM::MagicEffect::DetectAnimal, ESM::MagicEffect::DetectEnchantment,
                             ESM::MagicEffect::DetectKey})
                         spell("visibility_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
                             {effect(id, ESM::RT_Self, 5, 20)});
+                }
+                if (effectFamily == "movement-effects")
+                    for (const auto id : {ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
+                            ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden,
+                            ESM::MagicEffect::Feather, ESM::MagicEffect::Jump,
+                            ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall})
+                        spell("movement_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                            {effect(id, ESM::RT_Self, 5, id == ESM::MagicEffect::WaterBreathing
+                                || id == ESM::MagicEffect::WaterWalking ? 0 : 20)});
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6194,6 +6208,7 @@ namespace TES3MP::Native::Testing
             if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
                 && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
                 && effectFamily != "concealment" && effectFamily != "visibility"
+                && effectFamily != "movement-effects"
                 && effectFamily != "constant-concealment" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             ESM::RefId placedActor = npc.mId;
@@ -6308,6 +6323,7 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
                 || effectFamily == "persistent-conditions" || effectFamily == "disintegration"
                 || effectFamily == "concealment" || effectFamily == "visibility"
+                || effectFamily == "movement-effects"
                 || effectFamily == "constant-concealment" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
@@ -6316,6 +6332,14 @@ namespace TES3MP::Native::Testing
                 else if (specialConditions)
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return id.getRefIdString() != "special_corprus" && id.getRefIdString() != "special_vampire";
+                    });
+                else if (effectFamily == "visibility")
+                    std::erase_if(npc.mSpells.mList, [](auto id) {
+                        return !id.getRefIdString().starts_with("visibility_");
+                    });
+                else if (effectFamily == "movement-effects")
+                    std::erase_if(npc.mSpells.mList, [](auto id) {
+                        return !id.getRefIdString().starts_with("movement_");
                     });
                 else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
@@ -6429,6 +6453,25 @@ namespace TES3MP::Native::Testing
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
             ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("npc_door"); door.mModel = "npc-door.osgt";
             out.startRecord(ESM::Door::sRecordId, 0); door.save(out); out.endRecord(ESM::Door::sRecordId);
+            if (effectFamily == "visibility")
+            {
+                ESM::Miscellaneous key = *base.store().get<ESM::Miscellaneous>().begin();
+                key.mId = ESM::RefId::stringRefId("visibility_key"); key.mScript = {};
+                key.mData.mFlags |= ESM::Miscellaneous::Key;
+                out.startRecord(ESM::Miscellaneous::sRecordId, 0); key.save(out); out.endRecord(ESM::Miscellaneous::sRecordId);
+                ESM::Enchantment enchantment; enchantment.blank();
+                enchantment.mId = ESM::RefId::stringRefId("visibility_object_enchantment");
+                enchantment.mData.mType = ESM::Enchantment::ConstantEffect;
+                enchantment.mEffects.populate({{ESM::MagicEffect::Light, {}, {}, ESM::RT_Self, 0, 0, 1, 1}});
+                out.startRecord(ESM::Enchantment::sRecordId, 0); enchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                ESM::Clothing clothing = *base.store().get<ESM::Clothing>().find(ESM::RefId::stringRefId("common_shirt_01"));
+                clothing.mId = ESM::RefId::stringRefId("visibility_enchanted_object"); clothing.mScript = {};
+                clothing.mEnchant = enchantment.mId;
+                out.startRecord(ESM::Clothing::sRecordId, 0); clothing.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                ESM::Creature creature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("dremora"));
+                creature.mId = ESM::RefId::stringRefId("visibility_creature"); creature.mScript = {};
+                out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
+            }
             ESM::Container earlierOwner; earlierOwner.blank();
             earlierOwner.mId = ESM::RefId::stringRefId("npc_magic_earlier_inventory");
             if (effectLifecycle && strike)
@@ -6457,6 +6500,15 @@ namespace TES3MP::Native::Testing
                 if (record == placedActor) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
             }
+            if (effectFamily == "visibility")
+                for (const auto [record, x, y] : {
+                        std::tuple{ESM::RefId::stringRefId("visibility_key"), 130.f, -80.f},
+                        {ESM::RefId::stringRefId("visibility_enchanted_object"), 170.f, -80.f},
+                        {ESM::RefId::stringRefId("visibility_creature"), 210.f, -80.f}})
+                {
+                    ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                    placed.mPos = {{x, y, 1}, {0, 0, 0}}; placed.save(out);
+                }
             out.endRecord(ESM::Cell::sRecordId);
             cell.mName = "NPC Door Path Test"; cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
@@ -7638,7 +7690,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "movement-effects" ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7674,7 +7726,7 @@ namespace TES3MP::Native::Testing
         }
         if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
             || effectFamily == "constant-concealment"
-            || effectFamily == "visibility" || specialConditions)
+            || effectFamily == "visibility" || effectFamily == "movement-effects" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -7755,7 +7807,8 @@ namespace TES3MP::Native::Testing
                     command = runtime.prepareMagicUse(authority, proposal(runtime, owner, tick, name, target, item, npc), id<ServerTick>(tick));
                     require(bool(command), ("Expanded effect rejected: " + std::string(name)).c_str());
                 }
-                const auto world = specialConditions ? std::optional{specialWorld()} : std::nullopt;
+                const auto world = specialConditions || movementEffects
+                    ? std::optional{specialWorld()} : std::nullopt;
                 auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
                     std::move(command), world ? &*world : nullptr);
                 require(bool(pending), "Expanded effect tick absent"); return pending;
@@ -7879,6 +7932,81 @@ namespace TES3MP::Native::Testing
                     }
                 }
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
+                return;
+            }
+            if (effectFamily == "movement-effects")
+            {
+                const auto previousDescriptor = scratch / "native-v55.txt";
+                {
+                    std::ifstream in(descriptor);
+                    std::string description((std::istreambuf_iterator<char>(in)), {});
+                    require(description.starts_with("native-inventory-56"), "Movement fixture version changed");
+                    description.replace(0, std::string_view("native-inventory-56").size(), "native-inventory-55");
+                    std::ofstream(previousDescriptor) << description;
+                }
+                InventoryHost previous(previousDescriptor, testContentManifest(), *registry, *crypto, {});
+                previous.service().synchronizeCells(authority);
+                require(!previous.service().prepareMagicUse(authority,
+                    proposal(previous.service(), 1, 1, "movement_0"), id<ServerTick>(1)),
+                    "V55 admitted a movement effect before the ownership cutover");
+                const auto previousView = previous.service().projectCombat(authority, id<SessionId>(1),
+                    id<ServerTick>(1), id<CanonicalRevision>(1));
+                require(previousView && std::ranges::none_of(previousView->presentation(),
+                    [](const auto& pose) { return pose.movementOwned; }),
+                    "V55 claimed ownership of inherited movement effects");
+                const std::array ids{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
+                    ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden,
+                    ESM::MagicEffect::Feather, ESM::MagicEffect::Jump,
+                    ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall};
+                for (size_t slot = 0; slot < ids.size(); ++slot)
+                {
+                    auto running = make(); auto& runtime = running->service();
+                    const auto name = "movement_" + std::to_string(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const float expected = slot == 0 || slot == 2 ? 1.f : 20.f;
+                    const auto projected = [&](auto& current, uint64_t tick, uint64_t observer) {
+                        const auto view = current.projectCombat(authority, id<SessionId>(observer),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                        require(bool(view), "Movement combat projection absent");
+                        const auto actor = std::ranges::find_if(view->presentation(),
+                            [](const auto& pose) { return pose.kind == 1 && pose.id == 1; });
+                        require(actor != view->presentation().end() && actor->movementOwned,
+                            "Movement player presentation absent or unowned");
+                        return actor->movement[slot];
+                    };
+                    uint64_t tick = 0;
+                    bool active = false;
+                    for (unsigned frame = 0; frame < 100 && !active; ++frame)
+                    {
+                        const auto before = bytes(runtime);
+                        auto pending = advance(runtime, ++tick, frame == 0 ? name : std::string_view{});
+                        require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(runtime) == before,
+                            "Rejected movement tick leaked a source or payment");
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Movement retry failed");
+                        active = std::ranges::any_of(read(bytes(runtime)).timedEffects,
+                            [&](const auto& effect) { return effect.actor == 0 && effect.effectIndex == index
+                                && effect.source != 0 && effect.magnitude == expected; });
+                    }
+                    require(active && projected(runtime, tick, 1) == expected
+                        && projected(runtime, tick, 2) == expected,
+                        "Movement source or two-client projection changed");
+                    const auto saved = bytes(runtime);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved && projected(restart.service(), tick, 2) == expected,
+                        "Movement restart changed source or remote projection");
+                    for (unsigned frame = 0; frame < 165; ++frame)
+                    {
+                        (void)commit(runtime, ++tick); (void)commit(restart.service(), tick);
+                        require(bytes(runtime) == bytes(restart.service())
+                            && projected(runtime, tick, 1) == projected(restart.service(), tick, 2),
+                            "Movement expiry diverged after restart");
+                    }
+                    require(projected(runtime, tick, 1) == 0.f, "Movement effect survived expiry");
+                }
+                std::cout << "movement eight effects=source rejection restart projection expiry exact\n";
                 return;
             }
             if (effectFamily == "visibility")

@@ -124,6 +124,8 @@ table ActorPresentationSnapshot {
   cast_release:ushort;
   cast_stop:ushort;
   visibility:[float];
+  movement:[float];
+  movement_owned:bool;
 }
 
 table LatestWinsCombatSnapshot {
@@ -137,5 +139,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3C9";
+file_identifier "T3D0";
 file_extension "t3cs";

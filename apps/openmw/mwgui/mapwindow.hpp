@@ -2,6 +2,7 @@
 #define MWGUI_MAPWINDOW_H
 
 #include <cstdint>
+#include <array>
 #include <memory>
 
 #include <osg/Vec2f>
@@ -86,6 +87,8 @@ namespace MWGui
 
         void onFrame(float dt);
 
+        std::array<size_t, 3> detectionMarkerCounts() const noexcept { return mDetectionMarkerCounts; }
+
         bool toggleFogOfWar();
 
         struct MarkerUserData
@@ -151,6 +154,7 @@ namespace MWGui
         std::map<std::pair<int, int>, std::vector<MarkerWidget*>> mExteriorDoorsByCell;
         std::vector<MarkerWidget*> mInteriorDoorMarkerWidgets;
         std::vector<MyGUI::Widget*> mMagicMarkerWidgets;
+        std::array<size_t, 3> mDetectionMarkerCounts{};
         std::vector<MyGUI::Widget*> mCustomMarkerWidgets;
         std::vector<MarkerWidget*> mDoorMarkersToRecycle;
 

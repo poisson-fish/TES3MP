@@ -581,6 +581,7 @@ namespace MWGui
             markerWidget->setNeedMouseFocus(false);
             markerWidget->setUserData(markerPos);
             mMagicMarkerWidgets.push_back(markerWidget);
+            ++mDetectionMarkerCounts[size_t(type)];
         }
     }
 
@@ -729,6 +730,7 @@ namespace MWGui
         for (MyGUI::Widget* widget : mMagicMarkerWidgets)
             MyGUI::Gui::getInstance().destroyWidget(widget);
         mMagicMarkerWidgets.clear();
+        mDetectionMarkerCounts.fill(0);
 
         addDetectionMarkers(MWBase::World::Detect_Creature);
         addDetectionMarkers(MWBase::World::Detect_Key);

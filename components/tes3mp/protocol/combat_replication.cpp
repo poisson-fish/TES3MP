@@ -221,7 +221,10 @@ namespace TES3MP
                     || p.castElapsed >= p.castStop || (p.castPhase <= 2 && p.castElapsed)
                     || (p.castPhase < 4 ? p.castElapsed >= p.castRelease : p.castElapsed < p.castRelease)))
                 return error(Code::InvalidFloat, 0, 0, i);
-            if (std::ranges::any_of(p.visibility, [](float magnitude) {
+            if ((!p.movementOwned && std::ranges::any_of(p.movement, [](float magnitude) { return magnitude != 0.f; }))
+                || std::ranges::any_of(p.visibility, [](float magnitude) {
+                    return !std::isfinite(magnitude) || magnitude < 0.f || magnitude > 512000.f;
+                }) || std::ranges::any_of(p.movement, [](float magnitude) {
                     return !std::isfinite(magnitude) || magnitude < 0.f || magnitude > 512000.f;
                 })) return error(Code::InvalidFloat, 0, 0, i);
             if (p.phase > 4 || p.direction > 2 || p.bodyState < 1 || p.bodyState > 4 || p.hitGroup > 16
@@ -362,7 +365,8 @@ namespace TES3MP
                 p.bodyAction, p.kind, p.phase, p.direction, p.bodyState, p.hitGroup, p.strength, p.completion,
                 p.rate, p.bodyFrame, p.bodyStop, p.loopStart, p.loopStop, builder.CreateString(p.group), p.dead,
                 p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop,
-                builder.CreateVector(p.visibility.data(), p.visibility.size())));
+                builder.CreateVector(p.visibility.data(), p.visibility.size()),
+                builder.CreateVector(p.movement.data(), p.movement.size()), p.movementOwned));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
@@ -600,7 +604,8 @@ namespace TES3MP
         {
             const auto* p = root->presentation()->Get(flatbuffers::uoffset_t(i));
             if (!p || (p->group() && p->group()->size() > 64)
-                || !p->visibility() || p->visibility()->size() != 7)
+                || !p->visibility() || p->visibility()->size() != 7
+                || !p->movement() || p->movement()->size() != 8)
                 return error(Code::TooManyEntries, 0, 7, i);
             presentation.push_back({p->id(), p->life(), p->action(), p->body_action(), p->kind(), p->phase(),
                 p->direction(), p->body_state(), p->hit_group(), p->strength(), p->completion(), p->rate(),
@@ -608,6 +613,8 @@ namespace TES3MP
                 p->group() ? p->group()->str() : std::string{}, p->dead(),
                 p->cast(), p->cast_phase(), p->cast_range(), p->cast_elapsed(), p->cast_release(), p->cast_stop()});
             std::copy(p->visibility()->begin(), p->visibility()->end(), presentation.back().visibility.begin());
+            std::copy(p->movement()->begin(), p->movement()->end(), presentation.back().movement.begin());
+            presentation.back().movementOwned = p->movement_owned();
         }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),

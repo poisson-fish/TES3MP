@@ -817,6 +817,20 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"cast_elapsed\":" << pose.castElapsed << ",\"cast_release\":" << pose.castRelease
                     << ",\"cast_stop\":" << pose.castStop << '}';
             }
+            mOutput << "],\"visibility\":[";
+            first = true;
+            for (const auto& pose : snapshot.presentation())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id << ",\"effects\":[";
+                for (size_t i = 0; i < pose.visibility.size(); ++i)
+                {
+                    if (i) mOutput << ',';
+                    mOutput << pose.visibility[i];
+                }
+                mOutput << "]}";
+            }
             mOutput << "],\"swings\":[";
             first = true;
             for (const auto& swing : snapshot.swings())
