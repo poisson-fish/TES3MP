@@ -14,6 +14,7 @@
 #include "../mwworld/inventorystore.hpp"
 
 #include "actorutil.hpp"
+#include "airating.hpp"
 #include "combat.hpp"
 #include "npcstats.hpp"
 #include "spellpriority.hpp"
@@ -511,14 +512,12 @@ namespace MWMechanics
             = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
 
         const int flee = stats.getAiSetting(AiSetting::Flee).getModified();
-        if (flee >= 100)
-            return static_cast<float>(flee);
-
         static const float fAIFleeHealthMult = gmst.find("fAIFleeHealthMult")->mValue.getFloat();
         static const float fAIFleeFleeMult = gmst.find("fAIFleeFleeMult")->mValue.getFloat();
 
         float healthPercentage = stats.getHealth().getRatio(false);
-        float rating = (1.0f - healthPercentage) * fAIFleeHealthMult + flee * fAIFleeFleeMult;
+        float rating = fleeRating(flee, healthPercentage, fAIFleeHealthMult, fAIFleeFleeMult, 0.f);
+        if (flee >= 100) return rating;
 
         static const int iWereWolfLevelToAttack = gmst.find("iWereWolfLevelToAttack")->mValue.getInteger();
 
@@ -540,10 +539,7 @@ namespace MWMechanics
     bool makeFleeDecision(const MWWorld::Ptr& actor, const MWWorld::Ptr& enemy, float antiFleeRating)
     {
         float fleeRating = vanillaRateFlee(actor, enemy);
-        if (fleeRating < 100.0f)
-            fleeRating = 0.0f;
-
-        if (fleeRating > antiFleeRating)
+        if (fleeOverAttack(fleeRating, antiFleeRating))
             return true;
 
         // Run away after summoning a creature if we have nothing to use but fists.

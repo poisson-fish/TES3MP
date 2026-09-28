@@ -38,6 +38,7 @@
 #include "actors.hpp"
 #include "actorutil.hpp"
 #include "aicombat.hpp"
+#include "airating.hpp"
 #include "aipursue.hpp"
 #include "autocalcspell.hpp"
 #include "combat.hpp"
@@ -54,7 +55,7 @@ namespace
                                                 ->get<ESM::GameSetting>()
                                                 .find("fFightDispMult")
                                                 ->mValue.getFloat();
-        return ((50.f - disposition) * fFightDispMult);
+        return MWMechanics::fightDispositionBias(disposition, fFightDispMult);
     }
 
     void getPersuasionRatings(
@@ -563,15 +564,12 @@ namespace MWMechanics
         if (playerStats.getDrawState() == MWMechanics::DrawState::Weapon)
             x += fDispWeaponDrawn;
 
-        x += ptr.getClass()
+        const float charm = ptr.getClass()
                  .getCreatureStats(ptr)
                  .getMagicEffects()
                  .getOrDefault(ESM::MagicEffect::Charm)
                  .getMagnitude();
-
-        if (clamp)
-            return std::clamp(static_cast<int>(x), 0, 100); //, normally clamped to [0..100] when used
-        return static_cast<int>(x);
+        return dispositionWithCharm(x, charm, clamp);
     }
 
     int MechanicsManager::getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying)
@@ -1893,9 +1891,9 @@ namespace MWMechanics
         if (ptr.getClass().isNpc())
             disposition = getDerivedDisposition(ptr);
 
-        int fight = ptr.getClass().getCreatureStats(ptr).getAiSetting(AiSetting::Fight).getModified()
-            + static_cast<int>(
-                getFightDistanceBias(ptr, target) + getFightDispositionBias(static_cast<float>(disposition)));
+        const float distanceBias = getFightDistanceBias(ptr, target);
+        const float dispositionBias = getFightDispositionBias(static_cast<float>(disposition));
+        int fight = ptr.getClass().getCreatureStats(ptr).getAiSetting(AiSetting::Fight).getModified();
 
         if (ptr.getClass().isNpc() && target.getClass().isNpc())
         {
@@ -1909,7 +1907,7 @@ namespace MWMechanics
             }
         }
 
-        return (fight >= 100);
+        return aggressiveAtDistance(fight, distanceBias, dispositionBias);
     }
 
     void MechanicsManager::resurrect(const MWWorld::Ptr& ptr)

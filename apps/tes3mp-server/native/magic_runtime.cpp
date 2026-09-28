@@ -213,7 +213,8 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId id,
-        const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects)
+        const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects,
+        bool aiEffects)
     {
         const auto* enchantment = content.get<ESM::Enchantment>().search(id);
         if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
@@ -251,8 +252,10 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DetectKey
                 || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
                 || (movementEffects && movementEffect(effect.mEffectID))));
-            if (!magic || (!attribute && !skill && !resistance && !supportedCombatModifier(effect.mEffectID))
-                || (magic->mData.mFlags & ESM::MagicEffect::Harmful)
+            const bool ai = aiEffects && aiDispositionEffect(effect.mEffectID);
+            if (!magic || (!attribute && !skill && !resistance && !ai
+                    && !supportedCombatModifier(effect.mEffectID))
+                || ((magic->mData.mFlags & ESM::MagicEffect::Harmful) && !ai)
                 || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
                     && effect.mEffectID != ESM::MagicEffect::Invisibility
                     && effect.mEffectID != ESM::MagicEffect::WaterBreathing
@@ -262,6 +265,26 @@ namespace TES3MP::Native
                 || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
                 || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty()))
                 return std::nullopt;
+            result.effects.push_back(effect);
+        }
+        return result;
+    }
+
+    std::optional<PreparedInstantEffects> preparePassiveAiEffects(const ESM::Spell& spell,
+        const MWWorld::ESMStore& content)
+    {
+        if (spell.mData.mType != ESM::Spell::ST_Ability || spell.mEffects.mList.empty()
+            || spell.mEffects.mList.size() > 8) return std::nullopt;
+        PreparedInstantEffects result;
+        for (const auto& entry : spell.mEffects.mList)
+        {
+            const auto& effect = entry.mData;
+            if (!aiDispositionEffect(effect.mEffectID)
+                || !content.get<ESM::MagicEffect>().search(effect.mEffectID)
+                || effect.mRange != ESM::RT_Self || effect.mArea || effect.mDuration
+                || !effect.mAttribute.empty() || !effect.mSkill.empty()
+                || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax
+                || effect.mMagnMax > 1000) return std::nullopt;
             result.effects.push_back(effect);
         }
         return result;

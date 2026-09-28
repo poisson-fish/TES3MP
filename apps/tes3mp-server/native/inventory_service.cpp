@@ -5,6 +5,7 @@
 #include "magic_runtime.hpp"
 #include "ai_magic.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
+#include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/aitimer.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
@@ -194,6 +195,13 @@ namespace TES3MP::Native
             bool commanded = false;
             bool fightModified = false;
         };
+        std::pair<bool, bool> aiActorKind(const MWWorld::Ptr& actor)
+        {
+            if (actor.getType() == ESM::NPC::sRecordId) return {true, false};
+            if (actor.getType() != ESM::Creature::sRecordId)
+                throw std::invalid_argument("Native AI actor type invalid");
+            return {false, actor.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead};
+        }
         ActorDisposition committedDisposition(const MWWorld::ESMStore& content, ESM::RefId base,
             std::span<const ActorCampaignTimedEffect> effects, size_t actor)
         {
@@ -554,7 +562,8 @@ namespace TES3MP::Native
         bool reconcileConstants(const MWWorld::PlainEquipmentValues& values, size_t actor, ActorCasterIdentity caster,
             uint64_t tick, const MWWorld::ESMStore& content, bool general,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
-            bool expanded, bool specialConditions, bool movementEffects)
+            bool expanded, bool specialConditions, bool movementEffects, bool aiDecisions,
+            bool npcActor, bool undeadActor)
         {
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
@@ -572,7 +581,7 @@ namespace TES3MP::Native
                 if (general)
                 {
                     auto prepared = prepareConstantEffects(record.mEnchant, content, expanded, specialConditions,
-                        movementEffects);
+                        movementEffects, aiDecisions);
                     if (!prepared) throw std::invalid_argument("Native constant effects unsupported");
                     plan = std::move(*prepared);
                 }
@@ -587,6 +596,9 @@ namespace TES3MP::Native
                 for (size_t ordinal = 0; ordinal < plan.effects.size(); ++ordinal)
                 {
                     const auto& entry = plan.effects[ordinal];
+                    if (aiDispositionEffect(entry.mEffectID)
+                        && !MWMechanics::validAiEffectTarget(entry.mEffectID,
+                            actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
                     const bool noMagnitude = (entry.mEffectID == ESM::MagicEffect::Invisibility
                         || entry.mEffectID == ESM::MagicEffect::WaterBreathing
                         || entry.mEffectID == ESM::MagicEffect::WaterWalking)
@@ -645,6 +657,80 @@ namespace TES3MP::Native
             });
             if (effects.size() + desired.size() > (general ? MaximumActorTimedEffects : 16))
                 throw std::invalid_argument("Native constant effect capacity exhausted");
+            effects.insert(effects.end(), desired.begin(), desired.end());
+            return true;
+        }
+
+        bool reconcilePassiveAi(const MWWorld::Ptr& ptr, size_t actor, ActorCasterIdentity caster,
+            uint64_t tick, const MWWorld::ESMStore& content,
+            std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
+            bool enabled, bool npcActor, bool undeadActor)
+        {
+            if (!enabled) return false;
+            std::vector<ActorCampaignTimedEffect> desired;
+            bool changed = false;
+            for (const auto id : actorSpells(ptr).mList)
+            {
+                const auto* spell = content.get<ESM::Spell>().search(id);
+                if (!spell || spell->mData.mType != ESM::Spell::ST_Ability) continue;
+                const bool hasAi = std::ranges::any_of(spell->mEffects.mList, [](const auto& entry) {
+                    return aiDispositionEffect(entry.mData.mEffectID);
+                });
+                if (!hasAi) continue;
+                const auto plan = preparePassiveAiEffects(*spell, content);
+                const uint64_t source = spellRecordId(id);
+                if (!plan || !source || spellBySource(content, source) != spell)
+                    throw std::invalid_argument("Native passive AI source unsupported or ambiguous");
+                for (size_t ordinal = 0; ordinal < plan->effects.size(); ++ordinal)
+                {
+                    const auto& entry = plan->effects[ordinal];
+                    if (!MWMechanics::validAiEffectTarget(entry.mEffectID,
+                            actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
+                    ActorCampaignTimedEffect effect{actor, 0.f, UINT64_MAX,
+                        uint64_t(ESM::MagicEffect::refIdToIndex(entry.mEffectID)), caster.id,
+                        source, 5, 0.f, tick, 0, 0, ordinal, caster.kind, caster.life};
+                    const auto previous = std::ranges::find_if(effects, [&](const auto& active) {
+                        return active.actor == actor && active.sourceKind == 5
+                            && active.source == source && active.ordinal == ordinal;
+                    });
+                    if (previous != effects.end())
+                    {
+                        if (previous->effectIndex != effect.effectIndex || previous->caster != caster.id
+                            || previous->casterKind != caster.kind || previous->casterLife != caster.life
+                            || previous->resistance != 0.f || previous->durationTicks != 0
+                            || previous->expiresTick != UINT64_MAX || previous->argument
+                            || previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax
+                            || std::floor(previous->magnitude) != previous->magnitude)
+                            throw std::invalid_argument("Native passive AI effect disagrees with source");
+                        effect = *previous;
+                    }
+                    else if (rng)
+                    {
+                        changed = true;
+                        effect.magnitude = MWMechanics::rollEffectMagnitude(
+                            float(entry.mMagnMin), float(entry.mMagnMax), *rng);
+                    }
+                    else if (tick) throw std::invalid_argument("Native saved passive AI effect missing");
+                    else continue;
+                    desired.push_back(effect);
+                }
+            }
+            const auto existing = std::ranges::count_if(effects, [actor](const auto& effect) {
+                return effect.actor == actor && effect.sourceKind == 5;
+            });
+            if (!rng)
+            {
+                if (existing != desired.size())
+                    throw std::invalid_argument("Native saved passive AI membership invalid");
+                return false;
+            }
+            changed |= existing != desired.size();
+            if (!changed) return false;
+            std::erase_if(effects, [actor](const auto& effect) {
+                return effect.actor == actor && effect.sourceKind == 5;
+            });
+            if (effects.size() + desired.size() > MaximumActorTimedEffects)
+                throw std::invalid_argument("Native passive AI effect capacity exhausted");
             effects.insert(effects.end(), desired.begin(), desired.end());
             return true;
         }
@@ -1189,10 +1275,16 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native combat stat owner must be the selected NPC");
             mCombatNpcOwner = size_t(owner - mBinding.mContainers.begin()) + 2;
             const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
+            const bool creatureSpellsSupported = std::ranges::all_of(actorSpells(selected).mList,
+                [&](const ESM::RefId& id) {
+                    if (!mBinding.mAiDecisions) return false;
+                    const auto* spell = content.get<ESM::Spell>().search(id);
+                    return spell && preparePassiveAiEffects(*spell, content).has_value();
+                });
             if (selected.getType() == ESM::Creature::sRecordId
-                && (!mBinding.mActorPresentation || !actorSpells(selected).mList.empty()
+                && (!mBinding.mActorPresentation || !creatureSpellsSupported
                     || mRuntime.equippedWeaponCondition(mCombatNpcOwner)))
-                throw std::invalid_argument("Creature timeline currently requires an unarmed biped without spell sources");
+                throw std::invalid_argument("Creature timeline requires an unarmed biped with supported passive spell sources");
             mCombat = initialCombat({mBinding.mActors[0].mBase, mBinding.mActors[1].mBase, owner->mBase},
                 content, mBinding.mLootSeed, mBinding.mKnockoutAnimation);
             (void)mRuntime.equippedWeaponCondition(mCombatNpcOwner);
@@ -2232,11 +2324,17 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            const auto [aiNpc, aiUndead] = aiActorKind(mRuntime.ownerPtr(mCombatNpcOwner));
             if (bool(decoded.melee) != bool(mMelee)
                 || (decoded.melee && !mBinding.mWeaponMelee && decoded.melee->identity != mBinding.mBoundMelee->mResourceIdentity))
                 throw std::invalid_argument("Native melee resource binding differs from campaign");
             if (bool(decoded.combat) != mBinding.mCombatState)
                 throw std::invalid_argument("Native combat campaign version differs from binding");
+            if (decoded.combat && decoded.combat->fleeTarget
+                && std::ranges::none_of(mBinding.mPlayers, [&](PlayerId player) {
+                    return player.value() == decoded.combat->fleeTarget;
+                }))
+                throw std::invalid_argument("Native flee target differs from bound players");
             if (decoded.combat && mBinding.mBoundHits)
                 for (size_t i = 0; i < decoded.combat->hitRecoveryTicks.size(); ++i)
                 {
@@ -2297,10 +2395,11 @@ namespace TES3MP::Native
                 || mBinding.mActorPresentation != hasActorPresentation(magic)
                 || mBinding.mPlayerCastLifecycle != hasPlayerCasts(magic)
                 || mBinding.mPersistentConditions != (magic == PersistentConditionsCampaignMagic
-                    || magic == SpecialConditionsCampaignMagic || magic == MovementEffectsCampaignMagic)
+                    || magic == SpecialConditionsCampaignMagic || hasMovementEffects(magic))
                 || mBinding.mSpecialConditions != (magic == SpecialConditionsCampaignMagic
-                    || magic == MovementEffectsCampaignMagic)
-                || mBinding.mMovementEffects != (magic == MovementEffectsCampaignMagic))
+                    || hasMovementEffects(magic))
+                || mBinding.mMovementEffects != hasMovementEffects(magic)
+                || mBinding.mAiDecisions != hasAiDecisions(magic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2503,6 +2602,29 @@ namespace TES3MP::Native
                                 && conditionEffects.emplace(effect.actor, effect.source, effect.ordinal).second;
                         }
                     }
+                    else if (effect.sourceKind == 5)
+                    {
+                        const auto* spell = spellBySource(mRuntime.mStore, effect.source);
+                        const auto plan = spell ? preparePassiveAiEffects(*spell, mRuntime.mStore) : std::nullopt;
+                        const auto ptr = mRuntime.ownerPtr(effect.actor == 2 ? mCombatNpcOwner : effect.actor);
+                        if (plan && effect.ordinal < plan->effects.size())
+                        {
+                            const auto& entry = plan->effects[effect.ordinal];
+                            sourceKnown = mBinding.mAiDecisions && entry.mEffectID == id
+                                && std::ranges::find(actorSpells(ptr).mList, spell->mId)
+                                    != actorSpells(ptr).mList.end()
+                                && MWMechanics::validAiEffectTarget(id,
+                                    effect.actor < 2 || aiNpc, effect.actor < 2,
+                                    effect.actor == 2 && aiUndead, true)
+                                && effect.caster == (effect.actor == 2
+                                    ? mBinding.mNavigatingActor->actorId()
+                                    : mBinding.mPlayers[size_t(effect.actor)].value())
+                                && effect.resistance == 0.f && effect.argument == 0
+                                && effect.durationTicks == 0 && effect.expiresTick == UINT64_MAX
+                                && effect.magnitude >= entry.mMagnMin
+                                && effect.magnitude <= entry.mMagnMax;
+                        }
+                    }
                     else if (effect.sourceKind == 0)
                     {
                         for (const auto& spell : mRuntime.mStore.get<ESM::Spell>())
@@ -2681,9 +2803,18 @@ namespace TES3MP::Native
                             mBinding.mDurableCasters ? (actorIndex == 2 ? 2u : 1u) : 0u,
                             mBinding.mDurableCasters ? (actorIndex == 2 ? decoded.life->generation : 1u) : 0u},
                             decoded.tick, mRuntime.mStore, mBinding.mGeneralConstants, decoded.timedEffects, nullptr,
-                            mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects);
+                            mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                            mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
                     }
                 }
+                if (mBinding.mAiDecisions)
+                    for (size_t actorIndex = 0; actorIndex < 3; ++actorIndex)
+                        reconcilePassiveAi(mRuntime.ownerPtr(actorIndex == 2 ? mCombatNpcOwner : actorIndex),
+                            actorIndex, {actorIndex == 2 ? mBinding.mNavigatingActor->actorId()
+                                    : mBinding.mPlayers[actorIndex].value(), actorIndex == 2 ? 2u : 1u,
+                                actorIndex == 2 ? decoded.life->generation : 1u}, decoded.tick,
+                            mRuntime.mStore, decoded.timedEffects, nullptr, true,
+                            actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
                 if (mBinding.mPlayerCastLifecycle)
                     for (size_t i = 0; i < 2; ++i)
                     {
@@ -2802,7 +2933,8 @@ namespace TES3MP::Native
             + (mBinding.mKnockoutRules ? 3 * 8 : 0)
             + (mBinding.mKnockoutAnimation ? 6 * 8 : 0)
             + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0)
-            + (mBinding.mActorPresentation ? 7 * 8 : 0) : 0;
+            + (mBinding.mActorPresentation ? 7 * 8 : 0)
+            + (mBinding.mAiDecisions ? 5 * 8 : 0) : 0;
         const size_t lifeSize = life ? (6 + ActorCampaignCombat::StatCount * 5 + (mBinding.mDurableCasters ? 5 : 3) * life->deaths.size()) * 8
             + life->spawnActor.size() + life->spawnInventory.size() : 0;
         const size_t projectileSize = mBinding.mMagicProjectile
@@ -2842,7 +2974,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mMovementEffects ? MovementEffectsCampaignMagic
+        putAreaWord(result, mBinding.mAiDecisions ? AiDecisionCampaignMagic
+            : mBinding.mMovementEffects ? MovementEffectsCampaignMagic
             : mBinding.mSpecialConditions ? SpecialConditionsCampaignMagic
             : mBinding.mPersistentConditions ? PersistentConditionsCampaignMagic
             : mBinding.mPlayerCastLifecycle ? PlayerCastCampaignMagic
@@ -2902,6 +3035,12 @@ namespace TES3MP::Native
             putAreaWord(result, combat->npcAction);
             for (auto v : combat->bodyAction) putAreaWord(result, v);
             for (auto v : combat->hitGroup) putAreaWord(result, v);
+        }
+        if (combat && mBinding.mAiDecisions)
+        {
+            putAreaWord(result, combat->fleeTarget); putAreaWord(result, combat->fleeUntil);
+            for (float value : combat->fleeDestination)
+                putAreaWord(result, std::bit_cast<uint32_t>(value));
         }
         if (life)
         {
@@ -3399,6 +3538,7 @@ namespace TES3MP::Native
         if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
         if (!std::isfinite(seconds) || std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
             throw std::invalid_argument("Native actor requires increasing 30 Hz durable ticks");
+        const auto [aiNpc, aiUndead] = aiActorKind(mRuntime.ownerPtr(mCombatNpcOwner));
         const uint64_t gameNowMs = mBinding.mSpecialConditions ? gameTimeMilliseconds(world) : 0;
         std::optional<ClientMeleeAttackCommand> playerAttack;
         PlayerId playerAttacker = mBinding.mPlayers[0];
@@ -3465,6 +3605,14 @@ namespace TES3MP::Native
                     if (mBinding.mNavigatingActor->contains(follow)) navigationDestination = follow;
                 }
             }
+            else if (mBinding.mAiDecisions && mCombat->fleeTarget && mCombat->fleeUntil > tick.value())
+            {
+                const auto fleeingFrom = PlayerId::fromValue(mCombat->fleeTarget);
+                const auto* player = fleeingFrom ? players.findPlayer(*fleeingFrom) : nullptr;
+                if (player && player->transform().cell() == actorCell(before)
+                    && mBinding.mNavigatingActor->contains(mCombat->fleeDestination))
+                    navigationDestination = mCombat->fleeDestination;
+            }
         }
         if (active && mBinding.mMovementEffects)
         {
@@ -3492,7 +3640,11 @@ namespace TES3MP::Native
             const bool inert = encumbrance > 1.f || magnitude(ESM::MagicEffect::Paralyze) > 0.f
                 || mCombat->knockedDown[2];
             movement.enabled = true;
-            movement.walkSpeed = inert ? 0.f : walk;
+            const bool fleeing = mBinding.mAiDecisions && mCombat->fleeTarget
+                && mCombat->fleeUntil > tick.value() && navigationDestination == mCombat->fleeDestination;
+            movement.walkSpeed = inert ? 0.f : fleeing
+                ? MWClass::npcRunSpeed(walk, athletics, setting("fAthleticsRunBonus"),
+                    setting("fBaseRunMultiplier")) : walk;
             movement.swimSpeed = inert ? 0.f : MWClass::npcSwimSpeed(walk,
                 magnitude(ESM::MagicEffect::SwiftSwim), athletics,
                 setting("fSwimRunBase"), setting("fSwimRunAthleticsMult"));
@@ -3532,6 +3684,12 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        if (combat && mBinding.mAiDecisions && combat->fleeTarget
+            && (combat->fleeUntil <= tick.value() || combat->actors[2][8][2] <= 0
+                || !std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                    return session.playerId().value() == combat->fleeTarget;
+                })))
+        { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
         if (mBinding.mRangedFlight && combat)
             std::erase_if(combat->arrows, [&](const auto& arrow) {
                 // Retain a receipt throughout the accepted input window. Once
@@ -3835,11 +3993,23 @@ namespace TES3MP::Native
                 const auto previous = timedEffects;
                 if (reconcileConstants(values, actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
-                        mBinding.mSpecialConditions, mBinding.mMovementEffects))
+                        mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                        mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
         }
+        if (mBinding.mAiDecisions && combat)
+            for (size_t actorIndex = 0; actorIndex < 3; ++actorIndex)
+            {
+                Misc::Rng::Generator rng{combat->rng};
+                const auto previous = timedEffects;
+                if (reconcilePassiveAi(mRuntime.ownerPtr(actorIndex == 2 ? mCombatNpcOwner : actorIndex),
+                        actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
+                        timedEffects, &rng, true, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead))
+                    updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
+                combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+            }
         const auto acquireCondition = [&](size_t index, const ESM::Spell& spell, Misc::Rng::Generator& rng,
             bool authored, MWMechanics::NpcStats* contactStats = nullptr) {
             ActorCampaignCombat::ConditionSource member{index, spellRecordId(spell.mId)};
@@ -4248,7 +4418,18 @@ namespace TES3MP::Native
                 if (reconcileConstants(respawn->values(), 2, {before.mActor,
                         mBinding.mDurableCasters ? 2u : 0u, mBinding.mDurableCasters ? life->generation + 1 : 0u}, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
-                        mBinding.mSpecialConditions, mBinding.mMovementEffects))
+                        mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                        mBinding.mAiDecisions, aiNpc, aiUndead))
+                    updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
+                combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+            }
+            if (mBinding.mAiDecisions)
+            {
+                Misc::Rng::Generator rng{combat->rng};
+                const auto previous = timedEffects;
+                if (reconcilePassiveAi(mRuntime.ownerPtr(mCombatNpcOwner), 2,
+                        {before.mActor, 2, life->generation + 1}, tick.value(), mRuntime.mStore,
+                        timedEffects, &rng, true, aiNpc, aiUndead))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -4861,8 +5042,44 @@ namespace TES3MP::Native
             ? committedDisposition(mRuntime.mStore, mRuntime.ownerPtr(mCombatNpcOwner).getCellRef().getRefId(),
                 timedEffects, 2) : ActorDisposition{};
         const bool npcMayAttack = !npcDisposition.calm && !npcDisposition.commanded
-            && npcDisposition.flee < 100
-            && (!npcDisposition.fightModified || npcDisposition.fight >= 100);
+            && (mBinding.mAiDecisions || (npcDisposition.flee < 100
+                && (!npcDisposition.fightModified || npcDisposition.fight >= 100)));
+        if (combat && mBinding.mAiDecisions && !npcMayAttack)
+        { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
+        const auto aggressiveAgainst = [&](const CanonicalPlayerEntityState& player) {
+            if (!mBinding.mAiDecisions || target == player.playerId().value()) return true;
+            const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+            const auto actorPtr = mRuntime.ownerPtr(mCombatNpcOwner);
+            const auto* npc = actorPtr.getType() == ESM::NPC::sRecordId
+                ? actorPtr.get<ESM::NPC>() : nullptr;
+            float disposition = 50.f;
+            if (npc)
+            {
+                const auto stats = loadCombatStats(mRuntime.mStore,
+                    combat->actors[actor(player.playerId())], timedEffects, actor(player.playerId()));
+                disposition = float(npc->mBase->mNpdt.mDisposition) + npcDisposition.charm;
+                const auto playerPtr = mRuntime.ownerPtr(actor(player.playerId()));
+                const auto* playerNpc = playerPtr.getType() == ESM::NPC::sRecordId
+                    ? playerPtr.get<ESM::NPC>() : nullptr;
+                if (playerNpc && npc->mBase->mRace == playerNpc->mBase->mRace)
+                    disposition += settings.find("fDispRaceMod")->mValue.getFloat();
+                disposition += settings.find("fDispPersonalityMult")->mValue.getFloat()
+                    * (stats.getAttribute(ESM::Attribute::Personality).getModified()
+                        - settings.find("fDispPersonalityBase")->mValue.getFloat());
+                disposition = float(MWMechanics::dispositionWithCharm(disposition, 0.f));
+            }
+            const auto position = player.transform().position();
+            const float dx = float(double(position.x()) / 1024) - before.mPosition[0];
+            const float dy = float(double(position.y()) / 1024) - before.mPosition[1];
+            const float dz = float(double(position.z()) / 1024) - before.mPosition[2];
+            const float distance = std::sqrt(dx*dx + dy*dy + dz*dz);
+            const float distanceBias = MWMechanics::fightDistanceBias(distance,
+                settings.find("iFightDistanceBase")->mValue.getInteger(),
+                settings.find("fFightDistanceMultiplier")->mValue.getFloat());
+            const float dispositionBias = MWMechanics::fightDispositionBias(disposition,
+                settings.find("fFightDispMult")->mValue.getFloat());
+            return MWMechanics::aggressiveAtDistance(npcDisposition.fight, distanceBias, dispositionBias);
+        };
         if (mBinding.mWeaponMelee && target && !npcMayAttack)
         { melee = mIdleMelee; target = 0; contact = false; }
         if (mBinding.mAutomaticNpcSpells && npcMayAttack && !automaticCast && !actorCast && step && active && !respawn && combat && life
@@ -4890,6 +5107,7 @@ namespace TES3MP::Native
                 const float dz = float(double(place.z()) / 1024) + 64.f - (before.mPosition[2] + 55.f);
                 const float distance = dx*dx + dy*dy + dz*dz;
                 if (distance < 8.f*8.f || distance > 2048.f*2048.f) continue;
+                if (!aggressiveAgainst(*player)) continue;
                 if (mBinding.mNpcFullSelection && !mBinding.mNavigatingActor->lineOfSight(
                     {before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f},
                     {float(double(place.x()) / 1024), float(double(place.y()) / 1024),
@@ -5039,9 +5257,54 @@ namespace TES3MP::Native
                         }
                     items.push_back({item.mRef.mRefNum, record.mEnchant, item.mRef.mEnchantmentCharge, true, activeSelf, enemyDuration});
                 }
-                if (const auto selected = weaponRating
-                    ? prepareAiMagicCast(selection, sources, items, mRuntime.mStore) : std::nullopt)
+                const auto selected = weaponRating
+                    ? prepareAiMagicCast(selection, sources, items, mRuntime.mStore) : std::nullopt;
+                bool flee = false;
+                if (mBinding.mAiDecisions && weaponRating)
                 {
+                    const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                    const float distanceBias = MWMechanics::fightDistanceBias(std::sqrt(nearest),
+                        settings.find("iFightDistanceBase")->mValue.getInteger(),
+                        settings.find("fFightDistanceMultiplier")->mValue.getFloat());
+                    const float rating = MWMechanics::fleeRating(npcDisposition.flee,
+                        caster.getHealth().getRatio(false),
+                        settings.find("fAIFleeHealthMult")->mValue.getFloat(),
+                        settings.find("fAIFleeFleeMult")->mValue.getFloat(), distanceBias);
+                    flee = MWMechanics::fleeOverAttack(rating,
+                        selected ? selected->rating : *weaponRating);
+                }
+                if (flee)
+                {
+                    melee = mIdleMelee; target = 0; contact = false;
+                    if (combat->fleeTarget != enemy->playerId().value() || combat->fleeUntil <= tick.value())
+                    {
+                        if (tick.value() > UINT64_MAX - 30)
+                            throw std::invalid_argument("Native flee deadline exhausted");
+                        const auto position = enemy->transform().position();
+                        const float dx = before.mPosition[0] - float(double(position.x()) / 1024);
+                        const float dy = before.mPosition[1] - float(double(position.y()) / 1024);
+                        const float length = std::hypot(dx, dy);
+                        const float directionX = length > 1.f ? dx / length : 1.f;
+                        const float directionY = length > 1.f ? dy / length : 0.f;
+                        float stride = std::clamp(movement.walkSpeed * 2.f, 96.f, 512.f);
+                        std::array<float, 3> destination{};
+                        do
+                        {
+                            destination = {before.mPosition[0] + stride * directionX,
+                                before.mPosition[1] + stride * directionY, before.mPosition[2]};
+                            if (mBinding.mNavigatingActor->contains(destination)) break;
+                            stride *= .5f;
+                        } while (stride >= 24.f);
+                        if (!mBinding.mNavigatingActor->contains(destination)) destination = before.mPosition;
+                        combat->fleeTarget = enemy->playerId().value();
+                        combat->fleeUntil = tick.value() + 30;
+                        combat->fleeDestination = destination;
+                    }
+                }
+                else if (selected)
+                {
+                    if (mBinding.mAiDecisions)
+                    { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
                     const bool self = selected->spell.effects.onlyRange(ESM::RT_Self);
                     actorCast = ActorMagicCast{before.mActor, life->generation, tick.value(),
                         selected->payment ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell,
@@ -5052,6 +5315,8 @@ namespace TES3MP::Native
                 }
                 else if (mBinding.mWeaponMelee && weaponRating)
                 {
+                    if (mBinding.mAiDecisions)
+                    { combat->fleeTarget = combat->fleeUntil = 0; combat->fleeDestination = {}; }
                     // A completed swing returns to selection on the same durable
                     // reaction cadence as casting. Never execute the old weapon
                     // while the winning carried item waits for its equipment tick.
@@ -5078,7 +5343,8 @@ namespace TES3MP::Native
                             const auto previous = timedEffects;
                             if (reconcileConstants(equipped, 2, magicCaster(2).identity, tick.value(), mRuntime.mStore,
                                     mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
-                                    mBinding.mSpecialConditions, mBinding.mMovementEffects))
+                                    mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                                    mBinding.mAiDecisions, aiNpc, aiUndead))
                                 updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                             command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
@@ -5775,7 +6041,8 @@ namespace TES3MP::Native
                 Misc::Rng::Generator rng{combat->rng};
                 if (reconcileConstants(values, index, magicCaster(index).identity, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
-                        mBinding.mSpecialConditions, mBinding.mMovementEffects))
+                        mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                        mBinding.mAiDecisions, index == 2 && aiNpc, index == 2 && aiUndead))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -6022,7 +6289,8 @@ namespace TES3MP::Native
                 p.movementOwned = mBinding.mMovementEffects;
                 const std::array visibleEffects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
                     ESM::MagicEffect::Light, ESM::MagicEffect::NightEye, ESM::MagicEffect::DetectAnimal,
-                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey};
+                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey,
+                    ESM::MagicEffect::Charm};
                 const std::array movementEffects{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
                     ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden, ESM::MagicEffect::Feather,
                     ESM::MagicEffect::Jump, ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall};

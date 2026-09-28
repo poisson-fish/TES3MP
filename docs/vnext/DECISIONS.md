@@ -280,6 +280,13 @@ death schema requires an actor life, so drowning records the NPC's own life as
 the environmental cause; distinguish environment explicitly when death ownership
 is generalized.
 
+**AI decisions (V57).** Persist the selected actor's Flee target, deadline and
+navigation destination with combat and RNG. Reconcile bounded AI-only passive
+abilities and equipped constants as durable sources; never reroll them on recovery.
+T3D1/capability 29 adds Charm to actor presentation so stock dialogue disposition
+consumes committed magnitude. Earlier campaign and wire versions retain their
+layouts; fresh V57 campaigns are required.
+
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve
 authentication/session separation, stable identities, stale/retry rejection,

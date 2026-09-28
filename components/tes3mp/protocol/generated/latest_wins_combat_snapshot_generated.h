@@ -1319,7 +1319,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3D0";
+  return "T3D1";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

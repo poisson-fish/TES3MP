@@ -28,6 +28,7 @@
 #include "../mwworld/player.hpp"
 
 #include "actorutil.hpp"
+#include "airating.hpp"
 #include "difficultyscaling.hpp"
 #include "movement.hpp"
 #include "meleestate.hpp"
@@ -516,7 +517,7 @@ namespace MWMechanics
                                                           .find("fFightDistanceMultiplier")
                                                           ->mValue.getFloat();
 
-        return (iFightDistanceBase - fFightDistanceMultiplier * d);
+        return fightDistanceBias(d, iFightDistanceBase, fFightDistanceMultiplier);
     }
 
     float getAggroDistance(const MWWorld::Ptr& actor, const osg::Vec3f& lhs, const osg::Vec3f& rhs)

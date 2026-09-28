@@ -34,7 +34,8 @@ namespace TES3MP
         std::uint16_t castElapsed = 0, castRelease = 0, castStop = 0;
         // Invisibility, Chameleon, Light, NightEye, DetectAnimal,
         // DetectEnchantment, DetectKey; aggregate magnitudes after source suppression.
-        std::array<float, 7> visibility{};
+        // The final entry carries committed Charm into stock dialogue rules.
+        std::array<float, 8> visibility{};
         // WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather, Jump,
         // Levitate, SlowFall; committed magnitudes for inherited OpenMW movement.
         std::array<float, 8> movement{};

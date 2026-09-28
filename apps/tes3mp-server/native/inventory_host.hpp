@@ -7,6 +7,9 @@
 
 namespace TES3MP::Native
 {
+    // V57 persists the selected actor's Flee interval and destination, admits
+    // bounded passive AI abilities and constant AI effects, and projects Charm
+    // in T3D1/capability 29. Fresh campaigns required; older layouts remain.
     // V54 adds durable common disease/blight/curse membership and source effects.
     // V53 persists both players' bound cast resources, source/target life,
     // wind-up/release/recovery and cancellation in the same atomic actor image.

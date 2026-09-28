@@ -336,7 +336,7 @@ namespace
         TES3MP::ActorPresentationSnapshot p;
         p.id = 1; p.kind = 1; p.cast = 9; p.castPhase = 3; p.castRange = 2;
         p.castElapsed = 3; p.castRelease = 10; p.castStop = 20;
-        p.visibility = {1.f, 25.f, 40.f, 60.f, 80.f, 100.f, 120.f};
+        p.visibility = {1.f, 25.f, 40.f, 60.f, 80.f, 100.f, 120.f, 35.f};
         p.movement = {1.f, 15.f, 1.f, 20.f, 25.f, 30.f, 35.f, 40.f};
         p.movementOwned = true;
         const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
@@ -362,7 +362,7 @@ namespace
             if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         }
         p = valid;
-        p.visibility[2] = std::numeric_limits<float>::quiet_NaN();
+        p.visibility[7] = std::numeric_limits<float>::quiet_NaN();
         if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         p = valid;
         p.movement[7] = std::numeric_limits<float>::infinity();

@@ -2166,7 +2166,8 @@ namespace TES3MP::OpenMWAdapter
             {
                 const std::array effects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
                     ESM::MagicEffect::Light, ESM::MagicEffect::NightEye, ESM::MagicEffect::DetectAnimal,
-                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey};
+                    ESM::MagicEffect::DetectEnchantment, ESM::MagicEffect::DetectKey,
+                    ESM::MagicEffect::Charm};
                 const std::array movementEffects{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
                     ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden, ESM::MagicEffect::Feather,
                     ESM::MagicEffect::Jump, ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall};

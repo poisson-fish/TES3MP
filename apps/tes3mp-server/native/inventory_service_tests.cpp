@@ -5929,6 +5929,22 @@ namespace TES3MP::Native::Testing
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
+            if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+            {
+                for (const auto [name, value] : {std::pair{"fAIFleeHealthMult", 200.f},
+                        {"fAIFleeFleeMult", 1.f}, {"fFightDistanceMultiplier", .05f},
+                        {"fFightDispMult", 1.f}})
+                {
+                    auto setting = *base.store().get<ESM::GameSetting>().find(name);
+                    setting.mValue.setFloat(value);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out);
+                    out.endRecord(ESM::GameSetting::sRecordId);
+                }
+                auto distance = *base.store().get<ESM::GameSetting>().find("iFightDistanceBase");
+                distance.mValue.setInteger(30);
+                out.startRecord(ESM::GameSetting::sRecordId, 0); distance.save(out);
+                out.endRecord(ESM::GameSetting::sRecordId);
+            }
             if (weaponExecution)
             {
                 out.startRecord(ESM::Enchantment::sRecordId, 0);
@@ -6073,6 +6089,8 @@ namespace TES3MP::Native::Testing
                     }
                 if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
                 {
+                    npc.mAiData.mFight = 20; npc.mAiData.mFlee = 0;
+                    npc.mNpdt.mDisposition = 50; npc.mNpdt.mHealth = 200;
                     for (const auto id : {ESM::MagicEffect::Charm, ESM::MagicEffect::CalmHumanoid,
                             ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyHumanoid,
                             ESM::MagicEffect::FrenzyCreature, ESM::MagicEffect::DemoralizeHumanoid,
@@ -6083,6 +6101,61 @@ namespace TES3MP::Native::Testing
                             {effect(id, ESM::RT_Target, 5, 100)});
                     spell("ai_calm_stack", {effect(ESM::MagicEffect::CalmHumanoid, ESM::RT_Target, 5, 25)});
                     spell("ai_calm_creature_stack", {effect(ESM::MagicEffect::CalmCreature, ESM::RT_Target, 5, 25)});
+                    spell("ai_hurt", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Target, 0, 170)});
+                    spell("ai_flee_force", {effect(effectFamily == "ai-creature"
+                        ? ESM::MagicEffect::FrenzyCreature : ESM::MagicEffect::FrenzyHumanoid,
+                        ESM::RT_Target, 5, 100), effect(effectFamily == "ai-creature"
+                        ? ESM::MagicEffect::DemoralizeCreature : ESM::MagicEffect::DemoralizeHumanoid,
+                        ESM::RT_Target, 5, 300)});
+                    if (effectFamily == "ai-disposition")
+                    {
+                        spell("ai_item_charm", {effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 40)}, true);
+                        spell("ai_charm_fight", {effect(ESM::MagicEffect::FrenzyHumanoid, ESM::RT_Target, 5, 100),
+                            effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 100)});
+                    }
+                    ESM::Enchantment passive; passive.blank();
+                    passive.mId = ESM::RefId::stringRefId("ai_constant_rally");
+                    passive.mData.mType = ESM::Enchantment::ConstantEffect;
+                    passive.mEffects.populate({effect(effectFamily == "ai-creature"
+                        ? ESM::MagicEffect::RallyCreature : ESM::MagicEffect::RallyHumanoid,
+                        ESM::RT_Self, 0, 20)});
+                    out.startRecord(ESM::Enchantment::sRecordId, 0); passive.save(out);
+                    out.endRecord(ESM::Enchantment::sRecordId);
+                    auto shirt = *base.store().get<ESM::Clothing>().find(
+                        ESM::RefId::stringRefId("common_shirt_01"));
+                    shirt.mId = passive.mId; shirt.mEnchant = passive.mId;
+                    shirt.mScript = {}; shirt.mData.mValue = 100;
+                    out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out);
+                    out.endRecord(ESM::Clothing::sRecordId);
+                    if (effectFamily == "ai-creature")
+                    {
+                        ESM::Armor shield; shield.blank();
+                        shield.mId = ESM::RefId::stringRefId("ai_constant_rally_shield");
+                        shield.mData.mType = ESM::Armor::Shield;
+                        shield.mData.mHealth = 100; shield.mData.mValue = 100;
+                        shield.mData.mArmor = 10; shield.mEnchant = passive.mId;
+                        out.startRecord(ESM::Armor::sRecordId, 0); shield.save(out);
+                        out.endRecord(ESM::Armor::sRecordId);
+                    }
+                    ESM::Spell ability; ability.blank();
+                    ability.mId = ESM::RefId::stringRefId("ai_passive_rally");
+                    ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({effect(effectFamily == "ai-creature"
+                        ? ESM::MagicEffect::RallyCreature : ESM::MagicEffect::RallyHumanoid,
+                        ESM::RT_Self, 0, 10)});
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out);
+                    out.endRecord(ESM::Spell::sRecordId);
+                    if (effectFamily == "ai-disposition")
+                    {
+                        ability.mId = ESM::RefId::stringRefId("ai_passive_charm");
+                        ability.mEffects.populate({effect(ESM::MagicEffect::Charm, ESM::RT_Self, 0, 10)});
+                        out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out);
+                        out.endRecord(ESM::Spell::sRecordId);
+                    }
+                    std::erase_if(npc.mInventory.mList, [](const auto& item) {
+                        return item.mItem == ESM::RefId::stringRefId("common_shirt_01");
+                    });
+                    npc.mInventory.mList.push_back({1, shirt.mId});
                 }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
@@ -6215,9 +6288,18 @@ namespace TES3MP::Native::Testing
                 }
             }
             const auto observerAppearance = npc;
-            const auto aiPlayerSpells = npc.mSpells.mList;
+            auto aiPlayerSpells = npc.mSpells.mList;
+            if (effectFamily == "ai-disposition")
+                aiPlayerSpells.push_back(ESM::RefId::stringRefId("ai_passive_charm"));
             if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+            {
                 npc.mSpells.mList.clear();
+                npc.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
+            }
+            if (effectFamily == "ai-disposition")
+                std::erase_if(npc.mInventory.mList, [](const auto& item) {
+                    return item.mItem == ESM::RefId::stringRefId("ai_item_charm");
+                });
             if (customBody)
             {
                 const auto name = encounterProfile.substr(std::string_view("vanilla-knockdown-custom:").size());
@@ -6244,11 +6326,18 @@ namespace TES3MP::Native::Testing
                 require((creature.mFlags & ESM::Creature::Bipedal) != 0, "Creature fixture must be bipedal");
                 creature.mId = placedActor = ESM::RefId::stringRefId("timeline_creature");
                 creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
+                if (effectFamily == "ai-creature")
+                {
+                    creature.mInventory.mList.push_back({1, ESM::RefId::stringRefId("ai_constant_rally_shield")});
+                    creature.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
+                }
                 creature.mData.mHealth = 10000; creature.mData.mMana = 100; creature.mData.mFatigue = 100;
                 for (auto& attribute : creature.mData.mAttributes) attribute = 40;
                 creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
                 creature.mData.mCombat = 100;
                 if (effectFamily == "ai-creature") creature.mData.mType = ESM::Creature::Undead;
+                if (effectFamily == "ai-creature")
+                { creature.mAiData.mFight = 30; creature.mAiData.mFlee = 0; creature.mData.mHealth = 200; }
                 out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
                 std::ofstream(scratch / "encounter.txt", std::ios::app)
                     << "actor timeline_creature\ncreature dremora\nmodel " << creature.mModel << "\nmelee handtohand\n";
@@ -6276,7 +6365,10 @@ namespace TES3MP::Native::Testing
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
                 if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                {
                     female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
+                    female.mInventory.mList = beast.mInventory.mList = observerAppearance.mInventory.mList;
+                }
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
                 if ((encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
                 {
@@ -7732,7 +7824,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << ((effectFamily == "ai-disposition" || effectFamily == "ai-creature") ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8012,6 +8104,24 @@ namespace TES3MP::Native::Testing
                 }) == CanonicalDurabilityResult::Committed, "AI cast retry failed");
                 while (tick < 90 && !count(runtime, calmIndex)) (void)commit(runtime, ++tick);
                 require(count(runtime, calmIndex) == 1, "CalmHumanoid did not reach the NPC");
+                const auto rallyIndex = uint64_t(ESM::MagicEffect::refIdToIndex(creatureTarget
+                    ? ESM::MagicEffect::RallyCreature : ESM::MagicEffect::RallyHumanoid));
+                const auto passive = read(bytes(runtime));
+                require(std::ranges::any_of(passive.timedEffects, [&](const auto& effect) {
+                    return effect.actor == 2 && effect.effectIndex == rallyIndex
+                        && effect.sourceKind == 3 && effect.magnitude == 20.f;
+                }), "Equipped constant Rally did not reach the selected actor");
+                require(std::ranges::any_of(passive.timedEffects, [&](const auto& effect) {
+                    return effect.actor == 2 && effect.effectIndex == rallyIndex
+                        && effect.sourceKind == 5 && effect.magnitude == 10.f;
+                }), "Authored ability Rally did not reach the selected actor");
+                if (!creatureTarget)
+                    for (size_t actor = 0; actor < 2; ++actor)
+                        require(std::ranges::any_of(passive.timedEffects, [&](const auto& effect) {
+                            return effect.actor == actor
+                                && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Charm))
+                                && effect.sourceKind == 5 && effect.magnitude == 10.f;
+                        }), "Authored ability Charm did not reach a player");
                 auto stacked = advance(runtime, ++tick, creatureTarget
                     ? "ai_calm_creature_stack" : "ai_calm_stack", 2, npc, false, true);
                 require(stacked->commit(accepted) == CanonicalDurabilityResult::Committed,
@@ -8029,6 +8139,116 @@ namespace TES3MP::Native::Testing
                         "AI stacking, combat choice or expiry diverged after restart");
                 }
                 require(!count(runtime, calmIndex), "CalmHumanoid survived expiry");
+                {
+                    auto ordinary = make(); auto& plain = ordinary->service();
+                    for (uint64_t frame = 1; frame <= 75; ++frame) (void)commit(plain, frame);
+                    require(!read(bytes(plain)).combat->npcAction,
+                        "Low stock Fight acquired a distant player without a modifier");
+                    auto fierce = make(); auto& fighter = fierce->service();
+                    const auto frenzy = creatureTarget ? ESM::MagicEffect::FrenzyCreature
+                        : ESM::MagicEffect::FrenzyHumanoid;
+                    const auto frenzyIndex = uint64_t(ESM::MagicEffect::refIdToIndex(frenzy));
+                    bool aggressive = false;
+                    for (uint64_t frame = 1; frame <= 90; ++frame)
+                    {
+                        (void)commit(fighter, frame, frame == 1
+                            ? "ai_" + std::to_string(frenzyIndex) : std::string{},
+                            1, npc, false, frame == 1);
+                        aggressive |= read(bytes(fighter)).combat->npcAction != 0;
+                    }
+                    require(count(fighter, frenzyIndex) && aggressive,
+                        "Committed Frenzy did not cross stock distance/disposition Fight threshold");
+                    if (!creatureTarget)
+                    {
+                        auto charmed = make(); auto& service = charmed->service();
+                        bool bothApplied = false;
+                        for (uint64_t frame = 1; frame <= 90; ++frame)
+                        {
+                            (void)commit(service, frame, frame == 1 ? "ai_charm_fight" : std::string_view{},
+                                1, npc, false, frame == 1);
+                            bothApplied |= count(service, frenzyIndex) != 0
+                                && count(service, uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Charm))) != 0;
+                        }
+                        require(bothApplied && !read(bytes(service)).combat->npcAction,
+                            "Committed Charm did not lower stock aggression through disposition");
+                    }
+                }
+                {
+                    auto fleeing = make(); auto& service = fleeing->service();
+                    uint64_t decided = 0;
+                    for (uint64_t frame = 1; frame <= 90 && !decided; ++frame)
+                    {
+                        (void)commit(service, frame, frame == 1 ? "ai_flee_force" : std::string{},
+                            1, npc, false, frame == 1);
+                        if (read(bytes(service)).combat->fleeTarget) decided = frame;
+                    }
+                    require(decided, "Committed Demoralize did not select stock Flee over attack");
+                    const auto origin = service.travelDiagnostics();
+                    require(bool(origin), "Flee origin missing");
+                    const auto saved = bytes(service);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved, "Flee path changed on restart");
+                    auto rejected = advance(service, decided + 1);
+                    require(rejected->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(service) == saved,
+                        "Rejected flee movement changed committed path");
+                    for (uint64_t frame = decided + 1; frame <= decided + 22; ++frame)
+                    {
+                        (void)commit(service, frame); (void)commit(restart.service(), frame);
+                        require(bytes(service) == bytes(restart.service()),
+                            "Flee movement diverged after restart");
+                    }
+                    const auto moved = service.travelDiagnostics();
+                    require(moved && moved->position[1] > origin->position[1] + 20.f,
+                        "Flee destination did not move the actor away from the player");
+                }
+                {
+                    auto injured = make(); auto& service = injured->service();
+                    const auto frenzy = creatureTarget ? ESM::MagicEffect::FrenzyCreature
+                        : ESM::MagicEffect::FrenzyHumanoid;
+                    const auto source = "ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(frenzy));
+                    bool lostHealth = false, choseFlee = false;
+                    for (uint64_t frame = 1; frame <= 110; ++frame)
+                    {
+                        (void)commit(service, frame, frame == 1 ? source
+                            : frame == 2 ? std::string("ai_hurt") : std::string{},
+                            frame == 2 ? 2 : 1, npc, false, frame <= 2);
+                        const auto state = read(bytes(service));
+                        lostHealth |= state.combat->actors[2][8][2] < 100.f;
+                        choseFlee |= lostHealth && state.combat->fleeTarget != 0;
+                        if (choseFlee) break;
+                    }
+                    require(lostHealth && choseFlee,
+                        "Low committed health did not raise the stock Flee rating over attack");
+                }
+                if (!creatureTarget)
+                {
+                    auto enchanted = make(); auto& service = enchanted->service();
+                    const auto charmIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Charm));
+                    bool applied = false;
+                    uint64_t landed = 0;
+                    for (uint64_t frame = 1; frame <= 90 && !applied; ++frame)
+                    {
+                        (void)commit(service, frame, frame == 1 ? "ai_item_charm" : std::string_view{},
+                            1, npc, frame == 1, frame == 1);
+                        const auto state = read(bytes(service));
+                        applied = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.effectIndex == charmIndex
+                                && effect.sourceKind == uint64_t(MagicUseSourceKind::EnchantedItem);
+                        });
+                        if (applied) landed = frame;
+                    }
+                    require(applied, "WhenUsed Charm did not commit to NPC dialogue effects");
+                    const auto saved = bytes(service);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved, "WhenUsed Charm changed on restart");
+                    auto rejected = advance(service, landed + 1);
+                    require(rejected->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(service) == saved,
+                        "Rejected WhenUsed Charm tick changed disposition");
+                }
                 const std::vector<ESM::RefId> valid = creatureTarget
                     ? std::vector<ESM::RefId>{ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead,
                         ESM::MagicEffect::FrenzyCreature, ESM::MagicEffect::DemoralizeCreature,
@@ -8036,10 +8256,10 @@ namespace TES3MP::Native::Testing
                     : std::vector<ESM::RefId>{ESM::MagicEffect::Charm, ESM::MagicEffect::CommandHumanoid,
                         ESM::MagicEffect::FrenzyHumanoid, ESM::MagicEffect::DemoralizeHumanoid,
                         ESM::MagicEffect::RallyHumanoid};
-                for (const auto id : valid)
+                for (const auto effectId : valid)
                 {
                     auto isolated = make(); auto& service = isolated->service();
-                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
+                    const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(effectId));
                     const auto sourceName = "ai_" + std::to_string(index);
                     bool applied = false;
                     uint64_t appliedTick = 0;
@@ -8047,11 +8267,45 @@ namespace TES3MP::Native::Testing
                     {
                         (void)commit(service, frame, frame == 1 ? sourceName : std::string_view{},
                             1, npc, false, frame == 1);
-                        applied = count(service, index) != 0;
+                        const auto state = read(bytes(service));
+                        applied = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.effectIndex == index && effect.sourceKind < 3;
+                        });
                         if (applied) appliedTick = frame;
                     }
                     require(applied, "Valid NPC AI source did not commit");
-                    if (id == ESM::MagicEffect::CommandHumanoid || id == ESM::MagicEffect::CommandCreature)
+                    if (effectId == ESM::MagicEffect::Charm)
+                    {
+                        const auto snapshot = service.projectCombat(authority, id<SessionId>(1),
+                            id<ServerTick>(appliedTick), id<CanonicalRevision>(appliedTick));
+                        require(bool(snapshot), "Committed Charm combat snapshot missing");
+                        const auto presented = std::ranges::find_if(snapshot->presentation(), [&](const auto& pose) {
+                            return pose.kind == 2 && pose.id == npc;
+                        });
+                        require(presented != snapshot->presentation().end() && presented->visibility[7] > 0.f,
+                            "Committed Charm did not reach stock dialogue magic effects");
+                        const auto charmImage = bytes(service);
+                        InventoryHost charmRestart(descriptor, testContentManifest(), *registry, *crypto, charmImage);
+                        charmRestart.service().synchronizeCells(authority);
+                        require(bytes(charmRestart.service()) == charmImage,
+                            "Committed Charm source changed on restart");
+                        auto rejectedCharm = advance(service, appliedTick + 1);
+                        require(rejectedCharm->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(service) == charmImage,
+                            "Rejected Charm expiry tick changed committed disposition");
+                        for (uint64_t frame = appliedTick + 1; frame <= appliedTick + 155; ++frame)
+                        {
+                            (void)commit(service, frame); (void)commit(charmRestart.service(), frame);
+                            require(bytes(service) == bytes(charmRestart.service()),
+                                "Charm disposition diverged after restart");
+                        }
+                        const auto expired = service.projectCombat(authority, id<SessionId>(1),
+                            id<ServerTick>(appliedTick + 155), id<CanonicalRevision>(appliedTick + 155));
+                        require(expired && std::ranges::none_of(expired->presentation(), [&](const auto& pose) {
+                            return pose.kind == 2 && pose.id == npc && pose.visibility[7] != 0.f;
+                        }), "Expired Charm remained in dialogue disposition projection");
+                    }
+                    if (effectId == ESM::MagicEffect::CommandHumanoid || effectId == ESM::MagicEffect::CommandCreature)
                     {
                         auto ordinary = make(); auto& baseline = ordinary->service();
                         for (uint64_t frame = 1; frame <= 100; ++frame) (void)commit(baseline, frame);

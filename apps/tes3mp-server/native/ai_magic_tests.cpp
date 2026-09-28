@@ -2,6 +2,7 @@
 #include <apps/openmw/mwmechanics/spells.hpp>
 #include "loadout.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
+#include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/spellresistance.hpp>
 #include <apps/openmw/mwmechanics/spelleffects.hpp>
 #include <apps/openmw/mwmechanics/weaponpriority.hpp>
@@ -336,7 +337,33 @@ namespace
     }
     void aiDispositionRules()
     {
+        near(MWMechanics::fightDistanceBias(200.f, 50, .1f), 30.f,
+            "Stock distance bias changed");
+        near(MWMechanics::fightDispositionBias(70.f, 1.5f), -30.f,
+            "Stock disposition bias changed");
+        require(MWMechanics::aggressiveAtDistance(100, 20.f, -15.f)
+            && !MWMechanics::aggressiveAtDistance(90, 20.f, -15.f),
+            "Fight threshold changed");
+        near(MWMechanics::fleeRating(40, .2f, 100.f, 1.f, 10.f), 130.f,
+            "Low health flee rating changed");
+        require(MWMechanics::fleeOverAttack(130.f, 50.f)
+            && !MWMechanics::fleeOverAttack(130.f, 150.f)
+            && !MWMechanics::fleeOverAttack(99.f, 0.f),
+            "Flee attack competition changed");
+        require(MWMechanics::dispositionWithCharm(74.9f, 25.f) == 99
+            && MWMechanics::dispositionWithCharm(74.9f, 26.f) == 100,
+            "Charm dialogue disposition changed");
         MWWorld::ESMStore store; content(store);
+        const auto constant = [&](ESM::RefId effect) {
+            ESM::Enchantment source; source.blank();
+            source.mId = id("ai_constant_" + std::to_string(ESM::MagicEffect::refIdToIndex(effect)));
+            source.mData.mType = ESM::Enchantment::ConstantEffect;
+            source.mEffects.populate({{effect, {}, {}, ESM::RT_Self, 0, 0, 10, 10}});
+            store.insertStatic(source);
+            require(!prepareConstantEffects(source.mId, store, true, false, true)
+                && prepareConstantEffects(source.mId, store, true, false, true, true),
+                "AI constant source crossed its V57 gate");
+        };
         const std::array humanoid{ESM::MagicEffect::CalmHumanoid, ESM::MagicEffect::FrenzyHumanoid,
             ESM::MagicEffect::DemoralizeHumanoid, ESM::MagicEffect::RallyHumanoid};
         const std::array creature{ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyCreature,
@@ -348,6 +375,7 @@ namespace
                 ESM::MagicEffect record; record.blank(); record.mId = effect;
                 record.mData.mSchool = ESM::Skill::Illusion; record.mData.mBaseCost = 1.f;
                 store.insertStatic(record);
+                constant(effect);
                 auto source = spell("ai effect", effect, ESM::RT_Target);
                 require(!prepareInstantSpell(source, store, true, true, false, false)
                     && bool(prepareInstantSpell(source, store, true, true, false, true)),
@@ -369,6 +397,7 @@ namespace
             ESM::MagicEffect record; record.blank(); record.mId = effect;
             record.mData.mSchool = ESM::Skill::Illusion; record.mData.mBaseCost = 1.f;
             store.insertStatic(record);
+            constant(effect);
             require(bool(prepareInstantSpell(spell("ai special", effect, ESM::RT_Target), store,
                 true, true, false, true)), "AI special source rejected");
         }

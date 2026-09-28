@@ -604,9 +604,9 @@ namespace TES3MP
         {
             const auto* p = root->presentation()->Get(flatbuffers::uoffset_t(i));
             if (!p || (p->group() && p->group()->size() > 64)
-                || !p->visibility() || p->visibility()->size() != 7
+                || !p->visibility() || p->visibility()->size() != 8
                 || !p->movement() || p->movement()->size() != 8)
-                return error(Code::TooManyEntries, 0, 7, i);
+                return error(Code::TooManyEntries, 0, 8, i);
             presentation.push_back({p->id(), p->life(), p->action(), p->body_action(), p->kind(), p->phase(),
                 p->direction(), p->body_state(), p->hit_group(), p->strength(), p->completion(), p->rate(),
                 p->body_frame(), p->body_stop(), p->loop_start(), p->loop_stop(),

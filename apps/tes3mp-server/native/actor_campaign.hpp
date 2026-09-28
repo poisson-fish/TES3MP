@@ -42,9 +42,14 @@ namespace TES3MP::Native
     inline constexpr uint64_t PersistentConditionsCampaignMagic = 0x5350434154335354;
     inline constexpr uint64_t SpecialConditionsCampaignMagic = 0x5450434154335354;
     inline constexpr uint64_t MovementEffectsCampaignMagic = 0x5550434154335354;
+    inline constexpr uint64_t AiDecisionCampaignMagic = 0x5650434154335354;
+    inline constexpr bool hasAiDecisions(uint64_t magic)
+    { return magic == AiDecisionCampaignMagic; }
+    inline constexpr bool hasMovementEffects(uint64_t magic)
+    { return magic == MovementEffectsCampaignMagic || hasAiDecisions(magic); }
     inline constexpr bool hasPlayerCasts(uint64_t magic)
     { return magic == PlayerCastCampaignMagic || magic == PersistentConditionsCampaignMagic
-        || magic == SpecialConditionsCampaignMagic || magic == MovementEffectsCampaignMagic; }
+        || magic == SpecialConditionsCampaignMagic || hasMovementEffects(magic); }
     inline constexpr bool hasActorPresentation(uint64_t magic)
     { return magic == ActorPresentationCampaignMagic || hasPlayerCasts(magic); }
     inline constexpr bool hasExpandedEffects(uint64_t magic)
@@ -154,6 +159,10 @@ namespace TES3MP::Native
         std::array<std::optional<ActorCampaignCast>, 2> playerCasts;
         std::array<std::string, 2> playerCastResources;
         uint64_t npcAction = 0;
+        // A stock flee decision lasts through its blind-run interval. The
+        // destination and expiry commit with combat and navigation state.
+        uint64_t fleeTarget = 0, fleeUntil = 0;
+        std::array<float, 3> fleeDestination{};
         std::array<uint64_t, 3> bodyAction{}, hitGroup{};
         bool operator==(const ActorCampaignCombat&) const = default;
     };
@@ -363,6 +372,24 @@ namespace TES3MP::Native
             for (auto& group : state.hitGroup)
             { group = getAreaWord(bytes, offset); if (group > 16) throw std::invalid_argument("Invalid hit group"); }
         }
+        if (hasAiDecisions(magic))
+        {
+            auto& state = *combat;
+            state.fleeTarget = getAreaWord(bytes, offset);
+            state.fleeUntil = getAreaWord(bytes, offset);
+            for (float& value : state.fleeDestination)
+            {
+                const auto bits = getAreaWord(bytes, offset);
+                if (bits > UINT32_MAX) throw std::invalid_argument("Native flee coordinate bits invalid");
+                value = std::bit_cast<float>(uint32_t(bits));
+                if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                    throw std::invalid_argument("Native flee destination invalid");
+            }
+            if ((!state.fleeTarget && (state.fleeUntil || state.fleeDestination != std::array<float, 3>{}))
+                || (state.fleeTarget && (!state.fleeUntil
+                    || (state.fleeUntil > tick && state.fleeUntil - tick > 30))))
+                throw std::invalid_argument("Native flee state invalid");
+        }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic
             || magic == EnchantedProjectileActorCampaignMagic || magic == TimedActorCampaignMagic
@@ -554,10 +581,10 @@ namespace TES3MP::Native
                         effect.beneficiary = getAreaWord(bytes, offset);
                         if (effect.beneficiary > 3) throw std::invalid_argument("Native effect beneficiary invalid");
                     }
-                    if ((!effect.effectIndex && magic != MovementEffectsCampaignMagic)
+                    if ((!effect.effectIndex && !hasMovementEffects(magic))
                         || effect.effectIndex > 255 || !effect.caster || !effect.source
-                        || effect.sourceKind > ((magic == PersistentConditionsCampaignMagic
-                            || magic == SpecialConditionsCampaignMagic || magic == MovementEffectsCampaignMagic)
+                        || effect.sourceKind > (hasAiDecisions(magic) ? 5u : (magic == PersistentConditionsCampaignMagic
+                            || magic == SpecialConditionsCampaignMagic || hasMovementEffects(magic))
                             ? 4u : hasConstantState(magic) ? 3u : 2u)
                         || !std::isfinite(effect.resistance)
                         || effect.resistance < -20000 || effect.resistance > 100
@@ -626,17 +653,17 @@ namespace TES3MP::Native
                 combat->playerCasts[i] = value;
             }
         if (magic == PersistentConditionsCampaignMagic || magic == SpecialConditionsCampaignMagic
-            || magic == MovementEffectsCampaignMagic)
+            || hasMovementEffects(magic))
         {
             const auto count = getAreaWord(bytes, offset);
             const size_t sourceBytes = magic == SpecialConditionsCampaignMagic
-                || magic == MovementEffectsCampaignMagic ? 40 : 16;
+                || hasMovementEffects(magic) ? 40 : 16;
             if (count > ActorCampaignCombat::MaximumConditionSources || count > (bytes.size() - offset) / sourceBytes)
                 throw std::invalid_argument("Native condition source count invalid");
             for (size_t i = 0; i < count; ++i)
             {
                 ActorCampaignCombat::ConditionSource value{getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
-                if (magic == SpecialConditionsCampaignMagic || magic == MovementEffectsCampaignMagic)
+                if (magic == SpecialConditionsCampaignMagic || hasMovementEffects(magic))
                 {
                     value.nextWorseningMs = getAreaWord(bytes, offset);
                     value.lastObservedMs = getAreaWord(bytes, offset);
