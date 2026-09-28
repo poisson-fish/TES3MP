@@ -1,5 +1,6 @@
 ﻿#include "npc.hpp"
 #include "npcmodel.hpp"
+#include "npcmovement.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -708,14 +709,10 @@ namespace MWClass
             moveSpeed = 0.0f;
         else if (mageffects.getOrDefault(ESM::MagicEffect::Levitate).getMagnitude() > 0 && world->isLevitationEnabled())
         {
-            float flySpeed = 0.01f
-                * (stats.getAttribute(ESM::Attribute::Speed).getModified()
-                    + mageffects.getOrDefault(ESM::MagicEffect::Levitate).getMagnitude());
-            flySpeed = gmst.fMinFlySpeed->mValue.getFloat()
-                + flySpeed * (gmst.fMaxFlySpeed->mValue.getFloat() - gmst.fMinFlySpeed->mValue.getFloat());
-            flySpeed *= 1.0f - gmst.fEncumberedMoveEffect->mValue.getFloat() * normalizedEncumbrance;
-            flySpeed = std::max(0.0f, flySpeed);
-            moveSpeed = flySpeed;
+            moveSpeed = npcFlySpeed(stats.getAttribute(ESM::Attribute::Speed).getModified(),
+                mageffects.getOrDefault(ESM::MagicEffect::Levitate).getMagnitude(), normalizedEncumbrance,
+                gmst.fMinFlySpeed->mValue.getFloat(), gmst.fMaxFlySpeed->mValue.getFloat(),
+                gmst.fEncumberedMoveEffect->mValue.getFloat());
         }
         else if (world->isSwimming(ptr))
             moveSpeed = getSwimSpeed(ptr);
@@ -742,30 +739,12 @@ namespace MWClass
 
         const GMST& gmst = getGmst();
         const MWMechanics::MagicEffects& mageffects = stats.getMagicEffects();
-        const float encumbranceTerm = gmst.fJumpEncumbranceBase->mValue.getFloat()
-            + gmst.fJumpEncumbranceMultiplier->mValue.getFloat() * (1.0f - normalizedEncumbrance);
-
-        float a = getSkill(ptr, ESM::Skill::Acrobatics);
-        float b = 0.0f;
-        if (a > 50.0f)
-        {
-            b = a - 50.0f;
-            a = 50.0f;
-        }
-
-        float x = gmst.fJumpAcrobaticsBase->mValue.getFloat()
-            + std::pow(a / 15.0f, gmst.fJumpAcroMultiplier->mValue.getFloat());
-        x += 3.0f * b * gmst.fJumpAcroMultiplier->mValue.getFloat();
-        x += mageffects.getOrDefault(ESM::MagicEffect::Jump).getMagnitude() * 64;
-        x *= encumbranceTerm;
-
-        if (stats.getStance(MWMechanics::CreatureStats::Stance_Run))
-            x *= gmst.fJumpRunMultiplier->mValue.getFloat();
-        x *= stats.getFatigueTerm();
-        x -= -Constants::GravityConst * Constants::UnitsPerMeter;
-        x /= 3.0f;
-
-        return x;
+        return npcJumpSpeed(normalizedEncumbrance, getSkill(ptr, ESM::Skill::Acrobatics),
+            mageffects.getOrDefault(ESM::MagicEffect::Jump).getMagnitude(), stats.getFatigueTerm(),
+            stats.getStance(MWMechanics::CreatureStats::Stance_Run),
+            gmst.fJumpEncumbranceBase->mValue.getFloat(), gmst.fJumpEncumbranceMultiplier->mValue.getFloat(),
+            gmst.fJumpAcrobaticsBase->mValue.getFloat(), gmst.fJumpAcroMultiplier->mValue.getFloat(),
+            gmst.fJumpRunMultiplier->mValue.getFloat(), Constants::GravityConst * Constants::UnitsPerMeter);
     }
 
     MWMechanics::Movement& Npc::getMovementSettings(const MWWorld::Ptr& ptr) const
@@ -1199,29 +1178,27 @@ namespace MWClass
         const float normalizedEncumbrance = getNormalizedEncumbrance(ptr);
         const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(ptr);
 
-        float walkSpeed = gmst.fMinWalkSpeed->mValue.getFloat()
-            + 0.01f * stats.getAttribute(ESM::Attribute::Speed).getModified()
-                * (gmst.fMaxWalkSpeed->mValue.getFloat() - gmst.fMinWalkSpeed->mValue.getFloat());
-        walkSpeed *= 1.0f - gmst.fEncumberedMoveEffect->mValue.getFloat() * normalizedEncumbrance;
-        walkSpeed = std::max(0.0f, walkSpeed);
-        if (sneaking)
-            walkSpeed *= gmst.fSneakSpeedMultiplier->mValue.getFloat();
-
-        return walkSpeed;
+        return npcWalkSpeed(stats.getAttribute(ESM::Attribute::Speed).getModified(), normalizedEncumbrance,
+            gmst.fMinWalkSpeed->mValue.getFloat(), gmst.fMaxWalkSpeed->mValue.getFloat(),
+            gmst.fEncumberedMoveEffect->mValue.getFloat(),
+            sneaking ? gmst.fSneakSpeedMultiplier->mValue.getFloat() : 1.f);
     }
 
     float Npc::getRunSpeed(const MWWorld::Ptr& ptr) const
     {
         const GMST& gmst = getGmst();
-        return getWalkSpeed(ptr)
-            * (0.01f * getSkill(ptr, ESM::Skill::Athletics) * gmst.fAthleticsRunBonus->mValue.getFloat()
-                + gmst.fBaseRunMultiplier->mValue.getFloat());
+        return npcRunSpeed(getWalkSpeed(ptr), getSkill(ptr, ESM::Skill::Athletics),
+            gmst.fAthleticsRunBonus->mValue.getFloat(), gmst.fBaseRunMultiplier->mValue.getFloat());
     }
 
     float Npc::getSwimSpeed(const MWWorld::Ptr& ptr) const
     {
         const MWMechanics::MagicEffects& effects = getNpcStats(ptr).getMagicEffects();
         const bool running = MWBase::Environment::get().getMechanicsManager()->isRunning(ptr);
-        return getSwimSpeedImpl(ptr, getGmst(), effects, running ? getRunSpeed(ptr) : getWalkSpeed(ptr));
+        const GMST& gmst = getGmst();
+        return npcSwimSpeed(running ? getRunSpeed(ptr) : getWalkSpeed(ptr),
+            effects.getOrDefault(ESM::MagicEffect::SwiftSwim).getMagnitude(),
+            getSkill(ptr, ESM::Skill::Athletics), gmst.fSwimRunBase->mValue.getFloat(),
+            gmst.fSwimRunAthleticsMult->mValue.getFloat());
     }
 }

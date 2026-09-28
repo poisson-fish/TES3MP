@@ -1,4 +1,5 @@
 #include "actors.hpp"
+#include "breathing.hpp"
 
 #include <array>
 #include <optional>
@@ -940,7 +941,6 @@ namespace MWMechanics
                                                  ->mValue.getFloat();
         if (stats.getTimeToStartDrowning() == -1.f)
             stats.setTimeToStartDrowning(fHoldBreathTime);
-
         if (!isPlayer && stats.getTimeToStartDrowning() < fHoldBreathTime / 2)
         {
             AiSequence& seq = actorClass.getCreatureStats(ptr).getAiSequence();
@@ -951,23 +951,15 @@ namespace MWMechanics
         const MWBase::World* const world = MWBase::Environment::get().getWorld();
         const bool knockedOutUnderwater
             = (isKnockedOut && world->isUnderwater(ptr.getCell(), osg::Vec3f(ptr.getRefData().getPosition().asVec3())));
-        if ((world->isSubmerged(ptr) || knockedOutUnderwater)
-            && stats.getMagicEffects().getOrDefault(ESM::MagicEffect::WaterBreathing).getMagnitude() == 0)
+        const auto breath = advanceBreath(stats.getTimeToStartDrowning(), fHoldBreathTime, duration,
+            world->isSubmerged(ptr), knockedOutUnderwater,
+            stats.getMagicEffects().getOrDefault(ESM::MagicEffect::WaterBreathing).getMagnitude() != 0);
+        stats.setTimeToStartDrowning(breath.remaining);
+        if (breath.drowning)
         {
-            float timeLeft = 0.0f;
-            if (knockedOutUnderwater)
-                stats.setTimeToStartDrowning(0);
-            else
-            {
-                timeLeft = stats.getTimeToStartDrowning() - duration;
-                if (timeLeft < 0.0f)
-                    timeLeft = 0.0f;
-                stats.setTimeToStartDrowning(timeLeft);
-            }
-
             const bool godmode = isPlayer && world->getGodModeState();
 
-            if (timeLeft == 0.0f && !godmode)
+            if (!godmode)
             {
                 // If drowning, apply 3 points of damage per second
                 static const float fSuffocationDamage
@@ -986,8 +978,6 @@ namespace MWMechanics
                     MWBase::Environment::get().getWindowManager()->activateHitOverlay(false);
             }
         }
-        else
-            stats.setTimeToStartDrowning(fHoldBreathTime);
     }
 
     static void updateEquippedLight(const MWWorld::Ptr& ptr, float duration, bool mayEquip)

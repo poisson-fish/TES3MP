@@ -20,21 +20,19 @@ server/client/save identity. Python may package/hash/cache, not reinterpret ESM.
 Unsupported behavior rejects visibly.
 
 **One server authority.** The server owns actors, objects, player resources,
-time/weather and outcomes in every story scope. Clients submit authenticated intent
-and present commits. Prediction cannot author damage, rewards or world mutations.
-Validate inherited movement for combat. Schedule the player-area union independently
-of individual menus/scenes. NPC authority has no client ownership leases.
+time/weather and outcomes. Clients submit authenticated intent and present commits;
+prediction cannot author gameplay. Validate inherited combat movement. Schedule
+the player-area union independent of menus/scenes; NPCs have no client leases.
 
 **M3 doors:** shared OpenMW rules own durable activation, reversal, angle and
 replication. Player contact reports bind session, placement, sequence and tick;
 expire after ten ticks; and invalidate on reconnect/reversal. They supplement
 server physics until movement cutover. Latency may clip; preserve persistence.
 
-**Presentation is separate.** Route UI, visual animation, audio and graphics to relevant
-clients. Pure visual replacements may vary; collision/bounds and script-affecting
-resources belong to gameplay identity. Reuse supported MWScript/Lua execution and
-semantic serialization with explicit context and resource limits. Never persist
-raw memory, process pointers, rendering objects or live sessions.
+**Presentation is separate.** Clients own UI, visuals and audio. Cosmetic assets may
+vary; collision and script resources enter gameplay identity. Reuse MWScript/Lua
+with bounded context and semantic serialization. Never persist pointers, render
+objects or sessions.
 
 ## M4 actor simulation
 
@@ -77,21 +75,18 @@ equipped; replacement and respawn install new sources in the same transaction.
 Recovery checks arguments, source membership and magnitude bounds without rolling.
 Modifiers overlay detached combat stats and never accumulate in saved base state.
 
-**Combat latency.** Predict local swing/cast presentation only; the server owns
-gameplay consequences. Start with server-time contacts; measure latency before adding
-bounded historical actor/obstacle queries. Full-world rewind is not selected. Reuse
-timestamped replication, reliable action/life events and latest-wins motion.
-V31 uses a 32-unit player sphere at the active server position, comparing earliest
-projectile contact with NPC/world collision until shared player hulls are bound.
+**Combat latency.** Predict swing/cast presentation; the server owns consequences.
+Use server-time contacts pending latency measurements; full-world rewind is not
+selected. Replicate timestamped reliable action/life events and latest-wins motion.
+V31 compares projectile contacts against a 32-unit active player sphere until
+shared hulls are bound.
 
-**Melee state.** Negative fatigue prevents attacks and redirects unarmed damage to
-health. Stock fatigue restoration continues while active. V50 persists authored
-knockout/knockdown clock: exhaustion loops, restored fatigue lets the current clip
-finish its get-up tail. Shared stock health-hit rolls select physical knockdown.
-New hits do not restart an active knockdown; inactive actors pause, and death/respawn
-clear body clocks. V34 shares shield visibility and CPU hit recovery. V43 binds
-participant hit resources in the fingerprint; recovery validates timers against
-their clips. Fresh campaigns are required.
+**Melee state.** Negative fatigue prevents attacks and routes unarmed damage to
+health; stock restoration continues. V50 persists knockout/knockdown clocks:
+exhaustion loops and recovery finishes the current get-up clip. Stock health-hit
+rolls select physical knockdown. Hits cannot restart an active knockdown; inactive
+actors pause, and death clears body clocks. V34 shares shield visibility/recovery;
+V43 fingerprints hit clips and validates timers. Fresh campaigns are required.
 
 V44 persists pre-release targets and clip recipes. Detached transactions equip
 selected weapons; recovery never re-equips. Completion resumes selection; breakage
@@ -117,13 +112,11 @@ effect index zero is distinguished from legacy ResistMagicka by its source ident
 The later player movement authority cutover remains subject to M4 collision and
 combat acceptance.
 
-**Movement smoothness (target).** Cut over after smooth replication and unified
-engine collision. Until then validate inherited combat contacts on the server.
-Start with stock physics; tune snapshot frequency separately. Interpolate remote
-snapshots with bounded extrapolation. Predict locally with shared fixed steps;
-restore acknowledged physics and replay input. Timestamp obstacles, blend visual
-corrections, reset on teleport/respawn/cell change, and measure jitter and
-correction overruns.
+**Movement smoothness (target).** Cut over after unified collision and smooth
+replication; validate inherited contacts meanwhile. Use stock physics, remote
+interpolation and bounded extrapolation. Predict locally with fixed steps; restore
+acknowledged physics and replay input. Timestamp obstacles; blend corrections;
+reset on teleport, respawn and cell change. Measure jitter and overruns.
 
 ## Cooperative progression design
 
@@ -185,24 +178,19 @@ Locals key by character/script/stable reference and survive respawn with cursors
 lifecycle fields reset separately. Scripted combat enters the shared action path.
 API coverage establishes mod support without quest rewrites.
 
-**Death and temporary unavailability:** replace the consumable shared OnDeath flag
-with per-character/script event cursors and attributed death history. Record events
-even before quest acceptance. Proposed credit includes the initiating character and
-eligible consenting helpers; define summons/environmental attribution explicitly.
-A keeps credit after revival; uninvolved B receives no narrative death event.
+**Death and temporary unavailability:** replace shared OnDeath with character/script
+cursors and attributed history, including pre-quest events. Proposed credit covers
+the initiator and eligible helpers; define summon/environmental causes. Credit
+survives revival; uninvolved characters receive no narrative death event.
 
-For B's script, another's combat/death makes a reference temporarily unavailable.
-Health/liveness, lookup, existence and enumeration must preserve that distinction.
-Defer polling/handlers without committing; wake on lifecycle change, revalidate and
-rerun from committed state. Rendering/combat show the corpse; B's own failures retain
-normal consequences. Journal numbers cannot establish success/failure.
+Another's combat/death makes a reference temporarily unavailable to a personal
+script. Preserve this in liveness, lookup and enumeration. Defer handlers without
+committing; wake and revalidate on lifecycle change. Combat still shows the corpse;
+personal failures remain real. Journal numbers do not prove success.
 
-Deferral is distinct from failure: it must not disable a global/local script.
-Persist the wake dependency and event identity; bound queues/retries and report
-unresolved waits rather than spin. Pause affected story deadlines during enforced
-unavailability/offline suspension; raw time reads must use a consistent story clock.
-Persistent scripted removal uses the scoped rule above, not an endless respawn wait.
-Indirect observations require coverage.
+Deferral cannot disable a script. Persist bounded wake dependencies and report
+unresolved waits. Pause affected story deadlines while unavailable/offline; use a
+consistent story clock. Scoped scripted removal does not become a respawn wait.
 
 **Atomic execution:** stage globals, locals, journal, inventories, references, RNG,
 events, timers and presentation together. Unavailable reads, stale lives, unsupported
@@ -277,6 +265,13 @@ respawn never inherits them. Persist effects, benefits, resources and RNG togeth
 Dispel groups temporary spells by source/caster/life/launch, leaving enchanted
 items and constants intact. T3C6/capability 24 carries authoritative paralysis;
 inherited movement cannot bypass it. Existing campaigns do not silently upgrade.
+
+**Detached movement (V56).** Commit NPC movement from content water, inventory,
+stats and effect sources through shared OpenMW rules and the stock physics solver.
+Keep inherited player movement until the M4 collision/combat cutover. The current
+death schema requires an actor life, so drowning records the NPC's own life as
+the environmental cause; distinguish environment explicitly when death ownership
+is generalized.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

@@ -1,4 +1,5 @@
 #include "physicssystem.hpp"
+#include "../mwclass/npcmovement.hpp"
 #include "doorcontact.hpp"
 #include "../mwworld/doormotion.hpp"
 
@@ -689,8 +690,8 @@ namespace MWPhysics
             physicActor->setCanWaterWalk(waterCollision);
 
             // Slow fall reduces fall speed by a factor of (effect magnitude / 200)
-            const float slowFall
-                = 1.f - std::clamp(effects.getOrDefault(ESM::MagicEffect::SlowFall).getMagnitude() * 0.005f, 0.f, 1.f);
+            const float slowFall = MWClass::npcSlowFall(
+                effects.getOrDefault(ESM::MagicEffect::SlowFall).getMagnitude());
             const bool isPlayer = ptr == world->getPlayerConstPtr();
             const bool godmode = isPlayer && world->getGodModeState();
             const bool inert = stats.isDead()

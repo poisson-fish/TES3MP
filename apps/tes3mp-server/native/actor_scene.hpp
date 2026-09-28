@@ -42,6 +42,21 @@ namespace TES3MP::Native
         bool mGrounded = false;
         std::vector<uint64_t> mContacts;
         float mYaw = 0;
+        bool mDrowning = false;
+    };
+    struct ActorMovement
+    {
+        bool enabled = false;
+        float walkSpeed = 0;
+        float swimSpeed = 0;
+        float flySpeed = 0;
+        float jumpSpeed = 0;
+        float slowFall = 1;
+        bool levitating = false;
+        bool waterWalking = false;
+        bool waterBreathing = false;
+        bool unconscious = false;
+        bool jumpRequested = false;
     };
     struct BoundMeleeAnimation
     {
@@ -113,6 +128,7 @@ namespace TES3MP::Native
         // trusted settings file supplies stock navigation settings and is bound
         // into the scene identity. No World/player services are constructed.
         void enableNavigation(const std::string& settingsFile);
+        void enableMovementEffects();
         std::vector<std::array<float, 3>> pathTo(const std::array<float, 3>& destination) const;
         void travelTo(const std::array<float, 3>& destination, bool retainUnavailable = false);
         ActorSceneSnapshot navigate(float speed);
@@ -131,6 +147,8 @@ namespace TES3MP::Native
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});
+        std::unique_ptr<Prepared> prepareNavigation(const ActorMovement& movement,
+            std::span<const ActorSceneDoor> doors = {});
         void setFacing(Prepared& prepared, float yaw) const;
         bool canInstall(const Prepared& prepared) const noexcept;
         void install(Prepared& prepared) noexcept;

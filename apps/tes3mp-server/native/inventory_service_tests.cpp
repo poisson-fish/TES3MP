@@ -5443,7 +5443,7 @@ namespace TES3MP::Native::Testing
     void checkNpcDoors(const std::filesystem::path& scratch, const std::filesystem::path& config,
         const std::filesystem::path& settings, bool avoidance, bool traveler, bool melee, bool combat,
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
-        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily)
+        bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool specialConditions = effectFamily == "special-conditions";
@@ -5997,7 +5997,8 @@ namespace TES3MP::Native::Testing
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
                     record.mData.mType = ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
-                    record.mData.mCost = 5; record.mEffects.populate(effects);
+                    record.mData.mCost = effectFamily == "movement-effects" ? 0 : 5;
+                    record.mEffects.populate(effects);
                     npc.mSpells.mList.push_back(record.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); record.save(out); out.endRecord(ESM::Spell::sRecordId);
                     if (!item) return;
@@ -6058,9 +6059,15 @@ namespace TES3MP::Native::Testing
                             ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden,
                             ESM::MagicEffect::Feather, ESM::MagicEffect::Jump,
                             ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall})
+                    {
                         spell("movement_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
                             {effect(id, ESM::RT_Self, 5, id == ESM::MagicEffect::WaterBreathing
                                 || id == ESM::MagicEffect::WaterWalking ? 0 : 20)});
+                        spell("movement_npc_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                            {effect(id, ESM::RT_Target, 5, id == ESM::MagicEffect::WaterBreathing
+                                || id == ESM::MagicEffect::WaterWalking ? 0
+                                : id == ESM::MagicEffect::Burden ? 100 : 20)});
+                    }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                 {
                     auto transfer = *base.store().get<ESM::GameSetting>().find("fDiseaseXferChance");
@@ -6480,9 +6487,15 @@ namespace TES3MP::Native::Testing
                 earlierOwner.save(out); out.endRecord(ESM::Container::sRecordId);
             }
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
-            if (!encounterProfile.empty())
+            if (!encounterProfile.empty() || effectFamily == "movement-effects")
                 cell.mAmbi.mAmbient = cell.mAmbi.mSunlight = 0x00b0b0b0;
             cell.mData.mFlags = ESM::Cell::Interior | (specialConditions ? ESM::Cell::QuasiEx : 0);
+            if (wetMovement)
+            {
+                cell.mData.mFlags |= ESM::Cell::HasWater;
+                cell.mWater = 150.f;
+                cell.mHasWaterHeightSub = true;
+            }
             if (specialConditions) cell.mRegion = base.store().get<ESM::Region>().begin()->mId;
             cell.updateId();
             out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
@@ -6523,6 +6536,7 @@ namespace TES3MP::Native::Testing
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
         if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))) return;
+        if (!wetMovement)
         {
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
@@ -7711,7 +7725,9 @@ namespace TES3MP::Native::Testing
                 << "\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
                 << "npc \"npc_door_actor\" " << std::quoted(actorSettings.string())
-                << (melee ? "\ndestination 60 -32 1 120\n" : "\ndestination 60 -240 1 120\n");
+                << (melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
+                    : wetMovement ? "\ndestination 60 -500 1 120\n"
+                    : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee \"weapononehand\" \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
         }
@@ -7936,6 +7952,8 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily == "movement-effects")
             {
+                if (!wetMovement)
+                {
                 const auto previousDescriptor = scratch / "native-v55.txt";
                 {
                     std::ifstream in(descriptor);
@@ -7954,6 +7972,7 @@ namespace TES3MP::Native::Testing
                 require(previousView && std::ranges::none_of(previousView->presentation(),
                     [](const auto& pose) { return pose.movementOwned; }),
                     "V55 claimed ownership of inherited movement effects");
+                }
                 const std::array ids{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
                     ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden,
                     ESM::MagicEffect::Feather, ESM::MagicEffect::Jump,
@@ -8005,6 +8024,77 @@ namespace TES3MP::Native::Testing
                             "Movement expiry diverged after restart");
                     }
                     require(projected(runtime, tick, 1) == 0.f, "Movement effect survived expiry");
+                }
+                for (size_t slot = 0; slot < ids.size(); ++slot)
+                {
+                    auto running = make(); auto& runtime = running->service();
+                    const auto inventory = runtime.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(1), id<CanonicalRevision>(1));
+                    require(inventory && inventory->equipment && !inventory->equipment->motions.empty(),
+                        "Movement NPC identity absent");
+                    const uint64_t npc = inventory->equipment->motions.front().placement;
+                    const auto name = "movement_npc_" + std::to_string(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const auto effectIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ids[slot]));
+                    const float expected = slot == 0 || slot == 2 ? 1.f
+                        : ids[slot] == ESM::MagicEffect::Burden ? 100.f : 20.f;
+                    bool applied = false;
+                    uint64_t tick = 0;
+                    for (unsigned frame = 0; frame < 90 && !applied; ++frame)
+                    {
+                        const auto state = commit(runtime, ++tick, frame == 0 ? name : std::string_view{},
+                            1, npc, false, frame == 0);
+                        applied = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.effectIndex == effectIndex
+                                && effect.magnitude == expected;
+                        });
+                    }
+                    require(applied, "Targeted movement effect did not reach detached NPC");
+                    for (uint64_t observer : {1, 2})
+                    {
+                        const auto view = runtime.projectCombat(authority, id<SessionId>(observer),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                        require(view && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                            return pose.kind == 2 && pose.id == npc && pose.movementOwned
+                                && pose.movement[slot] == expected;
+                        }), "Movement NPC effect did not reach both observers");
+                    }
+                    if (ids[slot] == ESM::MagicEffect::Burden
+                        || (wetMovement && (ids[slot] == ESM::MagicEffect::SwiftSwim
+                            || ids[slot] == ESM::MagicEffect::WaterWalking)))
+                    {
+                        auto baseline = make(); auto& plain = baseline->service();
+                        for (uint64_t frame = 1; frame <= tick + 5; ++frame)
+                            (void)commit(plain, frame);
+                        for (unsigned frame = 0; frame < 5; ++frame) (void)commit(runtime, ++tick);
+                        const auto slow = runtime.travelDiagnostics();
+                        const auto ordinary = plain.travelDiagnostics();
+                        std::cout << "movement NPC " << ESM::MagicEffect::refIdToIndex(ids[slot])
+                            << " applied=" << (tick - 5)
+                            << " modified=" << (slow ? slow->position[1] : 0)
+                            << " baseline=" << (ordinary ? ordinary->position[1] : 0)
+                            << " z=" << (slow ? slow->position[2] : 0) << '\n';
+                        require(slow && ordinary, "Movement travel diagnostics absent");
+                        if (ids[slot] == ESM::MagicEffect::Burden)
+                            require(slow->position[1] > ordinary->position[1] + 1.f,
+                                "Burden did not slow authoritative NPC travel");
+                        if (ids[slot] == ESM::MagicEffect::SwiftSwim)
+                            require(slow->position[1] < ordinary->position[1] - 1.f,
+                                "SwiftSwim did not accelerate authoritative underwater travel");
+                        if (ids[slot] == ESM::MagicEffect::WaterWalking)
+                        {
+                            require(slow->position[2] > ordinary->position[2] + 100.f,
+                                "WaterWalking did not lift the NPC onto the stock water plane");
+                            const auto saved = bytes(runtime);
+                            InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, saved);
+                            replay.service().synchronizeCells(authority);
+                            require(bytes(replay.service()) == saved,
+                                "WaterWalking support changed across restart");
+                            (void)commit(runtime, ++tick);
+                            (void)commit(replay.service(), tick);
+                            require(bytes(runtime) == bytes(replay.service()),
+                                "WaterWalking support diverged after restart");
+                        }
+                    }
                 }
                 std::cout << "movement eight effects=source rejection restart projection expiry exact\n";
                 return;

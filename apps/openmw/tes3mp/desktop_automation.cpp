@@ -831,6 +831,21 @@ namespace TES3MP::OpenMWAdapter
                 }
                 mOutput << "]}";
             }
+            mOutput << "],\"movement\":[";
+            first = true;
+            for (const auto& pose : snapshot.presentation())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id
+                    << ",\"owned\":" << (pose.movementOwned ? "true" : "false") << ",\"effects\":[";
+                for (size_t i = 0; i < pose.movement.size(); ++i)
+                {
+                    if (i) mOutput << ',';
+                    mOutput << pose.movement[i];
+                }
+                mOutput << "]}";
+            }
             mOutput << "],\"swings\":[";
             first = true;
             for (const auto& swing : snapshot.swings())

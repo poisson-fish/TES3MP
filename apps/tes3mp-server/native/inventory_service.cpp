@@ -14,6 +14,7 @@
 #include <apps/openmw/mwworld/containeradd.hpp>
 #include <apps/openmw/mwclass/armor.hpp>
 #include <apps/openmw/mwclass/creature.hpp>
+#include <apps/openmw/mwclass/npcmovement.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
@@ -29,6 +30,7 @@
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/statstate.hpp>
 #include <components/misc/rng.hpp>
+#include <components/misc/constants.hpp>
 #include <tes3mp/melee_combat.hpp>
 #include <algorithm>
 #include <bit>
@@ -3376,8 +3378,54 @@ namespace TES3MP::Native
             active = report.status == Diagnostics::Status::Running;
         }
         const auto doors = actorDoorFrames(command.get());
-        auto step = active ? mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)
-            : nullptr;
+        ActorMovement movement;
+        if (active && mBinding.mMovementEffects)
+        {
+            if (!mCombat) throw std::logic_error("NPC movement requires committed actor stats");
+            const auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[2], mTimedEffects, 2);
+            const auto magnitude = [&](ESM::RefId id) {
+                const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
+                float result = 0.f;
+                for (const auto& effect : mTimedEffects)
+                    if (effect.actor == 2 && effect.effectIndex == index) result += effect.magnitude;
+                return result;
+            };
+            const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+            const auto setting = [&](const char* name) { return settings.find(name)->mValue.getFloat(); };
+            const float strength = stats.getAttribute(ESM::Attribute::Strength).getModified();
+            const float speed = stats.getAttribute(ESM::Attribute::Speed).getModified();
+            const float athletics = stats.getSkill(ESM::Skill::Athletics).getModified();
+            const float acrobatics = stats.getSkill(ESM::Skill::Acrobatics).getModified();
+            const float weight = std::max(0.f, mRuntime.storage(mCombatNpcOwner).getWeight()
+                - magnitude(ESM::MagicEffect::Feather) + magnitude(ESM::MagicEffect::Burden));
+            const float encumbrance = MWClass::normalizedEncumbrance(weight,
+                strength * setting("fEncumbranceStrMult"));
+            const float walk = MWClass::npcWalkSpeed(speed, encumbrance,
+                setting("fMinWalkSpeed"), setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
+            const bool inert = encumbrance > 1.f || magnitude(ESM::MagicEffect::Paralyze) > 0.f
+                || mCombat->knockedDown[2];
+            movement.enabled = true;
+            movement.walkSpeed = inert ? 0.f : walk;
+            movement.swimSpeed = inert ? 0.f : MWClass::npcSwimSpeed(walk,
+                magnitude(ESM::MagicEffect::SwiftSwim), athletics,
+                setting("fSwimRunBase"), setting("fSwimRunAthleticsMult"));
+            movement.flySpeed = inert ? 0.f : MWClass::npcFlySpeed(speed,
+                magnitude(ESM::MagicEffect::Levitate), encumbrance,
+                setting("fMinFlySpeed"), setting("fMaxFlySpeed"), setting("fEncumberedMoveEffect"));
+            movement.jumpSpeed = inert ? 0.f : MWClass::npcJumpSpeed(encumbrance, acrobatics,
+                magnitude(ESM::MagicEffect::Jump), stats.getFatigueTerm(mRuntime.mStore), false,
+                setting("fJumpEncumbranceBase"), setting("fJumpEncumbranceMultiplier"),
+                setting("fJumpAcrobaticsBase"), setting("fJumpAcroMultiplier"),
+                setting("fJumpRunMultiplier"), Constants::GravityConst * Constants::UnitsPerMeter);
+            movement.slowFall = MWClass::npcSlowFall(magnitude(ESM::MagicEffect::SlowFall));
+            movement.levitating = magnitude(ESM::MagicEffect::Levitate) > 0.f;
+            movement.waterWalking = magnitude(ESM::MagicEffect::WaterWalking) > 0.f;
+            movement.waterBreathing = magnitude(ESM::MagicEffect::WaterBreathing) > 0.f;
+            movement.unconscious = mCombat->knockedDown[2];
+        }
+        auto step = active ? (mBinding.mMovementEffects
+            ? mBinding.mNavigatingActor->prepareNavigation(movement, doors)
+            : mBinding.mNavigatingActor->prepareNavigation(mBinding.mNavigationSpeed, doors)) : nullptr;
         if (step && mBinding.mTravelerNeighborhood && !mBinding.mNavigatingActor->contains(step->snapshot().mPosition))
         { step.reset(); report.status = Diagnostics::Status::Boundary; }
         if (active && !step) report.status = Diagnostics::Status::Boundary;
@@ -5562,6 +5610,22 @@ namespace TES3MP::Native
                         hitDamage, hitStat, contact && hitSuccess, hitBlocked, targetDied};
             }
         }
+        const auto waterBreathingIndex
+            = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterBreathing));
+        if (combat && step && step->snapshot().mDrowning && combat->actors[2][8][2] > 0
+            && std::ranges::none_of(timedEffects, [waterBreathingIndex](const auto& effect) {
+                return effect.actor == 2 && effect.effectIndex == waterBreathingIndex && effect.magnitude > 0;
+            }))
+        {
+            auto victim = loadCombatStats(mRuntime.mStore, combat->actors[2], timedEffects, 2);
+            auto health = victim.getHealth();
+            health.setCurrent(health.getCurrent() - mRuntime.mStore.get<ESM::GameSetting>()
+                .find("fSuffocationDamage")->mValue.getFloat() * seconds);
+            victim.setHealth(health);
+            saveCombatStats(combat->actors[2], victim, timedEffects, 2);
+            if (victim.getHealth().getCurrent() <= 0)
+                recordEffectDeath({before.mActor, 2, life->generation});
+        }
         if (combat && mBinding.mPlayerCastLifecycle)
             for (size_t owner = 0; owner < 2; ++owner)
                 if (combat->playerCasts[owner] && (combat->actors[owner][8][2] <= 0 || combat->knockedDown[owner]
@@ -5586,7 +5650,13 @@ namespace TES3MP::Native
             for (size_t index = 0; index < combat->actors.size(); ++index)
                 if (combat->actors[index][8][2] <= 0) combat->hitRecoveryTicks[index] = 0;
         std::array<float,3> velocity;
-        for (size_t i=0; i<3; ++i) velocity[i]=respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
+        for (size_t i=0; i<3; ++i)
+        {
+            velocity[i] = respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
+            // WaterWalking may lift an actor onto the water plane in one frame.
+            // Keep its committed position exact while bounding presentation speed.
+            if (mBinding.mMovementEffects) velocity[i] = std::clamp(velocity[i], -4096.f, 4096.f);
+        }
         if (!mBinding.mNpcCastLifecycle)
             for (auto& effect : timedEffects) if (effect.sourceKind != 3)
             {

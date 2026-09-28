@@ -1,4 +1,6 @@
 #include <apps/openmw/mwmechanics/dooravoidance.hpp>
+#include <apps/openmw/mwclass/npcmovement.hpp>
+#include <apps/openmw/mwmechanics/breathing.hpp>
 #include <apps/openmw/mwmechanics/steering.hpp>
 #include <apps/openmw/mwphysics/collisiontype.hpp>
 #include <apps/openmw/mwphysics/movementdata.hpp>
@@ -13,6 +15,7 @@
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
 #include <BulletCollision/CollisionShapes/btBoxShape.h>
 #include <BulletCollision/CollisionShapes/btCylinderShape.h>
+#include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 
 #include <algorithm>
 #include <cmath>
@@ -76,16 +79,27 @@ namespace
             add(std::make_unique<btBoxShape>(halfExtents), center, MWPhysics::CollisionType_World);
         }
 
-        MWPhysics::ActorFrameData actor(const osg::Vec3f& position = { 0, 0, 1 }, float slowFall = 1.f)
+        void water(float level)
+        {
+            add(std::make_unique<btStaticPlaneShape>(btVector3(0, 0, 1), level),
+                {0, 0, 0}, MWPhysics::CollisionType_Water);
+        }
+
+        MWPhysics::ActorFrameData actor(const osg::Vec3f& position = { 0, 0, 1 }, float slowFall = 1.f,
+            float water = -std::numeric_limits<float>::max(), float swim = -std::numeric_limits<float>::max(),
+            bool waterWalking = false)
         {
             auto* object = add(std::make_unique<btCylinderShapeZ>(btVector3(16, 16, 32)),
                 { position.x(), position.y(), position.z() + 32 }, MWPhysics::CollisionType_Actor);
             return { .mPosition = position,
                 .mIsOnGround = position.z() == 1.f,
                 .mCollisionObject = object,
+                .mSwimLevel = swim,
                 .mSlowFall = slowFall,
+                .mWaterlevel = water,
                 .mHalfExtentsZ = 32.f,
-                .mWasOnGround = position.z() == 1.f };
+                .mWasOnGround = position.z() == 1.f,
+                .mWaterCollision = waterWalking };
         }
 
         void step(MWPhysics::ActorFrameData& actor, const MWPhysics::WorldFrameData& world = {},
@@ -257,6 +271,60 @@ namespace
             "Falling actor did not land on the floor");
     }
 
+    void movementRules()
+    {
+        const float empty = MWClass::normalizedEncumbrance(0.f, 0.f);
+        const float burdened = MWClass::normalizedEncumbrance(120.f, 100.f);
+        const float feathered = MWClass::normalizedEncumbrance(40.f, 100.f);
+        require(empty == 0.f && burdened > 1.f && feathered == .4f,
+            "Stock burden/feather encumbrance boundary changed");
+        const float walk = MWClass::npcWalkSpeed(50, feathered, 100, 200, .5f);
+        const float heavy = MWClass::npcWalkSpeed(50, burdened, 100, 200, .5f);
+        require(walk > heavy && walk == 120.f,
+            "Stock movement no longer uses encumbrance and Speed");
+        const float swim = MWClass::npcSwimSpeed(walk, 20, 50, 1, 1);
+        require(swim == 216.f && MWClass::npcFlySpeed(50, 20, feathered, 100, 200, .5f) > 0,
+            "SwiftSwim or Levitate no longer enters stock speed rules");
+        require(MWClass::npcJumpSpeed(feathered, 40, 20, 1, false, 1, 1, 1, 1, 1, -100)
+                > MWClass::npcJumpSpeed(feathered, 40, 0, 1, false, 1, 1, 1, 1, 1, -100)
+            && MWClass::npcSlowFall(100) == .5f,
+            "Jump or SlowFall magnitude no longer enters stock movement rules");
+        Scene scene;
+        auto normal = scene.actor({-100, 0, 200});
+        auto slowed = scene.actor({100, 0, 200}, MWClass::npcSlowFall(100));
+        scene.step(normal); scene.step(slowed);
+        require(std::abs(slowed.mInertia.z() * 2 - normal.mInertia.z()) < .001f,
+            "Shared SlowFall rule diverged from the stock solver");
+        Scene jumping;
+        auto low = jumping.actor({-100, 0, 1});
+        auto high = jumping.actor({100, 0, 1});
+        low.mMovement.z() = 120;
+        high.mMovement.z() = 120 + 20 * 64 / 3.f;
+        jumping.step(low); jumping.step(high);
+        require(high.mPosition.z() > low.mPosition.z() + 5.f,
+            "Jump impulse did not enter the stock solver");
+        Scene wet;
+        wet.water(80);
+        auto walking = wet.actor({-100, 0, 120}, 1, 80, 48, true);
+        auto sinking = wet.actor({100, 0, 120}, 1, 80, 48);
+        walking.mCollisionObject->getBroadphaseHandle()->m_collisionFilterMask |= MWPhysics::CollisionType_Water;
+        for (int i = 0; i < 100; ++i) { wet.step(walking); wet.step(sinking); }
+        require(walking.mWalkingOnWater && walking.mIsOnGround
+            && walking.mPosition.z() > sinking.mPosition.z() + 30.f,
+            "WaterWalking did not bind the stock water collision plane");
+        auto swimmer = wet.actor({0, 100, 20}, 1, 160, 128);
+        swimmer.mMovement = {0, MWClass::npcSwimSpeed(100, 20, 50, 1, 1), 0};
+        for (int i = 0; i < 60; ++i) wet.step(swimmer);
+        require(std::abs(swimmer.mPosition.y() - 280.f) < 1.f,
+            "SwiftSwim did not enter the stock underwater solver");
+        const auto breath = MWMechanics::advanceBreath(-1, 2, .5f, true, false, false);
+        require(breath.remaining == 1.5f && !breath.drowning
+            && MWMechanics::advanceBreath(breath.remaining, 2, 2, true, false, false).drowning
+            && MWMechanics::advanceBreath(0, 2, .5f, true, false, true).remaining == 2.f
+            && MWMechanics::advanceBreath(2, 2, .5f, false, true, false).drowning,
+            "WaterBreathing no longer suspends the stock drowning timer");
+    }
+
     void doorAvoidance()
     {
         Misc::Rng::Generator random(7), expected(7);
@@ -326,6 +394,8 @@ int main(int argc, char** argv)
             environment();
         else if (filter == "collision-effects")
             collisionEffects();
+        else if (filter == "movement-rules")
+            movementRules();
         else if (filter == "door-contact")
             doorContact();
         else if (filter == "door-avoidance")

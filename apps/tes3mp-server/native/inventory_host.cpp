@@ -549,10 +549,12 @@ namespace TES3MP::Native
                 if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
                     throw std::invalid_argument("V17-V19 require at least one ordinary door");
                 const auto createScene = [&loadout, names, neighborhood = start.binding.mTravelerNeighborhood,
+                    movementEffects = start.binding.mMovementEffects,
                     id = owner.mId.value(), navigation = *start.navigation, doors] {
                     auto scene = std::make_shared<InteriorActorScene>(loadout, names, id,
                         "meshes/base_anim.nif", "meshes/base_animkna.nif");
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
+                    if (movementEffects) scene->enableMovementEffects();
                     scene->enableNavigation(navigation.settings);
                     scene->travelTo(navigation.destination, neighborhood);
                     return scene;

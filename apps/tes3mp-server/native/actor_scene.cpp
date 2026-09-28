@@ -15,6 +15,7 @@
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
 #include <apps/openmw/mwmechanics/pathfinding.hpp>
+#include <apps/openmw/mwmechanics/breathing.hpp>
 #include <apps/openmw/mwmechanics/dooravoidance.hpp>
 #include <apps/openmw/mwmechanics/steering.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
@@ -24,6 +25,7 @@
 #include <components/bullethelpers/collisionobject.hpp>
 #include <components/files/hash.hpp>
 #include <components/detournavigator/agentbounds.hpp>
+#include <components/detournavigator/flags.hpp>
 #include <components/detournavigator/navigatorutils.hpp>
 #include <components/settings/categories/navigator.hpp>
 #include <components/settings/parser.hpp>
@@ -47,6 +49,7 @@
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
 #include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
+#include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -84,6 +87,7 @@ namespace TES3MP::Native
             { mObjects.reserve(MaxContacts); }
             void objectCollision(const btCollisionObject* object, bool) override
             {
+                if (object->getBroadphaseHandle()->m_collisionFilterGroup == MWPhysics::CollisionType_Water) return;
                 const auto id = mIdentities.at(object);
                 if (std::find(mObjects.begin(), mObjects.end(), id) != mObjects.end()) return;
                 if (mObjects.size() == MaxContacts) throw std::length_error("Interior contact budget exceeded");
@@ -120,6 +124,9 @@ namespace TES3MP::Native
         btCollisionDispatcher mDispatcher{ &mConfiguration };
         btDbvtBroadphase mBroadphase;
         btCollisionWorld mWorld{ &mDispatcher, &mBroadphase, &mConfiguration };
+        std::unique_ptr<btStaticPlaneShape> mWaterShape;
+        std::unique_ptr<btCollisionObject> mWaterObject;
+        std::optional<float> mInteriorWater;
         std::vector<std::unique_ptr<Body>> mBodies;
         struct Terrain
         {
@@ -153,6 +160,7 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> mDoors;
         bool mAvoidanceEnabled = false;
         bool mSmoothMovement = false;
+        bool mWaterNavigation = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mOnlyAppropriateAmmunitionBypassesResistance = false;
         bool mUncappedDamageFatigue = false;
@@ -164,11 +172,80 @@ namespace TES3MP::Native
             uint64_t door = 0;
             MWMechanics::DoorAvoidance avoidance;
             Misc::Rng::Generator random;
+            float breath = -1.f;
+            bool drowning = false;
         } mTravel;
         // Derived cache only. A rejected candidate may warm it; every query
         // synchronizes it to its own complete angle image before using it.
         std::vector<ActorSceneDoor> mNavigationDoors;
         bool mNavigationValid = false;
+
+        DetourNavigator::Flags navigationFlags() const
+        { return mWaterNavigation && (mInteriorWater || !mTerrain.empty())
+            ? DetourNavigator::Flags(DetourNavigator::Flag_walk | DetourNavigator::Flag_swim)
+            : DetourNavigator::Flag_walk; }
+
+        ~Impl()
+        { if (mWaterObject) mWorld.removeCollisionObject(mWaterObject.get()); }
+
+        float waterAt(const osg::Vec3f& position) const
+        {
+            if (mInteriorWater) return *mInteriorWater;
+            const int x = int(std::floor(double(position.x()) / ESM::Land::REAL_SIZE));
+            const int y = int(std::floor(double(position.y()) / ESM::Land::REAL_SIZE));
+            for (const auto& terrain : mTerrain)
+                if (terrain->cell.x() == x && terrain->cell.y() == y) return terrain->water;
+            return -std::numeric_limits<float>::max();
+        }
+
+        MWPhysics::ActorFrameData movementFrame(const MWPhysics::ActorFrameData& frame,
+            const ActorMovement& movement) const
+        {
+            const float water = waterAt(frame.mPosition);
+            const float swimScale = mStore.get<ESM::GameSetting>().find("fSwimHeightScale")->mValue.getFloat();
+            return {.mPosition = frame.mPosition, .mInertia = frame.mInertia,
+                .mStandingOn = frame.mStandingOn, .mIsOnGround = frame.mIsOnGround,
+                .mIsOnSlope = frame.mIsOnSlope, .mWalkingOnWater = frame.mWalkingOnWater,
+                .mCollisionObject = frame.mCollisionObject,
+                .mSwimLevel = water - frame.mHalfExtentsZ * 2.f * swimScale,
+                .mSlowFall = movement.slowFall, .mRotation = frame.mRotation,
+                .mMovement = frame.mMovement, .mLastStuckPosition = frame.mLastStuckPosition,
+                .mWaterlevel = water, .mHalfExtentsZ = frame.mHalfExtentsZ,
+                .mOldHeight = frame.mOldHeight, .mStuckFrames = frame.mStuckFrames,
+                .mFlying = movement.levitating, .mWasOnGround = frame.mIsOnGround,
+                .mWaterCollision = movement.waterWalking && water > -1e30f};
+        }
+
+        float movementSpeed(const MWPhysics::ActorFrameData& frame, const ActorMovement& movement) const
+        {
+            if (movement.levitating) return movement.flySpeed;
+            if (frame.mPosition.z() < frame.mSwimLevel) return movement.swimSpeed;
+            return movement.walkSpeed;
+        }
+
+        float jumpVelocity(const MWPhysics::ActorFrameData& frame, const ActorMovement& movement) const
+        {
+            return movement.enabled && movement.jumpRequested && frame.mIsOnGround
+                && !movement.levitating && frame.mPosition.z() >= frame.mSwimLevel
+                ? movement.jumpSpeed : 0.f;
+        }
+
+        void updateBreath(const MWPhysics::ActorFrameData& frame, Travel& travel,
+            const ActorMovement& movement) const
+        {
+            if (!movement.enabled) return;
+            const float water = waterAt(frame.mPosition);
+            const float swimScale = mStore.get<ESM::GameSetting>().find("fSwimHeightScale")->mValue.getFloat();
+            const float hold = mStore.get<ESM::GameSetting>().find("fHoldBreathTime")->mValue.getFloat();
+            if (!(swimScale > 0.f) || !(hold > 0.f))
+                throw std::invalid_argument("Native breath settings outside bounds");
+            const bool submerged = water > frame.mPosition.z() + 2.f * frame.mHalfExtentsZ / swimScale;
+            const bool knockedOutUnderwater = movement.unconscious && water > frame.mPosition.z();
+            const auto next = MWMechanics::advanceBreath(travel.breath, hold, 1.f / 60.f,
+                submerged, knockedOutUnderwater, movement.waterBreathing);
+            travel.breath = next.remaining;
+            travel.drowning = next.drowning;
+        }
 
         void syncNavigation(std::span<const ActorSceneDoor> doors)
         {
@@ -204,7 +281,8 @@ namespace TES3MP::Native
             if (!travel.hasDestination) return;
             std::vector<osg::Vec3f> points;
             const auto status = DetourNavigator::findPath(*mNavigator, mAgentBounds, position,
-                travel.destination, DetourNavigator::Flag_walk, {}, 0, {}, std::back_inserter(points));
+                travel.destination, navigationFlags(),
+                {}, 0, {}, std::back_inserter(points));
             if (points.size() > 2048) throw std::length_error("Interior path exceeds bound");
             // An obstructed destination remains pending, never a completed trip.
             if (status == DetourNavigator::Status::Success)
@@ -275,7 +353,11 @@ namespace TES3MP::Native
             {
             auto& cell = mReferences.getCell(cellId);
             if (!cell.isExterior() && cell.getCell()->hasWater())
-                throw std::invalid_argument("Interior NPC slice requires a dry interior");
+            {
+                const float level = cell.getWaterLevel();
+                if (!std::isfinite(level)) throw std::invalid_argument("Actor water level outside bounds");
+                mInteriorWater = level;
+            }
             cell.forEach([&](const MWWorld::Ptr& ptr) {
                 if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
@@ -397,6 +479,14 @@ namespace TES3MP::Native
             }
             }
             if (!mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
+            if (mInteriorWater || !mTerrain.empty())
+            {
+                mWaterShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 0, 1), 0);
+                mWaterObject = std::make_unique<btCollisionObject>();
+                mWaterObject->setCollisionShape(mWaterShape.get());
+                mWorld.addCollisionObject(mWaterObject.get(), MWPhysics::CollisionType_Water,
+                    MWPhysics::CollisionType_Actor);
+            }
             std::ostringstream fingerprint;
             fingerprint << "native-interior-collision-1\n" << loadout.contentFingerprint() << '\n'
                 << (anchor ? "exterior-neighborhood-1" : std::string(cells.front().getRefIdString())) << '\n' << actor << '\n';
@@ -421,8 +511,28 @@ namespace TES3MP::Native
             {
                 btCollisionObject& object;
                 btTransform transform;
-                ~RestoreTransform() { object.setWorldTransform(transform); }
-            } restore{*frame.mCollisionObject, frame.mCollisionObject->getWorldTransform()};
+                btCollisionWorld& world;
+                btCollisionObject* water;
+                btTransform waterTransform;
+                int mask;
+                ~RestoreTransform()
+                {
+                    object.setWorldTransform(transform);
+                    object.getBroadphaseHandle()->m_collisionFilterMask = mask;
+                    if (water) { water->setWorldTransform(waterTransform); world.updateSingleAabb(water); }
+                }
+            } restore{*frame.mCollisionObject, frame.mCollisionObject->getWorldTransform(), mWorld,
+                mWaterObject.get(), mWaterObject ? mWaterObject->getWorldTransform() : btTransform::getIdentity(),
+                frame.mCollisionObject->getBroadphaseHandle()->m_collisionFilterMask};
+            if (mWaterObject && frame.mWaterlevel > -1e30f)
+            {
+                auto transform = mWaterObject->getWorldTransform();
+                transform.setOrigin(btVector3(0, 0, frame.mWaterlevel));
+                mWaterObject->setWorldTransform(transform);
+                mWorld.updateSingleAabb(mWaterObject.get());
+            }
+            if (frame.mWaterCollision)
+                frame.mCollisionObject->getBroadphaseHandle()->m_collisionFilterMask |= MWPhysics::CollisionType_Water;
             MWPhysics::MovementSolver::unstuck(frame, &mWorld);
             MWPhysics::MovementSolver::move(frame, 1.f/60.f, &mWorld, {}, effects);
             if (!std::isfinite(frame.mPosition.length2()) || frame.mPosition.length2()>3e14f)
@@ -430,13 +540,15 @@ namespace TES3MP::Native
             contacts.swap(effects.mObjects);
         }
         void navigate(MWPhysics::ActorFrameData& frame, MWMechanics::PathFinder& path,
-            std::vector<uint64_t>& contacts, float speed)
+            std::vector<uint64_t>& contacts, float speed, const ActorMovement& movement)
         {
-            if (!mNavigator || !std::isfinite(speed) || speed<=0 || speed>4096)
+            if (!mNavigator || !std::isfinite(speed) || speed<0 || speed>4096)
                 throw std::invalid_argument("Interior navigation speed outside bounds");
-            path.update(frame.mPosition, 8, 8, 0, mAgentBounds, DetourNavigator::Flag_walk, *mNavigator);
+            path.update(frame.mPosition, 8, 8, 0, mAgentBounds,
+                navigationFlags(), *mNavigator);
             if (path.isPathConstructed()) frame.mRotation.y()=path.getZAngleToNext(frame.mPosition.x(), frame.mPosition.y());
-            simulate(frame, contacts, {0, path.isPathConstructed() ? speed : 0, 0});
+            simulate(frame, contacts, {0, path.isPathConstructed() ? speed : 0,
+                jumpVelocity(frame, movement)});
         }
         void updateTransform() noexcept
         {
@@ -449,8 +561,10 @@ namespace TES3MP::Native
             const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts, const Travel& travel) const;
 
         void advance(MWPhysics::ActorFrameData& frame, MWMechanics::PathFinder& path,
-            std::vector<uint64_t>& contacts, Travel& travel, float speed, std::span<const ActorSceneDoor> doors)
+            std::vector<uint64_t>& contacts, Travel& travel, const ActorMovement& movement,
+            std::span<const ActorSceneDoor> doors)
         {
+            const float speed = movement.enabled ? movementSpeed(frame, movement) : movement.walkSpeed;
             if (travel.door)
             {
                 const auto door = std::ranges::find(doors, travel.door, &ActorSceneDoor::mId);
@@ -462,20 +576,23 @@ namespace TES3MP::Native
                     const auto turn = MWMechanics::smoothTurnStep(frame.mRotation.y(), *angle, speed,
                         1.f / 60, mSmoothMovement, osg::DegreesToRadians(5.f));
                     frame.mRotation.y() += turn.mRotation;
-                    simulate(frame, contacts, {0, turn.mComplete ? speed : 0, 0});
+                    simulate(frame, contacts, {0, turn.mComplete ? speed : 0,
+                        jumpVelocity(frame, movement)});
+                    updateBreath(frame, travel, movement);
                     return;
                 }
                 travel.door = 0;
                 travel.avoidance = {};
                 rebuildPath(path, frame.mPosition, travel);
             }
-            navigate(frame, path, contacts, speed);
+            navigate(frame, path, contacts, speed, movement);
+            updateBreath(frame, travel, movement);
         }
 
         ActorSceneSnapshot snapshot() const
         {
             return {mActorId, {mActor->mPosition.x(), mActor->mPosition.y(), mActor->mPosition.z()},
-                mActor->mIsOnGround, mContacts, mActor->mRotation.y()};
+                mActor->mIsOnGround, mContacts, mActor->mRotation.y(), mTravel.drowning};
         }
     };
 
@@ -746,10 +863,18 @@ namespace TES3MP::Native
         mDormant.swap(fresh.mDormant);
     }
 
+    void InteriorActorScene::enableMovementEffects()
+    {
+        if (!mImpl || mImpl->mNavigator) throw std::logic_error("Actor movement binding must precede navigation");
+        mImpl->mWaterNavigation = true;
+    }
+
     void InteriorActorScene::enableNavigation(const std::string& settingsFile)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         if (mImpl->mNavigator) throw std::logic_error("Interior navigation already initialized");
+        if (mImpl->mInteriorWater && !mImpl->mWaterNavigation)
+            throw std::invalid_argument("Interior NPC slice requires a dry interior");
         if (std::filesystem::file_size(settingsFile) > 1024 * 1024)
             throw std::invalid_argument("Navigation settings exceed startup bound");
         // Engine settings are read during serialized startup. Restore the globals
@@ -794,9 +919,15 @@ namespace TES3MP::Native
             throw std::invalid_argument("Interior NPC navigation bounds unsupported");
         navigator->updateBounds(ESM::RefId::stringRefId("native-interior"), {}, mImpl->mActor->mPosition, nullptr);
         for (const auto& terrain : mImpl->mTerrain)
+        {
             navigator->addHeightfield(terrain->cell, ESM::Land::REAL_SIZE,
                 DetourNavigator::HeightfieldSurface{terrain->heights.data(), ESM::Land::LAND_SIZE,
                     terrain->minimum, terrain->maximum}, nullptr);
+            if (mImpl->mWaterNavigation)
+                navigator->addWater(terrain->cell, ESM::Land::REAL_SIZE, terrain->water, nullptr);
+        }
+        if (mImpl->mWaterNavigation && mImpl->mInteriorWater)
+            navigator->addWater({0, 0}, std::numeric_limits<int>::max(), *mImpl->mInteriorWater, nullptr);
         for (size_t i = 0; i < mImpl->mBodies.size(); ++i)
         {
             const auto& body = *mImpl->mBodies[i];
@@ -826,7 +957,8 @@ namespace TES3MP::Native
         mImpl->syncNavigation(mImpl->mDoors);
         std::vector<osg::Vec3f> path;
         const auto status = DetourNavigator::findPath(*mImpl->mNavigator, mImpl->mAgentBounds,
-            mImpl->mActor->mPosition, {destination[0], destination[1], destination[2]}, DetourNavigator::Flag_walk,
+            mImpl->mActor->mPosition, {destination[0], destination[1], destination[2]},
+            mImpl->navigationFlags(),
             {}, 0, {}, std::back_inserter(path));
         if (status != DetourNavigator::Status::Success || path.empty() || path.size() > 2048)
             throw std::invalid_argument("No complete interior navigation path: " + std::string(DetourNavigator::getMessage(status)));
@@ -843,7 +975,7 @@ namespace TES3MP::Native
             for (float value : destination)
                 if (!std::isfinite(value) || std::abs(value) > 1e7f)
                     throw std::invalid_argument("Travel destination outside bounds");
-            if (!contains(destination)) throw std::invalid_argument("Travel destination outside dry processing neighborhood");
+            if (!contains(destination)) throw std::invalid_argument("Travel destination outside processing neighborhood");
             auto travel = mImpl->mTravel;
             travel.hasDestination = true;
             travel.destination = {destination[0], destination[1], destination[2]};
@@ -872,7 +1004,8 @@ namespace TES3MP::Native
         const auto x = std::floor(double(position[0]) / ESM::Land::REAL_SIZE);
         const auto y = std::floor(double(position[1]) / ESM::Land::REAL_SIZE);
         return std::ranges::any_of(mImpl->mTerrain, [&](const auto& terrain) {
-            return x == terrain->cell.x() && y == terrain->cell.y() && position[2] >= terrain->water;
+            return x == terrain->cell.x() && y == terrain->cell.y()
+                && (mImpl->mWaterNavigation || position[2] >= terrain->water);
         });
     }
     bool InteriorActorScene::pathUnavailable() const
@@ -937,7 +1070,7 @@ namespace TES3MP::Native
         auto travel=mImpl->mTravel;
         std::vector<uint64_t> contacts;
         mImpl->syncNavigation(mImpl->mDoors);
-        mImpl->advance(*frame,path,contacts,travel,speed,mImpl->mDoors);
+        mImpl->advance(*frame,path,contacts,travel,ActorMovement{.walkSpeed = speed},mImpl->mDoors);
         ActorSceneSnapshot result{mImpl->mActorId,{frame->mPosition.x(),frame->mPosition.y(),frame->mPosition.z()},
             frame->mIsOnGround,contacts,frame->mRotation.y()};
         mImpl->mActor.swap(frame); std::swap(mImpl->mPath,path); mImpl->mContacts.swap(contacts);
@@ -974,7 +1107,7 @@ namespace TES3MP::Native
     {
         const auto& frame = *mState->frame;
         return {mState->actor, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
-            frame.mIsOnGround, mState->contacts, frame.mRotation.y()};
+            frame.mIsOnGround, mState->contacts, frame.mRotation.y(), mState->travel.drowning};
     }
     void InteriorActorScene::setFacing(Prepared& prepared, float yaw) const
     {
@@ -1001,7 +1134,8 @@ namespace TES3MP::Native
         vector(frame.mPosition); vector(frame.mInertia); vector(frame.mLastStuckPosition);
         real(frame.mRotation.x()); real(frame.mRotation.y()); real(frame.mOldHeight);
         word(frame.mStuckFrames); word(frame.mIsOnGround); word(frame.mIsOnSlope);
-        word(frame.mStandingOn ? mIdentities.at(frame.mStandingOn) : 0);
+        word(frame.mStandingOn == mWaterObject.get() && mWaterObject ? UINT64_MAX
+            : frame.mStandingOn ? mIdentities.at(frame.mStandingOn) : 0);
         word(path.checkPathCompleted()); word(path.getPathSize());
         for (const auto& point : path.getPath()) vector(point);
         word(contacts.size());
@@ -1013,6 +1147,7 @@ namespace TES3MP::Native
             word(travel.avoidance.mDirection);
             word(std::stoull(Misc::Rng::serialize(travel.random)));
         }
+        if (mWaterNavigation) real(travel.breath);
         return bytes;
     }
 
@@ -1053,7 +1188,10 @@ namespace TES3MP::Native
         const auto standing = word(); frame->mStandingOn = nullptr;
         if (standing)
         {
-            for (const auto& [object, id] : mImpl->mIdentities) if (id == standing) frame->mStandingOn = object;
+            if (standing == UINT64_MAX && mImpl->mWaterNavigation)
+                frame->mStandingOn = mImpl->mWaterObject.get();
+            else
+                for (const auto& [object, id] : mImpl->mIdentities) if (id == standing) frame->mStandingOn = object;
             if (!frame->mStandingOn || standing == mImpl->mActorId) throw std::invalid_argument("Actor support outside scene");
         }
         const bool completed = boolean();
@@ -1093,6 +1231,16 @@ namespace TES3MP::Native
             travel.avoidance.mDirection = int(direction);
             Misc::Rng::deserialize(std::to_string(random), travel.random);
         }
+        // Earlier V56 images ended after avoidance. Restore those at full
+        // breath, then include the timer on the next committed frame.
+        if (mImpl->mWaterNavigation && offset < bytes.size())
+        {
+            travel.breath = real();
+            const float hold = mImpl->mStore.get<ESM::GameSetting>().find("fHoldBreathTime")->mValue.getFloat();
+            if (!(hold > 0.f) || travel.breath < -1.f || travel.breath > hold)
+                throw std::invalid_argument("Actor breath timer outside stock bounds");
+            travel.drowning = false;
+        }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
@@ -1101,12 +1249,24 @@ namespace TES3MP::Native
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
         float speed, std::span<const ActorSceneDoor> doors)
+    { return prepareNavigation(ActorMovement{.walkSpeed = speed}, doors); }
+
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
+        const ActorMovement& movement, std::span<const ActorSceneDoor> doors)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         mImpl->validateDoors(doors);
-        if (!mImpl->mNavigator || !std::isfinite(speed) || speed <= 0 || speed > 4096)
+        if (!mImpl->mNavigator || !std::isfinite(movement.walkSpeed)
+            || movement.walkSpeed < 0 || movement.walkSpeed > 4096
+            || (movement.enabled && (!std::isfinite(movement.swimSpeed) || movement.swimSpeed < 0
+                || movement.swimSpeed > 4096 || !std::isfinite(movement.flySpeed)
+                || movement.flySpeed < 0 || movement.flySpeed > 4096
+                || !std::isfinite(movement.jumpSpeed) || movement.jumpSpeed < 0
+                || movement.jumpSpeed > 4096 || !std::isfinite(movement.slowFall)
+                || movement.slowFall < 0 || movement.slowFall > 1)))
             throw std::invalid_argument("Interior navigation speed outside bounds");
-        auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
+        auto frame = std::make_unique<MWPhysics::ActorFrameData>(movement.enabled
+            ? mImpl->movementFrame(*mImpl->mActor, movement) : *mImpl->mActor);
         auto path = mImpl->mPath;
         auto travel = mImpl->mTravel;
         std::vector<uint64_t> contacts;
@@ -1130,8 +1290,8 @@ namespace TES3MP::Native
             ~RestoreDoors() { scene.applyDoors(scene.mDoors); }
         } restore{*mImpl};
         mImpl->applyDoors(doors);
-        mImpl->advance(*frame,path,contacts,travel,speed,doors);
-        mImpl->advance(*frame,path,contacts,travel,speed,doors);
+        mImpl->advance(*frame,path,contacts,travel,movement,doors);
+        mImpl->advance(*frame,path,contacts,travel,movement,doors);
         auto bytes = mImpl->encode(*frame,path,contacts,travel);
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts), std::move(bytes),

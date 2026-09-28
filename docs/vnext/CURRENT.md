@@ -59,16 +59,25 @@ omit the HUD; marker widget counts are recorded by the automation. Detached AI l
 sneak stance.
 
 V56 admits eight movement effects into committed spell/constant source lifetimes,
-including WaterBreathing's effect index zero; T3D0 projects their magnitudes to
-OpenMW's inherited player movement consumers. Synthetic source, rejection, remote
-projection, restart and expiry: `build/logs/movement-effects-test-06.log`;
-wire check: `build/logs/movement-wire-test-03.log`. Detached NPC navigation still
-uses dry cells and fixed speed; water, encumbrance, levitation and slow fall need
-authoritative engine-frame binding. Desktop capture pending.
+including WaterBreathing's effect index zero; T3D0 projects magnitudes to
+inherited player consumers. Detached NPC frames now derive stock walk/swim/fly
+speed, encumbrance, jump impulse, SlowFall, WaterWalking collision and breath
+from committed sources, stats, inventory and cell water. Drowning damages the
+NPC; a lethal environmental event currently uses the NPC's own life for death
+attribution. Existing V56 actor images restore with a full breath timer.
+Stock solver water/jump/slow-fall checks: `build/logs/movement-npc-rules-09.log`;
+NPC source, Burden travel, rejection and restart:
+`build/logs/movement-npc-service-17.log`; wet-cell SwiftSwim speed,
+WaterWalking lift/restart and Burden slowdown:
+`build/logs/movement-npc-wet-11.log`; wire:
+`build/logs/movement-wire-test-03.log`. Two impaired desktops received all
+eight player/NPC effects and identical positions on 671 common NPC ticks:
+`build/m4-movement-desktop-live-06/result.json`. Desktop room was dry; drowning
+lacks content-backed evidence. NPC AI issues no jump requests yet.
 
-**Next: bind movement effects to NPC physics and stock movement rules,
-then capture movement on two desktops.** Player movement cutover remains after M4
-combat/collision requirements.
+**Next: verify drowning and WaterBreathing in a deep-water content scene,
+then continue M4 effect families.** Player movement cutover stays after combat
+and collision requirements.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
