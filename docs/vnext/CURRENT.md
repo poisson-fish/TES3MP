@@ -1,36 +1,32 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-NPC/biped/doors: 60 Hz; commits: 30 Hz; three placement-keyed
-neighbors step once in one collision scene. Additional neighbors freeze. **V63.**
+NPC/biped/doors step at 60 Hz and commit at 30 Hz; three neighbors share one
+collision scene. Additional neighbors freeze. **V63.**
 
 Player/NPC casts, conditions, stats, Disintegration, concealment and visibility
-have vanilla/TR checks. VFX and sneak stance remain incomplete.
-`build/logs/{concealment-campaign-09,visibility-campaign-03}.log`.
+have vanilla/TR checks; VFX and sneak stance remain incomplete.
 
-V56 effects drive motion/breath and drowning; AI lacks jump requests:
-`build/logs/{movement-npc-service-17,movement-deep-05}.log`.
+V56 effects drive motion/breath and drowning; AI lacks jump requests.
 
 Twelve AI effects reach timed, item and passive sources; stock Fight/Flee and
-Charm consume them: `build/logs/ai-rules-final.log`. V58-V62 compose social
-context, crime, NPC placement stats, two-neighbor melee/effects/lives and
-respawn in one transaction. Two-player attacks, rejection and restart pass the
-synthetic real-loadout campaign: `build/logs/neighbor-combat-test-verify2.log`.
-V63 routes player Target spells, Touch effects and physical projectiles to any
-bound placement with its own life generation. Collision reports the first bound
-body; area effects include neighboring NPCs. Rejected launch, impact, death
-attribution and restart pass a synthetic real-loadout campaign for two and three
-neighbors: `build/logs/{neighbor-projectiles-test-08,neighbor-expanded-test-02}.log`.
-With three neighbors the largest scene image was 1,152 bytes and campaign
-image 32,138 bytes. V62 melee and older selected-NPC spell/bow checks:
-`build/logs/{neighbor-combat-compat-62,npc-target-spell-compat-02,bow-flight-compat-03}.log`.
-The three-neighbor bound remains provisional. Faction join/rank/expulsion
-commits for an explicit player: `build/logs/ai-faction-script-test-07.log`.
-Flee gates run on LOS and reach: `build/logs/{ai-flee-test-19,ai-action-test-05}.log`.
+Charm consume them. V58-V62 compose social context, crime, NPC placement
+stats, two-neighbor melee/effects/lives and respawn in one transaction.
+V63 routes player spells and physical projectiles by placement/life. Area
+effects include neighbors; rejected launch, impact, death and restart pass
+synthetic real-loadout campaigns for two and three neighbors.
+Player physical impacts now use the first server-owned NPC hull crossed, even
+when it differs from the requested aim target; world contact ends flight without
+damage. Direct hull/corridor and obstructed-shot outcomes pass in two/three-NPC
+campaigns: `build/logs/{projectile-hulls-test-04,projectile-hulls-expanded-02}.log`.
+The three-neighbor bound remains provisional. Faction changes commit for an
+explicit player; Flee gates run on LOS and reach.
 Mixed passives, non-player Command and scripts remain open.
 
-**Next: validate player projectile contacts against server-owned hulls, then
-execute NPC bows, crossbows and thrown weapons with durable ammunition recovery.**
+**Next: execute NPC bows, crossbows and thrown weapons with durable ammunition
+recovery.** NPC selection can rate ranged weapons, but its attack path still
+releases only melee. Physical flight receipts currently bind player casters and
+NPC targets; successful hits do not yet add recoverable ammunition to NPC loot.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

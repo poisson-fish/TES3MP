@@ -5581,12 +5581,14 @@ namespace TES3MP::Native
                     if (hit)
                     {
                         arrow.terminal = 1;
-                        const size_t victim = npcVictim(arrow.target);
-                        if (!victim) throw std::invalid_argument("Physical projectile target placement changed");
-                        playerContacts.push_back({actor(PlayerId::fromValue(arrow.caster).value()), victim,
-                            MeleeAttackType::Chop, arrow.strength,
-                            hit->actor == arrow.target && arrow.targetLife == victimLife(victim).generation
-                                && !victimLife(victim).respawnTick && combat->actors[victim][8][2] > 0, arrow});
+                        // The target in the launch intent fixes aim, not the impact victim.
+                        // The first server-owned hull in the sweep owns a physical hit.
+                        const size_t victim = npcVictim(hit->actor);
+                        if (victim && !victimLife(victim).respawnTick && combat->actors[victim][8][2] > 0
+                            && (hit->actor != arrow.target
+                                || arrow.targetLife == victimLife(victim).generation))
+                            playerContacts.push_back({actor(PlayerId::fromValue(arrow.caster).value()), victim,
+                                MeleeAttackType::Chop, arrow.strength, true, arrow});
                     }
                     else if (arrow.steps == 3600) arrow.terminal = 2;
                 }

@@ -6854,6 +6854,36 @@ namespace TES3MP::Native::Testing
                 if (neighborAi)
                 {
                     const auto witness = loadout.placedActors(combatRoom).at(1);
+                    if (projectileNeighbors)
+                    {
+                        const auto placements = loadout.placedActors(combatRoom);
+                        std::vector<uint64_t> neighbors;
+                        for (size_t i = 1; i < (effectFamily == "neighbor-expanded" ? 4u : 3u); ++i)
+                            neighbors.push_back(placements.at(i).mIdentity);
+                        InteriorActorScene hulls(loadout, std::array{combatRoom}, combatActor.mIdentity,
+                            "meshes/base_anim.nif", "meshes/base_animkna.nif", neighbors);
+                        const auto bodies = hulls.neighborSnapshots();
+                        require(bodies.size() == neighbors.size(), "Projectile hull fixture lost a bound NPC");
+                        for (const auto& body : bodies)
+                        {
+                            const std::array<float, 3> start{body.mPosition[0], body.mPosition[1] - 60.f,
+                                body.mPosition[2] + 80.f};
+                            auto end = start; end[1] += 120.f;
+                            const auto hit = hulls.projectileContact(start, end);
+                            require(hit && hit->actor == body.mActor,
+                                "Server projectile sweep missed or misidentified an NPC hull");
+                        }
+                        const auto first = bodies.front().mPosition;
+                        const std::array<float, 3> crossedFrom{first[0] - 40.f, first[1], first[2] + 80.f};
+                        const std::array<float, 3> crossedTo{first[0] + 150.f, first[1], first[2] + 80.f};
+                        const auto crossed = hulls.projectileContact(crossedFrom, crossedTo);
+                        require(crossed && crossed->actor == bodies.front().mActor,
+                            "Projectile crossed the first NPC hull for a farther target");
+                        const auto missed = hulls.projectileContact(
+                            {first[0] - 40.f, first[1] - 150.f, first[2] + 80.f},
+                            {first[0] + 150.f, first[1] - 150.f, first[2] + 80.f});
+                        require(!missed || !missed->actor, "Clear projectile corridor produced an NPC contact");
+                    }
                     const auto collisionDoor = loadout.ordinaryDoors(combatRoom, 128).at(0).mIdentity;
                     InteriorActorScene shared(loadout, std::array{combatRoom}, combatActor.mIdentity,
                         "meshes/base_anim.nif", "meshes/base_animkna.nif", witness.mIdentity);
@@ -8279,6 +8309,46 @@ namespace TES3MP::Native::Testing
                         }
                         require(damaged, magic ? "Neighbor spell never hit" : "Neighbor arrow never hit");
                     }
+                {
+                    // Aim through the front placement at a farther one. The
+                    // launch target cannot override the first server hull.
+                    std::vector<CanonicalPlayerEntityState> moved(authority.players().begin(), authority.players().end());
+                    moved[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                        moved[0], id<ServerTick>(1),
+                        Transform(moved[0].transform().cell(), Position3(20*1024, -120*1024, 1024),
+                            moved[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                    const auto obstructed = std::get<CanonicalServerState>(createCanonicalServerState(
+                        moved, authority.activeSessions()));
+                    auto host = make(); auto& runtime = dynamic_cast<InventoryService&>(host->service());
+                    runtime.synchronizeCells(obstructed);
+                    const auto placements = read(bytes(runtime)).combat->npcPlacements;
+                    const auto* player = obstructed.findPlayer(id<PlayerId>(1));
+                    const ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        id<ActorId>(placements.back()), id<ServerTick>(1), CombatRevision::initial(),
+                        CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                        MeleeAttackCommandProposal(attack)};
+                    auto command = runtime.prepareMeleeAttack(obstructed, request, id<ServerTick>(1));
+                    require(bool(command), "Obstructed bow intent rejected");
+                    bool frontHit = false;
+                    for (uint64_t tick = 1; tick <= 150; ++tick)
+                    {
+                        auto pending = runtime.prepareNativeTick(obstructed, id<ServerTick>(tick), 1.f/30,
+                            std::move(command), {}, &world);
+                        require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Obstructed bow tick failed");
+                        const auto current = read(bytes(runtime));
+                        if (current.neighborLives[0].deaths.empty()) continue;
+                        require(current.neighborLives[0].deaths.size() == 1
+                                && current.neighborLives.back().deaths.empty(),
+                            "Bow damaged the requested placement through the first NPC hull");
+                        frontHit = true; break;
+                    }
+                    require(frontHit, "First NPC hull did not receive the obstructed bow contact");
+                }
                 require(maxSceneBytes < 65536 && maxImageBytes < MaximumNativeInventoryImageBytes,
                     "Expanded neighbor scene or transaction exceeded its bound");
                 std::cout << "neighbor spells and arrows=" << boundNeighbors
