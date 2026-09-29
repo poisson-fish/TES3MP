@@ -8411,6 +8411,18 @@ namespace TES3MP::Native::Testing
                                     selectedNpc, neighbor->placement}
                                 && state.combat->actors[3][8][2] > 0,
                             "V61 combat state did not bind both NPC placements");
+                        const auto combatView = service.projectCombat(nearby, attackingSession,
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(combatView && combatView->actors().size() == 2
+                                && std::ranges::any_of(combatView->actors(), [&](const auto& actor) {
+                                    return actor.actorId.value() == neighbor->placement
+                                        && actor.health == state.combat->actors[3][8][2];
+                                })
+                                && std::ranges::any_of(combatView->presentation(), [&](const auto& actor) {
+                                    return actor.kind == 2 && actor.id == neighbor->placement
+                                        && actor.life == 1;
+                                }),
+                            "Placement neighbor combat stats or body were absent from projection");
                         auto forged = image;
                         const size_t neighborKey = 56 + 8 + state.melee->identity.size() + 7 * 8 + 8 + 8 + 8;
                         require(neighborKey + 8 <= forged.size(), "V61 placement key outside campaign image");
@@ -8422,6 +8434,32 @@ namespace TES3MP::Native::Testing
                         catch (const std::invalid_argument&) { rejectedKey = true; }
                         require(rejectedKey && bytes(service) == image,
                             "V61 recovery accepted a foreign NPC placement or changed the live campaign");
+                        auto drained = image;
+                        const size_t fatigueOffset = neighborKey + 8
+                            + (3 * ActorCampaignCombat::StatCount * 5 + 10 * 5 + 2) * 8;
+                        require(fatigueOffset + 8 <= drained.size(),
+                            "Neighbor fatigue outside campaign image");
+                        const float initialFatigue = state.combat->actors[3][10][2];
+                        require(initialFatigue > 5.f, "Neighbor fixture lacks fatigue reserve");
+                        const float reducedFatigue = initialFatigue - 5.f;
+                        const uint64_t fatigueBits = std::bit_cast<uint32_t>(reducedFatigue);
+                        for (size_t byte = 0; byte < 8; ++byte)
+                            drained[fatigueOffset + byte] = std::byte(uint8_t(fatigueBits >> (byte * 8)));
+                        require(read(drained).combat->actors[3][10][2] == reducedFatigue,
+                            "Neighbor fatigue fixture changed the wrong stat");
+                        InventoryHost recovering(descriptor, testContentManifest(), *registry, *crypto, drained);
+                        auto& recovered = dynamic_cast<InventoryService&>(recovering.service());
+                        recovered.synchronizeCells(nearby);
+                        const auto recoveryWorld = specialWorld();
+                        auto recoveryTick = recovered.prepareNativeTick(nearby, id<ServerTick>(1), 1.f/30,
+                            {}, {}, &recoveryWorld);
+                        require(bool(recoveryTick), "Recovered neighbor fatigue tick absent");
+                        require(recoveryTick->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(recovered) == drained,
+                            "Rejected neighbor fatigue tick changed durable state");
+                        require(recoveryTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && read(bytes(recovered)).combat->actors[3][10][2] > reducedFatigue,
+                            "Neighbor fatigue failed to advance in the composed tick");
                     }
                     ClientMeleeAttackCommand attack{attackingSession, SessionGeneration::initial(),
                         CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
@@ -8499,6 +8537,17 @@ namespace TES3MP::Native::Testing
                     replay.service().synchronizeCells(chase);
                     require(bytes(replay.service()) == reportedImage,
                         "Crime engagement changed on restart");
+                    if (placementActors)
+                    {
+                        const auto live = service.projectCombat(chase, attackingSession,
+                            id<ServerTick>(reportTick), id<CanonicalRevision>(1));
+                        const auto resumed = replay.service().projectCombat(chase, attackingSession,
+                            id<ServerTick>(reportTick), id<CanonicalRevision>(1));
+                        require(live && resumed
+                                && std::ranges::equal(live->actors(), resumed->actors())
+                                && std::ranges::equal(live->presentation(), resumed->presentation()),
+                            "Neighbor combat/body projection diverged on restart");
+                    }
                     bool aiReacted = read(reportedImage).combat->npcAction != 0;
                     uint64_t frame = reportTick + 1;
                     for (; frame <= reportTick + 75 && !aiReacted; ++frame)

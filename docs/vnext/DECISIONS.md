@@ -291,8 +291,9 @@ V60 stages the first neighbor's stock body/path and engagement pursuit with the
 actor image; its frame shares the selected actor's collision world and sweeps
 against the staged selected pose. V60 combat owns one NPC slot. Keep engagement keyed by placement and player, with
 no implicit migration.
-V61 binds bounded combat stat/body vectors to placement IDs on recovery.
-Only the selected NPC has a combat clock so far.
+V61 binds bounded combat stat/body vectors and hit resources to placement IDs
+on recovery. Neighbor fatigue/recovery and presentation share the durable tick;
+only the selected NPC executes attacks so far.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

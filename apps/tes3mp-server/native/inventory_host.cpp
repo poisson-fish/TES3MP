@@ -294,7 +294,7 @@ namespace TES3MP::Native
                 binding.mNpcWeaponCompetition = descriptorVersion >= 40;
                 binding.mNpcFullSelection = descriptorVersion >= 41;
                 binding.mNpcCastLifecycle = descriptorVersion >= 42;
-                if (descriptorVersion >= 43) binding.mBoundHits.emplace();
+                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 61 ? 4 : 3);
             }
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
@@ -641,7 +641,11 @@ namespace TES3MP::Native
                 if (start.binding.mBoundHits)
                 {
                     auto& hits = *start.binding.mBoundHits;
-                    const std::array participants{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase};
+                    std::vector<ESM::RefId> participants{start.binding.mActors[0].mBase,
+                        start.binding.mActors[1].mBase, owner.mBase};
+                    if (start.binding.mPlacementCombat) participants.push_back(neighborOwner->mBase);
+                    if (hits.size() != participants.size())
+                        throw std::invalid_argument("Native hit resource placement domain invalid");
                     for (size_t i = 0; i < participants.size(); ++i)
                     {
                         hits[i] = scene->bindHitAnimations(participants[i], start.binding.mKnockoutAnimation);
@@ -694,7 +698,12 @@ namespace TES3MP::Native
                     start.binding.mNavigationActivity = [scene, createScene, meleeIdentity,
                         meleeGroup, meleeAttack, meleeSpeed, &loadout, hits = start.binding.mBoundHits,
                         knockout = start.binding.mKnockoutAnimation,
-                        participants = std::array{start.binding.mActors[0].mBase, start.binding.mActors[1].mBase, owner.mBase}](bool active) {
+                        participants = [&] {
+                            std::vector<ESM::RefId> actors{start.binding.mActors[0].mBase,
+                                start.binding.mActors[1].mBase, owner.mBase};
+                            if (start.binding.mPlacementCombat) actors.push_back(neighborOwner->mBase);
+                            return actors;
+                        }()](bool active) {
                         if (active && !scene->loaded())
                         {
                             auto fresh = createScene();

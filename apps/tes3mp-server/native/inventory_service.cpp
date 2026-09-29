@@ -802,26 +802,38 @@ namespace TES3MP::Native
         struct ExpandedEffectResult
         {
             InstantSpellResult target;
-            std::array<std::optional<ActorCasterIdentity>, 3> deaths;
+            std::vector<std::optional<ActorCasterIdentity>> deaths;
         };
         ExpandedEffectResult resolveExpandedEffects(const PreparedInstantEffects& plan, int range, size_t targetIndex,
             MWMechanics::NpcStats& target, ActorCasterIdentity caster, uint64_t source, uint64_t sourceKind,
             uint64_t tick, ActorCampaignCombat& combat, std::vector<ActorCampaignTimedEffect>& effects,
-            const std::array<ActorCasterIdentity, 3>& identities, const MWWorld::ESMStore& content,
+            std::span<const ActorCasterIdentity> identities, const MWWorld::ESMStore& content,
             Misc::Rng::Generator& rng, bool uncappedFatigue, bool classicReflect,
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
             bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {},
             const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {},
             bool npcActor = true, bool undeadActor = false)
         {
-            std::array owned{loadCombatStats(content, combat.actors[0], effects, 0),
-                loadCombatStats(content, combat.actors[1], effects, 1), loadCombatStats(content, combat.actors[2], effects, 2)};
-            std::array<MWMechanics::NpcStats*, 3> states{&owned[0], &owned[1], &owned[2]};
-            for (size_t i = 0; i < 3; ++i) addTimedResistance(*states[i], effects, i);
+            if (identities.size() != combat.actors.size() || targetIndex >= identities.size())
+                throw std::invalid_argument("Native effect participant domain invalid");
+            for (const auto& active : effects)
+                if (active.actor >= identities.size() || active.beneficiary > identities.size())
+                    throw std::invalid_argument("Native effect participant outside bound actors");
+            std::vector<MWMechanics::NpcStats> owned;
+            owned.reserve(combat.actors.size());
+            for (size_t i = 0; i < combat.actors.size(); ++i)
+                owned.push_back(loadCombatStats(content, combat.actors[i], effects, i));
+            std::vector<MWMechanics::NpcStats*> states;
+            states.reserve(owned.size());
+            for (size_t i = 0; i < owned.size(); ++i)
+            {
+                states.push_back(&owned[i]);
+                addTimedResistance(*states[i], effects, i);
+            }
             const auto found = std::ranges::find(identities, caster);
             const size_t casterIndex = size_t(found - identities.begin());
             states[targetIndex] = &target;
-            if (externalCaster && casterIndex < 3) states[casterIndex] = externalCaster;
+            if (externalCaster && casterIndex < states.size()) states[casterIndex] = externalCaster;
             const auto prior = std::array{target.getHealth().getCurrent(), target.getMagicka().getCurrent(), target.getFatigue().getCurrent()};
             const ESM::Spell* spell = nullptr;
             const ESM::Enchantment* enchantment = nullptr;
@@ -834,10 +846,10 @@ namespace TES3MP::Native
             if (!spell && !enchantment) throw std::invalid_argument("Native expanded effect source missing");
             const int cost = spell ? MWMechanics::calcSpellCost(*spell, content)
                 : MWMechanics::getEffectiveEnchantmentCastCost(MWMechanics::getEnchantmentCastCost(*enchantment, content),
-                    casterIndex < 3 ? states[casterIndex]->getSkill(ESM::Skill::Enchant).getModified() : 0.f);
-            ExpandedEffectResult result;
+                    casterIndex < states.size() ? states[casterIndex]->getSkill(ESM::Skill::Enchant).getModified() : 0.f);
+            ExpandedEffectResult result{.deaths = std::vector<std::optional<ActorCasterIdentity>>(states.size())};
             const auto undo = [&](const ActorCampaignTimedEffect& effect) {
-                for (size_t i = 0; i < 3; ++i) applyEffectStats(*states[i], content, {&effect, 1}, i, -1.f);
+                for (size_t i = 0; i < states.size(); ++i) applyEffectStats(*states[i], content, {&effect, 1}, i, -1.f);
                 const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
                 auto& victim = *states[effect.actor];
                 if (!effect.argument && !timedDamage(id) && !timedRestore(id)
@@ -861,11 +873,11 @@ namespace TES3MP::Native
                 if (aiDispositionEffect(effect.mEffectID)
                     && !MWMechanics::validAiEffectTarget(effect.mEffectID,
                         recipient < 2 || npcActor, recipient < 2, recipient == 2 && undeadActor,
-                        author < 3)) return;
+                        author < states.size())) return;
                 const auto* magic = content.get<ESM::MagicEffect>().find(effect.mEffectID);
                 if (protections && recipient != author)
                 {
-                    const bool reflect = author < 3 && !(magic->mData.mFlags & ESM::MagicEffect::Unreflectable)
+                    const bool reflect = author < states.size() && !(magic->mData.mFlags & ESM::MagicEffect::Unreflectable)
                         && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Reflect).getMagnitude() > 0;
                     const bool absorb = victim.getMagicEffects().getOrDefault(ESM::MagicEffect::SpellAbsorption).getMagnitude() > 0;
                     for (const auto& defense : effects)
@@ -884,7 +896,7 @@ namespace TES3MP::Native
                     }
                 }
                 const bool noMagnitude = magic->mData.mFlags & ESM::MagicEffect::NoMagnitude;
-                const float chance = sourceKind != 4 && spell && author < 3
+                const float chance = sourceKind != 4 && spell && author < states.size()
                     ? MWMechanics::getSpellSuccessChance(*spell, *states[author], content, false, false) : 100.f;
                 const float resistance = ignoreResistance ? 0.f : MWMechanics::getEffectResistance(effect.mEffectID, victim,
                     chance, victim.getFatigueTerm(content), noMagnitude, rng);
@@ -982,7 +994,7 @@ namespace TES3MP::Native
                     else if (permanentStatEffect(effect.mEffectID))
                         applyPermanentStatEffect(victim, effect, magnitude, content);
                     else if (absorb >= 0)
-                        MWMechanics::absorbDynamicStat(victim, author < 3 && states[author]->getHealth().getCurrent() > 0
+                        MWMechanics::absorbDynamicStat(victim, author < states.size() && states[author]->getHealth().getCurrent() > 0
                             ? states[author] : nullptr, absorb, magnitude, &deathTime);
                     else
                     {
@@ -1005,9 +1017,9 @@ namespace TES3MP::Native
                             ? uint64_t(ESM::Attribute::refIdToIndex(effect.mAttribute) + 1)
                             : !effect.mSkill.empty() ? uint64_t(ESM::Skill::refIdToIndex(effect.mSkill) + 9) : 0,
                         ordinal, attribution.kind, attribution.life,
-                        (absorb >= 0 || absorbStat(effect.mEffectID)) && author < 3 ? author + 1 : 0};
+                        (absorb >= 0 || absorbStat(effect.mEffectID)) && author < states.size() ? author + 1 : 0};
                     effects.push_back(active);
-                    for (size_t i = 0; i < 3; ++i) applyEffectStats(*states[i], content, {&active, 1}, i, 1.f);
+                    for (size_t i = 0; i < states.size(); ++i) applyEffectStats(*states[i], content, {&active, 1}, i, 1.f);
                     if (sourceKind == 4 && spell && MWMechanics::Spells::hasCorprusEffect(spell)
                         && (magic->mData.mFlags & ESM::MagicEffect::AppliedOnce)
                         && effect.mEffectID != ESM::MagicEffect::Corprus)
@@ -1027,7 +1039,7 @@ namespace TES3MP::Native
                 if (plan.effects[ordinal].mRange == range)
                     apply(apply, plan.effects[ordinal], ordinals.empty() ? ordinal : ordinals[ordinal],
                         targetIndex, casterIndex, caster, true);
-            for (size_t i = 0; i < 3; ++i) saveCombatStats(combat.actors[i], *states[i], effects, i);
+            for (size_t i = 0; i < states.size(); ++i) saveCombatStats(combat.actors[i], *states[i], effects, i);
             result.target = {target.getHealth().getCurrent() - prior[0], target.getMagicka().getCurrent() - prior[1],
                 target.getFatigue().getCurrent() - prior[2]};
             return result;
@@ -1250,6 +1262,8 @@ namespace TES3MP::Native
         {
             if (!mBinding.mNpcCastLifecycle || !mBinding.mMeleeDefenseRules)
                 throw std::invalid_argument("Participant hit resources require the composed combat lifecycle");
+            if (mBinding.mBoundHits->size() != (mBinding.mPlacementCombat ? 4u : 3u))
+                throw std::invalid_argument("Participant hit resources differ from bound placements");
             for (const auto& hit : *mBinding.mBoundHits)
             {
                 if (hit.resourceIdentity.empty() || hit.resourceIdentity.size() > MaximumHitResourceIdentity
@@ -4203,9 +4217,17 @@ namespace TES3MP::Native
             if (!mBinding.mExpandedEffects)
                 return resolveActorEffects(plan, range, index, victim, at, identity, source, kind, rng,
                     content, effects, lifecycle, uncapped, ordinals);
-            const std::array<ActorCasterIdentity, 3> identities{{
-                {mBinding.mPlayers[0].value(), 1, 1}, {mBinding.mPlayers[1].value(), 1, 1},
-                {mBinding.mNavigatingActor->actorId(), 2, life->generation}}};
+            std::vector<ActorCasterIdentity> identities{{mBinding.mPlayers[0].value(), 1, 1},
+                {mBinding.mPlayers[1].value(), 1, 1},
+                {mBinding.mNavigatingActor->actorId(), 2, life->generation}};
+            if (combat->actors.size() > 3)
+            {
+                const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+                if (!neighbor || combat->npcPlacements.size() != 2
+                    || neighbor->mActor != combat->npcPlacements[1])
+                    throw std::invalid_argument("Native effect placement domain invalid");
+                identities.push_back({neighbor->mActor, 2, 1});
+            }
             auto result = resolveExpandedEffects(plan, range, index, victim, identity, source, kind, at,
                 *combat, effects, identities, content, rng, uncapped, mBinding.mClassicReflectedAbsorb,
                 ordinals, casterStats, false, sunExposure, stageDisintegrate,
@@ -4411,12 +4433,13 @@ namespace TES3MP::Native
         { step.reset(); after = before; melee = mIdleMelee; target = 0; contact = false; }
         if (combat && mBinding.mKnockoutRules)
         {
-            // V61 retains the neighbor's placement-bound stats in this image;
-            // its active combat clock is wired in the next actor slice.
-            for (size_t index = 0; index < 3; ++index)
+            for (size_t index = 0; index < combat->actors.size(); ++index)
             {
-                const bool awake = index == 2 ? active
-                    : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                const bool awake = index == 2 ? active : index > 2
+                    ? std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                        const auto* player = players.findPlayer(session.playerId());
+                        return player && player->transform().cell() == actorCell(before);
+                    }) : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
                         return session.playerId() == mBinding.mPlayers[index];
                     });
                 if (!awake || combat->actors[index][8][2] <= 0) continue;
@@ -4601,9 +4624,17 @@ namespace TES3MP::Native
             auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
             addTimedResistance(stats, timedEffects, index);
             auto& victim = contactStats ? *contactStats : stats;
-            const std::array<ActorCasterIdentity, 3> identities{{
-                {mBinding.mPlayers[0].value(), 1, 1}, {mBinding.mPlayers[1].value(), 1, 1},
-                {mBinding.mNavigatingActor->actorId(), 2, life->generation}}};
+            std::vector<ActorCasterIdentity> identities{{mBinding.mPlayers[0].value(), 1, 1},
+                {mBinding.mPlayers[1].value(), 1, 1},
+                {mBinding.mNavigatingActor->actorId(), 2, life->generation}};
+            if (combat->actors.size() > 3)
+            {
+                const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+                if (!neighbor || combat->npcPlacements.size() != 2
+                    || neighbor->mActor != combat->npcPlacements[1])
+                    throw std::invalid_argument("Native condition placement domain invalid");
+                identities.push_back({neighbor->mActor, 2, 1});
+            }
             combat->conditions.push_back(member);
             const auto outcome = resolveExpandedEffects(*plan, ESM::RT_Self, index, victim, identities[index], member.source,
                 4, tick.value(), *combat, timedEffects, identities, mRuntime.mStore, rng,
@@ -7147,19 +7178,40 @@ namespace TES3MP::Native
                 projected.castRange = uint8_t(casting->range); projected.castElapsed = uint16_t(casting->elapsed);
                 projected.castRelease = uint16_t(timing.releaseTicks); projected.castStop = uint16_t(timing.stopTicks);
             }
+            if (combat.actors.size() > 3)
+            {
+                const auto neighbor = moving && moving->actor ? moving->actor->neighborSnapshot()
+                    : mBinding.mNavigatingActor->neighborSnapshot();
+                if (!neighbor || combat.npcPlacements.size() != 2
+                    || combat.npcPlacements[1] != neighbor->mActor)
+                    throw std::invalid_argument("Native projected combat neighbor differs from placement");
+                const auto stats = loadCombatStats(mRuntime.mStore, combat.actors[3], effects, 3);
+                visible.push_back({ActorId::fromValue(neighbor->mActor).value(), combatRevision,
+                    stats.getHealth().getCurrent(), stats.getHealth().getModified(),
+                    stats.getFatigue().getCurrent(), stats.getFatigue().getModified(),
+                    stats.getMagicka().getCurrent(), stats.getMagicka().getModified(),
+                    stats.getHealth().getCurrent() <= 0});
+                visible.back().knockout = knockout(3);
+            }
         }
+        std::ranges::sort(visible, {}, &ActorCombatSnapshot::actorId);
         std::vector<ActorPresentationSnapshot> presentation;
         if (mBinding.mActorPresentation)
         {
-            for (size_t index = 0; index < 3; ++index)
+            for (size_t index = 0; index < combat.actors.size(); ++index)
             {
                 if (index < 2 && index != selfIndex && std::ranges::none_of(others,
                         [&](const auto& other) { return other.playerId == mBinding.mPlayers[index]; })) continue;
-                if (index == 2 && visible.empty()) continue;
+                if (index >= 2 && std::ranges::none_of(visible, [&](const auto& value) {
+                    const auto placement = combat.npcPlacements.empty() ? scene.mActor
+                        : combat.npcPlacements[index - 2];
+                    return value.actorId.value() == placement;
+                })) continue;
                 ActorPresentationSnapshot p;
-                p.id = index < 2 ? mBinding.mPlayers[index].value() : scene.mActor;
+                p.id = index < 2 ? mBinding.mPlayers[index].value()
+                    : combat.npcPlacements.empty() ? scene.mActor : combat.npcPlacements[index - 2];
                 p.kind = index < 2 ? 1 : 2;
-                p.life = index < 2 ? 1 : (moving && moving->life ? moving->life->generation : mLife->generation);
+                p.life = index < 2 || index > 2 ? 1 : (moving && moving->life ? moving->life->generation : mLife->generation);
                 p.dead = combat.actors[index][8][2] <= 0;
                 p.movementOwned = mBinding.mMovementEffects;
                 const std::array visibleEffects{ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
@@ -7216,7 +7268,9 @@ namespace TES3MP::Native
                     p.bodyStop = uint16_t((*mBinding.mBoundHits)[index].animations.ticks[p.hitGroup - 1]);
                     p.bodyFrame = float(p.bodyStop - combat.hitRecoveryTicks[index]);
                 }
-                const auto& pending = index < 2 ? combat.playerCasts[index] : (moving ? moving->casting : mNpcCast);
+                const std::optional<ActorCampaignCast> noCast;
+                const auto& pending = index < 2 ? combat.playerCasts[index]
+                    : index == 2 ? (moving ? moving->casting : mNpcCast) : noCast;
                 if (pending && !p.dead && p.bodyState == 1)
                 {
                     const auto timing = (index < 2 ? mBinding.mPlayerCasts[index] : *mBinding.mBoundCasts).ranges[pending->range];

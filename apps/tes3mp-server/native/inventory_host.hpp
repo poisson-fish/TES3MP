@@ -8,7 +8,9 @@
 namespace TES3MP::Native
 {
     // V61 binds bounded NPC combat stat/body slots to placement IDs in the
-    // actor campaign. The selected NPC is still the only combat executor.
+    // actor campaign. Neighbor fatigue, recovery and body state share the
+    // durable tick and project to both clients. The selected NPC is still
+    // the only combat executor.
     // V60 binds the first neighboring NPC witness to another stock navigation
     // frame in the selected actor's collision world. Both frames join one
     // actor image and commit;

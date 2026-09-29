@@ -26,13 +26,15 @@ identity/bounty and durable per-player Fight engagement together. Its selected
 NPC consumes engagement in AI. Synthetic rejection/restart/AI:
 `build/logs/social-lifecycle-regression-23.log`; V58 compatibility:
 `build/logs/ai-disposition-compat-21.log`.
-V60 moves the first witness in the selected NPC's collision world; both frames
-commit together and neighbor pursuit follows engagement. Converging collision,
-rejection and restart: `build/logs/shared-scene-neighbor-11.log`. V61 stores
-selected/neighbor NPC stats behind placement keys with the two players;
-foreign-key recovery rejects. Two-player rejection/restart and V60 compatibility:
-`build/logs/{placement-actors-test-05,neighbor-compat-01}.log`. Neighbor attacks,
-effects and life are pending; other witnesses freeze. Faction join/rank/expulsion
+V60 moves the first witness in the shared collision world; pursuit follows
+engagement. Collision, rejection and restart:
+`build/logs/shared-scene-neighbor-11.log`. V61 binds NPC stats/hit resources to
+placement keys. Neighbor fatigue/recovery advances durably; both NPC stat/body
+views project. Fresh V61 campaigns required. Foreign-key recovery rejects;
+two-player rejection/restart:
+`build/logs/placement-effects-11.log`; V60 compatibility:
+`build/logs/neighbor-compat-24.log`. Neighbor attacks, effects and life are
+pending; other witnesses freeze. Faction join/rank/expulsion
 commits for an explicit player: `build/logs/ai-faction-script-test-07.log`.
 Flee gates runs on LOS and reach: `build/logs/{ai-flee-test-19,ai-action-test-05}.log`;
 desktop comparison: `build/stock-flee-comparison/result.json`.

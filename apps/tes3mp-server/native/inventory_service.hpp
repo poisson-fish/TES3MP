@@ -131,8 +131,8 @@ namespace TES3MP::Native
         std::vector<CrimeWitness> mCrimeWitnesses; // Content placements; V60 moves the first neighbor too.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
-        // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.
-        std::optional<std::array<BoundHitAnimations, 3>> mBoundHits;
+        // Combat slots follow the bounded placement domain, never inventory-owner indices.
+        std::optional<std::vector<BoundHitAnimations>> mBoundHits;
         // V44: bind the selected NPC's actual weapon group and speed. The
         // Empty direction uses the descriptor clip (including the idle sentinel).
         std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)> mWeaponMelee;
