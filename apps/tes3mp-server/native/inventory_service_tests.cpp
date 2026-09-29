@@ -6401,6 +6401,8 @@ namespace TES3MP::Native::Testing
                 {
                     female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
                     female.mInventory.mList = beast.mInventory.mList = observerAppearance.mInventory.mList;
+                    if (effectFamily == "ai-disposition")
+                        female.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 }
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
                 if ((encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
@@ -8361,6 +8363,142 @@ namespace TES3MP::Native::Testing
                         "Committed Frenzy did not cross stock distance/disposition Fight threshold");
                     if (!creatureTarget)
                     {
+                        auto actions = make(); auto& actionService = actions->service();
+                        const auto itemView = actionService.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(itemView && !itemView->playerInventory.empty(),
+                            "Player action source inventory absent");
+                        const auto sourceItem = std::ranges::find(itemView->playerInventory.front().stacks,
+                            id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                ESM::RefId::stringRefId("ai_item_charm"))), &CanonicalItemStack::prototypeId);
+                        require(sourceItem != itemView->playerInventory.front().stacks.end(),
+                            "Player action enchanted source absent");
+                        auto firstCast = actionService.prepareMagicUse(authority,
+                            proposal(actionService, 1, 1, "ai_item_charm", npc, true, true), id<ServerTick>(1));
+                        require(firstCast && actionService.appendMagicUse(authority,
+                                proposal(actionService, 2, 1, "ai_flee_force", npc, false, true),
+                                id<ServerTick>(1), *firstCast),
+                            "Two player action sources did not prepare together");
+                        const auto beforeActions = bytes(actionService);
+                        const auto actionWorld = specialWorld();
+                        auto actionTick = dynamic_cast<InventoryService&>(actionService).prepareNativeTick(authority, id<ServerTick>(1),
+                            1.f/30, std::move(firstCast), {}, &actionWorld);
+                        require(actionTick && actionTick->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(actionService) == beforeActions,
+                            "Rejected two-player cast changed draw or selected sources");
+                        require(actionTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Two-player source action failed to commit");
+                        const auto selections = read(bytes(actionService)).combat->players;
+                        require(selections[0].drawState == 2 && selections[0].selectedSpell.empty()
+                                && selections[0].selectedEnchantedItem == sourceItem->stackId.value()
+                                && selections[1].drawState == 2
+                                && selections[1].selectedSpell == ESM::RefId::stringRefId("ai_flee_force")
+                                && !selections[1].selectedEnchantedItem,
+                            "Accepted cast source crossed player identities");
+                        const auto savedActions = bytes(actionService);
+                        InventoryHost actionRestart(descriptor, testContentManifest(), *registry, *crypto, savedActions);
+                        actionRestart.service().synchronizeCells(authority);
+                        require(bytes(actionRestart.service()) == savedActions,
+                            "Two-player action sources changed on restart");
+                        auto equipped = make(); auto& equipService = equipped->service();
+                        const auto equipmentView = equipService.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(equipmentView && !equipmentView->playerInventory.empty(),
+                            "Player equipment source inventory absent");
+                        const auto& playerInventory = equipmentView->playerInventory.front();
+                        const auto right = std::ranges::find(playerInventory.equipment,
+                            EquipmentSlot::CarriedRight, &EquipmentBinding::slot);
+                        const auto weapon = std::ranges::find(playerInventory.stacks,
+                            id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                                ESM::RefId::stringRefId("iron shortsword"))), &CanonicalItemStack::prototypeId);
+                        require(weapon != playerInventory.stacks.end(), "Player right-hand weapon absent");
+                        uint64_t equipTick = 1;
+                        if (right != playerInventory.equipment.end())
+                        {
+                            const auto carried = std::ranges::find(playerInventory.stacks,
+                                right->stackId, &CanonicalItemStack::stackId);
+                            require(carried != playerInventory.stacks.end(), "Player carried stack absent");
+                            ClientInventoryTransactionCommand unequip{id<SessionId>(1), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                                InventoryTransactionKind::UnequipItem, {}, carried->prototypeId, carried->stackId, 1,
+                                EquipmentSlot::CarriedRight, playerInventory.revision, {}, {}, Position3(0,0,0)};
+                            auto remove = equipService.prepareInventory(authority, bind(authority, unequip).proposal());
+                            require(bool(remove), "Accepted right-hand unequip did not prepare");
+                            auto removed = dynamic_cast<InventoryService&>(equipService).prepareNativeTick(authority,
+                                id<ServerTick>(1), 1.f/30, std::move(remove), {}, &actionWorld);
+                            require(removed && removed->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Right-hand unequip did not commit");
+                            equipTick = 2;
+                        }
+                        const auto bare = equipService.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(equipTick), id<CanonicalRevision>(equipTick));
+                        const auto& bareInventory = bare->playerInventory.front();
+                        ClientInventoryTransactionCommand equip{id<SessionId>(1), SessionGeneration::initial(),
+                            CommandSequence::initial(), id<CommandId>(equipTick), id<CanonicalRevision>(equipTick),
+                            InventoryTransactionKind::EquipItem, {}, weapon->prototypeId, weapon->stackId, 1,
+                            EquipmentSlot::CarriedRight, bareInventory.revision, {}, {}, Position3(0,0,0)};
+                        auto install = equipService.prepareInventory(authority, bind(authority, equip).proposal());
+                        require(bool(install), "Accepted right-hand equip did not prepare");
+                        const auto beforeEquip = bytes(equipService);
+                        auto installed = dynamic_cast<InventoryService&>(equipService).prepareNativeTick(authority,
+                            id<ServerTick>(equipTick), 1.f/30, std::move(install), {}, &actionWorld);
+                        require(installed && installed->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(equipService) == beforeEquip,
+                            "Rejected equipment draw change leaked");
+                        require(installed->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Right-hand equip did not join actor tick");
+                        const auto equipState = read(bytes(equipService)).combat->players;
+                        require(equipState[0].drawState == 1 && equipState[1].drawState == 0,
+                            "Equipment draw state crossed player identities");
+                        const auto savedEquip = bytes(equipService);
+                        InventoryHost equipRestart(descriptor, testContentManifest(), *registry, *crypto, savedEquip);
+                        equipRestart.service().synchronizeCells(authority);
+                        require(bytes(equipRestart.service()) == savedEquip,
+                            "Equipment draw state changed on restart");
+
+                        auto attacking = make(); auto& attackService = attacking->service();
+                        std::vector<CanonicalPlayerEntityState> close(authority.players().begin(), authority.players().end());
+                        close[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(close[0],
+                            id<ServerTick>(1), Transform(close[0].transform().cell(),
+                                Position3(60*1024, -64*1024, 1024), close[0].transform().orientation()),
+                            LinearVelocity3(0, 0, 0)));
+                        const auto nearby = std::get<CanonicalServerState>(createCanonicalServerState(close,
+                            authority.activeSessions()));
+                        attackService.synchronizeCells(nearby);
+                        const auto attackView = attackService.projectInventory(nearby, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(attackView && attackView->equipment && !attackView->equipment->motions.empty(),
+                            "Player attack target absent");
+                        ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
+                            CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                            id<ActorId>(attackView->equipment->motions.front().placement), id<ServerTick>(1),
+                            CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                        const auto* attacker = nearby.findPlayer(id<PlayerId>(1));
+                        const ServerCommandProposal attackProposal(id<SessionId>(1), SessionGeneration::initial(),
+                            CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                            EntityPrecondition(attacker->entityId(), attacker->entityRevision(), attacker->authorityEpoch()),
+                            MeleeAttackCommandProposal(attack));
+                        auto intent = attackService.prepareMeleeAttack(nearby, attackProposal, id<ServerTick>(1));
+                        require(bool(intent), "Player attack draw source did not prepare");
+                        const auto beforeAttack = bytes(attackService);
+                        auto swung = dynamic_cast<InventoryService&>(attackService).prepareNativeTick(nearby,
+                            id<ServerTick>(1), 1.f/30, std::move(intent), {}, &actionWorld);
+                        require(swung && swung->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(attackService) == beforeAttack,
+                            "Rejected attack draw change leaked");
+                        require(swung->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Attack did not join V58 actor tick");
+                        const auto attackState = read(bytes(attackService)).combat->players;
+                        require(attackState[0].drawState == 1 && attackState[1].drawState == 0,
+                            "Attack draw state crossed player identities");
+                        const auto savedAttack = bytes(attackService);
+                        InventoryHost attackRestart(descriptor, testContentManifest(), *registry, *crypto, savedAttack);
+                        attackRestart.service().synchronizeCells(nearby);
+                        require(bytes(attackRestart.service()) == savedAttack,
+                            "Attack draw state changed on restart");
+                    }
+                    if (!creatureTarget)
+                    {
                         auto charmed = make(); auto& service = charmed->service();
                         bool bothApplied = false;
                         for (uint64_t frame = 1; frame <= 90; ++frame)
@@ -8410,19 +8548,13 @@ namespace TES3MP::Native::Testing
                         require(bytes(itemRestart.service()) == selectedImage
                                 && read(selectedImage).combat->players[0] == itemState,
                             "Selected enchanted item changed on restart");
-                        auto selected = read(bytes(service)).combat->players[0];
-                        selected.drawState = 2;
-                        selected.selectedSpell = ESM::RefId::stringRefId("ai_flee_force");
-                        selected.selectedEnchantedItem = 0;
-                        const std::array spellUpdate{
-                            InventoryService::PlayerAiUpdate{id<PlayerId>(1), selected}};
                         auto cast = service.prepareMagicUse(authority,
                             proposal(service, 1, 2, "ai_flee_force", npc, false, true), id<ServerTick>(2));
                         require(bool(cast), "Live Flee source cast did not prepare");
                         auto selection = native.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30,
-                            std::move(cast), {}, &liveWorld, spellUpdate);
+                            std::move(cast), {}, &liveWorld);
                         require(selection && selection->commit(accepted) == CanonicalDurabilityResult::Committed,
-                            "Live selected spell and cast did not commit together for Flee reach");
+                            "Accepted spell did not produce selected Flee source");
                     }
                     uint64_t decided = 0;
                     for (uint64_t frame = creatureTarget ? 1 : 3; frame <= 90 && !decided; ++frame)

@@ -3812,6 +3812,51 @@ namespace TES3MP::Native
             }
         }
         if (mBinding.mPlayerAi && combat)
+        {
+            // Accepted gameplay commands are the producer for draw and source state.
+            // Keep them in the staged campaign so a failed write cannot publish them.
+            if (playerAttack)
+                combat->players[actor(playerAttacker)].drawState = uint64_t(MWMechanics::DrawState::Weapon);
+            for (auto* cast = playerCasts.get(); cast; cast = cast->concurrent.get())
+            {
+                auto& selection = combat->players[actor(cast->caster)];
+                selection.drawState = uint64_t(MWMechanics::DrawState::Spell);
+                if (cast->use.sourceKind == MagicUseSourceKind::Spell)
+                {
+                    const auto& known = mRuntime.mStore.get<ESM::NPC>()
+                        .find(mBinding.mActors[actor(cast->caster)].mBase)->mSpells.mList;
+                    const auto found = std::ranges::find_if(known, [&](const ESM::RefId& id) {
+                        return spellRecordId(id) == cast->use.sourceId;
+                    });
+                    if (found == known.end()) throw std::invalid_argument("Accepted player spell source disappeared");
+                    selection.selectedSpell = *found;
+                    selection.selectedEnchantedItem = 0;
+                }
+                else
+                {
+                    selection.selectedSpell = {};
+                    selection.selectedEnchantedItem = cast->charge && cast->charge->consume
+                        ? 0 : cast->use.sourceId;
+                }
+            }
+            if (const auto* equipment = dynamic_cast<const EquipmentTransaction*>(areaDoorCommand(command.get())))
+                if (equipment->binding)
+                {
+                    const size_t index = actor(equipment->binding->player());
+                    const auto beforeRight = mRuntime.installedValues(index)
+                        .mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+                    const auto afterRight = combatEquipmentValues(index, command.get())
+                        .mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+                    if (beforeRight != afterRight)
+                    {
+                        auto& draw = combat->players[index].drawState;
+                        if (afterRight.isSet()) draw = uint64_t(MWMechanics::DrawState::Weapon);
+                        else if (draw == uint64_t(MWMechanics::DrawState::Weapon))
+                            draw = uint64_t(MWMechanics::DrawState::Nothing);
+                    }
+                }
+        }
+        if (mBinding.mPlayerAi && combat)
             for (size_t index = 0; index < 2; ++index)
             {
                 auto& selected = combat->players[index].selectedEnchantedItem;
