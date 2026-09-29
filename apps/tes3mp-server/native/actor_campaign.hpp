@@ -772,8 +772,13 @@ namespace TES3MP::Native
                     value.casterLife = getAreaWord(bytes, offset);
                     validateActorCaster({value.caster, value.casterKind, value.casterLife}, life->generation);
                 }
+                const auto target = hasNeighborCombat(magic) && value.targetKind == 2
+                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
+                const auto targetGeneration = value.targetKind == 2
+                    ? target == 2 ? life->generation
+                        : target < combat->actors.size() ? neighborLives[target - 3].generation : 0 : 1;
                 if (!value.caster || !value.source || !value.target || !value.generation
-                    || (value.targetKind == 2 && value.generation != life->generation)
+                    || (value.targetKind == 2 && value.generation != targetGeneration)
                     || value.expiresTick <= tick
                     || value.expiresTick - tick > 90 || length2 < 1.f || length2 > 1e6f)
                     throw std::invalid_argument("Native projectile identity or lifetime invalid");
@@ -904,10 +909,15 @@ namespace TES3MP::Native
                 for (auto* field : {&value.actor, &value.life, &value.cast, &value.sourceKind, &value.source,
                         &value.targetKind, &value.target, &value.range, &value.elapsed, &value.phase, &value.targetLife})
                     *field = getAreaWord(bytes, offset);
+                const auto targetIndex = hasNeighborCombat(magic) && value.targetKind == 2
+                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
+                const auto targetGeneration = value.targetKind == 2
+                    ? targetIndex == 2 ? life->generation
+                        : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0 : 1;
                 if (!value.actor || value.life != 1 || !value.cast || !value.source || value.sourceKind > 1
                     || value.targetKind > 2 || ((value.targetKind == 0) != (value.target == 0))
-                    || (value.targetKind == 2 ? (!life || !value.targetLife || value.targetLife > life->generation
-                        || (value.phase < ActorCampaignCast::Released && value.targetLife != life->generation)) : value.targetLife != 1)
+                    || (value.targetKind == 2 ? (!targetGeneration || !value.targetLife || value.targetLife > targetGeneration
+                        || (value.phase < ActorCampaignCast::Released && value.targetLife != targetGeneration)) : value.targetLife != 1)
                     || value.range > 2 || value.elapsed > 1800 || value.phase < 1 || value.phase > 5
                     || (value.phase <= ActorCampaignCast::Prepared && value.elapsed))
                     throw std::invalid_argument("Native player cast state invalid");
@@ -1041,8 +1051,12 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native physical flight state invalid");
                 }
                 float norm = 0; for (float v : value.direction) norm += v * v;
+                const auto targetIndex = hasNeighborCombat(magic)
+                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
+                const auto targetGeneration = targetIndex == 2 ? life->generation
+                    : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0;
                 if (!value.caster || !value.command || !value.source || !value.ammunition || !value.target
-                    || !value.targetLife || value.targetLife > life->generation
+                    || !value.targetLife || !targetGeneration || value.targetLife > targetGeneration
                     || !value.releaseTick || value.releaseTick > tick || value.strength < 0 || value.strength > 1
                     || std::abs(norm - 1.f) > .001f
                     || std::ranges::any_of(value.position, [](float v) { return std::abs(v) > 100'000'000; })

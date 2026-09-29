@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 62; ++candidate)
+            for (unsigned candidate = 3; candidate <= 63; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -286,6 +286,7 @@ namespace TES3MP::Native
                 binding.mNeighborAi = descriptorVersion >= 60;
                 binding.mPlacementCombat = descriptorVersion >= 61;
                 binding.mNeighborCombat = descriptorVersion >= 62;
+                binding.mNeighborLimit = descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -295,7 +296,8 @@ namespace TES3MP::Native
                 binding.mNpcWeaponCompetition = descriptorVersion >= 40;
                 binding.mNpcFullSelection = descriptorVersion >= 41;
                 binding.mNpcCastLifecycle = descriptorVersion >= 42;
-                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 62 ? 5
+                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 63 ? 6
+                    : descriptorVersion >= 62 ? 5
                     : descriptorVersion >= 61 ? 4 : 3);
             }
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
@@ -405,7 +407,7 @@ namespace TES3MP::Native
                     if (firstNeighbor != references.end()) neighborIds.push_back(firstNeighbor->mIdentity);
                     if (start.binding.mNeighborCombat)
                         for (auto next = firstNeighbor == references.end() ? references.end() : firstNeighbor + 1;
-                            next != references.end() && neighborIds.size() < 2; ++next)
+                            next != references.end() && neighborIds.size() < start.binding.mNeighborLimit; ++next)
                             if (next->mRef.mRefID != selectedBase && !next->mScripted && !next->mLeveled
                                 && loadout.store().get<ESM::NPC>().search(next->mRef.mRefID))
                                 neighborIds.push_back(next->mIdentity);

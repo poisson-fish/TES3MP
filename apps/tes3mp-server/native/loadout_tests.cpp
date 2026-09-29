@@ -6769,6 +6769,8 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "neighbor-ai"
             || std::string_view(argv[1]) == "placement-actors"
             || std::string_view(argv[1]) == "neighbor-combat"
+            || std::string_view(argv[1]) == "neighbor-projectiles"
+            || std::string_view(argv[1]) == "neighbor-expanded"
             || std::string_view(argv[1]) == "ai-creature"
             || std::string_view(argv[1]) == "constant-concealment"))
         {
@@ -6776,7 +6778,10 @@ int main(int argc, char** argv)
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true, false, false, true, false,
                 false, true, false, true, false, false, false, false, false, false, false, false,
-                {}, std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
+                (std::string_view(argv[1]) == "neighbor-projectiles"
+                    || std::string_view(argv[1]) == "neighbor-expanded")
+                    ? std::string_view("bow-basic-flight") : std::string_view{},
+                std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
                 std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
                     : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep")
                         ? std::string_view("movement-effects") : std::string_view(argv[1]),

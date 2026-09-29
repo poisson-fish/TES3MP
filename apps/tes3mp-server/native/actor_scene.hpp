@@ -66,7 +66,7 @@ namespace TES3MP::Native
 
     // Detached, content-derived interior/exterior navigation and physics. References are
     // obstacles; bound doors receive transaction-owned angles. The selected
-    // NPC and its V60 neighbor step against one collision world. The native host composes
+    // NPC and its bounded neighbors step against one collision world. The native host composes
     // prepared frames with its existing inventory owner and durable transaction.
     // Shared door avoidance can interrupt the retained destination. No complete
     // AI packages, scripts or presentation services are constructed here.

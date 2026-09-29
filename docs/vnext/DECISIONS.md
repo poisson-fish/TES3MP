@@ -289,11 +289,12 @@ purge, stock stats, witness consequences and crime engagement with the actor
 image. Bind at most 128 unscripted, unleveled NPC placements as witnesses.
 V60 stages the first neighbor's stock body/path and engagement pursuit with the
 actor image; its frame shares the selected actor's collision world and sweeps
-against the staged selected pose. V60 combat owns one NPC slot. Keep engagement keyed by placement and player, with
-no implicit migration.
-V61 binds bounded combat stat/body vectors and hit resources to placement IDs
-on recovery. Neighbor fatigue/recovery and presentation share the durable tick;
-only the selected NPC executes attacks so far.
+against the staged selected pose. Keep engagement keyed by placement and player,
+with no implicit migration. V61 binds combat stat/body vectors and hit resources
+to placement IDs on recovery. V62 gives two neighbors their own melee, effects,
+death and respawn state. V63 binds three neighbors and routes player spells and
+physical projectiles by placement/life in the same collision scene and transaction.
+The cap remains provisional; a new descriptor version binds the larger set.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

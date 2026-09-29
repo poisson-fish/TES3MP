@@ -779,7 +779,12 @@ namespace TES3MP::Native
                 : ClosestConvexResultCallback(from, to), ignored(caster) {}
             bool needsCollision(btBroadphaseProxy* proxy) const override
             { return proxy->m_clientObject != ignored && ClosestConvexResultCallback::needsCollision(proxy); }
-        } hit(start, end, casterActor == mImpl->mActorId ? mImpl->mActor->mCollisionObject : nullptr);
+        } hit(start, end, [&]() -> const btCollisionObject* {
+            for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+                if (scene->mImpl->mActorId == casterActor)
+                    return scene->mImpl->mActor->mCollisionObject;
+            return nullptr;
+        }());
         hit.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
         hit.m_collisionFilterMask = MWPhysics::CollisionType_World
             | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor | MWPhysics::CollisionType_Door;
@@ -789,9 +794,11 @@ namespace TES3MP::Native
         for (int axis = 0; axis < 3; ++axis)
             if (!std::isfinite(point[axis]) || std::abs(point[axis]) > 1e7)
                 throw std::invalid_argument("Projectile impact position invalid");
-        return ActorProjectileContact{
-            hit.m_hitCollisionObject == mImpl->mActor->mCollisionObject ? mImpl->mActorId : 0,
-            {float(point.x()), float(point.y()), float(point.z())}};
+        uint64_t actor = 0;
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (hit.m_hitCollisionObject == scene->mImpl->mActor->mCollisionObject)
+            { actor = scene->mImpl->mActorId; break; }
+        return ActorProjectileContact{actor, {float(point.x()), float(point.y()), float(point.z())}};
     }
     const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
     bool InteriorActorScene::enchantedWeaponsAreMagical() const

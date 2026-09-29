@@ -122,6 +122,7 @@ namespace TES3MP::Native
         bool mNeighborAi = false; // V60 first neighboring witness has a durable body and stock navigation.
         bool mPlacementCombat = false; // V61 bounds NPC combat slots by placement identity.
         bool mNeighborCombat = false; // V62 gives bound neighbors attack/effect/life state.
+        uint8_t mNeighborLimit = 1; // V63 binds a third placement to the same scene and transaction.
         struct CrimeWitness
         {
             uint64_t placement = 0;

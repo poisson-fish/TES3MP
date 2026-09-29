@@ -5450,7 +5450,9 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
-        const bool neighborCombat = effectFamily == "neighbor-combat";
+        const bool projectileNeighbors = effectFamily == "neighbor-projectiles"
+            || effectFamily == "neighbor-expanded";
+        const bool neighborCombat = effectFamily == "neighbor-combat" || projectileNeighbors;
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
@@ -6315,6 +6317,8 @@ namespace TES3MP::Native::Testing
                 }
                 spell("expanded_dispel", {effect(ESM::MagicEffect::Dispel, ESM::RT_Self, 0, 100)});
                 spell("expanded_damage", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 10)});
+                if (projectileNeighbors)
+                    spell("neighbor_bolt", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Target, 0, 10)});
                 spell("expanded_lethal", {effect(ESM::MagicEffect::DrainHealth, ESM::RT_Touch, 1, 1000)});
                 // Live presentation fixture: expiry restores fatigue and permits the authored get-up tail.
                 spell("expanded_knockout", {effect(ESM::MagicEffect::DrainFatigue, ESM::RT_Self, 10, 1000)});
@@ -6415,7 +6419,7 @@ namespace TES3MP::Native::Testing
                 auto witness = npc;
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
-                witness.mAiData.mFight = 100;
+                witness.mAiData.mFight = projectileNeighbors ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = 5;
                 witness.mSpells.mList.clear();
                 if (neighborCombat)
@@ -6507,6 +6511,13 @@ namespace TES3MP::Native::Testing
                             = encounterProfile.ends_with("-flight") ? 255 : 100;
                     }
                 }
+                if (projectileNeighbors)
+                    for (auto* participant : {&female, &beast})
+                    {
+                        participant->mNpdt.mHealth = participant->mNpdt.mMana
+                            = participant->mNpdt.mFatigue = 1000;
+                        participant->mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 255;
+                    }
                 if (encounterProfile.find("combined") != std::string_view::npos)
                 {
                     beast.mInventory.mList = {{1, ESM::RefId::stringRefId("iron longsword")}};
@@ -6752,6 +6763,12 @@ namespace TES3MP::Native::Testing
                     witness.mRefNum = {++index, 0};
                     witness.mPos = {{175, -120, 1}, {0, 0, 0}};
                     witness.save(out);
+                    if (effectFamily == "neighbor-expanded")
+                    {
+                        witness.mRefNum = {++index, 0};
+                        witness.mPos = {{250, -120, 1}, {0, 0, 0}};
+                        witness.save(out);
+                    }
                 }
             }
             if (effectFamily == "visibility")
@@ -8035,7 +8052,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8081,7 +8098,9 @@ namespace TES3MP::Native::Testing
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
-                    Transform(placed[i].transform().cell(), Position3((i ? -160 : 60)*1024, -400*1024, 1024),
+                    Transform(placed[i].transform().cell(), Position3(
+                            (i ? -160 : effectFamily == "neighbor-expanded" ? 175 : projectileNeighbors ? 100 : 60)*1024,
+                            (i ? -400 : projectileNeighbors ? -200 : -400)*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
@@ -8117,6 +8136,7 @@ namespace TES3MP::Native::Testing
             for (size_t owner : {0u, 1u}) for (const auto [stat, value] :
                 {std::pair<size_t, float>{8, 40.f}, {9, 30.f}, {10, 60.f}})
             {
+                if (projectileNeighbors) continue;
                 const auto offset = statsOffset + (owner * ActorCampaignCombat::StatCount * 5 + stat * 5 + 2) * 8;
                 const uint64_t bits = std::bit_cast<uint32_t>(value);
                 for (unsigned i = 0; i < 8; ++i) seed.at(offset + i) = std::byte(bits >> (i * 8));
@@ -8174,6 +8194,98 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (projectileNeighbors)
+            {
+                const auto world = specialWorld();
+                const size_t boundNeighbors = effectFamily == "neighbor-expanded" ? 3 : 2;
+                size_t maxImageBytes = 0, maxSceneBytes = 0;
+                for (size_t neighbor = 0; neighbor < boundNeighbors; ++neighbor)
+                    for (bool magic : {true, false})
+                    {
+                        auto host = make(); auto& runtime = dynamic_cast<InventoryService&>(host->service());
+                        const auto initial = read(bytes(runtime));
+                        const auto placements = initial.combat->npcPlacements;
+                        require(placements.size() == boundNeighbors + 1,
+                            "Projectile fixture lost bound NPC placements");
+                        const auto appearance = runtime.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(appearance && appearance->equipment
+                                && appearance->equipment->motions.size() == placements.size(),
+                            "Expanded NPC collision scene omitted a bound placement");
+                        const auto target = placements[neighbor + 1];
+                        std::unique_ptr<PreparedNativeInventory> command;
+                        if (magic)
+                        {
+                            require(bool(runtime.prepareMagicUse(authority,
+                                    proposal(runtime, 1, 1, "neighbor_bolt", placements[0], false, true),
+                                    id<ServerTick>(1))), "Selected control spell intent rejected");
+                            require(!runtime.prepareMagicUse(authority,
+                                    proposal(runtime, 1, 1, "neighbor_bolt", UINT64_MAX, false, true),
+                                    id<ServerTick>(1)), "Foreign spell target entered bound combat");
+                            command = runtime.prepareMagicUse(authority,
+                                proposal(runtime, 1, 1, "neighbor_bolt", target, false, true),
+                                id<ServerTick>(1));
+                        }
+                        else
+                        {
+                            const auto* player = authority.findPlayer(id<PlayerId>(1));
+                            const ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                                id<ActorId>(target), id<ServerTick>(1), CombatRevision::initial(),
+                                CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                MeleeAttackCommandProposal(attack)};
+                            command = runtime.prepareMeleeAttack(authority, request, id<ServerTick>(1));
+                        }
+                        require(bool(command), magic ? "Neighbor spell intent rejected" : "Neighbor bow intent rejected");
+                        const auto prior = bytes(runtime);
+                        auto first = runtime.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                            std::move(command), {}, &world);
+                        require(first && first->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(runtime) == prior,
+                            "Rejected neighbor launch changed the campaign");
+                        require(first->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Neighbor launch did not commit");
+                        const auto launched = bytes(runtime);
+                        InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, launched);
+                        replay.service().synchronizeCells(authority);
+                        require(bytes(replay.service()) == launched, "Neighbor launch changed on restart");
+                        bool damaged = false;
+                        for (uint64_t tick = 2; tick <= 150; ++tick)
+                        {
+                            auto live = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                                {}, {}, &world);
+                            auto restored = dynamic_cast<InventoryService&>(replay.service())
+                                .prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, {}, &world);
+                            require(live && restored && live->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && restored->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && bytes(runtime) == bytes(replay.service()),
+                                "Neighbor projectile diverged after restart");
+                            const auto state = read(bytes(runtime));
+                            maxImageBytes = std::max(maxImageBytes, bytes(runtime).size());
+                            maxSceneBytes = std::max(maxSceneBytes, state.actor.size());
+                            if (state.neighborLives[neighbor].deaths.empty()) continue;
+                            require(state.neighborLives[neighbor].deaths.size() == 1
+                                    && state.life->deaths.empty()
+                                    && state.neighborLives[neighbor].deaths.front().killer == id<PlayerId>(1).value(),
+                                "Neighbor projectile crossed placement or caster life");
+                            for (size_t other = 0; other < boundNeighbors; ++other)
+                                if (other != neighbor)
+                                    require(state.neighborLives[other].deaths.empty(),
+                                        "Neighbor projectile killed another placement");
+                            damaged = true; break;
+                        }
+                        require(damaged, magic ? "Neighbor spell never hit" : "Neighbor arrow never hit");
+                    }
+                require(maxSceneBytes < 65536 && maxImageBytes < MaximumNativeInventoryImageBytes,
+                    "Expanded neighbor scene or transaction exceeded its bound");
+                std::cout << "neighbor spells and arrows=" << boundNeighbors
+                    << " scene-bytes=" << maxSceneBytes << " image-bytes=" << maxImageBytes
+                    << " atomic launch, restart and death identity\n";
+                return;
+            }
             if (effectFamily == "constant-concealment")
             {
                 auto running = make(); auto& runtime = running->service();
