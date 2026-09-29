@@ -35,11 +35,12 @@ V58 persists player faction, crime, bounty, draw, werewolf and source selection.
 Trusted updates for both players join the actor tick, including a simultaneous
 cast. Bad content, duplicate players and rejected writes are atomic; restart
 validates content and inventory. Stock aggression and Flee consume these values.
-Accepted player attacks, casts (including concurrent spell/item casts) and
-right-hand equipment changes now produce per-player draw/selected source state
-in the same V58 tick. Rejected writes leave both players unchanged; restart
-restores the selected sources and draw state. Faction, crime/bounty and werewolf
-still lack authoritative gameplay producers. Flee gates a
+Accepted attacks, casts and right-hand equipment produce per-player draw/source
+state. Trusted faction, crime/bounty and werewolf results join the V58 tick.
+Invalid or rejected actions leave both players unchanged; restart preserves them.
+Synthetic two-player stock aggression: `build/logs/ai-social-test-04.log`.
+Runtime scripts, witnesses and transformations do not yet emit these results.
+Flee gates a
 new run on LOS and target reach using loaded actor hulls.
 Synthetic hull-bound near/far and committed Flee/restart checks:
 `build/logs/{ai-flee-test-19,ai-action-test-05}.log`. Stock Flee desktop: 68/128 triggers,
@@ -50,7 +51,8 @@ V58 modifier/restart and V57 creature checks:
 `build/logs/ai-player-openmw-build-02.log`.
 Mixed passives, non-player Command and multiple combatants remain open.
 
-**Next: connect faction, crime/bounty and werewolf gameplay producers to V58.**
+**Next: emit the trusted V58 social results from runtime scripts, crime
+witnesses and werewolf transformations; cover stock transformation side effects.**
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

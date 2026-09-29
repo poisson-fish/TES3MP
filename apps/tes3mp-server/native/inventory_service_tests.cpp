@@ -8294,6 +8294,75 @@ namespace TES3MP::Native::Testing
                             require(read(bytes(native)).combat->npcAction != 0,
                                 "Live player modifiers did not reach stock aggression");
                         }
+                        for (const std::string_view producer : {"faction", "crime", "werewolf"})
+                        {
+                            using Action = InventoryService::PlayerSocialAction;
+                            auto candidate = make();
+                            auto& service = dynamic_cast<InventoryService&>(candidate->service());
+                            const auto liveWorld = specialWorld();
+                            const auto initial = bytes(service);
+                            const auto kind = producer == "faction" ? Action::Kind::JoinFaction
+                                : producer == "crime" ? Action::Kind::ReportCrime
+                                : Action::Kind::SetWerewolf;
+                            const ESM::RefId actionFaction = producer == "faction" ? factionId : ESM::RefId{};
+                            const int actionValue = producer == "crime" ? 100
+                                : producer == "werewolf" ? 1 : 0;
+                            const auto followKind = producer == "faction" ? Action::Kind::SetFactionRank
+                                : producer == "crime" ? Action::Kind::SetCrimeDisposition
+                                : Action::Kind::SetKnownWerewolf;
+                            const int followValue = producer == "crime" ? -100 : 1;
+                            const std::array first{
+                                Action{id<PlayerId>(1), kind, actionFaction, actionValue},
+                                Action{id<PlayerId>(1), followKind, actionFaction, followValue}};
+                            auto invalid = first;
+                            invalid[1].value = producer == "faction" ? 10
+                                : producer == "crime" ? 1'000'001 : 2;
+                            require(!service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                    {}, {}, &liveWorld, {}, invalid) && bytes(service) == initial,
+                                "Invalid trusted social action changed either player");
+                            auto pending = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &liveWorld, {}, first);
+                            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(service) == initial,
+                                "Rejected trusted social action leaked into the actor image");
+                            require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Trusted social action did not join V58 actor tick");
+                            auto committed = read(bytes(service)).combat->players;
+                            require(committed[0] != read(initial).combat->players[0]
+                                    && committed[1] == read(initial).combat->players[1],
+                                "Trusted social action crossed player identities");
+                            const auto saved = bytes(service);
+                            InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                            restart.service().synchronizeCells(authority);
+                            require(bytes(restart.service()) == saved,
+                                "Trusted social action changed on restart");
+                            bool attacked = read(saved).combat->npcAction != 0;
+                            for (uint64_t frame = 2; frame <= 75 && !attacked; ++frame)
+                            {
+                                (void)commit(service, frame); (void)commit(restart.service(), frame);
+                                require(bytes(service) == bytes(restart.service()),
+                                    "Trusted social aggression diverged after restart");
+                                attacked = read(bytes(service)).combat->npcAction != 0;
+                            }
+                            require(attacked, "Trusted social action did not affect stock aggression");
+                            const auto beforeSecond = bytes(service);
+                            const auto next = read(beforeSecond).tick + 1;
+                            auto second = first;
+                            for (auto& action : second) action.player = id<PlayerId>(2);
+                            auto other = service.prepareNativeTick(authority, id<ServerTick>(next), 1.f/30,
+                                {}, {}, &liveWorld, {}, second);
+                            require(other && other->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Second player's trusted social action failed");
+                            committed = read(bytes(service)).combat->players;
+                            require(committed[0] == read(beforeSecond).combat->players[0]
+                                    && committed[1] != read(beforeSecond).combat->players[1],
+                                "Second player's trusted social action changed the first player");
+                            const auto bothSaved = bytes(service);
+                            InventoryHost bothRestart(descriptor, testContentManifest(), *registry, *crypto, bothSaved);
+                            bothRestart.service().synchronizeCells(authority);
+                            require(bytes(bothRestart.service()) == bothSaved,
+                                "Two trusted social actions changed on restart");
+                        }
                         for (const std::string_view modifier : {"faction", "crime", "bounty", "drawn",
                                 "werewolf", "known-werewolf"})
                         {

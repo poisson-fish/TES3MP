@@ -3628,7 +3628,8 @@ namespace TES3MP::Native
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativeTick(const CanonicalServerState& players,
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
         std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world,
-        std::span<const PlayerAiUpdate> playerAiUpdates)
+        std::span<const PlayerAiUpdate> playerAiUpdates,
+        std::span<const PlayerSocialAction> socialActions)
     try
     {
         if (mRuntime.mFailedClosed || mRuntime.mRestartActor) return {};
@@ -3797,6 +3798,75 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        if (!socialActions.empty())
+        {
+            if (!mBinding.mPlayerAi || !combat || !playerAiUpdates.empty()
+                || socialActions.size() > 32) return {};
+            for (const auto& action : socialActions)
+            {
+                const auto found = std::ranges::find(mBinding.mPlayers, action.player);
+                if (found == mBinding.mPlayers.end()) return {};
+                const size_t index = size_t(found - mBinding.mPlayers.begin());
+                auto& state = combat->players[index];
+                auto faction = std::ranges::find(state.factions, action.faction,
+                    &ActorCampaignCombat::PlayerAi::Faction::id);
+                const bool factionAction = action.kind == PlayerSocialAction::Kind::JoinFaction
+                    || action.kind == PlayerSocialAction::Kind::SetFactionRank
+                    || action.kind == PlayerSocialAction::Kind::SetFactionExpelled;
+                if (factionAction)
+                {
+                    if (action.faction.empty() || action.faction.serializeText().size() > 256
+                        || !mRuntime.mStore.get<ESM::Faction>().search(action.faction)) return {};
+                }
+                else if (!action.faction.empty()) return {};
+                switch (action.kind)
+                {
+                    case PlayerSocialAction::Kind::JoinFaction:
+                        if (action.value != 0 || faction != state.factions.end()
+                            || state.factions.size() >= 256) return {};
+                        state.factions.insert(std::lower_bound(state.factions.begin(), state.factions.end(),
+                            action.faction, [](const auto& entry, const ESM::RefId& id) {
+                                return entry.id < id;
+                            }), {action.faction, 0, false});
+                        break;
+                    case PlayerSocialAction::Kind::SetFactionRank:
+                        if (faction == state.factions.end() || action.value < 0 || action.value > 9)
+                            return {};
+                        faction->rank = action.value;
+                        break;
+                    case PlayerSocialAction::Kind::SetFactionExpelled:
+                        if (faction == state.factions.end() || (action.value != 0 && action.value != 1))
+                            return {};
+                        faction->expelled = action.value != 0;
+                        break;
+                    case PlayerSocialAction::Kind::ReportCrime:
+                        if (action.value <= 0 || action.value > 10'000'000 - state.bounty) return {};
+                        state.bounty += action.value;
+                        break;
+                    case PlayerSocialAction::Kind::ClearBounty:
+                        if (action.value != 0) return {};
+                        state.bounty = 0;
+                        break;
+                    case PlayerSocialAction::Kind::SetCrimeDisposition:
+                        if (std::abs(int64_t(action.value)) > 1'000'000) return {};
+                        state.crimeDisposition = action.value;
+                        break;
+                    case PlayerSocialAction::Kind::SetWerewolf:
+                        if (action.value != 0 && action.value != 1) return {};
+                        state.werewolf = action.value != 0;
+                        if (state.werewolf && state.drawState == uint64_t(MWMechanics::DrawState::Spell))
+                            state.drawState = uint64_t(MWMechanics::DrawState::Nothing);
+                        break;
+                    case PlayerSocialAction::Kind::SetKnownWerewolf:
+                        if (action.value != 0 && action.value != 1) return {};
+                        state.knownWerewolf = action.value != 0;
+                        break;
+                    default: return {};
+                }
+            }
+            for (size_t index = 0; index < 2; ++index)
+                if (!validPlayerAiState(index, combat->players[index], command.get())) return {};
+        }
         if (!playerAiUpdates.empty())
         {
             if (!mBinding.mPlayerAi || !combat || playerAiUpdates.size() > 2) return {};

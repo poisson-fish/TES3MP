@@ -280,6 +280,21 @@ namespace TES3MP::Native
             PlayerId player;
             ActorCampaignCombat::PlayerAi state;
         };
+        // Trusted gameplay results. The caller has already established script or
+        // crime authority; no packet decoder may construct these actions.
+        struct PlayerSocialAction
+        {
+            enum class Kind : uint8_t
+            {
+                JoinFaction, SetFactionRank, SetFactionExpelled,
+                ReportCrime, ClearBounty, SetCrimeDisposition,
+                SetWerewolf, SetKnownWerewolf
+            };
+            PlayerId player;
+            Kind kind;
+            ESM::RefId faction;
+            int value = 0; // Rank, bool, reported bounty, or stock crime disposition adjustment.
+        };
         class PreparedCommand
         {
             friend class InventoryService;
@@ -375,7 +390,8 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
-            std::span<const PlayerAiUpdate> playerAiUpdates = {});
+            std::span<const PlayerAiUpdate> playerAiUpdates = {},
+            std::span<const PlayerSocialAction> socialActions = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;
