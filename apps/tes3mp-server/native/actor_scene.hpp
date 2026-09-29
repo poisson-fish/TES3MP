@@ -65,8 +65,8 @@ namespace TES3MP::Native
     };
 
     // Detached, content-derived interior/exterior navigation and physics. References are
-    // obstacles; bound doors receive transaction-owned angles and only the
-    // selected NPC is stepped. The native host composes
+    // obstacles; bound doors receive transaction-owned angles. The selected
+    // NPC and its V60 neighbor step against one collision world. The native host composes
     // prepared frames with its existing inventory owner and durable transaction.
     // Shared door avoidance can interrupt the retained destination. No complete
     // AI packages, scripts or presentation services are constructed here.
@@ -77,6 +77,9 @@ namespace TES3MP::Native
         struct Dormant;
         std::unique_ptr<Dormant> mDormant;
         std::unique_ptr<InteriorActorScene> mNeighbor;
+        InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+            const std::string& baseAnimation, const std::string& beastAnimation,
+            uint64_t neighbor, Impl* sharedParent);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor);
     public:

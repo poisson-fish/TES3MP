@@ -288,9 +288,11 @@ a fresh campaign rather than implicit migration.
 purge, stock stats, witness consequences and crime engagement with the actor
 image. Bind at most 128 unscripted, unleveled NPC placements as witnesses.
 V60 stages the first neighbor's stock body/path and engagement pursuit with the
-actor image; its separate scene tracks committed counterpart poses. Combat
-still owns one NPC slot. Keep engagement keyed by placement and player, with
+actor image; its frame shares the selected actor's collision world and sweeps
+against the staged selected pose. V60 combat owns one NPC slot. Keep engagement keyed by placement and player, with
 no implicit migration.
+V61 binds bounded combat stat/body vectors to placement IDs on recovery.
+Only the selected NPC has a combat clock so far.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

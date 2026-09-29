@@ -120,6 +120,7 @@ namespace TES3MP::Native
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
         bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.
         bool mNeighborAi = false; // V60 first neighboring witness has a durable body and stock navigation.
+        bool mPlacementCombat = false; // V61 bounds NPC combat slots by placement identity.
         struct CrimeWitness
         {
             uint64_t placement = 0;

@@ -6767,6 +6767,7 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "ai-disposition"
             || std::string_view(argv[1]) == "social-lifecycle"
             || std::string_view(argv[1]) == "neighbor-ai"
+            || std::string_view(argv[1]) == "placement-actors"
             || std::string_view(argv[1]) == "ai-creature"
             || std::string_view(argv[1]) == "constant-concealment"))
         {

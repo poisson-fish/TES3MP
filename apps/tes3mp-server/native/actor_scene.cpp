@@ -152,12 +152,18 @@ namespace TES3MP::Native
         Resource::ResourceSystem mResources;
         std::unique_ptr<Resource::BulletShapeManager> mShapes;
         MWWorld::WorldModel mReferences;
-        btDefaultCollisionConfiguration mConfiguration;
-        btCollisionDispatcher mDispatcher{ &mConfiguration };
-        btDbvtBroadphase mBroadphase;
-        btCollisionWorld mWorld{ &mDispatcher, &mBroadphase, &mConfiguration };
-        std::unique_ptr<btStaticPlaneShape> mWaterShape;
-        std::unique_ptr<btCollisionObject> mWaterObject;
+        struct Collision
+        {
+            btDefaultCollisionConfiguration configuration;
+            btCollisionDispatcher dispatcher{&configuration};
+            btDbvtBroadphase broadphase;
+            btCollisionWorld world{&dispatcher, &broadphase, &configuration};
+        };
+        std::shared_ptr<Collision> mCollision;
+        btCollisionWorld& mWorld;
+        Impl* mSharedParent = nullptr;
+        std::shared_ptr<btStaticPlaneShape> mWaterShape;
+        std::shared_ptr<btCollisionObject> mWaterObject;
         std::optional<float> mInteriorWater;
         std::vector<std::unique_ptr<Body>> mBodies;
         struct Terrain
@@ -175,7 +181,7 @@ namespace TES3MP::Native
         std::vector<std::unique_ptr<Terrain>> mTerrain;
         std::vector<ESM::RefId> mCells;
         std::map<const btCollisionObject*, uint64_t> mIdentities;
-        std::map<uint64_t, std::pair<btCollisionObject*, osg::Vec3f>> mActorObstacles;
+        std::map<uint64_t, btCollisionObject*> mActorObstacles;
         std::unique_ptr<MWPhysics::ActorFrameData> mActor;
         osg::Vec3f mActorOffset;
         uint64_t mActorId;
@@ -221,7 +227,7 @@ namespace TES3MP::Native
             : DetourNavigator::Flag_walk; }
 
         ~Impl()
-        { if (mWaterObject) mWorld.removeCollisionObject(mWaterObject.get()); }
+        { if (mWaterObject && !mSharedParent) mWorld.removeCollisionObject(mWaterObject.get()); }
 
         float waterAt(const osg::Vec3f& position) const
         {
@@ -340,6 +346,7 @@ namespace TES3MP::Native
         }
         void applyDoors(std::span<const ActorSceneDoor> doors) noexcept
         {
+            if (mSharedParent) { mSharedParent->applyDoors(doors); return; }
             for (const auto& door : doors)
             {
                 const auto index = mOrdinaryDoors.find(door.mId)->second;
@@ -353,11 +360,13 @@ namespace TES3MP::Native
         }
 
         Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
-            const std::string& baseAnimation, const std::string& beastAnimation)
+            const std::string& baseAnimation, const std::string& beastAnimation, Impl* sharedParent = nullptr)
             : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
-              mReferences(loadout.store(), loadout.readers(), 1), mActorId(actor),
+              mReferences(loadout.store(), loadout.readers(), 1),
+              mCollision(sharedParent ? sharedParent->mCollision : std::make_shared<Collision>()),
+              mWorld(mCollision->world), mSharedParent(sharedParent), mActorId(actor),
               mBaseAnimation(baseAnimation), mBeastAnimation(beastAnimation)
         {
             if (cells.empty() || cells.size() > 9 || !actor
@@ -475,16 +484,16 @@ namespace TES3MP::Native
                 auto* object = body->mObject.get();
                 if (actorBody && id != actor)
                 {
-                    const auto origin = Misc::Convert::toOsg(object->getWorldTransform().getOrigin());
-                    mActorObstacles.emplace(id, std::pair{object, origin - position.asVec3()});
+                    mActorObstacles.emplace(id, object);
                 }
                 if (ptr.getType() == ESM::Door::sRecordId && !ptr.getCellRef().getTeleport())
                     mOrdinaryDoors.emplace(id, mBodies.size());
                 mTransforms.push_back({position, scale});
                 mBodies.push_back(std::move(body));
                 mIdentities.emplace(object, id);
-                mWorld.addCollisionObject(object, actorBody ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
-                    actorBody ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
+                if (!mSharedParent)
+                    mWorld.addCollisionObject(object, actorBody ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
+                        actorBody ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
                 return true;
             });
             if (const auto* exterior = cellId.getIf<ESM::ESM3ExteriorCellRefId>())
@@ -515,18 +524,36 @@ namespace TES3MP::Native
                     BulletHelpers::getHeightfieldShift(exterior->getX(), exterior->getY(), ESM::Land::REAL_SIZE, *lo, *hi),
                     btQuaternion::getIdentity());
                 mIdentities.emplace(terrain->object.get(), mTerrain.size() + 1);
-                mWorld.addCollisionObject(terrain->object.get(), MWPhysics::CollisionType_HeightMap, MWPhysics::CollisionType_Actor);
+                if (!mSharedParent)
+                    mWorld.addCollisionObject(terrain->object.get(), MWPhysics::CollisionType_HeightMap, MWPhysics::CollisionType_Actor);
                 mTerrain.push_back(std::move(terrain));
             }
             }
             if (!mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
+            if (mSharedParent)
+            {
+                const auto shared = mSharedParent->mActorObstacles.find(actor);
+                if (shared == mSharedParent->mActorObstacles.end())
+                    throw std::invalid_argument("Shared NPC collision body absent");
+                mActor->mCollisionObject = shared->second;
+                mIdentities = mSharedParent->mIdentities;
+            }
             if (mInteriorWater || !mTerrain.empty())
             {
-                mWaterShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 0, 1), 0);
-                mWaterObject = std::make_unique<btCollisionObject>();
-                mWaterObject->setCollisionShape(mWaterShape.get());
-                mWorld.addCollisionObject(mWaterObject.get(), MWPhysics::CollisionType_Water,
-                    MWPhysics::CollisionType_Actor);
+                if (mSharedParent)
+                {
+                    mWaterShape = mSharedParent->mWaterShape;
+                    mWaterObject = mSharedParent->mWaterObject;
+                    if (!mWaterObject) throw std::invalid_argument("Shared actor water domain differs");
+                }
+                else
+                {
+                    mWaterShape = std::make_shared<btStaticPlaneShape>(btVector3(0, 0, 1), 0);
+                    mWaterObject = std::make_shared<btCollisionObject>();
+                    mWaterObject->setCollisionShape(mWaterShape.get());
+                    mWorld.addCollisionObject(mWaterObject.get(), MWPhysics::CollisionType_Water,
+                        MWPhysics::CollisionType_Actor);
+                }
             }
             std::ostringstream fingerprint;
             fingerprint << "native-interior-collision-1\n" << loadout.contentFingerprint() << '\n'
@@ -559,6 +586,7 @@ namespace TES3MP::Native
                 ~RestoreTransform()
                 {
                     object.setWorldTransform(transform);
+                    world.updateSingleAabb(&object);
                     object.getBroadphaseHandle()->m_collisionFilterMask = mask;
                     if (water) { water->setWorldTransform(waterTransform); world.updateSingleAabb(water); }
                 }
@@ -597,17 +625,6 @@ namespace TES3MP::Native
             transform.setOrigin(Misc::Convert::toBullet(mActor->mPosition+mActorOffset));
             mActor->mCollisionObject->setWorldTransform(transform);
             mWorld.updateSingleAabb(mActor->mCollisionObject);
-        }
-        void updateActorObstacle(const ActorSceneSnapshot& actor) noexcept
-        {
-            const auto found = mActorObstacles.find(actor.mActor);
-            if (found == mActorObstacles.end()) std::terminate();
-            auto* object = found->second.first;
-            auto transform = object->getWorldTransform();
-            transform.setOrigin(Misc::Convert::toBullet(osg::Vec3f(actor.mPosition[0], actor.mPosition[1],
-                actor.mPosition[2]) + found->second.second));
-            object->setWorldTransform(transform);
-            mWorld.updateSingleAabb(object);
         }
         std::vector<char> encode(const MWPhysics::ActorFrameData& frame,
             const MWMechanics::PathFinder& path, const std::vector<uint64_t>& contacts, const Travel& travel) const;
@@ -663,15 +680,18 @@ namespace TES3MP::Native
         : InteriorActorScene(loadout, std::array{interiorCell(cell)}, actor, baseAnimation, beastAnimation) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation, uint64_t neighbor)
-        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation))
+        : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbor, nullptr) {}
+    InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+        const std::string& baseAnimation, const std::string& beastAnimation, uint64_t neighbor, Impl* sharedParent)
+        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent))
     {
         if (!contains(snapshot().mPosition))
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
         if (neighbor)
         {
             if (neighbor == actor) throw std::invalid_argument("Neighbor actor duplicates selected placement");
-            mNeighbor = std::make_unique<InteriorActorScene>(loadout, cells, neighbor,
-                baseAnimation, beastAnimation);
+            mNeighbor.reset(new InteriorActorScene(loadout, cells, neighbor,
+                baseAnimation, beastAnimation, 0, mImpl.get()));
             mNeighbor->mImpl->mDynamicDestination = true;
         }
     }
@@ -1494,6 +1514,22 @@ namespace TES3MP::Native
     {
         if (!mNeighbor || !mImpl || prepared.mState->lifetime != mImpl->mLifetime)
             throw std::invalid_argument("Neighbor navigation binding invalid");
+        // Both sweeps use the same collision world. The neighbor must see the
+        // selected actor's candidate position, while a rejected write must
+        // leave the committed broadphase untouched.
+        auto* body = mImpl->mActor->mCollisionObject;
+        const auto committed = body->getWorldTransform();
+        struct RestoreActor
+        {
+            btCollisionWorld& world;
+            btCollisionObject& body;
+            btTransform transform;
+            ~RestoreActor() { body.setWorldTransform(transform); world.updateSingleAabb(&body); }
+        } restore{mImpl->mWorld, *body, committed};
+        auto candidate = committed;
+        candidate.setOrigin(Misc::Convert::toBullet(prepared.mState->frame->mPosition + mImpl->mActorOffset));
+        body->setWorldTransform(candidate);
+        mImpl->mWorld.updateSingleAabb(body);
         auto neighbor = mNeighbor->prepareNavigation(ActorMovement{.walkSpeed = speed}, doors, destination);
         prepared.mState->bytes = joinActorImages(
             mImpl->encode(*prepared.mState->frame, prepared.mState->path,
@@ -1549,11 +1585,6 @@ namespace TES3MP::Native
         mImpl->applyDoors(mImpl->mDoors);
         mImpl->updateTransform();
         if (mNeighbor) mNeighbor->install(*prepared.mNeighbor);
-        if (mNeighbor)
-        {
-            mImpl->updateActorObstacle(mNeighbor->snapshot());
-            mNeighbor->mImpl->updateActorObstacle(snapshot());
-        }
     }
 
 }

@@ -5450,7 +5450,8 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
-        const bool neighborAi = effectFamily == "neighbor-ai";
+        const bool placementActors = effectFamily == "placement-actors";
+        const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
         const bool aiDisposition = effectFamily == "ai-disposition" || socialLifecycle;
         const bool specialConditions = effectFamily == "special-conditions";
@@ -6823,6 +6824,43 @@ namespace TES3MP::Native::Testing
                 blind.install(*prepared);
                 require(blind.snapshot().mPosition == expected.mPosition,
                     "Blind flee install diverged from its prepared physics frame");
+                if (neighborAi)
+                {
+                    const auto witness = loadout.placedActors(combatRoom).at(1);
+                    const auto collisionDoor = loadout.ordinaryDoors(combatRoom, 128).at(0).mIdentity;
+                    InteriorActorScene shared(loadout, std::array{combatRoom}, combatActor.mIdentity,
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif", witness.mIdentity);
+                    const std::array doorIds{collisionDoor};
+                    shared.bindDoors(doorIds, true);
+                    shared.enableNavigation(settings.string());
+                    const auto start = shared.snapshot().mPosition;
+                    const auto other = shared.neighborSnapshot()->mPosition;
+                    shared.travelTo(other, true);
+                    const std::array open{ActorSceneDoor{collisionDoor, osg::PIf / 2}};
+                    const auto before = shared.image();
+                    auto rejected = shared.prepareNavigation(600.f, open);
+                    shared.prepareNeighborNavigation(*rejected, 600.f, open, start);
+                    require(shared.image() == before, "Prepared shared collision step mutated committed actors");
+                    auto repeated = shared.prepareNavigation(600.f, open);
+                    shared.prepareNeighborNavigation(*repeated, 600.f, open, start);
+                    require(std::ranges::equal(rejected->image(), repeated->image()),
+                        "Rejected shared collision step changed the next candidate");
+                    shared.install(*repeated);
+                    float closest = std::numeric_limits<float>::infinity();
+                    for (int tick = 0; tick < 7; ++tick)
+                    {
+                        auto both = shared.prepareNavigation(600.f, open);
+                        shared.prepareNeighborNavigation(*both, 600.f, open, start);
+                        shared.install(*both);
+                        const auto first = shared.snapshot().mPosition;
+                        const auto second = shared.neighborSnapshot()->mPosition;
+                        const float dx = first[0] - second[0], dy = first[1] - second[1];
+                        closest = std::min(closest, std::sqrt(dx * dx + dy * dy));
+                    }
+                    require(closest >= 45.f && closest < 90.f,
+                        "Converging NPC sweeps did not collide in one staged world");
+                    std::cout << "converging shared collision closest=" << closest << '\n';
+                }
             }
             if (effectLifecycle && strike)
             {
@@ -7987,7 +8025,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8361,6 +8399,30 @@ namespace TES3MP::Native::Testing
                     require(view && view->equipment && !view->equipment->motions.empty(),
                         "Witness crime target absent");
                     const auto selectedNpc = view->equipment->motions.front().placement;
+                    if (placementActors)
+                    {
+                        const auto image = bytes(service);
+                        const auto state = read(image);
+                        const auto neighbor = std::ranges::find_if(view->equipment->motions,
+                            [selectedNpc](const auto& motion) { return motion.placement != selectedNpc; });
+                        require(neighbor != view->equipment->motions.end()
+                                && state.combat->actors.size() == 4
+                                && state.combat->npcPlacements == std::vector<uint64_t>{
+                                    selectedNpc, neighbor->placement}
+                                && state.combat->actors[3][8][2] > 0,
+                            "V61 combat state did not bind both NPC placements");
+                        auto forged = image;
+                        const size_t neighborKey = 56 + 8 + state.melee->identity.size() + 7 * 8 + 8 + 8 + 8;
+                        require(neighborKey + 8 <= forged.size(), "V61 placement key outside campaign image");
+                        std::fill_n(forged.begin() + neighborKey, 8, std::byte{0xff});
+                        require(read(forged).combat->npcPlacements[1] == UINT64_MAX,
+                            "V61 recovery fixture did not alter the neighbor placement key");
+                        bool rejectedKey = false;
+                        try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, forged); }
+                        catch (const std::invalid_argument&) { rejectedKey = true; }
+                        require(rejectedKey && bytes(service) == image,
+                            "V61 recovery accepted a foreign NPC placement or changed the live campaign");
+                    }
                     ClientMeleeAttackCommand attack{attackingSession, SessionGeneration::initial(),
                         CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                         id<ActorId>(selectedNpc), id<ServerTick>(1), CombatRevision::initial(),
@@ -8455,17 +8517,21 @@ namespace TES3MP::Native::Testing
                     require(aiReacted, "Persisted victim engagement did not reach stock AI");
                     if (neighborAi)
                     {
-                        const auto position = [&](InventoryService& current) {
+                        const auto positions = [&](InventoryService& current) {
                             const auto view = current.projectInventory(chase, attackingSession,
                                 id<ServerTick>(frame), id<CanonicalRevision>(1));
                             require(view && view->equipment, "Neighbor appearance absent");
                             const auto found = std::ranges::find_if(view->equipment->motions,
                                 [selectedNpc](const auto& motion) { return motion.placement != selectedNpc; });
                             require(found != view->equipment->motions.end(), "Neighbor body motion absent");
-                            return found->position;
+                            const auto selected = std::ranges::find_if(view->equipment->motions,
+                                [selectedNpc](const auto& motion) { return motion.placement == selectedNpc; });
+                            require(selected != view->equipment->motions.end(), "Selected body motion absent");
+                            return std::pair{selected->position, found->position};
                         };
-                        const auto initial = position(service);
+                        const auto initial = positions(service).second;
                         auto& resumed = dynamic_cast<InventoryService&>(replay.service());
+                        float closest = std::numeric_limits<float>::infinity();
                         for (const auto stop = frame + 60; frame < stop; ++frame)
                         {
                             auto originalTick = service.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
@@ -8481,11 +8547,17 @@ namespace TES3MP::Native::Testing
                                     && replayTick->commit(accepted) == CanonicalDurabilityResult::Committed
                                     && bytes(service) == bytes(resumed),
                                 "Neighbor navigation diverged after restart");
+                            const auto [first, second] = positions(service);
+                            const float dx = first[0] - second[0], dy = first[1] - second[1];
+                            closest = std::min(closest, std::sqrt(dx * dx + dy * dy));
                         }
-                        const auto finalPosition = position(service);
+                        const auto finalPosition = positions(service).second;
                         const std::array<float, 3> authored{100.f, -120.f, 1.f};
                         require(initial != authored || finalPosition != authored,
                             "Persisted witness engagement did not move neighboring NPC");
+                        require(closest >= 45.f,
+                            "Committed neighboring NPC bodies interpenetrated in the shared collision scene");
+                        std::cout << "neighbor shared collision closest=" << closest << '\n';
                     }
                 }
                 std::cout << "werewolf and bystander crime two players effects equipment stats witnesses engagement rejection restart AI\n";

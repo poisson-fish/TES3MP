@@ -143,11 +143,23 @@ namespace TES3MP::Native
             return MWMechanics::isFatigueKnockout(stockBase ? stats.getFatigue().getBase() : 1.f,
                 stats.getFatigue().getCurrent());
         }
-        ActorCampaignCombat initialCombat(const std::array<ESM::RefId, 3>& actors,
-            const MWWorld::ESMStore& content, uint32_t seed, bool stockBase)
+        ActorCampaignCombat initialCombat(std::span<const ESM::RefId> actors,
+            const MWWorld::ESMStore& content, uint32_t seed, bool stockBase,
+            std::span<const uint64_t> placements = {})
         {
             static_assert(ActorCampaignCombat::StatCount == ESM::Attribute::Length + 3 + ESM::Skill::Length);
+            if (actors.size() < 3 || actors.size() > 10
+                || (!placements.empty() && placements.size() != actors.size() - 2))
+                throw std::invalid_argument("Native combat actor domain invalid");
             ActorCampaignCombat result;
+            result.npcPlacements.assign(placements.begin(), placements.end());
+            result.actors.resize(actors.size());
+            result.knockedDown.resize(actors.size());
+            result.knockoutFrame.resize(actors.size());
+            result.hitKnockdown.resize(actors.size());
+            result.hitRecoveryTicks.resize(actors.size());
+            result.bodyAction.resize(actors.size());
+            result.hitGroup.resize(actors.size());
             Misc::Rng::Generator rng{seed};
             result.rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             const float magickaMultiplier = content.get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat();
@@ -1298,8 +1310,23 @@ namespace TES3MP::Native
                 && (!mBinding.mActorPresentation || !creatureSpellsSupported
                     || mRuntime.equippedWeaponCondition(mCombatNpcOwner)))
                 throw std::invalid_argument("Creature timeline requires an unarmed biped with supported passive spell sources");
-            mCombat = initialCombat({mBinding.mActors[0].mBase, mBinding.mActors[1].mBase, owner->mBase},
-                content, mBinding.mLootSeed, mBinding.mKnockoutAnimation);
+            std::vector<ESM::RefId> combatBases{mBinding.mActors[0].mBase, mBinding.mActors[1].mBase,
+                owner->mBase};
+            std::vector<uint64_t> placements;
+            if (mBinding.mPlacementCombat)
+            {
+                placements.push_back(owner->mId.value());
+                const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+                const auto adjacent = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) {
+                    return neighbor && value.mId.value() == neighbor->mActor;
+                });
+                if (adjacent == mBinding.mContainers.end())
+                    throw std::invalid_argument("Native placement combat neighbor absent");
+                placements.push_back(adjacent->mId.value());
+                combatBases.push_back(adjacent->mBase);
+            }
+            mCombat = initialCombat(combatBases, content, mBinding.mLootSeed,
+                mBinding.mKnockoutAnimation, placements);
             (void)mRuntime.equippedWeaponCondition(mCombatNpcOwner);
         }
         if (mBinding.mBoundMelee)
@@ -2346,13 +2373,21 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native melee resource binding differs from campaign");
             if (bool(decoded.combat) != mBinding.mCombatState)
                 throw std::invalid_argument("Native combat campaign version differs from binding");
+            if (mBinding.mPlacementCombat)
+            {
+                const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+                if (!decoded.combat || !neighbor
+                    || decoded.combat->npcPlacements != std::vector<uint64_t>{
+                        mBinding.mNavigatingActor->actorId(), neighbor->mActor})
+                    throw std::invalid_argument("Native combat placements differ from bound actors");
+            }
             if (decoded.combat && decoded.combat->fleeTarget
                 && std::ranges::none_of(mBinding.mPlayers, [&](PlayerId player) {
                     return player.value() == decoded.combat->fleeTarget;
                 }))
                 throw std::invalid_argument("Native flee target differs from bound players");
             if (decoded.combat && mBinding.mBoundHits)
-                for (size_t i = 0; i < decoded.combat->hitRecoveryTicks.size(); ++i)
+                for (size_t i = 0; i < mBinding.mBoundHits->size(); ++i)
                 {
                     const auto& hit = (*mBinding.mBoundHits)[i].animations;
                     const unsigned maximum = hit.count ? *std::max_element(hit.ticks.begin(), hit.ticks.end()) : 1;
@@ -2417,7 +2452,8 @@ namespace TES3MP::Native
                 || mBinding.mMovementEffects != hasMovementEffects(magic)
                 || mBinding.mAiDecisions != hasAiDecisions(magic)
                 || mBinding.mPlayerAi != hasPlayerAi(magic)
-                || mBinding.mSocialLifecycle != hasSocialLifecycle(magic))
+                || mBinding.mSocialLifecycle != hasSocialLifecycle(magic)
+                || mBinding.mPlacementCombat != hasPlacementCombat(magic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2998,11 +3034,21 @@ namespace TES3MP::Native
     {
         const size_t meleeSize = melee ? 8 + (mBinding.mWeaponMelee ? melee->identity() : mBinding.mBoundMelee->mResourceIdentity).size()
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
-        const size_t combatSize = combat ? 8 + 3 * ActorCampaignCombat::StatCount * 5 * 8
-            + (mBinding.mKnockoutRules ? 3 * 8 : 0)
-            + (mBinding.mKnockoutAnimation ? 6 * 8 : 0)
-            + (mBinding.mMeleeDefenseRules ? 3 * 8 : 0)
-            + (mBinding.mActorPresentation ? 7 * 8 : 0)
+        const size_t actorSlots = combat ? combat->actors.size() : 0;
+        if (combat && ((mBinding.mPlacementCombat
+                ? (actorSlots < 4 || actorSlots > 10 || combat->npcPlacements.size() != actorSlots - 2
+                    || combat->npcPlacements.front() != mBinding.mNavigatingActor->actorId())
+                : actorSlots != 3 || !combat->npcPlacements.empty())
+            || combat->knockedDown.size() != actorSlots || combat->knockoutFrame.size() != actorSlots
+            || combat->hitKnockdown.size() != actorSlots || combat->hitRecoveryTicks.size() != actorSlots
+            || combat->bodyAction.size() != actorSlots || combat->hitGroup.size() != actorSlots))
+            throw std::invalid_argument("Native combat placement domain invalid");
+        const size_t combatSize = combat ? 8 + (mBinding.mPlacementCombat ? (1 + combat->npcPlacements.size()) * 8 : 0)
+            + actorSlots * ActorCampaignCombat::StatCount * 5 * 8
+            + (mBinding.mKnockoutRules ? actorSlots * 8 : 0)
+            + (mBinding.mKnockoutAnimation ? actorSlots * 2 * 8 : 0)
+            + (mBinding.mMeleeDefenseRules ? actorSlots * 8 : 0)
+            + (mBinding.mActorPresentation ? (1 + actorSlots * 2) * 8 : 0)
             + (mBinding.mAiDecisions ? 5 * 8 : 0) : 0;
         size_t playerAiSize = 0;
         if (mBinding.mPlayerAi && combat)
@@ -3057,7 +3103,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mSocialLifecycle ? SocialLifecycleCampaignMagic
+        putAreaWord(result, mBinding.mPlacementCombat ? PlacementCombatCampaignMagic
+            : mBinding.mSocialLifecycle ? SocialLifecycleCampaignMagic
             : mBinding.mPlayerAi ? PlayerAiCampaignMagic
             : mBinding.mAiDecisions ? AiDecisionCampaignMagic
             : mBinding.mMovementEffects ? MovementEffectsCampaignMagic
@@ -3103,6 +3150,11 @@ namespace TES3MP::Native
         if (combat)
         {
             putAreaWord(result, combat->rng);
+            if (mBinding.mPlacementCombat)
+            {
+                putAreaWord(result, combat->npcPlacements.size());
+                for (auto placement : combat->npcPlacements) putAreaWord(result, placement);
+            }
             for (const auto& actorStats : combat->actors)
                 for (const auto& stat : actorStats)
                     for (float value : stat) putAreaWord(result, std::bit_cast<uint32_t>(value));
@@ -4359,7 +4411,9 @@ namespace TES3MP::Native
         { step.reset(); after = before; melee = mIdleMelee; target = 0; contact = false; }
         if (combat && mBinding.mKnockoutRules)
         {
-            for (size_t index = 0; index < combat->actors.size(); ++index)
+            // V61 retains the neighbor's placement-bound stats in this image;
+            // its active combat clock is wired in the next actor slice.
+            for (size_t index = 0; index < 3; ++index)
             {
                 const bool awake = index == 2 ? active
                     : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {

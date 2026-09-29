@@ -48,7 +48,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t AiDecisionCampaignMagic = 0x5650434154335354;
     inline constexpr uint64_t PlayerAiCampaignMagic = 0x5750434154335354;
     inline constexpr uint64_t SocialLifecycleCampaignMagic = 0x5850434154335354;
-    inline constexpr bool hasSocialLifecycle(uint64_t magic) { return magic == SocialLifecycleCampaignMagic; }
+    inline constexpr uint64_t PlacementCombatCampaignMagic = 0x5950434154335354;
+    inline constexpr bool hasPlacementCombat(uint64_t magic) { return magic == PlacementCombatCampaignMagic; }
+    inline constexpr bool hasSocialLifecycle(uint64_t magic)
+    { return magic == SocialLifecycleCampaignMagic || hasPlacementCombat(magic); }
     inline constexpr bool hasPlayerAi(uint64_t magic)
     { return magic == PlayerAiCampaignMagic || hasSocialLifecycle(magic); }
     inline constexpr bool hasAiDecisions(uint64_t magic)
@@ -182,13 +185,17 @@ namespace TES3MP::Native
         static constexpr size_t MaximumConditionSources = 128;
         std::vector<ConditionSource> conditions;
         static constexpr size_t StatCount = 8 + 3 + 27;
-        std::array<std::array<std::array<float, 5>, StatCount>, 3> actors{};
+        using Stats = std::array<std::array<float, 5>, StatCount>;
+        // Players occupy indices 0/1. V61 NPC indices follow this ordered,
+        // placement-keyed domain; index 2 remains the selected legacy actor.
+        std::vector<uint64_t> npcPlacements;
+        std::vector<Stats> actors = std::vector<Stats>(3);
         uint32_t rng = 1;
-        std::array<bool, 3> knockedDown{};
-        std::array<uint32_t, 3> knockoutFrame{};
-        std::array<bool, 3> hitKnockdown{};
+        std::vector<bool> knockedDown = std::vector<bool>(3);
+        std::vector<uint32_t> knockoutFrame = std::vector<uint32_t>(3);
+        std::vector<bool> hitKnockdown = std::vector<bool>(3);
         // Remaining CPU hit animation frames; paused for inactive actors.
-        std::array<uint32_t, 3> hitRecoveryTicks{};
+        std::vector<uint32_t> hitRecoveryTicks = std::vector<uint32_t>(3);
         std::array<std::optional<PlayerSwing>, 2> swings;
         std::vector<BowProjectile> arrows;
         std::array<std::optional<ActorCampaignCast>, 2> playerCasts;
@@ -198,7 +205,7 @@ namespace TES3MP::Native
         // destination and expiry commit with combat and navigation state.
         uint64_t fleeTarget = 0, fleeUntil = 0;
         std::array<float, 3> fleeDestination{};
-        std::array<uint64_t, 3> bodyAction{}, hitGroup{};
+        std::vector<uint64_t> bodyAction = std::vector<uint64_t>(3), hitGroup = std::vector<uint64_t>(3);
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -347,6 +354,28 @@ namespace TES3MP::Native
             if (rng < 1 || rng > 2147483646)
                 throw std::invalid_argument("Native combat RNG state invalid");
             state.rng = uint32_t(rng);
+            if (hasPlacementCombat(magic))
+            {
+                const auto count = getAreaWord(bytes, offset);
+                if (count < 1 || count > 8 || count > (bytes.size() - offset) / 8)
+                    throw std::invalid_argument("Native NPC placement count invalid");
+                state.npcPlacements.reserve(size_t(count));
+                for (uint64_t i = 0; i < count; ++i)
+                {
+                    const auto placement = getAreaWord(bytes, offset);
+                    if (!placement || std::ranges::find(state.npcPlacements, placement) != state.npcPlacements.end())
+                        throw std::invalid_argument("Native NPC placement identity invalid");
+                    state.npcPlacements.push_back(placement);
+                }
+                const size_t slots = 2 + size_t(count);
+                state.actors.resize(slots);
+                state.knockedDown.resize(slots);
+                state.knockoutFrame.resize(slots);
+                state.hitKnockdown.resize(slots);
+                state.hitRecoveryTicks.resize(slots);
+                state.bodyAction.resize(slots);
+                state.hitGroup.resize(slots);
+            }
             for (auto& actor : state.actors)
                 for (auto& stat : actor)
                     for (float& value : stat)

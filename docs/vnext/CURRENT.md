@@ -2,7 +2,7 @@
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 NPC/biped/doors: 60 Hz; commits: 30 Hz; first engaged neighbor moves;
-other neighbors freeze. **V60.**
+other neighbors freeze. **V61.**
 
 Player/NPC casts, conditions, stats and Disintegration have vanilla/TR checks;
 VFX remains incomplete. Concealment uses stock awareness; actions break
@@ -26,22 +26,20 @@ identity/bounty and durable per-player Fight engagement together. Its selected
 NPC consumes engagement in AI. Synthetic rejection/restart/AI:
 `build/logs/social-lifecycle-regression-23.log`; V58 compatibility:
 `build/logs/ai-disposition-compat-21.log`.
-V60 binds the first neighboring NPC witness from plugin placements to an owned
-stock physics/navigation scene. Engagement pursues its player; body, motion and
-path persist with the actor transaction. Synthetic two-player rejection/restart/
-motion: `build/logs/neighbor-ai-test-09.log`. Its separate scene sees committed
-counterpart positions; simultaneous collision, attacks, damage, lives and
-effects still need bounded multi-actor composition. Other witnesses remain
-placement-bound. Other offenses remain open. The bounded faction script runner
-commits join/rank/expulsion for an explicit player; unsupported opcodes reject:
-`build/logs/ai-faction-script-test-07.log`. General scripts remain M5 work.
-Flee gates new runs on LOS and reach:
-`build/logs/{ai-flee-test-19,ai-action-test-05}.log`;
+V60 moves the first witness in the selected NPC's collision world; both frames
+commit together and neighbor pursuit follows engagement. Converging collision,
+rejection and restart: `build/logs/shared-scene-neighbor-11.log`. V61 stores
+selected/neighbor NPC stats behind placement keys with the two players;
+foreign-key recovery rejects. Two-player rejection/restart and V60 compatibility:
+`build/logs/{placement-actors-test-05,neighbor-compat-01}.log`. Neighbor attacks,
+effects and life are pending; other witnesses freeze. Faction join/rank/expulsion
+commits for an explicit player: `build/logs/ai-faction-script-test-07.log`.
+Flee gates runs on LOS and reach: `build/logs/{ai-flee-test-19,ai-action-test-05}.log`;
 desktop comparison: `build/stock-flee-comparison/result.json`.
-Mixed passives, non-player Command and multiple combatants remain open.
+Mixed passives, non-player Command and general scripts remain open.
 
-**Next: generalize the composed actor state, shared collision scene, stock AI
-attacks and durable combat/effect/life timelines to bounded neighboring NPCs.**
+**Next: wire the placement-keyed neighbor to stock AI attacks, effects and
+life transitions in the composed actor tick; extend beyond the first neighbor.**
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
