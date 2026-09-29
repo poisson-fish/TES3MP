@@ -44,7 +44,8 @@ tes3mp_verify_target_includes(tes3mp_native_actor_runtime
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
 
 # Concrete application adapter; engine/network types meet only in this leaf.
-add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp area_doors.cpp)
+add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp area_doors.cpp
+    faction_scripts.cpp faction_scripts.hpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_service PUBLIC tes3mp_server_app PRIVATE tes3mp_native_equipment_runtime tes3mp_native_actor_runtime openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_inventory_service

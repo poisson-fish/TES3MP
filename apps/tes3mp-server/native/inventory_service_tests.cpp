@@ -31,6 +31,7 @@
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadfact.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadclot.hpp>
 #include <components/esm3/loadmisc.hpp>
@@ -5974,9 +5975,22 @@ namespace TES3MP::Native::Testing
                     out.endRecord(ESM::GameSetting::sRecordId);
                     ESM::Faction faction; faction.blank();
                     faction.mId = ESM::RefId::stringRefId("ai_test_faction");
+                    faction.mRanks[0] = "Associate";
+                    faction.mRanks[1] = "Member";
                     faction.mReactions[faction.mId] = -100;
                     out.startRecord(ESM::Faction::sRecordId, 0); faction.save(out, false);
                     out.endRecord(ESM::Faction::sRecordId);
+                    for (const auto [id, body] : {
+                             std::pair{"ai_faction_script", "PCJoinFaction \"ai_test_faction\"\nPCRaiseRank \"ai_test_faction\"\n"},
+                             {"ai_faction_expel", "PcExpell \"ai_test_faction\"\n"},
+                             {"ai_faction_loop", "while ( 1 == 1 )\nendwhile\n"},
+                             {"ai_faction_unsupported", "ModHealth 10\n"}})
+                    {
+                        ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(id);
+                        script.mScriptText = "Begin " + std::string(id) + "\n" + body + "End " + id + "\n";
+                        out.startRecord(ESM::Script::sRecordId, 0); script.save(out);
+                        out.endRecord(ESM::Script::sRecordId);
+                    }
                 }
             }
             if (weaponExecution)
@@ -8169,6 +8183,99 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
             {
                 const bool creatureTarget = effectFamily == "ai-creature";
+                if (!creatureTarget)
+                    for (size_t owner = 0; owner < 2; ++owner)
+                    {
+                        auto scripted = make(); auto& service = dynamic_cast<InventoryService&>(scripted->service());
+                        const auto scene = specialWorld();
+                        const auto player = id<PlayerId>(owner + 1);
+                        const auto before = bytes(service);
+                        using Request = InventoryService::FactionScriptRequest;
+                        require(!service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &scene, {}, {}, Request{id<PlayerId>(999),
+                                    ESM::RefId::stringRefId("ai_faction_script")})
+                                && bytes(service) == before,
+                            "Missing faction script player context changed actor state");
+                        bool unsupported = false;
+                        try
+                        {
+                            (void)service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &scene, {}, {}, Request{player, ESM::RefId::stringRefId("ai_faction_unsupported")});
+                        }
+                        catch (const std::exception&) { unsupported = true; }
+                        require(unsupported && bytes(service) == before,
+                            "Unsupported faction script changed actor state");
+                        bool bounded = false;
+                        try
+                        {
+                            (void)service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                                {}, {}, &scene, {}, {}, Request{player, ESM::RefId::stringRefId("ai_faction_loop")});
+                        }
+                        catch (const std::exception& error)
+                        { bounded = std::string_view(error.what()) == "script instruction limit exceeded"; }
+                        require(bounded && bytes(service) == before,
+                            "Unbounded faction script changed actor state");
+                        auto pending = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                            {}, {}, &scene, {}, {}, Request{player, ESM::RefId::stringRefId("ai_faction_script")});
+                        require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(service) == before,
+                            "Rejected faction script leaked player or actor state");
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Stock faction script did not join the actor tick");
+                        const auto image = bytes(service);
+                        const auto states = read(image).combat->players;
+                        require(states[owner].factions.size() == 1
+                                && states[owner].factions.front().id == ESM::RefId::stringRefId("ai_test_faction")
+                                && states[owner].factions.front().rank == 1
+                                && !states[owner].factions.front().expelled
+                                && states[1 - owner] == read(before).combat->players[1 - owner],
+                            "Faction script did not preserve explicit player identity and stock results");
+                        InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, image);
+                        restart.service().synchronizeCells(authority);
+                        require(bytes(restart.service()) == image, "Faction script result changed on restart");
+                        bool attacked = read(image).combat->npcAction != 0;
+                        for (uint64_t frame = 2; frame <= 75 && !attacked; ++frame)
+                        {
+                            auto original = service.prepareNativeTick(authority, id<ServerTick>(frame), 1.f/30, {}, &scene);
+                            auto replay = restart.service().prepareNativeTick(authority, id<ServerTick>(frame), 1.f/30, {}, &scene);
+                            require(original && replay && original->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && bytes(service) == bytes(restart.service()),
+                                "Faction script AI diverged after restart");
+                            attacked = read(bytes(service)).combat->npcAction != 0;
+                        }
+                        require(attacked, "Faction script result did not reach stock AI");
+                        InventoryHost expelled(descriptor, testContentManifest(), *registry, *crypto, image);
+                        expelled.service().synchronizeCells(authority);
+                        auto& expelService = dynamic_cast<InventoryService&>(expelled.service());
+                        auto expel = expelService.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30,
+                            {}, {}, &scene, {}, {}, Request{player, ESM::RefId::stringRefId("ai_faction_expel")});
+                        require(expel && expel->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(expelService) == image,
+                            "Rejected stock faction expulsion leaked");
+                        require(expel->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Stock faction expulsion did not join actor tick");
+                        const auto expelledImage = bytes(expelService);
+                        const auto expelledState = read(expelledImage).combat->players;
+                        require(expelledState[owner].factions.front().expelled
+                                && expelledState[1 - owner] == states[1 - owner],
+                            "Faction expulsion crossed player identities");
+                        InventoryHost expelRestart(descriptor, testContentManifest(), *registry, *crypto, expelledImage);
+                        expelRestart.service().synchronizeCells(authority);
+                        require(bytes(expelRestart.service()) == expelledImage,
+                            "Faction expulsion changed on restart");
+                        for (uint64_t frame = 3; frame <= 75; ++frame)
+                        {
+                            auto original = expelService.prepareNativeTick(authority, id<ServerTick>(frame), 1.f/30, {}, &scene);
+                            auto replay = expelRestart.service().prepareNativeTick(authority, id<ServerTick>(frame), 1.f/30, {}, &scene);
+                            require(original && replay && original->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && bytes(expelService) == bytes(expelRestart.service()),
+                                "Faction expulsion AI diverged after restart");
+                        }
+                        require(!read(bytes(expelService)).combat->npcAction,
+                            "Expelled faction member retained same-faction aggression");
+                    }
                 {
                     auto idle = make();
                     const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(

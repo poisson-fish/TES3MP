@@ -1,6 +1,7 @@
 #ifndef INTERPRETER_INTERPRETER_H_INCLUDED
 #define INTERPRETER_INTERPRETER_H_INCLUDED
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <stack>
@@ -70,7 +71,7 @@ namespace Interpreter
             installSegment<T>(mSegment5, "5", code, std::forward<TArgs>(args)...);
         }
 
-        void run(const Program& program, Context& context);
+        void run(const Program& program, Context& context, std::size_t instructionLimit = 0);
     };
 }
 

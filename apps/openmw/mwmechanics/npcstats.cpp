@@ -345,10 +345,16 @@ void MWMechanics::NpcStats::joinFaction(const ESM::RefId& faction)
 
 void MWMechanics::NpcStats::setFactionRank(const ESM::RefId& faction, int newRank)
 {
+    setFactionRank(faction, newRank, *MWBase::Environment::get().getESMStore());
+}
+
+void MWMechanics::NpcStats::setFactionRank(const ESM::RefId& faction, int newRank,
+    const MWWorld::ESMStore& content)
+{
     auto it = mFactionRank.find(faction);
     if (it != mFactionRank.end())
     {
-        const ESM::Faction* factionPtr = MWBase::Environment::get().getESMStore()->get<ESM::Faction>().find(faction);
+        const ESM::Faction* factionPtr = content.get<ESM::Faction>().find(faction);
         if (newRank < 0)
         {
             mFactionRank.erase(it);

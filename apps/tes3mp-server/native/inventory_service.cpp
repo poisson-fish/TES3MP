@@ -6,6 +6,7 @@
 #include "ai_magic.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
 #include <apps/openmw/mwmechanics/crimeresult.hpp>
+#include "faction_scripts.hpp"
 #include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/aitimer.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -3630,7 +3631,8 @@ namespace TES3MP::Native
         ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
         std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world,
         std::span<const PlayerAiUpdate> playerAiUpdates,
-        std::span<const PlayerSocialAction> socialActions)
+        std::span<const PlayerSocialAction> socialActions,
+        std::optional<FactionScriptRequest> factionScript)
     try
     {
         if (mRuntime.mFailedClosed || mRuntime.mRestartActor) return {};
@@ -3799,6 +3801,19 @@ namespace TES3MP::Native
         };
         auto melee = mMelee;
         auto combat = mCombat;
+        std::optional<PlayerAiUpdate> scriptedFactionUpdate;
+        if (factionScript)
+        {
+            if (!mBinding.mPlayerAi || !combat || !playerAiUpdates.empty() || !socialActions.empty())
+                return {};
+            const auto found = std::ranges::find(mBinding.mPlayers, factionScript->player);
+            if (found == mBinding.mPlayers.end()) return {};
+            const size_t owner = size_t(found - mBinding.mPlayers.begin());
+            scriptedFactionUpdate.emplace(PlayerAiUpdate{factionScript->player,
+                runFactionScript(mRuntime.mStore, factionScript->script,
+                    mRuntime.ownerPtr(mCombatNpcOwner), mRuntime.ownerPtr(owner), combat->players[owner])});
+            playerAiUpdates = std::span<const PlayerAiUpdate>(&*scriptedFactionUpdate, 1);
+        }
         if (!socialActions.empty())
         {
             if (!mBinding.mPlayerAi || !combat || !playerAiUpdates.empty()

@@ -11,6 +11,9 @@
 
 #include "../mwworld/ptr.hpp"
 
+namespace MWWorld { class ESMStore; }
+namespace MWMechanics { class NpcStats; }
+
 namespace MWScript
 {
     class Locals;
@@ -25,6 +28,10 @@ namespace MWScript
     {
         Locals* mLocals;
         mutable MWWorld::Ptr mReference;
+        MWWorld::Ptr mPlayer;
+        MWMechanics::NpcStats* mPlayerStats = nullptr;
+        const MWWorld::ESMStore* mContent = nullptr;
+        bool mExplicitPlayer = false;
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
         /// If \a id is empty, a reference the script is run from is returned or in case
@@ -46,6 +53,16 @@ namespace MWScript
 
         InterpreterContext(MWScript::Locals* locals, const MWWorld::Ptr& reference);
         ///< The ownership of \a locals is not transferred. 0-pointer allowed.
+
+        InterpreterContext(MWScript::Locals* locals, const MWWorld::Ptr& reference,
+            const MWWorld::Ptr& player, const MWWorld::ESMStore& content,
+            MWMechanics::NpcStats* detachedPlayerStats = nullptr);
+        ///< Execute player-facing opcodes for this character. An empty player is invalid.
+
+        MWWorld::Ptr getPlayer() const;
+        MWMechanics::NpcStats& getPlayerStats() const;
+        const MWWorld::ESMStore& getContent() const;
+        bool hasExplicitPlayer() const { return mExplicitPlayer; }
 
         ESM::RefId getTarget() const override;
 

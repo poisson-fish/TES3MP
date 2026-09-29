@@ -93,6 +93,7 @@ namespace MWMechanics
         void joinFaction(const ESM::RefId& faction);
         /// Sets the rank in this faction to a specified value, if such a rank exists.
         void setFactionRank(const ESM::RefId& faction, int value);
+        void setFactionRank(const ESM::RefId& faction, int value, const MWWorld::ESMStore& content);
 
         const std::set<ESM::RefId>& getExpelled() const { return mExpelled; }
         bool getExpelled(const ESM::RefId& factionID) const;

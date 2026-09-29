@@ -30,6 +30,7 @@
 #include "../mwmechanics/npcstats.hpp"
 
 #include "ref.hpp"
+#include "interpretercontext.hpp"
 
 namespace
 {
@@ -40,6 +41,16 @@ namespace
             throw std::runtime_error("failed to determine dialogue actors faction (because actor is factionless)");
 
         return factionId;
+    }
+
+    MWWorld::Ptr getScriptPlayer(Interpreter::Runtime& runtime)
+    {
+        return static_cast<MWScript::InterpreterContext&>(runtime.getContext()).getPlayer();
+    }
+
+    MWMechanics::NpcStats& getScriptPlayerStats(Interpreter::Runtime& runtime)
+    {
+        return static_cast<MWScript::InterpreterContext&>(runtime.getContext()).getPlayerStats();
     }
 
     void modStat(MWMechanics::AttributeValue& stat, float amount)
@@ -626,12 +637,11 @@ namespace MWScript
                     runtime.pop();
                 }
                 // Make sure this faction exists
-                MWBase::Environment::get().getESMStore()->get<ESM::Faction>().find(factionID);
+                static_cast<InterpreterContext&>(runtime.getContext()).getContent().get<ESM::Faction>().find(factionID);
 
                 if (!factionID.empty())
                 {
-                    MWWorld::Ptr player = MWMechanics::getPlayer();
-                    player.getClass().getNpcStats(player).joinFaction(factionID);
+                    getScriptPlayerStats(runtime).joinFaction(factionID);
                 }
             }
         };
@@ -656,19 +666,19 @@ namespace MWScript
                     runtime.pop();
                 }
                 // Make sure this faction exists
-                MWBase::Environment::get().getESMStore()->get<ESM::Faction>().find(factionID);
+                static_cast<InterpreterContext&>(runtime.getContext()).getContent().get<ESM::Faction>().find(factionID);
 
                 if (!factionID.empty())
                 {
-                    MWWorld::Ptr player = MWMechanics::getPlayer();
-                    if (!player.getClass().getNpcStats(player).isInFaction(factionID))
+                    if (!getScriptPlayerStats(runtime).isInFaction(factionID))
                     {
-                        player.getClass().getNpcStats(player).joinFaction(factionID);
+                        getScriptPlayerStats(runtime).joinFaction(factionID);
                     }
                     else
                     {
-                        int currentRank = player.getClass().getNpcStats(player).getFactionRank(factionID);
-                        player.getClass().getNpcStats(player).setFactionRank(factionID, currentRank + 1);
+                        int currentRank = getScriptPlayerStats(runtime).getFactionRank(factionID);
+                        getScriptPlayerStats(runtime).setFactionRank(factionID, currentRank + 1,
+                            static_cast<InterpreterContext&>(runtime.getContext()).getContent());
                     }
                 }
             }
@@ -694,13 +704,13 @@ namespace MWScript
                     runtime.pop();
                 }
                 // Make sure this faction exists
-                MWBase::Environment::get().getESMStore()->get<ESM::Faction>().find(factionID);
+                static_cast<InterpreterContext&>(runtime.getContext()).getContent().get<ESM::Faction>().find(factionID);
 
                 if (!factionID.empty())
                 {
-                    MWWorld::Ptr player = MWMechanics::getPlayer();
-                    int currentRank = player.getClass().getNpcStats(player).getFactionRank(factionID);
-                    player.getClass().getNpcStats(player).setFactionRank(factionID, currentRank - 1);
+                    int currentRank = getScriptPlayerStats(runtime).getFactionRank(factionID);
+                    getScriptPlayerStats(runtime).setFactionRank(factionID, currentRank - 1,
+                        static_cast<InterpreterContext&>(runtime.getContext()).getContent());
                 }
             }
         };
@@ -724,12 +734,11 @@ namespace MWScript
                     factionID = ptr.getClass().getPrimaryFaction(ptr);
                 }
                 // Make sure this faction exists
-                MWBase::Environment::get().getESMStore()->get<ESM::Faction>().find(factionID);
+                static_cast<InterpreterContext&>(runtime.getContext()).getContent().get<ESM::Faction>().find(factionID);
 
                 if (!factionID.empty())
                 {
-                    MWWorld::Ptr player = MWMechanics::getPlayer();
-                    runtime.push(player.getClass().getNpcStats(player).getFactionRank(factionID));
+                    runtime.push(getScriptPlayerStats(runtime).getFactionRank(factionID));
                 }
                 else
                 {
@@ -821,8 +830,7 @@ namespace MWScript
                 if (factionId.empty())
                     throw std::runtime_error("failed to determine faction");
 
-                MWWorld::Ptr player = MWMechanics::getPlayer();
-                runtime.push(player.getClass().getNpcStats(player).getFactionReputation(factionId));
+                runtime.push(getScriptPlayerStats(runtime).getFactionReputation(factionId));
             }
         };
 
@@ -852,8 +860,7 @@ namespace MWScript
                 if (factionId.empty())
                     throw std::runtime_error("failed to determine faction");
 
-                MWWorld::Ptr player = MWMechanics::getPlayer();
-                player.getClass().getNpcStats(player).setFactionReputation(factionId, value);
+                getScriptPlayerStats(runtime).setFactionReputation(factionId, value);
             }
         };
 
@@ -883,9 +890,8 @@ namespace MWScript
                 if (factionId.empty())
                     throw std::runtime_error("failed to determine faction");
 
-                MWWorld::Ptr player = MWMechanics::getPlayer();
-                player.getClass().getNpcStats(player).setFactionReputation(
-                    factionId, player.getClass().getNpcStats(player).getFactionReputation(factionId) + value);
+                getScriptPlayerStats(runtime).setFactionReputation(
+                    factionId, getScriptPlayerStats(runtime).getFactionReputation(factionId) + value);
             }
         };
 
@@ -972,10 +978,9 @@ namespace MWScript
                 {
                     factionID = ptr.getClass().getPrimaryFaction(ptr);
                 }
-                MWWorld::Ptr player = MWMechanics::getPlayer();
                 if (!factionID.empty())
                 {
-                    runtime.push(player.getClass().getNpcStats(player).getExpelled(factionID));
+                    runtime.push(getScriptPlayerStats(runtime).getExpelled(factionID));
                 }
                 else
                 {
@@ -1002,10 +1007,10 @@ namespace MWScript
                 {
                     factionID = ptr.getClass().getPrimaryFaction(ptr);
                 }
-                MWWorld::Ptr player = MWMechanics::getPlayer();
                 if (!factionID.empty())
                 {
-                    player.getClass().getNpcStats(player).expell(factionID, true);
+                    const auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                    getScriptPlayerStats(runtime).expell(factionID, !context.hasExplicitPlayer());
                 }
             }
         };
@@ -1028,9 +1033,8 @@ namespace MWScript
                 {
                     factionID = ptr.getClass().getPrimaryFaction(ptr);
                 }
-                MWWorld::Ptr player = MWMechanics::getPlayer();
                 if (!factionID.empty())
-                    player.getClass().getNpcStats(player).clearExpelled(factionID);
+                    getScriptPlayerStats(runtime).clearExpelled(factionID);
             }
         };
 
@@ -1046,7 +1050,7 @@ namespace MWScript
                 if (factionID.empty())
                     return;
 
-                MWWorld::Ptr player = MWMechanics::getPlayer();
+                MWWorld::Ptr player = getScriptPlayer(runtime);
 
                 // no-op when executed on the player
                 if (ptr == player)
@@ -1078,7 +1082,7 @@ namespace MWScript
                 if (factionID.empty())
                     return;
 
-                MWWorld::Ptr player = MWMechanics::getPlayer();
+                MWWorld::Ptr player = getScriptPlayer(runtime);
 
                 // no-op when executed on the player
                 if (ptr == player)

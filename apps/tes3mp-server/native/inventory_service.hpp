@@ -280,6 +280,11 @@ namespace TES3MP::Native
             PlayerId player;
             ActorCampaignCombat::PlayerAi state;
         };
+        struct FactionScriptRequest
+        {
+            PlayerId player;
+            ESM::RefId script;
+        };
         // Trusted gameplay results. The caller has already established script or
         // crime authority; no packet decoder may construct these actions.
         struct PlayerSocialAction
@@ -391,7 +396,8 @@ namespace TES3MP::Native
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
             std::span<const PlayerAiUpdate> playerAiUpdates = {},
-            std::span<const PlayerSocialAction> socialActions = {});
+            std::span<const PlayerSocialAction> socialActions = {},
+            std::optional<FactionScriptRequest> factionScript = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

@@ -120,6 +120,40 @@ namespace MWScript
     {
     }
 
+    InterpreterContext::InterpreterContext(MWScript::Locals* locals, const MWWorld::Ptr& reference,
+        const MWWorld::Ptr& player, const MWWorld::ESMStore& content,
+        MWMechanics::NpcStats* detachedPlayerStats)
+        : mLocals(locals)
+        , mReference(reference)
+        , mPlayer(player)
+        , mPlayerStats(detachedPlayerStats)
+        , mContent(&content)
+        , mExplicitPlayer(true)
+    {
+        if (player.isEmpty())
+            throw std::invalid_argument("script player context is empty");
+    }
+
+    MWWorld::Ptr InterpreterContext::getPlayer() const
+    {
+        if (mExplicitPlayer)
+            return mPlayer;
+        return MWBase::Environment::get().getWorld()->getPlayerPtr();
+    }
+
+    MWMechanics::NpcStats& InterpreterContext::getPlayerStats() const
+    {
+        if (mPlayerStats)
+            return *mPlayerStats;
+        const MWWorld::Ptr player = getPlayer();
+        return player.getClass().getNpcStats(player);
+    }
+
+    const MWWorld::ESMStore& InterpreterContext::getContent() const
+    {
+        return mContent ? *mContent : *MWBase::Environment::get().getESMStore();
+    }
+
     InterpreterContext::InterpreterContext(std::shared_ptr<GlobalScriptDesc> globalScriptDesc)
         : mLocals(&(globalScriptDesc->mLocals))
     {
