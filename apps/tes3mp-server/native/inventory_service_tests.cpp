@@ -5450,7 +5450,8 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
-        const bool placementActors = effectFamily == "placement-actors";
+        const bool neighborCombat = effectFamily == "neighbor-combat";
+        const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
         const bool aiDisposition = effectFamily == "ai-disposition" || socialLifecycle;
@@ -6415,7 +6416,10 @@ namespace TES3MP::Native::Testing
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
                 witness.mAiData.mFight = 100;
+                if (neighborCombat) witness.mNpdt.mHealth = 5;
                 witness.mSpells.mList.clear();
+                if (neighborCombat)
+                    witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
                 out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
                 out.endRecord(ESM::NPC::sRecordId);
@@ -6743,6 +6747,12 @@ namespace TES3MP::Native::Testing
                 witness.mRefID = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mPos = {{100, -120, 1}, {0, 0, 0}};
                 witness.save(out);
+                if (neighborCombat)
+                {
+                    witness.mRefNum = {++index, 0};
+                    witness.mPos = {{175, -120, 1}, {0, 0, 0}};
+                    witness.save(out);
+                }
             }
             if (effectFamily == "visibility")
                 for (const auto [record, x, y] : {
@@ -8025,7 +8035,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8405,15 +8415,19 @@ namespace TES3MP::Native::Testing
                         const auto state = read(image);
                         const auto neighbor = std::ranges::find_if(view->equipment->motions,
                             [selectedNpc](const auto& motion) { return motion.placement != selectedNpc; });
+                        std::vector<uint64_t> neighboring;
+                        for (const auto& motion : view->equipment->motions)
+                            if (motion.placement != selectedNpc) neighboring.push_back(motion.placement);
                         require(neighbor != view->equipment->motions.end()
-                                && state.combat->actors.size() == 4
-                                && state.combat->npcPlacements == std::vector<uint64_t>{
-                                    selectedNpc, neighbor->placement}
+                                && state.combat->actors.size() == (neighborCombat ? 5u : 4u)
+                                && neighboring.size() == (neighborCombat ? 2u : 1u)
+                                && state.combat->npcPlacements.front() == selectedNpc
+                                && std::ranges::equal(std::span(state.combat->npcPlacements).subspan(1), neighboring)
                                 && state.combat->actors[3][8][2] > 0,
                             "V61 combat state did not bind both NPC placements");
                         const auto combatView = service.projectCombat(nearby, attackingSession,
                             id<ServerTick>(1), id<CanonicalRevision>(1));
-                        require(combatView && combatView->actors().size() == 2
+                        require(combatView && combatView->actors().size() == (neighborCombat ? 3u : 2u)
                                 && std::ranges::any_of(combatView->actors(), [&](const auto& actor) {
                                     return actor.actorId.value() == neighbor->placement
                                         && actor.health == state.combat->actors[3][8][2];
@@ -8427,15 +8441,16 @@ namespace TES3MP::Native::Testing
                         const size_t neighborKey = 56 + 8 + state.melee->identity.size() + 7 * 8 + 8 + 8 + 8;
                         require(neighborKey + 8 <= forged.size(), "V61 placement key outside campaign image");
                         std::fill_n(forged.begin() + neighborKey, 8, std::byte{0xff});
-                        require(read(forged).combat->npcPlacements[1] == UINT64_MAX,
-                            "V61 recovery fixture did not alter the neighbor placement key");
+                        if (!neighborCombat)
+                            require(read(forged).combat->npcPlacements[1] == UINT64_MAX,
+                                "V61 recovery fixture did not alter the neighbor placement key");
                         bool rejectedKey = false;
                         try { InventoryHost invalid(descriptor, testContentManifest(), *registry, *crypto, forged); }
                         catch (const std::invalid_argument&) { rejectedKey = true; }
                         require(rejectedKey && bytes(service) == image,
                             "V61 recovery accepted a foreign NPC placement or changed the live campaign");
                         auto drained = image;
-                        const size_t fatigueOffset = neighborKey + 8
+                        const size_t fatigueOffset = neighborKey + 8 * (state.combat->npcPlacements.size() - 1)
                             + (3 * ActorCampaignCombat::StatCount * 5 + 10 * 5 + 2) * 8;
                         require(fatigueOffset + 8 <= drained.size(),
                             "Neighbor fatigue outside campaign image");
@@ -8513,7 +8528,7 @@ namespace TES3MP::Native::Testing
                         reported = social.bounty == 123;
                         if (reported)
                         {
-                            require(social.engagements.size() == 2
+                            require(social.engagements.size() == (neighborCombat ? 3u : 2u)
                                     && std::ranges::any_of(social.engagements, [selectedNpc](const auto& entry) {
                                         return entry.witness != selectedNpc && entry.fight == 100;
                                     })
@@ -8525,6 +8540,16 @@ namespace TES3MP::Native::Testing
                     }
                     require(reported && rejected, "Bystander did not report authenticated assault atomically");
                     const auto reportedImage = bytes(service);
+                    if (neighborCombat)
+                    {
+                        const auto state = read(reportedImage);
+                        for (size_t i = 0; i < state.neighborLives.size(); ++i)
+                            require(std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                return effect.actor == i + 3 && effect.sourceKind == 5
+                                    && effect.caster == state.combat->npcPlacements[i + 1]
+                                    && effect.casterLife == state.neighborLives[i].generation;
+                            }), "Neighbor passive effect lost its placement and life identity");
+                    }
                     auto forgedEngagement = read(reportedImage).combat->players[attackerIndex];
                     forgedEngagement.engagements.clear();
                     const std::array forgedEngagementUpdate{
@@ -8581,13 +8606,25 @@ namespace TES3MP::Native::Testing
                         const auto initial = positions(service).second;
                         auto& resumed = dynamic_cast<InventoryService&>(replay.service());
                         float closest = std::numeric_limits<float>::infinity();
-                        for (const auto stop = frame + 60; frame < stop; ++frame)
+                        std::array<bool, 2> neighborSwing{}, neighborHit{};
+                        const auto placed = read(reportedImage).combat->npcPlacements;
+                        for (const auto stop = frame + (neighborCombat ? 180 : 60); frame < stop; ++frame)
                         {
                             auto originalTick = service.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
                                 {}, {}, &scene);
                             auto replayTick = resumed.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
                                 {}, {}, &scene);
                             require(originalTick && replayTick, "Neighbor AI tick absent");
+                            if (neighborCombat)
+                            {
+                                const auto events = service.projectCombatEvents(chase, attackingSession,
+                                    id<ServerTick>(frame), id<CanonicalRevision>(1), originalTick.get());
+                                if (events)
+                                    for (const auto& event : events->actorEvents())
+                                        for (size_t i = 1; i < placed.size(); ++i)
+                                            if (event.attackerActorId.value() == placed[i] && event.hit)
+                                                neighborHit[i - 1] = true;
+                            }
                             const auto retained = bytes(service);
                             require(originalTick->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                                     == CanonicalDurabilityResult::Rejected && bytes(service) == retained,
@@ -8596,6 +8633,9 @@ namespace TES3MP::Native::Testing
                                     && replayTick->commit(accepted) == CanonicalDurabilityResult::Committed
                                     && bytes(service) == bytes(resumed),
                                 "Neighbor navigation diverged after restart");
+                            if (neighborCombat)
+                                for (size_t i = 0; i < 2; ++i)
+                                    neighborSwing[i] |= read(bytes(service)).combat->neighborAttacks[i].action != 0;
                             const auto [first, second] = positions(service);
                             const float dx = first[0] - second[0], dy = first[1] - second[1];
                             closest = std::min(closest, std::sqrt(dx * dx + dy * dy));
@@ -8606,7 +8646,114 @@ namespace TES3MP::Native::Testing
                             "Persisted witness engagement did not move neighboring NPC");
                         require(closest >= 45.f,
                             "Committed neighboring NPC bodies interpenetrated in the shared collision scene");
+                        if (neighborCombat)
+                            require(std::ranges::all_of(neighborSwing, std::identity{})
+                                    && std::ranges::all_of(neighborHit, std::identity{}),
+                                "Both engaged neighboring NPCs did not execute durable hits");
                         std::cout << "neighbor shared collision closest=" << closest << '\n';
+                    }
+                    if (neighborCombat && attackerIndex == 0)
+                    {
+                        auto overlapHost = make();
+                        auto& overlap = dynamic_cast<InventoryService&>(overlapHost->service());
+                        std::vector<CanonicalPlayerEntityState> fighters(authority.players().begin(), authority.players().end());
+                        const std::array<Position3, 2> locations{
+                            Position3(100 * 1024, -115 * 1024, 1024),
+                            Position3(60 * 1024, -65 * 1024, 1024)};
+                        for (size_t i = 0; i < fighters.size(); ++i)
+                            fighters[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                fighters[i], id<ServerTick>(1),
+                                Transform(fighters[i].transform().cell(), locations[i], fighters[i].transform().orientation()),
+                                LinearVelocity3(0, 0, 0)));
+                        const auto close = std::get<CanonicalServerState>(createCanonicalServerState(
+                            fighters, authority.activeSessions()));
+                        const auto overlapWorld = specialWorld();
+                        overlap.synchronizeCells(close);
+                        const auto placements = read(bytes(overlap)).combat->npcPlacements;
+                        require(placements.size() == 3, "Overlapping combat lost NPC placements");
+                        const auto input = [&](size_t playerIndex, uint64_t targetId, uint64_t at) {
+                            const auto* attacker = close.findPlayer(id<PlayerId>(playerIndex + 1));
+                            ClientMeleeAttackCommand attack{id<SessionId>(playerIndex + 1), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(playerIndex + 11), id<CanonicalRevision>(1),
+                                id<ActorId>(targetId), id<ServerTick>(at), CombatRevision::initial(),
+                                CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            return ServerCommandProposal(id<SessionId>(playerIndex + 1), SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(playerIndex + 11), id<CanonicalRevision>(1),
+                                EntityPrecondition(attacker->entityId(), attacker->entityRevision(), attacker->authorityEpoch()),
+                                MeleeAttackCommandProposal(attack));
+                        };
+                        bool bothPending = false;
+                        bool neighborKilled = false;
+                        bool npcAttacked = false;
+                        std::array<bool, 3> contacts{};
+                        std::unique_ptr<InventoryHost> overlapReplay;
+                        for (uint64_t at = 1; at <= 75; ++at)
+                        {
+                            std::unique_ptr<PreparedNativeInventory> attack;
+                            if (at <= 2)
+                            {
+                                attack = overlap.prepareMeleeAttack(close,
+                                    input(size_t(at - 1), placements[size_t(2 - at)], at), id<ServerTick>(at));
+                                require(bool(attack), "Overlapping player swing did not prepare for NPC placement");
+                            }
+                            auto prepared = overlap.prepareNativeTick(close, id<ServerTick>(at), 1.f/30,
+                                std::move(attack), {}, &overlapWorld);
+                            require(bool(prepared), "Overlapping NPC combat tick absent");
+                            if (const auto events = overlap.projectCombatEvents(close, id<SessionId>(1),
+                                    id<ServerTick>(at), id<CanonicalRevision>(1), prepared.get()))
+                            {
+                                for (const auto& hit : events->events())
+                                    for (size_t i = 0; i < placements.size(); ++i)
+                                        if (hit.targetActorId.value() == placements[i])
+                                        { contacts[i] = true; if (i == 1 && hit.targetDied) neighborKilled = true; }
+                                npcAttacked |= !events->actorEvents().empty();
+                            }
+                            const auto retained = bytes(overlap);
+                            require(prepared->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                                    && bytes(overlap) == retained,
+                                "Rejected overlapping player/NPC combat changed campaign");
+                            require(prepared->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Overlapping player/NPC combat did not commit");
+                            if (at == 2)
+                            {
+                                bothPending = std::ranges::all_of(read(bytes(overlap)).combat->swings,
+                                    [](const auto& swing) { return swing && swing->pending(); });
+                                overlapReplay = std::make_unique<InventoryHost>(descriptor,
+                                    testContentManifest(), *registry, *crypto, overlap.inventoryImage());
+                                overlapReplay->service().synchronizeCells(close);
+                                require(bytes(overlapReplay->service()) == bytes(overlap),
+                                    "Overlapping swings changed across restart");
+                            }
+                            if (at > 2)
+                            {
+                                auto replayTick = dynamic_cast<InventoryService&>(overlapReplay->service())
+                                    .prepareNativeTick(close, id<ServerTick>(at), 1.f/30, {}, {}, &overlapWorld);
+                                require(replayTick && replayTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                        && bytes(overlapReplay->service()) == bytes(overlap),
+                                    "Overlapping combat diverged after restart");
+                            }
+                        }
+                        require(bothPending && contacts[0] && contacts[1] && npcAttacked,
+                            "Two players did not overlap attacks on separate NPCs");
+                        const auto finalCombat = read(bytes(overlap)).combat;
+                        const auto finalLife = read(bytes(overlap)).neighborLives;
+                        require(neighborKilled && finalLife[0].generation == 2
+                                && finalLife[0].deaths.size() == 1 && !finalLife[0].respawnTick
+                                && finalCombat->actors[3][8][2] == finalLife[0].spawnStats[8][2]
+                                && finalLife[1].generation == 1 && finalLife[1].deaths.empty(),
+                            "Neighbor death and respawn crossed placements or lost the composed transaction");
+                        const auto finalEffects = read(bytes(overlap)).timedEffects;
+                        for (size_t i = 0; i < finalLife.size(); ++i)
+                            require(std::ranges::any_of(finalEffects, [&](const auto& effect) {
+                                return effect.actor == i + 3 && effect.sourceKind == 5
+                                    && effect.caster == placements[i + 1]
+                                    && effect.casterLife == finalLife[i].generation;
+                            }) && std::ranges::none_of(finalEffects, [&](const auto& effect) {
+                                return effect.actor == i + 3 && effect.casterLife != finalLife[i].generation;
+                            }), "Neighbor effect survived a prior life or crossed placements");
+                        std::cout << "overlap npc health=" << finalCombat->actors[2][8][2]
+                            << ',' << finalCombat->actors[3][8][2]
+                            << " fatigue=" << finalCombat->actors[3][10][2] << '\n';
                     }
                 }
                 std::cout << "werewolf and bystander crime two players effects equipment stats witnesses engagement rejection restart AI\n";

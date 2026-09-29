@@ -680,18 +680,27 @@ namespace TES3MP::Native
         : InteriorActorScene(loadout, std::array{interiorCell(cell)}, actor, baseAnimation, beastAnimation) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation, uint64_t neighbor)
-        : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbor, nullptr) {}
+        : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation,
+            neighbor ? std::span<const uint64_t>(&neighbor, 1) : std::span<const uint64_t>{}, nullptr) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
-        const std::string& baseAnimation, const std::string& beastAnimation, uint64_t neighbor, Impl* sharedParent)
+        const std::string& baseAnimation, const std::string& beastAnimation,
+        std::span<const uint64_t> neighbors)
+        : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr) {}
+    InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+        const std::string& baseAnimation, const std::string& beastAnimation,
+        std::span<const uint64_t> neighbors, Impl* sharedParent)
         : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent))
     {
         if (!contains(snapshot().mPosition))
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
-        if (neighbor)
+        if (!neighbors.empty())
         {
-            if (neighbor == actor) throw std::invalid_argument("Neighbor actor duplicates selected placement");
-            mNeighbor.reset(new InteriorActorScene(loadout, cells, neighbor,
-                baseAnimation, beastAnimation, 0, mImpl.get()));
+            if (neighbors.size() > 3 || !neighbors.front()
+                || std::ranges::find(neighbors, actor) != neighbors.end()
+                || std::ranges::find(neighbors.begin() + 1, neighbors.end(), neighbors.front()) != neighbors.end())
+                throw std::invalid_argument("Neighbor actor placements invalid");
+            mNeighbor.reset(new InteriorActorScene(loadout, cells, neighbors.front(),
+                baseAnimation, beastAnimation, neighbors.subspan(1), sharedParent ? sharedParent : mImpl.get()));
             mNeighbor->mImpl->mDynamicDestination = true;
         }
     }
@@ -699,6 +708,13 @@ namespace TES3MP::Native
     ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl ? mImpl->snapshot() : mDormant->snapshot; }
     std::optional<ActorSceneSnapshot> InteriorActorScene::neighborSnapshot() const
     { return mNeighbor ? std::optional(mNeighbor->snapshot()) : std::nullopt; }
+    std::vector<ActorSceneSnapshot> InteriorActorScene::neighborSnapshots() const
+    {
+        std::vector<ActorSceneSnapshot> result;
+        for (auto* adjacent = mNeighbor.get(); adjacent; adjacent = adjacent->mNeighbor.get())
+            result.push_back(adjacent->snapshot());
+        return result;
+    }
     std::array<float, 4> InteriorActorScene::transform() const noexcept
     {
         if (!mImpl) return mDormant->transform;
@@ -1267,6 +1283,13 @@ namespace TES3MP::Native
     }
     std::optional<ActorSceneSnapshot> InteriorActorScene::Prepared::neighborSnapshot() const
     { return mNeighbor ? std::optional(mNeighbor->snapshot()) : std::nullopt; }
+    std::vector<ActorSceneSnapshot> InteriorActorScene::Prepared::neighborSnapshots() const
+    {
+        std::vector<ActorSceneSnapshot> result;
+        for (auto* adjacent = mNeighbor.get(); adjacent; adjacent = adjacent->mNeighbor.get())
+            result.push_back(adjacent->snapshot());
+        return result;
+    }
     void InteriorActorScene::setFacing(Prepared& prepared, float yaw) const
     {
         if (!std::isfinite(yaw) || !mImpl || prepared.mState->lifetime != mImpl->mLifetime)
@@ -1287,6 +1310,15 @@ namespace TES3MP::Native
         return mImpl ? mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel)
             : mDormant->image;
     }
+    std::vector<char> InteriorActorScene::neighborImage() const
+    { return mNeighbor ? mNeighbor->selectedImage() : std::vector<char>{}; }
+    std::vector<char> InteriorActorScene::neighborImage(size_t index) const
+    {
+        auto* adjacent = mNeighbor.get();
+        while (index-- && adjacent) adjacent = adjacent->mNeighbor.get();
+        if (!adjacent) throw std::invalid_argument("Neighbor image index outside bound scene");
+        return adjacent->selectedImage();
+    }
     std::vector<char> InteriorActorScene::image() const
     {
         auto primary = selectedImage();
@@ -1299,6 +1331,24 @@ namespace TES3MP::Native
         if (!mNeighbor) return prepareRestore(bytes, doors);
         const auto combined = joinActorImages(bytes, mNeighbor->image());
         return prepareRestore(combined, doors);
+    }
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNeighborRestore(
+        std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
+    {
+        if (!mNeighbor) throw std::invalid_argument("Neighbor restore has no bound actor");
+        return prepareRestore(joinActorImages(selectedImage(), bytes), doors);
+    }
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNeighborRestore(
+        size_t index, std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
+    {
+        const auto count = neighborSnapshots().size();
+        if (index >= count) throw std::invalid_argument("Neighbor restore index outside bound scene");
+        std::vector<std::vector<char>> images;
+        for (size_t i = 0; i < count; ++i) images.push_back(neighborImage(i));
+        images[index].assign(bytes.begin(), bytes.end());
+        auto combined = std::move(images.back());
+        for (size_t i = count - 1; i-- > 0; ) combined = joinActorImages(images[i], combined);
+        return prepareRestore(joinActorImages(selectedImage(), combined), doors);
     }
 
     std::vector<char> InteriorActorScene::Impl::encode(const MWPhysics::ActorFrameData& frame,
@@ -1535,6 +1585,49 @@ namespace TES3MP::Native
             mImpl->encode(*prepared.mState->frame, prepared.mState->path,
                 prepared.mState->contacts, prepared.mState->travel), neighbor->image());
         prepared.mNeighbor = std::move(neighbor);
+    }
+
+    void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, std::span<const float> speeds,
+        std::span<const ActorSceneDoor> doors,
+        std::span<const std::optional<std::array<float, 3>>> destinations)
+    {
+        if (!mImpl || prepared.mState->lifetime != mImpl->mLifetime
+            || speeds.size() != destinations.size() || speeds.size() != neighborSnapshots().size())
+            throw std::invalid_argument("Neighbor set navigation binding invalid");
+        std::vector<InteriorActorScene*> scenes{this};
+        for (auto* next = mNeighbor.get(); next; next = next->mNeighbor.get()) scenes.push_back(next);
+        struct RestoreBodies
+        {
+            btCollisionWorld& world;
+            std::vector<std::pair<btCollisionObject*, btTransform>> bodies;
+            ~RestoreBodies()
+            {
+                for (auto& [body, transform] : bodies)
+                { body->setWorldTransform(transform); world.updateSingleAabb(body); }
+            }
+        } restore{mImpl->mWorld};
+        Prepared* parent = &prepared;
+        for (size_t i = 0; i < speeds.size(); ++i)
+        {
+            auto* previous = scenes[i]->mImpl->mActor->mCollisionObject;
+            restore.bodies.emplace_back(previous, previous->getWorldTransform());
+            auto candidate = previous->getWorldTransform();
+            candidate.setOrigin(Misc::Convert::toBullet(parent->mState->frame->mPosition
+                + scenes[i]->mImpl->mActorOffset));
+            previous->setWorldTransform(candidate);
+            mImpl->mWorld.updateSingleAabb(previous);
+            parent->mNeighbor = scenes[i + 1]->prepareNavigation(
+                ActorMovement{.walkSpeed = speeds[i]}, doors, destinations[i]);
+            parent = parent->mNeighbor.get();
+        }
+        std::vector<Prepared*> frames{&prepared};
+        for (auto* next = prepared.mNeighbor.get(); next; next = next->mNeighbor.get())
+            frames.push_back(next);
+        for (size_t i = frames.size(); i-- > 1; )
+        {
+            auto* current = frames[i - 1];
+            current->mState->bytes = joinActorImages(current->mState->bytes, frames[i]->image());
+        }
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareBlindRun(

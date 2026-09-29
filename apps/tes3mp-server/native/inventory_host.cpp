@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 61; ++candidate)
+            for (unsigned candidate = 3; candidate <= 62; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -285,6 +285,7 @@ namespace TES3MP::Native
                 binding.mSocialLifecycle = descriptorVersion >= 59;
                 binding.mNeighborAi = descriptorVersion >= 60;
                 binding.mPlacementCombat = descriptorVersion >= 61;
+                binding.mNeighborCombat = descriptorVersion >= 62;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -294,7 +295,8 @@ namespace TES3MP::Native
                 binding.mNpcWeaponCompetition = descriptorVersion >= 40;
                 binding.mNpcFullSelection = descriptorVersion >= 41;
                 binding.mNpcCastLifecycle = descriptorVersion >= 42;
-                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 61 ? 4 : 3);
+                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 62 ? 5
+                    : descriptorVersion >= 61 ? 4 : 3);
             }
             binding.mNpcRespawnDelayTicks = respawnDelayTicks;
             if (navigation) { binding.mTravelerCellBudget = navigation->cells; binding.mTravelerStepBudget = navigation->steps; }
@@ -399,9 +401,17 @@ namespace TES3MP::Native
                             return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
                                 && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
                         }) : references.end();
-                    const uint64_t neighborId = firstNeighbor == references.end() ? 0 : firstNeighbor->mIdentity;
+                    std::vector<uint64_t> neighborIds;
+                    if (firstNeighbor != references.end()) neighborIds.push_back(firstNeighbor->mIdentity);
+                    if (start.binding.mNeighborCombat)
+                        for (auto next = firstNeighbor == references.end() ? references.end() : firstNeighbor + 1;
+                            next != references.end() && neighborIds.size() < 2; ++next)
+                            if (next->mRef.mRefID != selectedBase && !next->mScripted && !next->mLeveled
+                                && loadout.store().get<ESM::NPC>().search(next->mRef.mRefID))
+                                neighborIds.push_back(next->mIdentity);
                     std::erase_if(references, [&](const auto& ref) {
-                        return ref.mRef.mRefID != selectedBase && ref.mIdentity != neighborId;
+                        return ref.mRef.mRefID != selectedBase
+                            && std::ranges::find(neighborIds, ref.mIdentity) == neighborIds.end();
                     });
                     if (cellIndex != 0) references.clear();
                     if (cellIndex == 0)
@@ -409,7 +419,8 @@ namespace TES3MP::Native
                         const auto selected = std::ranges::find_if(references, [&](const auto& ref) {
                             return ref.mRef.mRefID == selectedBase;
                         });
-                        if (references.size() != (start.binding.mNeighborAi ? 2u : 1u)
+                        if (references.size() != 1u + neighborIds.size()
+                            || (start.binding.mNeighborAi && neighborIds.empty())
                             || std::ranges::count(references, selectedBase, [](const auto& ref) {
                                 return ref.mRef.mRefID;
                             }) != 1 || selected == references.end()
@@ -591,22 +602,23 @@ namespace TES3MP::Native
                 std::ranges::sort(doors);
                 if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
                     throw std::invalid_argument("V17-V19 require at least one ordinary door");
-                const auto neighborOwner = std::ranges::find_if(start.binding.mContainers, [&](const auto& value) {
-                    return start.binding.mNeighborAi && value.mCell == start.wireCell
+                std::vector<InventoryContainerBinding> neighborOwners;
+                for (const auto& value : start.binding.mContainers)
+                    if (start.binding.mNeighborAi && value.mCell == start.wireCell
                         && value.mId != owner.mId
                         && std::ranges::any_of(start.binding.mCrimeWitnesses, [&](const auto& witness) {
                             return witness.placement == value.mId.value();
-                        });
-                });
-                const uint64_t neighborId = neighborOwner == start.binding.mContainers.end()
-                    ? 0 : neighborOwner->mId.value();
-                if (start.binding.mNeighborAi && !neighborId)
+                        })) neighborOwners.push_back(value);
+                std::ranges::sort(neighborOwners, {}, [](const auto& value) { return value.mId.value(); });
+                if (start.binding.mNeighborAi && neighborOwners.empty())
                     throw std::invalid_argument("Native neighbor witness has no inventory owner");
+                std::vector<uint64_t> neighborIds;
+                for (const auto& adjacent : neighborOwners) neighborIds.push_back(adjacent.mId.value());
                 const auto createScene = [&loadout, names, neighborhood = start.binding.mTravelerNeighborhood,
                     movementEffects = start.binding.mMovementEffects,
-                    id = owner.mId.value(), neighborId, navigation = *start.navigation, doors] {
+                    id = owner.mId.value(), neighborIds, navigation = *start.navigation, doors] {
                     auto scene = std::make_shared<InteriorActorScene>(loadout, names, id,
-                        "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborId);
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborIds);
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     if (movementEffects) scene->enableMovementEffects();
                     scene->enableNavigation(navigation.settings);
@@ -643,7 +655,8 @@ namespace TES3MP::Native
                     auto& hits = *start.binding.mBoundHits;
                     std::vector<ESM::RefId> participants{start.binding.mActors[0].mBase,
                         start.binding.mActors[1].mBase, owner.mBase};
-                    if (start.binding.mPlacementCombat) participants.push_back(neighborOwner->mBase);
+                    if (start.binding.mPlacementCombat)
+                        for (const auto& adjacent : neighborOwners) participants.push_back(adjacent.mBase);
                     if (hits.size() != participants.size())
                         throw std::invalid_argument("Native hit resource placement domain invalid");
                     for (size_t i = 0; i < participants.size(); ++i)
@@ -669,6 +682,25 @@ namespace TES3MP::Native
                             throw std::invalid_argument("Native weapon animation cache exceeded inventory bound");
                         return cache.emplace(id, scene->bindWeaponMeleeAnimation(actor, weapon, mode)).first->second;
                     };
+                }
+                if (start.binding.mNeighborCombat)
+                {
+                    for (const auto& adjacent : neighborOwners)
+                    {
+                        auto bound = [scene, actor = adjacent.mBase,
+                            cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
+                            (const ESM::Weapon* weapon, std::string_view direction) mutable {
+                            const std::string mode(direction.empty() ? std::string_view("chop") : direction);
+                            const auto key = std::pair{weapon ? weapon->mId : ESM::RefId{}, mode};
+                            if (const auto found = cache.find(key); found != cache.end()) return found->second;
+                            if (cache.size() >= 3 * (PlainEquipmentValues::MaxItems + 1))
+                                throw std::invalid_argument("Native neighbor animation cache exceeded bound");
+                            return cache.emplace(key, scene->bindWeaponMeleeAnimation(actor, weapon, mode)).first->second;
+                        };
+                        placement << "\nneighbor-melee:" << adjacent.mId.value() << ':' << bound(nullptr, "chop").identity();
+                        start.binding.mNeighborMeleeSet.push_back(bound);
+                    }
+                    start.binding.mNeighborWeaponMelee = start.binding.mNeighborMeleeSet.front();
                 }
                 if (playerSwings)
                     for (size_t i = 0; i < start.binding.mPlayerMelee.size(); ++i)
@@ -701,7 +733,8 @@ namespace TES3MP::Native
                         participants = [&] {
                             std::vector<ESM::RefId> actors{start.binding.mActors[0].mBase,
                                 start.binding.mActors[1].mBase, owner.mBase};
-                            if (start.binding.mPlacementCombat) actors.push_back(neighborOwner->mBase);
+                            if (start.binding.mPlacementCombat)
+                                for (const auto& adjacent : neighborOwners) actors.push_back(adjacent.mBase);
                             return actors;
                         }()](bool active) {
                         if (active && !scene->loaded())

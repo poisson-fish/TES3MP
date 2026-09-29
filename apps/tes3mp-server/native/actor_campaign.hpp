@@ -49,7 +49,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerAiCampaignMagic = 0x5750434154335354;
     inline constexpr uint64_t SocialLifecycleCampaignMagic = 0x5850434154335354;
     inline constexpr uint64_t PlacementCombatCampaignMagic = 0x5950434154335354;
-    inline constexpr bool hasPlacementCombat(uint64_t magic) { return magic == PlacementCombatCampaignMagic; }
+    inline constexpr uint64_t NeighborCombatCampaignMagic = 0x5a50434154335354;
+    inline constexpr bool hasNeighborCombat(uint64_t magic) { return magic == NeighborCombatCampaignMagic; }
+    inline constexpr bool hasPlacementCombat(uint64_t magic)
+    { return magic == PlacementCombatCampaignMagic || hasNeighborCombat(magic); }
     inline constexpr bool hasSocialLifecycle(uint64_t magic)
     { return magic == SocialLifecycleCampaignMagic || hasPlacementCombat(magic); }
     inline constexpr bool hasPlayerAi(uint64_t magic)
@@ -112,6 +115,7 @@ namespace TES3MP::Native
         MeleeAnimation::Snapshot state;
         uint64_t ammunition = 0;
         std::string ammoRecord;
+        uint64_t target = 0; // V62 placement; earlier campaigns always target the selected NPC.
         bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
         bool operator==(const PlayerSwing&) const = default;
     };
@@ -149,6 +153,15 @@ namespace TES3MP::Native
     }
     struct ActorCampaignCombat
     {
+        struct NeighborAttack
+        {
+            std::string identity;
+            std::string weapon;
+            MeleeAnimation::Snapshot state;
+            uint64_t target = 0, action = 0, source = 0, direction = 0;
+            bool contact = false;
+            bool operator==(const NeighborAttack&) const = default;
+        };
         struct PlayerAi
         {
             struct Faction
@@ -189,6 +202,7 @@ namespace TES3MP::Native
         // Players occupy indices 0/1. V61 NPC indices follow this ordered,
         // placement-keyed domain; index 2 remains the selected legacy actor.
         std::vector<uint64_t> npcPlacements;
+        std::vector<NeighborAttack> neighborAttacks;
         std::vector<Stats> actors = std::vector<Stats>(3);
         uint32_t rng = 1;
         std::vector<bool> knockedDown = std::vector<bool>(3);
@@ -271,6 +285,7 @@ namespace TES3MP::Native
         std::optional<ActorCampaignMelee> melee;
         std::optional<ActorCampaignCombat> combat;
         std::optional<ActorCampaignLife> life;
+        std::vector<ActorCampaignLife> neighborLives;
         std::optional<ActorCampaignProjectile> projectile;
         std::vector<ActorCampaignProjectile> projectiles;
         std::vector<ActorCampaignTimedEffect> timedEffects;
@@ -435,6 +450,49 @@ namespace TES3MP::Native
             { action = getAreaWord(bytes, offset); if (action > tick) throw std::invalid_argument("Future body action"); }
             for (auto& group : state.hitGroup)
             { group = getAreaWord(bytes, offset); if (group > 16) throw std::invalid_argument("Invalid hit group"); }
+            if (hasNeighborCombat(magic))
+            {
+                state.neighborAttacks.reserve(state.npcPlacements.size() - 1);
+                for (size_t i = 1; i < state.npcPlacements.size(); ++i)
+                {
+                    ActorCampaignCombat::NeighborAttack attack;
+                    const auto length = getAreaWord(bytes, offset);
+                    if (!length || length > 512 || length > bytes.size() - offset)
+                        throw std::invalid_argument("Native neighbor attack resource invalid");
+                    attack.identity.assign(bytes.data() + offset, size_t(length));
+                    offset += size_t(length);
+                    if (attack.identity.find('\0') != std::string::npos)
+                        throw std::invalid_argument("Native neighbor attack identity invalid");
+                    const auto weaponLength = getAreaWord(bytes, offset);
+                    if (weaponLength > 256 || weaponLength > bytes.size() - offset)
+                        throw std::invalid_argument("Native neighbor weapon identity length invalid");
+                    attack.weapon.assign(bytes.data() + offset, size_t(weaponLength));
+                    offset += size_t(weaponLength);
+                    if (attack.weapon.find('\0') != std::string::npos)
+                        throw std::invalid_argument("Native neighbor weapon identity invalid");
+                    const auto phase = getAreaWord(bytes, offset);
+                    const auto time = getAreaWord(bytes, offset), strength = getAreaWord(bytes, offset);
+                    const auto released = getAreaWord(bytes, offset), hit = getAreaWord(bytes, offset);
+                    attack.target = getAreaWord(bytes, offset);
+                    const auto contact = getAreaWord(bytes, offset);
+                    attack.action = getAreaWord(bytes, offset);
+                    attack.source = getAreaWord(bytes, offset);
+                    attack.direction = getAreaWord(bytes, offset);
+                    if (phase > uint64_t(MeleeAnimation::Phase::Complete) || time > UINT32_MAX
+                        || strength > UINT32_MAX || released > 1 || hit > 1 || contact > 1
+                        || attack.action > tick || attack.direction > 2
+                        || (attack.source == 0) != attack.weapon.empty()
+                        || (contact && (!attack.target || !hit))
+                        || (released && !attack.target))
+                        throw std::invalid_argument("Native neighbor attack state invalid");
+                    attack.state = {MeleeAnimation::Phase(phase), std::bit_cast<float>(uint32_t(time)),
+                        std::bit_cast<float>(uint32_t(strength)), bool(released), bool(hit)};
+                    if (!std::isfinite(attack.state.mTime) || !std::isfinite(attack.state.mStrength))
+                        throw std::invalid_argument("Native neighbor attack number invalid");
+                    attack.contact = bool(contact);
+                    state.neighborAttacks.push_back(std::move(attack));
+                }
+            }
         }
         if (hasAiDecisions(magic))
         {
@@ -591,6 +649,64 @@ namespace TES3MP::Native
                     : state.bornTick <= state.deaths.back().tick))
                 throw std::invalid_argument("Native NPC life chronology invalid");
         }
+        std::vector<ActorCampaignLife> neighborLives;
+        if (hasNeighborCombat(magic))
+        {
+            const auto count = getAreaWord(bytes, offset);
+            if (!combat || count != combat->npcPlacements.size() - 1)
+                throw std::invalid_argument("Native neighbor life count differs from placements");
+            neighborLives.reserve(size_t(count));
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto placement = getAreaWord(bytes, offset);
+                if (placement != combat->npcPlacements[i + 1])
+                    throw std::invalid_argument("Native neighbor life placement invalid");
+                ActorCampaignLife state;
+                state.generation = getAreaWord(bytes, offset);
+                state.bornTick = getAreaWord(bytes, offset);
+                state.respawnTick = getAreaWord(bytes, offset);
+                if (!state.generation || state.generation > UINT32_MAX || state.bornTick > tick)
+                    throw std::invalid_argument("Native neighbor life generation invalid");
+                for (auto& stat : state.spawnStats)
+                    for (float& value : stat)
+                    {
+                        const auto bits = getAreaWord(bytes, offset);
+                        value = std::bit_cast<float>(uint32_t(bits));
+                        if (bits > UINT32_MAX || !std::isfinite(value) || std::abs(value) > 1'000'000)
+                            throw std::invalid_argument("Native neighbor spawn stat invalid");
+                    }
+                const auto actorLength = getAreaWord(bytes, offset);
+                const auto inventoryLength = getAreaWord(bytes, offset);
+                if (!actorLength || actorLength > 65536 || !inventoryLength
+                    || inventoryLength > 2 * 1024 * 1024 || actorLength > bytes.size() - offset
+                    || inventoryLength > bytes.size() - offset - actorLength)
+                    throw std::invalid_argument("Native neighbor spawn image length invalid");
+                state.spawnActor.assign(bytes.data() + offset, bytes.data() + offset + actorLength);
+                offset += size_t(actorLength);
+                state.spawnInventory.assign(bytes.data() + offset, bytes.data() + offset + inventoryLength);
+                offset += size_t(inventoryLength);
+                const auto deaths = getAreaWord(bytes, offset);
+                if (deaths != state.generation - (state.respawnTick ? 0 : 1)
+                    || deaths > (bytes.size() - offset) / 40)
+                    throw std::invalid_argument("Native neighbor death history bound invalid");
+                state.deaths.reserve(size_t(deaths));
+                for (size_t d = 0; d < deaths; ++d)
+                {
+                    ActorDeathEvent event{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
+                        getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                    validateActorCaster({event.killer, event.killerKind, event.killerLife}, UINT32_MAX);
+                    if (event.life != d + 1 || !event.tick || event.tick > tick
+                        || (!state.deaths.empty() && event.tick <= state.deaths.back().tick))
+                        throw std::invalid_argument("Native neighbor death history invalid");
+                    state.deaths.push_back(event);
+                }
+                if (!state.deaths.empty() && (state.respawnTick
+                        ? state.respawnTick <= state.deaths.back().tick
+                        : state.bornTick <= state.deaths.back().tick))
+                    throw std::invalid_argument("Native neighbor life chronology invalid");
+                neighborLives.push_back(std::move(state));
+            }
+        }
         std::optional<ActorCampaignProjectile> projectile; // Legacy single-flight decoded view.
         std::vector<ActorCampaignProjectile> projectiles;
         if (magic == ProjectileActorCampaignMagic || magic == EnchantedProjectileActorCampaignMagic
@@ -713,12 +829,17 @@ namespace TES3MP::Native
                     {
                         effect.casterKind = getAreaWord(bytes, offset);
                         effect.casterLife = getAreaWord(bytes, offset);
-                        validateActorCaster({effect.caster, effect.casterKind, effect.casterLife}, life->generation);
+                        uint64_t maximumLife = life->generation;
+                        if (hasNeighborCombat(magic))
+                            for (const auto& adjacent : neighborLives)
+                                maximumLife = std::max(maximumLife, adjacent.generation);
+                        validateActorCaster({effect.caster, effect.casterKind, effect.casterLife}, maximumLife);
                     }
                     if (hasExpandedEffects(magic))
                     {
                         effect.beneficiary = getAreaWord(bytes, offset);
-                        if (effect.beneficiary > 3) throw std::invalid_argument("Native effect beneficiary invalid");
+                        if (effect.beneficiary > (hasNeighborCombat(magic) ? combat->actors.size() : 3))
+                            throw std::invalid_argument("Native effect beneficiary invalid");
                     }
                     if ((!effect.effectIndex && !hasMovementEffects(magic))
                         || effect.effectIndex > 255 || !effect.caster || !effect.source
@@ -734,7 +855,8 @@ namespace TES3MP::Native
                             : (!effect.durationTicks || effect.durationTicks > 108000)))
                         throw std::invalid_argument("Native effect identity or duration invalid");
                 }
-                if (effect.actor >= 3 || !std::isfinite(effect.magnitude)
+                if (effect.actor >= (hasNeighborCombat(magic) ? combat->actors.size() : 3)
+                    || !std::isfinite(effect.magnitude)
                     || (effect.magnitude < 0 || (effect.magnitude == 0 && effect.sourceKind < 3)) || effect.magnitude > (hasKnockoutState(magic) && effect.effectIndex ? 100000 : 1000)
                     || effect.expiresTick <= tick
                     || (effect.sourceKind < 3 && effect.expiresTick - tick > 108000))
@@ -808,7 +930,7 @@ namespace TES3MP::Native
                     value.lastObservedMs = getAreaWord(bytes, offset);
                     value.worsenings = getAreaWord(bytes, offset);
                 }
-                if (value.actor >= 3 || !value.source
+                if (value.actor >= (hasNeighborCombat(magic) ? combat->actors.size() : 3) || !value.source
                     || value.worsenings > 100000
                     || (value.nextWorseningMs && (!value.lastObservedMs
                         || value.nextWorseningMs <= value.lastObservedMs
@@ -830,6 +952,7 @@ namespace TES3MP::Native
                 auto& value = swing.emplace();
                 for (auto* field : {&value.command, &value.source, &value.targetLife, &value.direction, &value.interruption})
                     *field = getAreaWord(bytes, offset);
+                if (hasNeighborCombat(magic)) value.target = getAreaWord(bytes, offset);
                 const auto number = [&] {
                     const auto bits = getAreaWord(bytes, offset);
                     const float result = std::bit_cast<float>(uint32_t(bits));
@@ -850,7 +973,11 @@ namespace TES3MP::Native
                 const auto phase = getAreaWord(bytes, offset);
                 value.state.mTime = number(); value.state.mStrength = number();
                 const auto released = getAreaWord(bytes, offset), hit = getAreaWord(bytes, offset);
-                if (!value.command || !value.targetLife || value.targetLife > life->generation
+                const auto targetIndex = hasNeighborCombat(magic)
+                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
+                const auto targetGeneration = targetIndex == 2 ? life->generation
+                    : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0;
+                if (!value.command || !value.targetLife || !targetGeneration || value.targetLife > targetGeneration
                     || value.direction > 2 || value.interruption > PlayerSwing::TargetLost
                     || value.strength < 0 || value.strength > 1 || value.identity.empty()
                     || bool(value.source) != !value.weapon.empty()
@@ -928,7 +1055,7 @@ namespace TES3MP::Native
         if (!inventorySize || !actorSize || actorSize > 65536 || inventorySize > bytes.size()-offset
             || actorSize != bytes.size()-offset-inventorySize)
             throw std::invalid_argument("Native actor campaign lengths invalid");
-        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life), std::move(projectile), std::move(projectiles), std::move(timedEffects), std::move(castResource), casting};
+        return {bytes.subspan(offset, size_t(inventorySize)), bytes.subspan(offset+size_t(inventorySize), size_t(actorSize)), tick, velocity, std::move(melee), std::move(combat), std::move(life), std::move(neighborLives), std::move(projectile), std::move(projectiles), std::move(timedEffects), std::move(castResource), casting};
     }
 }
 #endif

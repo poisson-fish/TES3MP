@@ -1,47 +1,42 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-NPC/biped/doors: 60 Hz; commits: 30 Hz; first engaged neighbor moves;
-other neighbors freeze. **V61.**
+NPC/biped/doors: 60 Hz; commits: 30 Hz; two placement-keyed
+neighbors step once in one collision scene. Additional neighbors freeze. **V62.**
 
-Player/NPC casts, conditions, stats and Disintegration have vanilla/TR checks;
-VFX remains incomplete. Concealment uses stock awareness; actions break
-Invisibility. T3D1 projects visibility and Charm. Checks:
-`build/logs/{concealment-campaign-09,visibility-campaign-03}.log`;
-desktop expiry: `build/m4-visibility-desktop-live-08/result.json`.
-Detached AI lacks sneak stance.
+Player/NPC casts, conditions, stats, Disintegration, concealment and visibility
+have vanilla/TR checks. VFX and sneak stance remain incomplete.
+`build/logs/{concealment-campaign-09,visibility-campaign-03}.log`.
 
-V56 movement effects drive committed NPC motion/breath and drowning attribution;
-NPC AI has no jump request. Checks:
+V56 effects drive motion/breath and drowning; AI lacks jump requests:
 `build/logs/{movement-npc-service-17,movement-deep-05}.log`.
 
-Twelve AI/disposition effects reach timed, item and passive sources. Stock
-Fight/Flee and Charm dialogue consume them; Flee paths persist. Checks:
+Twelve AI effects reach timed, item and passive sources; stock
+Fight/Flee and Charm consume them:
 `build/logs/{ai-rules-final,ai-player-charm-02,ai-flee-test-11}.log`;
-desktop Charm: `build/m4-charm-activation-live-01/result.json`.
-V58 persists two-player social context with atomic trusted tick updates:
-`build/logs/ai-social-test-04.log`.
-V59 commits stock werewolf stats/equipment, temporary-effect purge, witnessed
-identity/bounty and durable per-player Fight engagement together. Its selected
-NPC consumes engagement in AI. Synthetic rejection/restart/AI:
+V58 persists social context. V59 composes werewolf stats/equipment,
+crime and Fight engagement. Rejection/restart/AI:
 `build/logs/social-lifecycle-regression-23.log`; V58 compatibility:
 `build/logs/ai-disposition-compat-21.log`.
-V60 moves the first witness in the shared collision world; pursuit follows
-engagement. Collision, rejection and restart:
-`build/logs/shared-scene-neighbor-11.log`. V61 binds NPC stats/hit resources to
-placement keys. Neighbor fatigue/recovery advances durably; both NPC stat/body
-views project. Fresh V61 campaigns required. Foreign-key recovery rejects;
-two-player rejection/restart:
-`build/logs/placement-effects-11.log`; V60 compatibility:
-`build/logs/neighbor-compat-24.log`. Neighbor attacks, effects and life are
-pending; other witnesses freeze. Faction join/rank/expulsion
+V60 moves an engaged witness. V61 binds NPC stats and hit resources to
+placements; fatigue, bodies and foreign-key rejection are checked:
+`build/logs/placement-effects-11.log`. V62 gives both bound neighbors their own
+stock melee clip, combat stats, passive/timed effect owner and caster identity,
+death history, respawn baseline and life generation. Player melee can target a
+neighbor. Hits, death and respawn join the composed actor/inventory image;
+rejected writes leave it unchanged. Two players attacking separate NPCs, two
+neighbors attacking, passive effects, death, respawn and restart pass the
+synthetic real-loadout campaign: `build/logs/neighbor-combat-test-verify2.log`;
+V61 and selected-NPC life compatibility:
+`build/logs/{placement-actors-compat-14,npc-life-cycle-compat-v62}.log`.
+Player spells and ranged hits still target the selected NPC; the
+two-neighbor bound is provisional. Faction join/rank/expulsion
 commits for an explicit player: `build/logs/ai-faction-script-test-07.log`.
-Flee gates runs on LOS and reach: `build/logs/{ai-flee-test-19,ai-action-test-05}.log`;
-desktop comparison: `build/stock-flee-comparison/result.json`.
-Mixed passives, non-player Command and general scripts remain open.
+Flee gates run on LOS and reach: `build/logs/{ai-flee-test-19,ai-action-test-05}.log`.
+Mixed passives, non-player Command and scripts remain open.
 
-**Next: wire the placement-keyed neighbor to stock AI attacks, effects and
-life transitions in the composed actor tick; extend beyond the first neighbor.**
+**Next: route player spells and physical projectiles to any bound NPC placement,
+then extend the bounded neighbor set as scene and transaction budgets permit.**
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
@@ -61,6 +56,6 @@ life transitions in the composed actor tick; extend beyond the first neighbor.**
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-81 implemented + 62 incomplete = 143 IDs; visuals/sources remain bounded.
-Scripts, multi-NPC combat/summons/player lives remain unproven. Ranged/body work
-precedes movement cutover. TR Lua awaits M5.
+81 implemented + 62 incomplete = 143 IDs. Broader multi-NPC combat, summons
+and player lives remain unproven. Ranged/body work precedes movement cutover.
+TR Lua awaits M5.

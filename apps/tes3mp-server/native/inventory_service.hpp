@@ -121,6 +121,7 @@ namespace TES3MP::Native
         bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.
         bool mNeighborAi = false; // V60 first neighboring witness has a durable body and stock navigation.
         bool mPlacementCombat = false; // V61 bounds NPC combat slots by placement identity.
+        bool mNeighborCombat = false; // V62 gives bound neighbors attack/effect/life state.
         struct CrimeWitness
         {
             uint64_t placement = 0;
@@ -136,6 +137,8 @@ namespace TES3MP::Native
         // V44: bind the selected NPC's actual weapon group and speed. The
         // Empty direction uses the descriptor clip (including the idle sentinel).
         std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)> mWeaponMelee;
+        std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)> mNeighborWeaponMelee;
+        std::vector<std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)>> mNeighborMeleeSet;
         bool mGeneralAttackModes = false;
         // V46: independent player animation resources; empty for older campaigns.
         std::array<std::function<MeleeAnimation(const ESM::Weapon*, std::string_view)>, 2> mPlayerMelee;
@@ -199,6 +202,7 @@ namespace TES3MP::Native
             ActorCasterIdentity identity;
         };
         MagicCasterContext magicCaster(size_t combatIndex) const;
+        size_t combatOwner(size_t combatIndex) const;
         struct WeaponWear
         {
             size_t owner;
@@ -223,17 +227,20 @@ namespace TES3MP::Native
         bool mMeleeContacted = false;
         std::optional<ActorCampaignCombat> mCombat;
         std::optional<ActorCampaignLife> mLife;
+        std::vector<ActorCampaignLife> mNeighborLives;
         std::vector<ActorCampaignProjectile> mProjectiles;
         std::vector<ActorCampaignTimedEffect> mTimedEffects;
         std::function<float(const CanonicalWorldState&, ESM::RefId)> mSunDamageScale;
         std::optional<ActorCampaignCast> mNpcCast;
         PlainEquipmentValues mRespawnInventory;
+        std::vector<PlainEquipmentValues> mNeighborRespawnInventory;
         size_t mCombatNpcOwner = 0;
         EquipmentBytes sealActor(std::span<const char> core, std::span<const char> actor,
             uint64_t tick, const std::array<float, 3>& velocity,
             const std::optional<MeleeAnimation>& melee, uint64_t target, bool contact,
             const std::optional<ActorCampaignCombat>& combat,
             const std::optional<ActorCampaignLife>& life,
+            std::span<const ActorCampaignLife> neighborLives,
             std::span<const ActorCampaignProjectile> projectiles,
             std::span<const ActorCampaignTimedEffect> timedEffects,
             const std::optional<ActorCampaignCast>& casting = {}) const;
@@ -243,7 +250,8 @@ namespace TES3MP::Native
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
             uint64_t requested, float reach) const;
         EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command,
-            std::span<const ItemCharge> charges = {}) const;
+            std::span<const ItemCharge> charges = {},
+            const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
         PlainEquipmentValues combatEquipmentValues(size_t owner, const PreparedNativeInventory* command) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;

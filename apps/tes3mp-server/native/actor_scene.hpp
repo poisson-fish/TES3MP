@@ -79,7 +79,7 @@ namespace TES3MP::Native
         std::unique_ptr<InteriorActorScene> mNeighbor;
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
-            uint64_t neighbor, Impl* sharedParent);
+            std::span<const uint64_t> neighbors, Impl* sharedParent);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor);
     public:
@@ -89,11 +89,15 @@ namespace TES3MP::Native
         // (at most 3x3). One collision world and one actor frame across cell edges.
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation, uint64_t neighbor = 0);
+        InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+            const std::string& baseAnimation, const std::string& beastAnimation,
+            std::span<const uint64_t> neighbors);
         bool contains(const std::array<float, 3>& position) const;
         bool pathUnavailable() const;
         ~InteriorActorScene();
         ActorSceneSnapshot snapshot() const;
         std::optional<ActorSceneSnapshot> neighborSnapshot() const;
+        std::vector<ActorSceneSnapshot> neighborSnapshots() const;
         std::array<float, 4> transform() const noexcept;
         // One stock 60 Hz step. Velocity is local-space diagnostic input, not AI
         // or authenticated player input. Invalid input leaves the scene unchanged.
@@ -156,6 +160,7 @@ namespace TES3MP::Native
             ~Prepared();
             ActorSceneSnapshot snapshot() const;
             std::optional<ActorSceneSnapshot> neighborSnapshot() const;
+            std::vector<ActorSceneSnapshot> neighborSnapshots() const;
             std::span<const char> image() const;
             bool pathUnavailable() const;
             bool pathCompleted() const;
@@ -168,6 +173,9 @@ namespace TES3MP::Native
         void prepareNeighborNavigation(Prepared& prepared, float speed,
             std::span<const ActorSceneDoor> doors,
             std::optional<std::array<float, 3>> destination);
+        void prepareNeighborNavigation(Prepared& prepared, std::span<const float> speeds,
+            std::span<const ActorSceneDoor> doors,
+            std::span<const std::optional<std::array<float, 3>>> destinations);
         std::unique_ptr<Prepared> prepareBlindRun(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors, const std::array<float, 3>& enemy);
         void setFacing(Prepared& prepared, float yaw) const;
@@ -175,9 +183,15 @@ namespace TES3MP::Native
         void install(Prepared& prepared) noexcept;
         std::vector<char> image() const;
         std::vector<char> selectedImage() const;
+        std::vector<char> neighborImage() const;
+        std::vector<char> neighborImage(size_t index) const;
         void restore(std::span<const char> bytes);
         std::unique_ptr<Prepared> prepareRestore(std::span<const char> bytes, std::span<const ActorSceneDoor> doors = {});
         std::unique_ptr<Prepared> prepareSelectedRestore(std::span<const char> bytes,
+            std::span<const ActorSceneDoor> doors = {});
+        std::unique_ptr<Prepared> prepareNeighborRestore(std::span<const char> bytes,
+            std::span<const ActorSceneDoor> doors = {});
+        std::unique_ptr<Prepared> prepareNeighborRestore(size_t index, std::span<const char> bytes,
             std::span<const ActorSceneDoor> doors = {});
     };
 }
