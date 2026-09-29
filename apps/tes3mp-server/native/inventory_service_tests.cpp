@@ -5953,6 +5953,10 @@ namespace TES3MP::Native::Testing
                 out.endRecord(ESM::GameSetting::sRecordId);
                 if (effectFamily == "ai-disposition")
                 {
+                    auto crime = *base.store().get<ESM::GameSetting>().find("iCrimeAttack");
+                    crime.mValue.setInteger(123);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); crime.save(out);
+                    out.endRecord(ESM::GameSetting::sRecordId);
                     for (const auto [name, value] : {std::pair{"fDispCrimeMod", 1.f},
                             {"fDispWeaponDrawn", -100.f}, {"fDispFactionRankMult", 0.f},
                             {"fDispFactionRankBase", 1.f}, {"fDispFactionMod", 1.f}})
@@ -6120,6 +6124,7 @@ namespace TES3MP::Native::Testing
                 if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
                 {
                     npc.mAiData.mFight = 20; npc.mAiData.mFlee = 0;
+                    if (effectFamily == "ai-disposition") npc.mAiData.mAlarm = 100;
                     npc.mNpdt.mDisposition = 50; npc.mNpdt.mHealth = 200;
                     if (effectFamily == "ai-disposition")
                         npc.mFaction = ESM::RefId::stringRefId("ai_test_faction");
@@ -8525,46 +8530,129 @@ namespace TES3MP::Native::Testing
                         require(bytes(equipRestart.service()) == savedEquip,
                             "Equipment draw state changed on restart");
 
-                        auto attacking = make(); auto& attackService = attacking->service();
-                        std::vector<CanonicalPlayerEntityState> close(authority.players().begin(), authority.players().end());
-                        close[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(close[0],
-                            id<ServerTick>(1), Transform(close[0].transform().cell(),
-                                Position3(60*1024, -64*1024, 1024), close[0].transform().orientation()),
-                            LinearVelocity3(0, 0, 0)));
-                        const auto nearby = std::get<CanonicalServerState>(createCanonicalServerState(close,
-                            authority.activeSessions()));
-                        attackService.synchronizeCells(nearby);
-                        const auto attackView = attackService.projectInventory(nearby, id<SessionId>(1),
-                            id<ServerTick>(1), id<CanonicalRevision>(1));
-                        require(attackView && attackView->equipment && !attackView->equipment->motions.empty(),
-                            "Player attack target absent");
-                        ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
-                            CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
-                            id<ActorId>(attackView->equipment->motions.front().placement), id<ServerTick>(1),
-                            CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
-                        const auto* attacker = nearby.findPlayer(id<PlayerId>(1));
-                        const ServerCommandProposal attackProposal(id<SessionId>(1), SessionGeneration::initial(),
-                            CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
-                            EntityPrecondition(attacker->entityId(), attacker->entityRevision(), attacker->authorityEpoch()),
-                            MeleeAttackCommandProposal(attack));
-                        auto intent = attackService.prepareMeleeAttack(nearby, attackProposal, id<ServerTick>(1));
-                        require(bool(intent), "Player attack draw source did not prepare");
-                        const auto beforeAttack = bytes(attackService);
-                        auto swung = dynamic_cast<InventoryService&>(attackService).prepareNativeTick(nearby,
-                            id<ServerTick>(1), 1.f/30, std::move(intent), {}, &actionWorld);
-                        require(swung && swung->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
-                                == CanonicalDurabilityResult::Rejected && bytes(attackService) == beforeAttack,
-                            "Rejected attack draw change leaked");
-                        require(swung->commit(accepted) == CanonicalDurabilityResult::Committed,
-                            "Attack did not join V58 actor tick");
-                        const auto attackState = read(bytes(attackService)).combat->players;
-                        require(attackState[0].drawState == 1 && attackState[1].drawState == 0,
-                            "Attack draw state crossed player identities");
-                        const auto savedAttack = bytes(attackService);
-                        InventoryHost attackRestart(descriptor, testContentManifest(), *registry, *crypto, savedAttack);
-                        attackRestart.service().synchronizeCells(nearby);
-                        require(bytes(attackRestart.service()) == savedAttack,
-                            "Attack draw state changed on restart");
+                        for (size_t attackerIndex = 0; attackerIndex < 2; ++attackerIndex)
+                        {
+                            const auto assaultFactionId = ESM::RefId::stringRefId("ai_test_faction");
+                            const auto attackingPlayer = id<PlayerId>(attackerIndex + 1);
+                            const auto attackingSession = id<SessionId>(attackerIndex + 1);
+                            auto attacking = make(); auto& attackService = attacking->service();
+                            std::vector<CanonicalPlayerEntityState> close(authority.players().begin(), authority.players().end());
+                            close[attackerIndex] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(close[attackerIndex],
+                                id<ServerTick>(1), Transform(close[attackerIndex].transform().cell(),
+                                    Position3(60*1024, -64*1024, 1024), close[attackerIndex].transform().orientation()),
+                                LinearVelocity3(0, 0, 0)));
+                            const auto nearby = std::get<CanonicalServerState>(createCanonicalServerState(close,
+                                authority.activeSessions()));
+                            attackService.synchronizeCells(nearby);
+                            const auto attackView = attackService.projectInventory(nearby, attackingSession,
+                                id<ServerTick>(1), id<CanonicalRevision>(1));
+                            require(attackView && attackView->equipment && !attackView->equipment->motions.empty(),
+                                "Player attack target absent");
+                            ClientMeleeAttackCommand attack{attackingSession, SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                                id<ActorId>(attackView->equipment->motions.front().placement), id<ServerTick>(1),
+                                CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            const auto* attacker = nearby.findPlayer(attackingPlayer);
+                            const ServerCommandProposal attackProposal(attackingSession, SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                                EntityPrecondition(attacker->entityId(), attacker->entityRevision(), attacker->authorityEpoch()),
+                                MeleeAttackCommandProposal(attack));
+                            auto intent = attackService.prepareMeleeAttack(nearby, attackProposal, id<ServerTick>(1));
+                            require(bool(intent), "Player attack draw source did not prepare");
+                            const auto beforeAttack = bytes(attackService);
+                            const std::array peacefulUntilReport{
+                                InventoryService::PlayerSocialAction{attackingPlayer,
+                                    InventoryService::PlayerSocialAction::Kind::JoinFaction, assaultFactionId, 0},
+                                InventoryService::PlayerSocialAction{attackingPlayer,
+                                    InventoryService::PlayerSocialAction::Kind::SetCrimeDisposition, {}, 200}};
+                            auto swung = dynamic_cast<InventoryService&>(attackService).prepareNativeTick(nearby,
+                                id<ServerTick>(1), 1.f/30, std::move(intent), {}, &actionWorld, {}, peacefulUntilReport);
+                            require(swung && swung->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(attackService) == beforeAttack,
+                                "Rejected attack draw change leaked");
+                            require(swung->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Attack did not join V58 actor tick");
+                            const auto attackState = read(bytes(attackService)).combat->players;
+                            require(attackState[attackerIndex].drawState == 1
+                                    && attackState[1 - attackerIndex].drawState == 0,
+                                "Attack draw state crossed player identities");
+                            const auto savedAttack = bytes(attackService);
+                            InventoryHost attackRestart(descriptor, testContentManifest(), *registry, *crypto, savedAttack);
+                            attackRestart.service().synchronizeCells(nearby);
+                            require(bytes(attackRestart.service()) == savedAttack,
+                                "Attack draw state changed on restart");
+                            std::vector<CanonicalPlayerEntityState> chasePlayers(
+                                nearby.players().begin(), nearby.players().end());
+                            chasePlayers[attackerIndex] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                chasePlayers[attackerIndex], id<ServerTick>(2), Transform(chasePlayers[attackerIndex].transform().cell(),
+                                    Position3(60*1024, -160*1024, 1024), chasePlayers[attackerIndex].transform().orientation()),
+                                LinearVelocity3(0, 0, 0)));
+                            const auto chase = std::get<CanonicalServerState>(createCanonicalServerState(
+                                chasePlayers, nearby.activeSessions()));
+                            attackService.synchronizeCells(chase);
+                            constexpr int assaultBounty = 123;
+                            bool reportedAssault = false, rejectedContact = false;
+                            unsigned assaultEvents = 0, assaultContacts = 0;
+                            uint64_t reportTick = 0;
+                            for (uint64_t frame = 2; frame <= 90; ++frame)
+                            {
+                                auto contact = dynamic_cast<InventoryService&>(attackService).prepareNativeTick(
+                                    chase, id<ServerTick>(frame), 1.f/30, {}, {}, &actionWorld);
+                                if (auto events = attackService.projectCombatEvents(chase, attackingSession,
+                                        id<ServerTick>(frame), id<CanonicalRevision>(1), contact.get()))
+                                    for (const auto& event : events->events())
+                                    {
+                                        ++assaultEvents; assaultContacts += event.hit;
+                                        if (event.hit)
+                                        {
+                                            const auto beforeContact = bytes(attackService);
+                                            require(contact->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                                    == CanonicalDurabilityResult::Rejected
+                                                    && bytes(attackService) == beforeContact,
+                                                "Rejected witnessed assault leaked bounty or hit state");
+                                            rejectedContact = true;
+                                        }
+                                    }
+                                require(contact && contact->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                    "Live assault contact did not commit");
+                            const auto social = read(bytes(attackService)).combat->players;
+                            reportedAssault = social[attackerIndex].bounty == assaultBounty;
+                            if (reportedAssault)
+                                require(social[attackerIndex].factions.size() == 1
+                                        && social[attackerIndex].factions.front().id == assaultFactionId
+                                        && social[attackerIndex].factions.front().expelled,
+                                    "Reported assault did not expel the victim's faction member");
+                                require(social[1 - attackerIndex].bounty == 0,
+                                    "Witnessed assault changed the other player's bounty");
+                                if (reportedAssault) { reportTick = frame; break; }
+                            }
+                            if (!reportedAssault)
+                                std::cerr << "assault diagnostic events=" << assaultEvents << " hits=" << assaultContacts
+                                    << " npcAction=" << read(bytes(attackService)).combat->npcAction << '\n';
+                            require(reportedAssault && rejectedContact && assaultContacts,
+                                "Witnessed live assault did not emit stock bounty atomically");
+                            const auto reportedImage = bytes(attackService);
+                            InventoryHost reportedRestart(descriptor, testContentManifest(), *registry, *crypto,
+                                reportedImage);
+                            reportedRestart.service().synchronizeCells(chase);
+                            require(bytes(reportedRestart.service()) == reportedImage,
+                                "Reported assault changed on restart");
+                            bool aiReacted = read(reportedImage).combat->npcAction != 0;
+                            for (uint64_t frame = reportTick + 1; frame <= reportTick + 75 && !aiReacted; ++frame)
+                            {
+                                auto original = dynamic_cast<InventoryService&>(attackService).prepareNativeTick(
+                                    chase, id<ServerTick>(frame), 1.f/30, {}, {}, &actionWorld);
+                                auto replay = dynamic_cast<InventoryService&>(reportedRestart.service()).prepareNativeTick(
+                                    chase, id<ServerTick>(frame), 1.f/30, {}, {}, &actionWorld);
+                                require(original && replay && original->commit(accepted) == CanonicalDurabilityResult::Committed
+                                        && replay->commit(accepted) == CanonicalDurabilityResult::Committed
+                                        && bytes(attackService) == bytes(reportedRestart.service()),
+                                    "Reported assault AI diverged after restart");
+                                aiReacted = read(bytes(attackService)).combat->npcAction != 0;
+                            }
+                            require(aiReacted, "Reported assault bounty did not affect stock AI");
+                        }
+                        std::cout << "AI reported assault=bounty 123 two players rejected-write restart AI-reacted\n";
                     }
                     if (!creatureTarget)
                     {

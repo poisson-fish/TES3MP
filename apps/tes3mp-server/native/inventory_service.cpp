@@ -5,6 +5,7 @@
 #include "magic_runtime.hpp"
 #include "ai_magic.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
+#include <apps/openmw/mwmechanics/crimeresult.hpp>
 #include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/aitimer.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -4915,6 +4916,7 @@ namespace TES3MP::Native
                     else if (arrow.steps == 3600) arrow.terminal = 2;
                 }
             }
+        std::array<bool, 2> reportedAssaultContact{};
         for (const auto& request : playerContacts)
         {
             const size_t owner = request.owner;
@@ -5064,6 +5066,23 @@ namespace TES3MP::Native
                     step.reset(); after = before; report.status = Diagnostics::Status::Idle;
                     melee = mIdleMelee;
                     target = 0; contact = false;
+                }
+            }
+            // The selected NPC is aware of an assault on itself. Stock crime
+            // reporting requires an Alarm 100 witness; the victim qualifies
+            // even outside the alarm radius. Resolve this only after a valid
+            // authoritative contact and stage it with the hit and inventory.
+            if (mBinding.mPlayerAi && request.contact && (!request.projectile || success)
+                && mCombat && life && !mCombat->npcAction && !mMeleeTarget
+                && !mCombat->fleeTarget && !mCombat->knockedDown[2] && !life->respawnTick)
+            {
+                const auto npcPtr = mRuntime.ownerPtr(mCombatNpcOwner);
+                const auto* npc = npcPtr.getType() == ESM::NPC::sRecordId
+                    ? npcPtr.get<ESM::NPC>() : nullptr;
+                if (npc && npc->mBase->mAiData.mAlarm >= 100 && !victim.isWerewolf()
+                    && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Vampirism).getMagnitude() <= 0)
+                {
+                    reportedAssaultContact[owner] = true;
                 }
             }
             playerHits.push_back(MeleeCombatEvent{playerAttacker,
@@ -5413,6 +5432,22 @@ namespace TES3MP::Native
                     settings.find("iWerewolfFightMod")->mValue.getInteger()) : 0);
             return MWMechanics::aggressiveAtDistance(fight, distanceBias, dispositionBias);
         };
+        if (mBinding.mPlayerAi && combat)
+            for (size_t owner = 0; owner < reportedAssaultContact.size(); ++owner)
+            {
+                if (!reportedAssaultContact[owner]) continue;
+                const auto* player = players.findPlayer(mBinding.mPlayers[owner]);
+                if (!player || aggressiveAgainst(*player)) continue;
+                const int bounty = MWMechanics::reportedAssaultBounty(
+                    mRuntime.mStore.get<ESM::GameSetting>());
+                if (bounty < 0 || bounty > 10'000'000 - combat->players[owner].bounty)
+                    throw std::invalid_argument("Native reported assault bounty out of bounds");
+                combat->players[owner].bounty += bounty;
+                const auto npc = mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::NPC>();
+                const auto faction = std::ranges::find(combat->players[owner].factions,
+                    npc->mBase->mFaction, &ActorCampaignCombat::PlayerAi::Faction::id);
+                if (faction != combat->players[owner].factions.end()) faction->expelled = true;
+            }
         if (mBinding.mWeaponMelee && target && !npcMayAttack)
         { melee = mIdleMelee; target = 0; contact = false; }
         if (mBinding.mAutomaticNpcSpells && npcMayAttack && !automaticCast && !actorCast && step && active && !respawn && combat && life

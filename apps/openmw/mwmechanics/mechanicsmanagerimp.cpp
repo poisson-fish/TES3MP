@@ -42,6 +42,7 @@
 #include "aipursue.hpp"
 #include "autocalcspell.hpp"
 #include "combat.hpp"
+#include "crimeresult.hpp"
 #include "npcstats.hpp"
 #include "spellutil.hpp"
 
@@ -1264,7 +1265,7 @@ namespace MWMechanics
         }
         else if (type == OT_Assault)
         {
-            bounty = store.find("iCrimeAttack")->mValue.getInteger();
+            bounty = reportedAssaultBounty(store);
             disp = store.find("iDispAttackMod")->mValue.getFloat();
             dispVictim = store.find("fDispAttacking")->mValue.getFloat();
         }

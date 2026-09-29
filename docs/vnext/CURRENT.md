@@ -4,11 +4,11 @@
 NPC/biped/doors: 60 Hz; commits: 30 Hz; neighbors freeze.
 **V58.**
 
-Player/NPC casts retain timing and payment/interruption. Condition/stat/resource/
-Disintegration checks and vanilla/TR cast captures exist; VFX remains incomplete.
+Player/NPC casts retain timing, payment and interruption. Condition/stat/resource/
+Disintegration and vanilla/TR cast checks exist; VFX remains incomplete.
 
-Invisibility/Chameleon use stock hit and awareness; actions break Invisibility.
-T3D1 projects visibility effects and Charm. Checks:
+Invisibility/Chameleon use stock hit/awareness; actions break Invisibility.
+T3D1 projects visibility and Charm. Checks:
 `build/logs/{concealment-campaign-09,visibility-campaign-03,visibility-protocol-03}.log`.
 Desktop visibility and expiry:
 `build/m4-visibility-desktop-live-08/result.json`. Detached AI lacks sneak stance.
@@ -20,29 +20,31 @@ Captures:
 `build/m4-movement-desktop-live-06/result.json`,
 `build/m4-movement-deep-desktop-live-03/result.json`. NPC AI has no jump request.
 
-Twelve AI/disposition IDs enter timed, item and passive sources for players
-and the selected actor. Stock Fight/Flee use distance, disposition and health.
-Flee follows pathgrids or runs blindly; paths persist until completion or distant
-LOS loss. Calm, Frenzy, Demoralize, Rally, TurnUndead and Command affect AI.
-T3D1 projects Charm into stock dialogue and server aggression. Checks:
+Twelve AI/disposition IDs enter timed, item and passive sources. Stock
+Fight/Flee consume distance, disposition and health. Flee paths persist until
+completion or distant LOS loss. Calm, Frenzy, Demoralize, Rally, TurnUndead,
+Command and Charm affect AI/dialogue. Checks:
 `build/logs/{ai-rules-final,ai-protocol-test,ai-player-charm-02,ai-passive-creature-02,ai-flee-test-11}.log`.
-Committed disease affects disposition; offline AI passives persist. Stock dialogue
-45→80→45 with Charm 35 and expiry:
+Disease affects disposition; offline passives persist. Stock dialogue
+45→80→45 with Charm expiry:
 `build/m4-charm-activation-live-01/result.json`.
-Ordinary activation now focuses the replicated NPC and executes stock talk.
-Remote equipment accepts constants.
+Activation focuses the NPC for stock talk; remote equipment accepts constants.
 V58 persists player faction, crime, bounty, draw, werewolf and source selection.
-Trusted updates for both players join the actor tick, including a simultaneous
-cast. Bad content, duplicate players and rejected writes are atomic; restart
-validates content and inventory. Stock aggression and Flee consume these values.
-Accepted attacks, casts and right-hand equipment produce per-player draw/source
-state. Trusted faction, crime/bounty and werewolf results join the V58 tick.
-Invalid or rejected actions leave both players unchanged; restart preserves them.
+Trusted two-player updates compose with casts and actor ticks. Bad content,
+duplicate players and rejected writes are atomic; restart validates content
+and inventory. Stock aggression/Flee consume these values. Accepted attacks,
+casts and right-hand equipment set draw/source state. Trusted social results
+join the V58 tick and survive restart.
 Synthetic two-player stock aggression: `build/logs/ai-social-test-04.log`.
-Runtime scripts, witnesses and transformations do not yet emit these results.
-Flee gates a
-new run on LOS and target reach using loaded actor hulls.
-Synthetic hull-bound near/far and committed Flee/restart checks:
+An authenticated contact against the selected NPC now produces a reported
+assault when that victim has stock Alarm 100 and is not engaged, unconscious,
+werewolf or vampire. Stock `iCrimeAttack` bounty and faction expulsion join
+the hit transaction. Synthetic two-player contact, rejected-write, restart
+and subsequent AI checks: `build/logs/ai-crime-test-11.log`. Other witnesses,
+offenses and durable crime engagement remain open. Runtime faction scripts
+and werewolf transformation do not yet emit results or stock side effects.
+Flee gates new runs on LOS and actor-hull reach. Synthetic near/far and
+Flee/restart checks:
 `build/logs/{ai-flee-test-19,ai-action-test-05}.log`. Stock Flee desktop: 68/128 triggers,
 218/128 does not;
 `build/stock-flee-comparison/result.json` (temporary logging removed).
@@ -51,8 +53,8 @@ V58 modifier/restart and V57 creature checks:
 `build/logs/ai-player-openmw-build-02.log`.
 Mixed passives, non-player Command and multiple combatants remain open.
 
-**Next: emit the trusted V58 social results from runtime scripts, crime
-witnesses and werewolf transformations; cover stock transformation side effects.**
+**Next: connect runtime faction script results, then werewolf transformation
+with stock equipment/stat effects; extend crime witnesses and engagement.**
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
