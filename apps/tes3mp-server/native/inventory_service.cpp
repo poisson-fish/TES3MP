@@ -1279,6 +1279,14 @@ namespace TES3MP::Native
             if (owner == mBinding.mContainers.end() || !actorInventory(mRuntime.ownerPtr(size_t(owner - mBinding.mContainers.begin()) + 2)))
                 throw std::invalid_argument("Native combat stat owner must be the selected NPC");
             mCombatNpcOwner = size_t(owner - mBinding.mContainers.begin()) + 2;
+            if (mBinding.mNeighborAi)
+            {
+                const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+                if (!neighbor || std::ranges::none_of(mBinding.mContainers, [&](const auto& value) {
+                    return value.mId.value() == neighbor->mActor && value.mPlacement.has_value()
+                        && value.mCell == owner->mCell && value.mId != owner->mId;
+                })) throw std::invalid_argument("Native neighboring NPC has no authoritative placement");
+            }
             const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
             const bool creatureSpellsSupported = std::ranges::all_of(actorSpells(selected).mList,
                 [&](const ESM::RefId& id) {
@@ -1336,7 +1344,7 @@ namespace TES3MP::Native
                 const auto envelope = mRuntime.expectedEnvelope(mRespawnInventory.mActor);
                 ActorCampaignLife life;
                 life.spawnStats = mCombat->actors[2];
-                life.spawnActor = mBinding.mNavigatingActor->image();
+                life.spawnActor = mBinding.mNavigatingActor->selectedImage();
                 encodeEquipment(mRespawnInventory, {envelope, mRuntime.mStore, ids, mRuntime.mScriptLocals, true},
                     life.spawnInventory);
                 mLife = std::move(life);
@@ -2455,7 +2463,7 @@ namespace TES3MP::Native
                 if (baseline.mObjects.size() > PlainEquipmentValues::MaxItems
                     || decoded.life->spawnStats[8][2] <= 0)
                     throw std::invalid_argument("Native NPC respawn baseline invalid");
-                (void)mBinding.mNavigatingActor->prepareRestore(decoded.life->spawnActor, actorDoorFrames());
+                (void)mBinding.mNavigatingActor->prepareSelectedRestore(decoded.life->spawnActor, actorDoorFrames());
             }
             auto restoredMelee = mMelee;
             if (decoded.melee && !mBinding.mWeaponMelee) restoredMelee->restore(decoded.melee->state);
@@ -3301,20 +3309,21 @@ namespace TES3MP::Native
 
     void InventoryService::installActorPosition() noexcept
     {
-        // The physics identity is the existing engine inventory owner. No second
-        // NPC inventory or loot stream is created by the collision scene.
-        const auto state = mBinding.mNavigatingActor->transform();
-        const auto id = mBinding.mNavigatingActor->actorId();
-        for (size_t i=0; i<mBinding.mContainers.size(); ++i)
-            if (mBinding.mContainers[i].mId.value() == id)
-            {
-                auto position = mRuntime.ownerPtr(i+2).getRefData().getPosition();
-                std::copy_n(state.begin(), 3, position.pos);
-                position.rot[2] = state[3];
-                mRuntime.ownerPtr(i+2).getRefData().setPosition(position);
-                return;
-            }
-        std::terminate();
+        // Both simulated identities are existing engine inventory owners.
+        const auto install = [&](const ActorSceneSnapshot& state) {
+            for (size_t i = 0; i < mBinding.mContainers.size(); ++i)
+                if (mBinding.mContainers[i].mId.value() == state.mActor)
+                {
+                    auto position = mRuntime.ownerPtr(i + 2).getRefData().getPosition();
+                    std::copy_n(state.mPosition.begin(), 3, position.pos);
+                    position.rot[2] = state.mYaw;
+                    mRuntime.ownerPtr(i + 2).getRefData().setPosition(position);
+                    return;
+                }
+            std::terminate();
+        };
+        install(mBinding.mNavigatingActor->snapshot());
+        if (const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot()) install(*neighbor);
     }
 
     CellId InventoryService::actorCell(const ActorSceneSnapshot& state) const
@@ -4266,14 +4275,20 @@ namespace TES3MP::Native
             {
                 if (witness.cell != player->transform().cell()) continue;
                 const bool selected = witness.placement == before.mActor;
+                const auto neighbor = mBinding.mNeighborAi
+                    ? mBinding.mNavigatingActor->neighborSnapshot() : std::nullopt;
+                const bool simulatedNeighbor = neighbor && neighbor->mActor == witness.placement;
                 if (selected && (life->respawnTick || combat->knockedDown[2]
                     || combat->actors[2][8][2] <= 0.f)) continue;
                 const auto* npc = mRuntime.mStore.get<ESM::NPC>().search(witness.base);
                 if (!npc) continue;
                 const std::array<float, 3> from{selected ? before.mPosition[0]
+                        : simulatedNeighbor ? neighbor->mPosition[0]
                         : float(double(witness.position.x()) / 1024),
-                    selected ? before.mPosition[1] : float(double(witness.position.y()) / 1024),
+                    selected ? before.mPosition[1] : simulatedNeighbor ? neighbor->mPosition[1]
+                        : float(double(witness.position.y()) / 1024),
                     (selected ? before.mPosition[2]
+                        : simulatedNeighbor ? neighbor->mPosition[2]
                         : float(double(witness.position.z()) / 1024)) + 64.f};
                 float distance2 = 0.f;
                 for (size_t axis = 0; axis < 3; ++axis)
@@ -4893,7 +4908,7 @@ namespace TES3MP::Native
         {
             if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
             respawn = mRuntime.prepareRespawn(mCombatNpcOwner, mRespawnInventory);
-            step = mBinding.mNavigatingActor->prepareRestore(life->spawnActor, doors);
+            step = mBinding.mNavigatingActor->prepareSelectedRestore(life->spawnActor, doors);
             after = step->snapshot();
             combat->actors[2] = life->spawnStats;
             combat->knockedDown[2] = life->spawnStats[8][2] > 0
@@ -6803,9 +6818,56 @@ namespace TES3MP::Native
             }
         if (std::ranges::any_of(wear, [&](const auto& change) {
                 return change.owner < 2 && changingWerewolfEquipment[change.owner];
-            }) || std::ranges::any_of(charges, [&](const auto& change) {
-                return change.owner < 2 && changingWerewolfEquipment[change.owner];
-            })) throw std::invalid_argument("Werewolf equipment changed during a concurrent item effect");
+        }) || std::ranges::any_of(charges, [&](const auto& change) {
+            return change.owner < 2 && changingWerewolfEquipment[change.owner];
+        })) throw std::invalid_argument("Werewolf equipment changed during a concurrent item effect");
+        if (mBinding.mNeighborAi && combat)
+        {
+            const auto neighbor = mBinding.mNavigatingActor->neighborSnapshot();
+            if (!neighbor) throw std::logic_error("Bound neighboring NPC body absent");
+            const CanonicalPlayerEntityState* pursued = nullptr;
+            float nearest = std::numeric_limits<float>::infinity();
+            for (const auto playerId : mBinding.mPlayers)
+            {
+                const auto* player = players.findPlayer(playerId);
+                if (!player || player->transform().cell() != actorCell(*neighbor)
+                    || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
+                        return session.playerId() == playerId;
+                    }))
+                    continue;
+                // The persisted fight engagement already passed stock Fight,
+                // Alarm and disposition checks at the witnessed offense.
+                if (std::ranges::none_of(combat->players[actor(playerId)].engagements,
+                        [&](const auto& entry) { return entry.witness == neighbor->mActor && entry.fight >= 100; }))
+                    continue;
+                const auto& position = player->transform().position();
+                const float dx = float(double(position.x()) / 1024) - neighbor->mPosition[0];
+                const float dy = float(double(position.y()) / 1024) - neighbor->mPosition[1];
+                const float dz = float(double(position.z()) / 1024) - neighbor->mPosition[2];
+                const float distance = dx * dx + dy * dy + dz * dz;
+                if (distance > 2048.f * 2048.f || distance >= nearest) continue;
+                if (!mBinding.mNavigatingActor->lineOfSight(
+                        {neighbor->mPosition[0], neighbor->mPosition[1], neighbor->mPosition[2] + 110.f},
+                        {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
+                            float(double(position.z()) / 1024) + 110.f})) continue;
+                pursued = player;
+                nearest = distance;
+            }
+            if (pursued || step)
+            {
+                if (!step) step = mBinding.mNavigatingActor->prepareSelectedRestore(
+                    mBinding.mNavigatingActor->selectedImage(), doors);
+                std::optional<std::array<float, 3>> destination;
+                if (pursued)
+                {
+                    const auto& position = pursued->transform().position();
+                    destination = std::array<float, 3>{float(double(position.x()) / 1024),
+                        float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                }
+                mBinding.mNavigatingActor->prepareNeighborNavigation(*step,
+                    pursued ? mBinding.mNavigationSpeed : 0.f, doors, destination);
+            }
+        }
         if (!wear.empty() || !charges.empty()) wornCore = stagedWeaponCore(wear, command.get(), charges);
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
             std::move(melee), target, contact, std::move(combat), std::move(life),
@@ -6926,6 +6988,26 @@ namespace TES3MP::Native
             if (std::ranges::any_of(result->equipment->actors, [&](const auto& owner) { return owner.actor.value() == state.mActor; }))
                 result->equipment->motions.push_back({state.mActor, moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
                     state.mPosition, moving ? moving->velocity : mActorVelocity, state.mYaw});
+            if (mBinding.mNeighborAi)
+            {
+                const auto neighbor = moving && moving->actor ? moving->actor->neighborSnapshot()
+                    : mBinding.mNavigatingActor->neighborSnapshot();
+                if (neighbor && std::ranges::any_of(result->equipment->actors, [&](const auto& owner) {
+                    return owner.actor.value() == neighbor->mActor;
+                }))
+                {
+                    std::array<float, 3> velocity{};
+                    if (moving && moving->actor)
+                    {
+                        const auto previous = mBinding.mNavigatingActor->neighborSnapshot();
+                        for (size_t i = 0; i < 3; ++i)
+                            velocity[i] = (neighbor->mPosition[i] - previous->mPosition[i]) * 30.f;
+                    }
+                    result->equipment->motions.push_back({neighbor->mActor,
+                        moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
+                        neighbor->mPosition, velocity, neighbor->mYaw});
+                }
+            }
         }
         return result;
     }

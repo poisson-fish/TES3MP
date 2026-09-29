@@ -119,6 +119,7 @@ namespace TES3MP::Native
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
         bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.
+        bool mNeighborAi = false; // V60 first neighboring witness has a durable body and stock navigation.
         struct CrimeWitness
         {
             uint64_t placement = 0;
@@ -126,7 +127,7 @@ namespace TES3MP::Native
             Position3 position;
             ESM::RefId base;
         };
-        std::vector<CrimeWitness> mCrimeWitnesses; // Loaded content placements; selected NPC moves separately.
+        std::vector<CrimeWitness> mCrimeWitnesses; // Content placements; V60 moves the first neighbor too.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.

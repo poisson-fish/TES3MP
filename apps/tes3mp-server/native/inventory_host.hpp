@@ -7,6 +7,9 @@
 
 namespace TES3MP::Native
 {
+    // V60 binds the first neighboring NPC witness to a second detached stock
+    // physics/navigation scene. Its frame joins the actor image and commit;
+    // engagement drives pursuit. Combat still has one NPC slot.
     // V58 persists bounded, content-bound player AI context and selected source
     // with the actor campaign for trusted updates and stock aggression/Flee reach.
     // V57 persists the selected actor's Flee interval and destination, admits

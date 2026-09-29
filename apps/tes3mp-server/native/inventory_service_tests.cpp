@@ -5450,7 +5450,8 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
-        const bool socialLifecycle = effectFamily == "social-lifecycle";
+        const bool neighborAi = effectFamily == "neighbor-ai";
+        const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
         const bool aiDisposition = effectFamily == "ai-disposition" || socialLifecycle;
         const bool specialConditions = effectFamily == "special-conditions";
         const bool movementEffects = effectFamily == "movement-effects" || aiDisposition
@@ -7986,7 +7987,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8437,7 +8438,8 @@ namespace TES3MP::Native::Testing
                     require(bytes(replay.service()) == reportedImage,
                         "Crime engagement changed on restart");
                     bool aiReacted = read(reportedImage).combat->npcAction != 0;
-                    for (uint64_t frame = reportTick + 1; frame <= reportTick + 75 && !aiReacted; ++frame)
+                    uint64_t frame = reportTick + 1;
+                    for (; frame <= reportTick + 75 && !aiReacted; ++frame)
                     {
                         auto originalTick = service.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
                             {}, {}, &scene);
@@ -8451,6 +8453,40 @@ namespace TES3MP::Native::Testing
                         aiReacted = read(bytes(service)).combat->npcAction != 0;
                     }
                     require(aiReacted, "Persisted victim engagement did not reach stock AI");
+                    if (neighborAi)
+                    {
+                        const auto position = [&](InventoryService& current) {
+                            const auto view = current.projectInventory(chase, attackingSession,
+                                id<ServerTick>(frame), id<CanonicalRevision>(1));
+                            require(view && view->equipment, "Neighbor appearance absent");
+                            const auto found = std::ranges::find_if(view->equipment->motions,
+                                [selectedNpc](const auto& motion) { return motion.placement != selectedNpc; });
+                            require(found != view->equipment->motions.end(), "Neighbor body motion absent");
+                            return found->position;
+                        };
+                        const auto initial = position(service);
+                        auto& resumed = dynamic_cast<InventoryService&>(replay.service());
+                        for (const auto stop = frame + 60; frame < stop; ++frame)
+                        {
+                            auto originalTick = service.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
+                                {}, {}, &scene);
+                            auto replayTick = resumed.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
+                                {}, {}, &scene);
+                            require(originalTick && replayTick, "Neighbor AI tick absent");
+                            const auto retained = bytes(service);
+                            require(originalTick->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(service) == retained,
+                                "Rejected neighbor step changed actor campaign");
+                            require(originalTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && replayTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && bytes(service) == bytes(resumed),
+                                "Neighbor navigation diverged after restart");
+                        }
+                        const auto finalPosition = position(service);
+                        const std::array<float, 3> authored{100.f, -120.f, 1.f};
+                        require(initial != authored || finalPosition != authored,
+                            "Persisted witness engagement did not move neighboring NPC");
+                    }
                 }
                 std::cout << "werewolf and bystander crime two players effects equipment stats witnesses engagement rejection restart AI\n";
                 return;

@@ -284,13 +284,13 @@ fields. Share stock numeric aggression terms while keeping the server the sole
 gameplay writer. V57 remains readable under its prior descriptor; V58 requires
 a fresh campaign rather than implicit migration.
 
-**Social lifecycle (V59).** Commit werewolf equipment, temporary-effect purge,
-saved/restored stock stats, witness consequences and crime engagement with the
-actor image. Bind at most 128 unscripted, unleveled NPC placements from the
-selected loaded interior as potential witnesses; only the selected NPC has a
-simulated body and live AI until multi-actor cutover. Keep engagement keyed by
-placement and player in the campaign, with no implicit migration of earlier
-descriptors.
+**Social lifecycle (V59/V60).** Commit werewolf equipment, temporary-effect
+purge, stock stats, witness consequences and crime engagement with the actor
+image. Bind at most 128 unscripted, unleveled NPC placements as witnesses.
+V60 stages the first neighbor's stock body/path and engagement pursuit with the
+actor image; its separate scene tracks committed counterpart poses. Combat
+still owns one NPC slot. Keep engagement keyed by placement and player, with
+no implicit migration.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

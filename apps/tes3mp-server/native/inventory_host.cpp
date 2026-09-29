@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 59; ++candidate)
+            for (unsigned candidate = 3; candidate <= 60; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -283,6 +283,7 @@ namespace TES3MP::Native
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
+                binding.mNeighborAi = descriptorVersion >= 60;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -389,10 +390,31 @@ namespace TES3MP::Native
                                 << ':' << p[0] << ':' << p[1] << ':' << p[2];
                         }
                     }
-                    std::erase_if(references, [&](const auto& ref) { return ref.mRef.mRefID != ESM::RefId::stringRefId(start.navigation->record); });
+                    if (start.binding.mNeighborAi)
+                        std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
+                    const auto selectedBase = ESM::RefId::stringRefId(start.navigation->record);
+                    const auto firstNeighbor = start.binding.mNeighborAi && cellIndex == 0
+                        ? std::ranges::find_if(references, [&](const auto& ref) {
+                            return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
+                                && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
+                        }) : references.end();
+                    const uint64_t neighborId = firstNeighbor == references.end() ? 0 : firstNeighbor->mIdentity;
+                    std::erase_if(references, [&](const auto& ref) {
+                        return ref.mRef.mRefID != selectedBase && ref.mIdentity != neighborId;
+                    });
                     if (cellIndex != 0) references.clear();
-                    if (cellIndex == 0 && (references.size()!=1 || references.front().mScripted || references.front().mLeveled))
-                        throw std::invalid_argument("Native navigating actor must be one unscripted placement");
+                    if (cellIndex == 0)
+                    {
+                        const auto selected = std::ranges::find_if(references, [&](const auto& ref) {
+                            return ref.mRef.mRefID == selectedBase;
+                        });
+                        if (references.size() != (start.binding.mNeighborAi ? 2u : 1u)
+                            || std::ranges::count(references, selectedBase, [](const auto& ref) {
+                                return ref.mRef.mRefID;
+                            }) != 1 || selected == references.end()
+                            || selected->mScripted || selected->mLeveled)
+                            throw std::invalid_argument("Native navigating actor must be one unscripted placement");
+                    }
                     actorCounts[cellIndex]=references.size();
                 }
                 else if (start.worldActors)
@@ -568,11 +590,22 @@ namespace TES3MP::Native
                 std::ranges::sort(doors);
                 if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
                     throw std::invalid_argument("V17-V19 require at least one ordinary door");
+                const auto neighborOwner = std::ranges::find_if(start.binding.mContainers, [&](const auto& value) {
+                    return start.binding.mNeighborAi && value.mCell == start.wireCell
+                        && value.mId != owner.mId
+                        && std::ranges::any_of(start.binding.mCrimeWitnesses, [&](const auto& witness) {
+                            return witness.placement == value.mId.value();
+                        });
+                });
+                const uint64_t neighborId = neighborOwner == start.binding.mContainers.end()
+                    ? 0 : neighborOwner->mId.value();
+                if (start.binding.mNeighborAi && !neighborId)
+                    throw std::invalid_argument("Native neighbor witness has no inventory owner");
                 const auto createScene = [&loadout, names, neighborhood = start.binding.mTravelerNeighborhood,
                     movementEffects = start.binding.mMovementEffects,
-                    id = owner.mId.value(), navigation = *start.navigation, doors] {
+                    id = owner.mId.value(), neighborId, navigation = *start.navigation, doors] {
                     auto scene = std::make_shared<InteriorActorScene>(loadout, names, id,
-                        "meshes/base_anim.nif", "meshes/base_animkna.nif");
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborId);
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     if (movementEffects) scene->enableMovementEffects();
                     scene->enableNavigation(navigation.settings);
