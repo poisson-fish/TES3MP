@@ -6,6 +6,7 @@
 #include "ai_magic.hpp"
 #include <apps/openmw/mwmechanics/combat.hpp>
 #include <apps/openmw/mwmechanics/crimeresult.hpp>
+#include <apps/openmw/mwmechanics/werewolfstats.hpp>
 #include "faction_scripts.hpp"
 #include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/aitimer.hpp>
@@ -2025,6 +2026,8 @@ namespace TES3MP::Native
             if (input.kind == InventoryTransactionKind::EquipItem || input.kind == InventoryTransactionKind::UnequipItem)
             {
                 validate(players, *binding);
+                if (mBinding.mSocialLifecycle && mCombat->players[actor(binding->player())].werewolf)
+                    return {};
                 if (!mBinding.mConstantEffects)
                 {
                     const auto values = mRuntime.installedValues(actor(binding->player()));
@@ -2114,6 +2117,7 @@ namespace TES3MP::Native
         if (!player || session->sessionGeneration() != proposal.sessionGeneration()
             || use.sessionId != proposal.sessionId() || use.sessionGeneration != proposal.sessionGeneration()
             || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
+            || (mBinding.mSocialLifecycle && mCombat->players[actor(player->playerId())].werewolf)
             || player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot())
             || (mBinding.mPlayerCastLifecycle && (mCombat->playerCasts[actor(player->playerId())]
                 || (mCombat->swings[actor(player->playerId())] && mCombat->swings[actor(player->playerId())]->pending())))
@@ -2404,7 +2408,8 @@ namespace TES3MP::Native
                     || hasMovementEffects(magic))
                 || mBinding.mMovementEffects != hasMovementEffects(magic)
                 || mBinding.mAiDecisions != hasAiDecisions(magic)
-                || mBinding.mPlayerAi != hasPlayerAi(magic))
+                || mBinding.mPlayerAi != hasPlayerAi(magic)
+                || mBinding.mSocialLifecycle != hasSocialLifecycle(magic))
                 throw std::invalid_argument("Native weapon execution campaign differs from binding");
             if (mBinding.mNpcCastLifecycle != hasCastLifecycle(magic)
                 || (mBinding.mNpcCastLifecycle && decoded.castResource != mBinding.mBoundCasts->resourceIdentity))
@@ -2705,6 +2710,28 @@ namespace TES3MP::Native
                                     && mRuntime.mStore.get<ESM::Enchantment>().search(record.mEnchant);
                             }))
                             throw std::invalid_argument("Saved player selected item differs from inventory");
+                        if (mBinding.mSocialLifecycle)
+                        {
+                            if (social.werewolf != social.normalSkills.has_value()
+                                || social.werewolf != social.normalAttributes.has_value())
+                                throw std::invalid_argument("Saved werewolf stat state invalid");
+                            const auto& inventory = session.mActors[i];
+                            if (social.werewolf)
+                            {
+                                const auto robe = inventory.mSlots[MWWorld::InventoryStore::Slot_Robe];
+                                const auto item = std::ranges::find(inventory.mObjects, robe,
+                                    [](const auto& object) { return object.mRef.mRefNum; });
+                                if (!robe.isSet() || item == inventory.mObjects.end()
+                                    || item->mRef.mRefID != ESM::RefId::stringRefId("werewolfrobe")
+                                    || std::ranges::any_of(inventory.mSlots, [robe](ESM::RefNum slot) {
+                                        return slot.isSet() && slot != robe;
+                                    })) throw std::invalid_argument("Saved werewolf equipment invalid");
+                            }
+                            for (const auto& engagement : social.engagements)
+                                if (std::ranges::none_of(mBinding.mCrimeWitnesses, [&](const auto& witness) {
+                                    return witness.placement == engagement.witness;
+                                })) throw std::invalid_argument("Saved crime witness differs from content");
+                        }
                     }
                 if (decoded.combat) for (const auto& arrow : decoded.combat->arrows)
                 {
@@ -2976,6 +3003,10 @@ namespace TES3MP::Native
                 if (player.factions.size() > 256 || player.bounty < 0 || player.drawState > 2)
                     throw std::invalid_argument("Native player AI state exceeds bounds");
                 playerAiSize += 8 + 7 * 8 + player.selectedSpell.serializeText().size();
+                if (mBinding.mSocialLifecycle && player.werewolf)
+                    playerAiSize += (ESM::Skill::Length + ESM::Attribute::Length) * 8;
+                if (mBinding.mSocialLifecycle)
+                    playerAiSize += 8 + player.engagements.size() * 24;
                 for (const auto& faction : player.factions)
                     playerAiSize += 24 + faction.id.serializeText().size();
             }
@@ -3018,7 +3049,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mPlayerAi ? PlayerAiCampaignMagic
+        putAreaWord(result, mBinding.mSocialLifecycle ? SocialLifecycleCampaignMagic
+            : mBinding.mPlayerAi ? PlayerAiCampaignMagic
             : mBinding.mAiDecisions ? AiDecisionCampaignMagic
             : mBinding.mMovementEffects ? MovementEffectsCampaignMagic
             : mBinding.mSpecialConditions ? SpecialConditionsCampaignMagic
@@ -3108,6 +3140,21 @@ namespace TES3MP::Native
                 putAreaWord(result, player.werewolf); putAreaWord(result, player.knownWerewolf);
                 putAreaWord(result, spell.size()); result.insert(result.end(), spell.begin(), spell.end());
                 putAreaWord(result, player.selectedEnchantedItem);
+                if (mBinding.mSocialLifecycle && player.werewolf)
+                {
+                    if (!player.normalSkills || !player.normalAttributes)
+                        throw std::invalid_argument("Native werewolf missing saved normal stats");
+                    for (float value : *player.normalSkills) putAreaWord(result, std::bit_cast<uint32_t>(value));
+                    for (float value : *player.normalAttributes) putAreaWord(result, std::bit_cast<uint32_t>(value));
+                }
+                if (mBinding.mSocialLifecycle)
+                {
+                    if (player.engagements.size() > 128)
+                        throw std::invalid_argument("Native crime engagement capacity exceeded");
+                    putAreaWord(result, player.engagements.size());
+                    for (const auto& entry : player.engagements)
+                    { putAreaWord(result, entry.witness); putAreaWord(result, entry.tick); putAreaWord(result, entry.fight); }
+                }
             }
         if (life)
         {
@@ -3448,6 +3495,31 @@ namespace TES3MP::Native
         if (state.factions.size() > 256 || state.bounty < 0 || state.bounty > 10'000'000
             || std::abs(int64_t(state.crimeDisposition)) > 1'000'000 || state.drawState > 2)
             return false;
+        if (mBinding.mSocialLifecycle)
+        {
+            if (state.normalSkills.has_value() != state.werewolf
+                || state.normalAttributes.has_value() != state.werewolf) return false;
+            const auto validStats = [](const auto& values) {
+                return std::ranges::all_of(values, [](float value) {
+                    return std::isfinite(value) && std::abs(value) <= 1'000'000.f;
+                });
+            };
+            if (state.werewolf && (!validStats(*state.normalSkills)
+                || !validStats(*state.normalAttributes))) return false;
+            if (state.werewolf && (state.drawState == uint64_t(MWMechanics::DrawState::Spell)
+                || !state.selectedSpell.empty() || state.selectedEnchantedItem)) return false;
+            if (state.engagements.size() > 128) return false;
+            uint64_t previousWitness = 0;
+            for (const auto& entry : state.engagements)
+            {
+                if (!entry.witness || entry.witness <= previousWitness || !entry.tick
+                    || entry.tick > mActorTick || entry.fight < 0 || entry.fight > 100
+                    || std::ranges::none_of(mBinding.mCrimeWitnesses, [&](const auto& witness) {
+                        return witness.placement == entry.witness;
+                    })) return false;
+                previousWitness = entry.witness;
+            }
+        }
         ESM::RefId previous;
         for (const auto& faction : state.factions)
         {
@@ -3814,6 +3886,7 @@ namespace TES3MP::Native
                     mRuntime.ownerPtr(mCombatNpcOwner), mRuntime.ownerPtr(owner), combat->players[owner])});
             playerAiUpdates = std::span<const PlayerAiUpdate>(&*scriptedFactionUpdate, 1);
         }
+        std::array<std::optional<bool>, 2> requestedWerewolf{};
         if (!socialActions.empty())
         {
             if (!mBinding.mPlayerAi || !combat || !playerAiUpdates.empty()
@@ -3869,9 +3942,18 @@ namespace TES3MP::Native
                         break;
                     case PlayerSocialAction::Kind::SetWerewolf:
                         if (action.value != 0 && action.value != 1) return {};
-                        state.werewolf = action.value != 0;
-                        if (state.werewolf && state.drawState == uint64_t(MWMechanics::DrawState::Spell))
-                            state.drawState = uint64_t(MWMechanics::DrawState::Nothing);
+                        if (mBinding.mSocialLifecycle)
+                        {
+                            if (requestedWerewolf[index] || playerAttack || playerCasts)
+                                return {};
+                            requestedWerewolf[index] = action.value != 0;
+                        }
+                        else
+                        {
+                            state.werewolf = action.value != 0;
+                            if (state.werewolf && state.drawState == uint64_t(MWMechanics::DrawState::Spell))
+                                state.drawState = uint64_t(MWMechanics::DrawState::Nothing);
+                        }
                         break;
                     case PlayerSocialAction::Kind::SetKnownWerewolf:
                         if (action.value != 0 && action.value != 1) return {};
@@ -3892,7 +3974,12 @@ namespace TES3MP::Native
                 const auto found = std::ranges::find(mBinding.mPlayers, update.player);
                 if (found == mBinding.mPlayers.end()) return {};
                 const size_t index = size_t(found - mBinding.mPlayers.begin());
-                if (seen[index] || !validPlayerAiState(index, update.state, command.get())) return {};
+                if (seen[index] || !validPlayerAiState(index, update.state, command.get())
+                    || (mBinding.mSocialLifecycle
+                        && (update.state.werewolf != combat->players[index].werewolf
+                            || update.state.normalSkills != combat->players[index].normalSkills
+                            || update.state.normalAttributes != combat->players[index].normalAttributes
+                            || update.state.engagements != combat->players[index].engagements))) return {};
                 seen[index] = true;
                 combat->players[index] = update.state;
             }
@@ -4004,10 +4091,13 @@ namespace TES3MP::Native
         auto life = mLife;
         auto projectiles = mProjectiles;
         auto timedEffects = mTimedEffects;
+        std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
+        std::array<bool, 2> transformedNow{}, changingWerewolfEquipment{};
         auto casting = mNpcCast;
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
         const auto stageDisintegrate = [&](size_t recipient, ESM::RefId effect, float magnitude) {
+            if (recipient < 2 && changingWerewolfEquipment[recipient]) return;
             if (!std::isfinite(magnitude) || magnitude < 0.f || magnitude > 100000.f)
                 throw std::invalid_argument("Native disintegration magnitude invalid");
             const size_t owner = recipient == 2 ? mCombatNpcOwner : recipient;
@@ -4090,6 +4180,65 @@ namespace TES3MP::Native
             const auto death = updateEffectResources(*combat, index, mRuntime.mStore, previous, current, retainKnockout);
             if (index == 2 && death) recordEffectDeath(*death);
         };
+        if (mBinding.mSocialLifecycle && combat)
+            for (size_t index = 0; index < requestedWerewolf.size(); ++index)
+            {
+                if (!requestedWerewolf[index] || *requestedWerewolf[index] == combat->players[index].werewolf)
+                    continue;
+                if (respawn || dueRespawn || command && dynamic_cast<const EquipmentTransaction*>(areaDoorCommand(command.get())))
+                    return {};
+                auto& social = combat->players[index];
+                const bool transformed = *requestedWerewolf[index];
+                respawn = mRuntime.prepareWerewolfEquipment(index, transformed);
+                changingWerewolfEquipment[index] = true;
+                combat->swings[index].reset();
+                const auto previous = timedEffects;
+                std::erase_if(timedEffects, [index](const auto& effect) {
+                    return effect.actor == index && effect.sourceKind <= 2;
+                });
+                updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
+                if (mBinding.mConstantEffects)
+                {
+                    Misc::Rng::Generator rng{combat->rng};
+                    const auto beforeEquipment = timedEffects;
+                    if (reconcileConstants(respawn->values(), index,
+                            {mBinding.mPlayers[index].value(), 1, 1}, tick.value(), mRuntime.mStore,
+                            mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
+                            mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                            mBinding.mAiDecisions, false, false))
+                        updateResources(index, beforeEquipment, timedEffects, mBinding.mKnockoutAnimation);
+                    combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                }
+                auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+                if (transformed)
+                {
+                    const float multiplier = mRuntime.mStore.get<ESM::GameSetting>()
+                        .find("fWereWolfHealth")->mValue.getFloat();
+                    if (!std::isfinite(multiplier) || multiplier <= 0.f
+                        || stats.getHealth().getBase() <= 0.f)
+                        throw std::invalid_argument("Werewolf health setting or base invalid");
+                    const auto saved = MWMechanics::saveWerewolfStats(stats);
+                    social.normalSkills = saved.skills;
+                    social.normalAttributes = saved.attributes;
+                    MWMechanics::applyWerewolfStats(stats, mRuntime.mStore);
+                    social.drawState = uint64_t(MWMechanics::DrawState::Nothing);
+                    social.selectedSpell = {};
+                    social.selectedEnchantedItem = 0;
+                    combat->playerCasts[index].reset();
+                }
+                else
+                {
+                    if (!social.normalSkills || !social.normalAttributes)
+                        throw std::invalid_argument("Werewolf normal stats absent");
+                    MWMechanics::restoreWerewolfStats(stats, mRuntime.mStore,
+                        {*social.normalSkills, *social.normalAttributes});
+                    social.normalSkills.reset();
+                    social.normalAttributes.reset();
+                }
+                social.werewolf = transformed;
+                transformedNow[index] = transformed;
+                saveCombatStats(combat->actors[index], stats, timedEffects, index);
+            }
         const auto npcDetects = [&](size_t index) {
             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
             addTimedResistance(victim, timedEffects, index);
@@ -4102,6 +4251,59 @@ namespace TES3MP::Native
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             return detected;
         };
+        const auto crimeWitnesses = [&](size_t index, bool includeSelectedOutsideRadius,
+            const auto& observe) {
+            const auto* player = players.findPlayer(mBinding.mPlayers[index]);
+            if (!player) return;
+            const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+            const float radius = settings.find("fAlarmRadius")->mValue.getFloat();
+            if (!std::isfinite(radius) || radius < 0.f || radius > 1e7f)
+                throw std::invalid_argument("Native crime alarm radius invalid");
+            const auto position = player->transform().position();
+            const std::array<float, 3> target{float(double(position.x()) / 1024),
+                float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 64.f};
+            for (const auto& witness : mBinding.mCrimeWitnesses)
+            {
+                if (witness.cell != player->transform().cell()) continue;
+                const bool selected = witness.placement == before.mActor;
+                if (selected && (life->respawnTick || combat->knockedDown[2]
+                    || combat->actors[2][8][2] <= 0.f)) continue;
+                const auto* npc = mRuntime.mStore.get<ESM::NPC>().search(witness.base);
+                if (!npc) continue;
+                const std::array<float, 3> from{selected ? before.mPosition[0]
+                        : float(double(witness.position.x()) / 1024),
+                    selected ? before.mPosition[1] : float(double(witness.position.y()) / 1024),
+                    (selected ? before.mPosition[2]
+                        : float(double(witness.position.z()) / 1024)) + 64.f};
+                float distance2 = 0.f;
+                for (size_t axis = 0; axis < 3; ++axis)
+                    distance2 += (target[axis] - from[axis]) * (target[axis] - from[axis]);
+                if (distance2 > radius * radius && !(selected && includeSelectedOutsideRadius)) continue;
+                if (!mBinding.mNavigatingActor->lineOfSight(from, target) || !npcDetects(index)) continue;
+                observe(witness, *npc, selected, std::sqrt(distance2));
+            }
+        };
+        if (mBinding.mSocialLifecycle && combat)
+            for (size_t index = 0; index < transformedNow.size(); ++index)
+            {
+                if (!transformedNow[index]) continue;
+                bool detected = false, reported = false;
+                crimeWitnesses(index, false, [&](const auto&, const ESM::NPC& npc, bool, float) {
+                    detected = true;
+                    reported |= npc.mAiData.mAlarm > 0;
+                });
+                if (!detected) continue;
+                auto& social = combat->players[index];
+                social.knownWerewolf = true;
+                if (reported)
+                {
+                    const int bounty = mRuntime.mStore.get<ESM::GameSetting>()
+                        .find("iWereWolfBounty")->mValue.getInteger();
+                    if (bounty < 0 || bounty > 10'000'000 - social.bounty)
+                        throw std::invalid_argument("Native werewolf bounty outside bounds");
+                    social.bounty += bounty;
+                }
+            }
         const auto breakInvisibility = [&](size_t index) {
             const auto previous = timedEffects;
             const auto invisibility = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
@@ -4444,7 +4646,6 @@ namespace TES3MP::Native
                 }
                 condition.lastObservedMs = gameNowMs;
             }
-        std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
         std::vector<MeleeCombatEvent> playerHits;
         std::optional<ActorMeleeCombatEvent> actorHit;
         std::vector<MagicUseCombatEvent> spellCasts;
@@ -4486,6 +4687,8 @@ namespace TES3MP::Native
         };
         const auto& gmst = mRuntime.mStore.get<ESM::GameSetting>();
         const auto armorCondition = [&](size_t owner, int slot) {
+            if (owner < 2 && changingWerewolfEquipment[owner])
+                return std::optional<EquipmentRuntime::EquippedWeaponCondition>{};
             auto result = mRuntime.equippedArmorCondition(owner, slot);
             if (result && mBinding.mPlayerMelee[0])
                 for (const auto& change : wear)
@@ -5094,7 +5297,8 @@ namespace TES3MP::Native
                 const auto npcPtr = mRuntime.ownerPtr(mCombatNpcOwner);
                 const auto* npc = npcPtr.getType() == ESM::NPC::sRecordId
                     ? npcPtr.get<ESM::NPC>() : nullptr;
-                if (npc && npc->mBase->mAiData.mAlarm >= 100 && !victim.isWerewolf()
+                if (npc && (mBinding.mSocialLifecycle || npc->mBase->mAiData.mAlarm >= 100)
+                    && !victim.isWerewolf()
                     && victim.getMagicEffects().getOrDefault(ESM::MagicEffect::Vampirism).getMagnitude() <= 0)
                 {
                     reportedAssaultContact[owner] = true;
@@ -5371,6 +5575,10 @@ namespace TES3MP::Native
                 ? actorPtr.get<ESM::NPC>() : nullptr;
             float disposition = 50.f;
             const auto& social = combat->players[actor(player.playerId())];
+            if (mBinding.mSocialLifecycle
+                && std::ranges::any_of(social.engagements, [&](const auto& entry) {
+                    return entry.witness == before.mActor;
+                })) return true;
             if (npc)
             {
                 const auto stats = loadCombatStats(mRuntime.mStore,
@@ -5453,6 +5661,46 @@ namespace TES3MP::Native
                 if (!reportedAssaultContact[owner]) continue;
                 const auto* player = players.findPlayer(mBinding.mPlayers[owner]);
                 if (!player || aggressiveAgainst(*player)) continue;
+                bool reported = !mBinding.mSocialLifecycle;
+                if (mBinding.mSocialLifecycle)
+                {
+                    const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                    auto& engagements = combat->players[owner].engagements;
+                    crimeWitnesses(owner, true, [&](const auto& witness, const ESM::NPC& npc,
+                            bool victim, float distance) {
+                        if (std::ranges::any_of(engagements, [&](const auto& entry) {
+                            return entry.witness == witness.placement;
+                        })) return;
+                        const int alarm = std::clamp(int(npc.mAiData.mAlarm), 0, 100);
+                        const int baseFight = std::clamp(int(npc.mAiData.mFight), 0, 100);
+                        reported |= alarm >= 100;
+                        const float disposition = float(npc.mNpdt.mDisposition)
+                            + MWMechanics::crimeDisposition(combat->players[owner].crimeDisposition,
+                                combat->players[owner].bounty,
+                                settings.find("fDispCrimeMod")->mValue.getFloat());
+                        const float distanceBias = MWMechanics::fightDistanceBias(distance,
+                            settings.find("iFightDistanceBase")->mValue.getInteger(),
+                            settings.find("fFightDistanceMultiplier")->mValue.getFloat());
+                        const float dispositionBias = MWMechanics::fightDispositionBias(disposition,
+                            settings.find("fFightDispMult")->mValue.getFloat());
+                        const int provocation = settings.find(victim ? "iFightAttack" : "iFightAttacking")
+                            ->mValue.getInteger();
+                        const float rawTerm = (float(provocation) + distanceBias + dispositionBias)
+                            * .01f * float(alarm);
+                        if (!std::isfinite(rawTerm))
+                            throw std::invalid_argument("Native crime engagement term invalid");
+                        const float term = std::clamp(rawTerm, 0.f, float(100 - baseFight));
+                        const int fight = baseFight + int(term);
+                        if (fight < 100) return;
+                        if (engagements.size() >= 128)
+                            throw std::invalid_argument("Native crime engagement capacity exceeded");
+                        engagements.insert(std::lower_bound(engagements.begin(), engagements.end(),
+                            witness.placement, [](const auto& entry, uint64_t id) {
+                                return entry.witness < id;
+                            }), {witness.placement, tick.value(), fight});
+                    });
+                }
+                if (!reported) continue;
                 const int bounty = MWMechanics::reportedAssaultBounty(
                     mRuntime.mStore.get<ESM::GameSetting>());
                 if (bounty < 0 || bounty > 10'000'000 - combat->players[owner].bounty)
@@ -6501,7 +6749,8 @@ namespace TES3MP::Native
         std::array<float,3> velocity;
         for (size_t i=0; i<3; ++i)
         {
-            velocity[i] = respawn ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
+            velocity[i] = respawn && respawn->owner() == mCombatNpcOwner
+                ? 0 : (after.mPosition[i]-before.mPosition[i])*30;
             // WaterWalking may lift an actor onto the water plane in one frame.
             // Keep its committed position exact while bounding presentation speed.
             if (mBinding.mMovementEffects) velocity[i] = std::clamp(velocity[i], -4096.f, 4096.f);
@@ -6552,6 +6801,11 @@ namespace TES3MP::Native
                 else if (!swing->state.mHit && (combat->actors[2][8][2] <= 0 || swing->targetLife != life->generation))
                     swing->interruption = PlayerSwing::TargetLost;
             }
+        if (std::ranges::any_of(wear, [&](const auto& change) {
+                return change.owner < 2 && changingWerewolfEquipment[change.owner];
+            }) || std::ranges::any_of(charges, [&](const auto& change) {
+                return change.owner < 2 && changingWerewolfEquipment[change.owner];
+            })) throw std::invalid_argument("Werewolf equipment changed during a concurrent item effect");
         if (!wear.empty() || !charges.empty()) wornCore = stagedWeaponCore(wear, command.get(), charges);
         return std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
             std::move(melee), target, contact, std::move(combat), std::move(life),

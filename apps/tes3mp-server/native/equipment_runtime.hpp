@@ -247,6 +247,9 @@ namespace TES3MP::Native
         // Rebuild one placed actor's starting inventory with fresh item identities.
         // The caller persists image() with the actor life and frame before install.
         std::unique_ptr<PreparedRespawn> prepareRespawn(size_t owner, const PlainEquipmentValues& baseline);
+        // Replace a player's slots and transformation robe in one detached image.
+        // Ordinary item identities and their object state are retained.
+        std::unique_ptr<PreparedRespawn> prepareWerewolfEquipment(size_t owner, bool transformed);
         void installRespawn(PreparedRespawn& prepared) noexcept;
         class PreparedDoor
         {

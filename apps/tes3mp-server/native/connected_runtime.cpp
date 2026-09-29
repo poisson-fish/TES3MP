@@ -1,6 +1,8 @@
 #include "equipment_runtime.hpp"
 #include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
+#include <apps/openmw/mwworld/esmstore.hpp>
+#include <components/esm3/loadclot.hpp>
 
 #include <limits>
 #include <stdexcept>
@@ -635,6 +637,7 @@ namespace TES3MP::Native
         ContainerStoreIterator selected;
         EquipmentBytes image;
         PlainEquipmentValues values;
+        Ptr playerItem;
         State(EquipmentRuntime& ownerRuntime, size_t ownerIndex, ContainerStore& live)
             : runtime(&ownerRuntime), owner(ownerIndex), beforeRevision(ownerRuntime.mWorld.getPtrRegistryRevision()),
               slots(InventoryStore::Slots, live.end()), selected(live.end()) {}
@@ -702,6 +705,80 @@ namespace TES3MP::Native
         return std::unique_ptr<PreparedRespawn>(new PreparedRespawn(std::move(staged)));
     }
 
+    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareWerewolfEquipment(
+        size_t owner, bool transformed)
+    {
+        if (!mConnected || mRestartActor || mFailedClosed || owner >= 2
+            || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
+            throw std::invalid_argument("Werewolf equipment owner or runtime invalid");
+        const auto robeId = ESM::RefId::stringRefId("werewolfrobe");
+        if (!mStore.get<ESM::Clothing>().search(robeId))
+            throw std::invalid_argument("Werewolf robe is absent from the bound loadout");
+        const auto actorId = ownerPtr(owner).getCellRef().getRefNum();
+        auto replacement = installedValues(owner);
+        auto counter = mWorld.getLastGeneratedRefNum();
+        if (counter.mContentFile != -1) throw std::invalid_argument("Werewolf item counter invalid");
+        if (transformed)
+        {
+            if (replacement.mObjects.size() >= PlainEquipmentValues::MaxItems || counter.mIndex == UINT32_MAX)
+                throw std::invalid_argument("Werewolf robe exceeds inventory capacity");
+            replacement.mSlots.fill({});
+            ESM::ObjectState robe;
+            robe.blank();
+            robe.mRef.mRefID = robeId;
+            robe.mRef.mRefNum = {++counter.mIndex, -1};
+            robe.mRef.mCount = 1;
+            robe.mEnabled = 1;
+            robe.mHasCustomState = false;
+            replacement.mObjects.push_back(std::move(robe));
+            replacement.mSlots[InventoryStore::Slot_Robe] = counter;
+        }
+        else
+        {
+            const auto equipped = replacement.mSlots[InventoryStore::Slot_Robe];
+            const auto robe = std::ranges::find(replacement.mObjects, equipped,
+                [](const auto& object) { return object.mRef.mRefNum; });
+            if (robe == replacement.mObjects.end() || robe->mRef.mRefID != robeId)
+                throw std::invalid_argument("Werewolf robe identity changed");
+            replacement.mObjects.erase(robe);
+            replacement.mSlots[InventoryStore::Slot_Robe] = {};
+        }
+        replacement.mLastGenerated = counter;
+        replacement.validate(mStore, actorId, mScriptLocals.get());
+        EquipmentSessionValues values{{installedValues(0), installedValues(1)},
+            mWorld.getPtrRegistryRevision() + 1};
+        values.mActors[owner] = replacement;
+        for (size_t i = 2; i < ownerCount(); ++i) values.mContainers.push_back(installedValues(i));
+        auto& live = storage(owner);
+        auto staged = std::make_unique<PreparedRespawn::State>(*this, owner, live);
+        staged->counter = counter;
+        staged->values = replacement;
+        encodeSession(std::move(values), staged->image);
+        staged->restored = std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
+            replacement, mStore, actorId, mScriptLocals));
+        auto& candidate = staged->restored->installationStorage(mStore, actorId, counter);
+        staged->candidate = &candidate;
+        staged->registry = mWorld.mPtrRegistry.mIndex;
+        for (const auto& object : installedValues(owner).mObjects)
+            staged->registry.erase(object.mRef.mRefNum);
+        const auto playerItemId = mItems[owner].isEmpty() ? ESM::RefNum{} : mItems[owner].getCellRef().getRefNum();
+        candidate.forEachStored([&](auto& node, auto it) {
+            it.mContainer = &live;
+            Ptr ptr(&node, nullptr);
+            ptr.mContainerStore = &live;
+            const auto id = node.mRef.getRefNum();
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (id == replacement.mSlots[slot]) staged->slots[slot] = it;
+            if (id == replacement.mSelected) staged->selected = it;
+            if (id == playerItemId) staged->playerItem = ptr;
+            if (!staged->registry.emplace(id, ptr).second)
+                throw std::invalid_argument("Werewolf item identity collision");
+        });
+        if (staged->registry.size() > registryBound())
+            throw std::invalid_argument("Werewolf registry capacity exceeded");
+        return std::unique_ptr<PreparedRespawn>(new PreparedRespawn(std::move(staged)));
+    }
+
     void EquipmentRuntime::installRespawn(PreparedRespawn& prepared) noexcept
     {
         auto& staged = *prepared.mState;
@@ -711,6 +788,7 @@ namespace TES3MP::Native
         auto& equipped = *inventoryStorage(staged.owner);
         std::copy(staged.slots.begin(), staged.slots.end(), equipped.mSlots.begin());
         equipped.mSelectedEnchantItem = staged.selected;
+        if (staged.owner < 2) mItems[staged.owner] = staged.playerItem;
         mWorld.mPtrRegistry.mIndex.swap(staged.registry);
         mWorld.mPtrRegistry.mRevision = staged.beforeRevision + 1;
         mWorld.mPtrRegistry.mLastGenerated = staged.counter;

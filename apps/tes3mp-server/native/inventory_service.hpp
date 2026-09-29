@@ -118,6 +118,15 @@ namespace TES3MP::Native
         bool mMovementEffects = false; // V56 committed movement effects; inherited player movement remains client-side.
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
+        bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.
+        struct CrimeWitness
+        {
+            uint64_t placement = 0;
+            CellId cell;
+            Position3 position;
+            ESM::RefId base;
+        };
+        std::vector<CrimeWitness> mCrimeWitnesses; // Loaded content placements; selected NPC moves separately.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
         std::optional<BoundCastAnimations> mBoundCasts;
         // V43: combat slots (players 0/1, NPC 2), never inventory-owner indices.

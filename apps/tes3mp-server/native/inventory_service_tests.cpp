@@ -5450,8 +5450,10 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
+        const bool socialLifecycle = effectFamily == "social-lifecycle";
+        const bool aiDisposition = effectFamily == "ai-disposition" || socialLifecycle;
         const bool specialConditions = effectFamily == "special-conditions";
-        const bool movementEffects = effectFamily == "movement-effects" || effectFamily == "ai-disposition"
+        const bool movementEffects = effectFamily == "movement-effects" || aiDisposition
             || effectFamily == "ai-creature";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
@@ -5933,11 +5935,19 @@ namespace TES3MP::Native::Testing
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
-            if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+            if (socialLifecycle)
+            {
+                ESM::Clothing robe; robe.blank();
+                robe.mId = ESM::RefId::stringRefId("werewolfrobe");
+                robe.mData.mType = ESM::Clothing::Robe;
+                out.startRecord(ESM::Clothing::sRecordId, 0); robe.save(out);
+                out.endRecord(ESM::Clothing::sRecordId);
+            }
+            if (aiDisposition || effectFamily == "ai-creature")
             {
                 for (const auto [name, value] : {std::pair{"fAIFleeHealthMult", 200.f},
                         {"fAIFleeFleeMult", 1.f}, {"fFightDistanceMultiplier", .05f},
-                        {"fFightDispMult", effectFamily == "ai-disposition" ? 3.f : 1.f}})
+                        {"fFightDispMult", aiDisposition ? 3.f : 1.f}})
                 {
                     auto setting = *base.store().get<ESM::GameSetting>().find(name);
                     setting.mValue.setFloat(value);
@@ -5952,7 +5962,7 @@ namespace TES3MP::Native::Testing
                 fleeDistance.mValue = ESM::Variant(3000.f);
                 out.startRecord(ESM::GameSetting::sRecordId, 0); fleeDistance.save(out);
                 out.endRecord(ESM::GameSetting::sRecordId);
-                if (effectFamily == "ai-disposition")
+                if (aiDisposition)
                 {
                     auto crime = *base.store().get<ESM::GameSetting>().find("iCrimeAttack");
                     crime.mValue.setInteger(123);
@@ -5973,6 +5983,29 @@ namespace TES3MP::Native::Testing
                     werewolf.mValue.setInteger(100);
                     out.startRecord(ESM::GameSetting::sRecordId, 0); werewolf.save(out);
                     out.endRecord(ESM::GameSetting::sRecordId);
+                    if (socialLifecycle)
+                    {
+                        for (const auto name : {"iFightAttack", "iFightAttacking"})
+                        {
+                            ESM::GameSetting fight;
+                            fight.mId = ESM::RefId::stringRefId(name);
+                            fight.mValue.setType(ESM::VT_Int);
+                            fight.mValue.setInteger(1000);
+                            out.startRecord(ESM::GameSetting::sRecordId, 0); fight.save(out);
+                            out.endRecord(ESM::GameSetting::sRecordId);
+                        }
+                        ESM::GameSetting health;
+                        health.mId = ESM::RefId::stringRefId("fWereWolfHealth");
+                        health.mValue = ESM::Variant(2.f);
+                        out.startRecord(ESM::GameSetting::sRecordId, 0); health.save(out);
+                        out.endRecord(ESM::GameSetting::sRecordId);
+                        ESM::GameSetting bounty;
+                        bounty.mId = ESM::RefId::stringRefId("iWereWolfBounty");
+                        bounty.mValue.setType(ESM::VT_Int);
+                        bounty.mValue.setInteger(1000);
+                        out.startRecord(ESM::GameSetting::sRecordId, 0); bounty.save(out);
+                        out.endRecord(ESM::GameSetting::sRecordId);
+                    }
                     ESM::Faction faction; faction.blank();
                     faction.mId = ESM::RefId::stringRefId("ai_test_faction");
                     faction.mRanks[0] = "Associate";
@@ -6135,12 +6168,12 @@ namespace TES3MP::Native::Testing
                                 || id == ESM::MagicEffect::WaterWalking ? 0
                                 : id == ESM::MagicEffect::Burden ? 100 : 20)});
                     }
-                if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                if (aiDisposition || effectFamily == "ai-creature")
                 {
-                    npc.mAiData.mFight = 20; npc.mAiData.mFlee = 0;
-                    if (effectFamily == "ai-disposition") npc.mAiData.mAlarm = 100;
+                    npc.mAiData.mFight = socialLifecycle ? 50 : 20; npc.mAiData.mFlee = 0;
+                    if (aiDisposition) npc.mAiData.mAlarm = socialLifecycle ? 50 : 100;
                     npc.mNpdt.mDisposition = 50; npc.mNpdt.mHealth = 200;
-                    if (effectFamily == "ai-disposition")
+                    if (aiDisposition)
                         npc.mFaction = ESM::RefId::stringRefId("ai_test_faction");
                     for (const auto id : {ESM::MagicEffect::Charm, ESM::MagicEffect::CalmHumanoid,
                             ESM::MagicEffect::CalmCreature, ESM::MagicEffect::FrenzyHumanoid,
@@ -6158,12 +6191,15 @@ namespace TES3MP::Native::Testing
                         ESM::RT_Target, 5, 100), effect(effectFamily == "ai-creature"
                         ? ESM::MagicEffect::DemoralizeCreature : ESM::MagicEffect::DemoralizeHumanoid,
                         ESM::RT_Target, 5, 300)});
-                    if (effectFamily == "ai-disposition")
+                    if (aiDisposition)
                     {
                         spell("ai_charm_dialogue", {effect(ESM::MagicEffect::Charm, ESM::RT_Target, 20, 35)});
                         spell("ai_item_charm", {effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 40)}, true);
                         spell("ai_charm_fight", {effect(ESM::MagicEffect::FrenzyHumanoid, ESM::RT_Target, 5, 100),
                             effect(ESM::MagicEffect::Charm, ESM::RT_Target, 5, 100)});
+                        if (socialLifecycle)
+                            spell("social_temporary", {{ESM::MagicEffect::FortifyAttribute, {},
+                                ESM::Attribute::Strength, ESM::RT_Self, 0, 30, 20, 20}}, true);
                     }
                     ESM::Enchantment passive; passive.blank();
                     passive.mId = ESM::RefId::stringRefId("ai_constant_rally");
@@ -6197,7 +6233,7 @@ namespace TES3MP::Native::Testing
                         ESM::RT_Self, 0, 10)});
                     out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out);
                     out.endRecord(ESM::Spell::sRecordId);
-                    if (effectFamily == "ai-disposition")
+                    if (aiDisposition)
                     {
                         ability.mId = ESM::RefId::stringRefId("ai_passive_charm");
                         ability.mEffects.populate({effect(ESM::MagicEffect::Charm, ESM::RT_Self, 0, 10)});
@@ -6341,14 +6377,14 @@ namespace TES3MP::Native::Testing
             }
             const auto observerAppearance = npc;
             auto aiPlayerSpells = npc.mSpells.mList;
-            if (effectFamily == "ai-disposition")
+            if (aiDisposition)
                 aiPlayerSpells.push_back(ESM::RefId::stringRefId("ai_passive_charm"));
-            if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+            if (aiDisposition || effectFamily == "ai-creature")
             {
                 npc.mSpells.mList.clear();
                 npc.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
             }
-            if (effectFamily == "ai-disposition")
+            if (aiDisposition)
                 std::erase_if(npc.mInventory.mList, [](const auto& item) {
                     return item.mItem == ESM::RefId::stringRefId("ai_item_charm");
                 });
@@ -6371,6 +6407,17 @@ namespace TES3MP::Native::Testing
                 && effectFamily != "movement-effects"
                 && effectFamily != "constant-concealment" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
+            if (socialLifecycle)
+            {
+                auto witness = npc;
+                witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
+                witness.mAiData.mAlarm = 100;
+                witness.mAiData.mFight = 100;
+                witness.mSpells.mList.clear();
+                witness.mInventory.mList.clear();
+                out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
+                out.endRecord(ESM::NPC::sRecordId);
+            }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
             {
@@ -6416,11 +6463,11 @@ namespace TES3MP::Native::Testing
             {
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
-                if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")
+                if (aiDisposition || effectFamily == "ai-creature")
                 {
                     female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
                     female.mInventory.mList = beast.mInventory.mList = observerAppearance.mInventory.mList;
-                    if (effectFamily == "ai-disposition")
+                    if (aiDisposition)
                         female.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 }
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
@@ -6687,6 +6734,14 @@ namespace TES3MP::Native::Testing
                 if (record == placedActor) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
             }
+            if (socialLifecycle)
+            {
+                ESM::CellRef witness; witness.blank();
+                witness.mRefNum = {++index, 0};
+                witness.mRefID = ESM::RefId::stringRefId("npc_witness_alarm");
+                witness.mPos = {{100, -120, 1}, {0, 0, 0}};
+                witness.save(out);
+            }
             if (effectFamily == "visibility")
                 for (const auto [record, x, y] : {
                         std::tuple{ESM::RefId::stringRefId("visibility_key"), 130.f, -80.f},
@@ -6697,7 +6752,7 @@ namespace TES3MP::Native::Testing
                     placed.mPos = {{x, y, 1}, {0, 0, 0}}; placed.save(out);
                 }
             out.endRecord(ESM::Cell::sRecordId);
-            if (effectFamily == "ai-disposition")
+            if (aiDisposition)
             {
                 ESM::Pathgrid grid; grid.blank(); grid.mCell = cell.mId;
                 grid.mPoints = {{60, -32, 1}, {60, 200, 1}, {60, 300, 1}};
@@ -6727,7 +6782,7 @@ namespace TES3MP::Native::Testing
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
             Loadout loadout(readLoadoutOptions(3, arguments));
-            if (effectFamily == "ai-disposition")
+            if (aiDisposition)
             {
                 const auto combatRoom = ESM::RefId::stringRefId("NPC Door Contact Test");
                 const auto combatActor = loadout.placedActors(combatRoom).at(0);
@@ -7931,7 +7986,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "ai-disposition" ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -7972,7 +8027,7 @@ namespace TES3MP::Native::Testing
         if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
             || effectFamily == "constant-concealment"
             || effectFamily == "visibility" || effectFamily == "movement-effects"
-            || effectFamily == "ai-disposition" || effectFamily == "ai-creature" || specialConditions)
+            || aiDisposition || effectFamily == "ai-creature" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
@@ -8016,6 +8071,8 @@ namespace TES3MP::Native::Testing
                 const auto offset = statsOffset + (owner * ActorCampaignCombat::StatCount * 5 + stat * 5 + 2) * 8;
                 const uint64_t bits = std::bit_cast<uint32_t>(value);
                 for (unsigned i = 0; i < 8; ++i) seed.at(offset + i) = std::byte(bits >> (i * 8));
+                if (socialLifecycle)
+                    for (unsigned i = 0; i < 8; ++i) seed.at(offset - 16 + i) = std::byte(bits >> (i * 8));
             }
             const auto make = [&]() {
                 auto result = std::make_unique<InventoryHost>(descriptor, testContentManifest(), *registry, *crypto, seed);
@@ -8178,6 +8235,224 @@ namespace TES3MP::Native::Testing
                     }
                 }
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
+                return;
+            }
+            if (socialLifecycle)
+            {
+                using Action = InventoryService::PlayerSocialAction;
+                for (size_t owner = 0; owner < 2; ++owner)
+                {
+                    auto host = make(); auto& native = dynamic_cast<InventoryService&>(host->service());
+                    const auto player = id<PlayerId>(owner + 1);
+                    uint64_t actionTick = 0;
+                    if (owner == 0)
+                    {
+                        const auto effectIndex = uint64_t(ESM::MagicEffect::refIdToIndex(
+                            ESM::MagicEffect::FortifyAttribute));
+                        bool activeTemporary = false;
+                        for (actionTick = 1; actionTick <= 60; ++actionTick)
+                        {
+                            const auto state = commit(native, actionTick,
+                                actionTick == 1 ? "social_temporary" : std::string_view{});
+                            activeTemporary = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                return effect.actor == owner && effect.sourceKind <= 2
+                                    && effect.effectIndex == effectIndex;
+                            });
+                            if (activeTemporary) break;
+                        }
+                        require(activeTemporary, "Temporary spell did not precede werewolf transformation");
+                    }
+                    const auto initial = bytes(native);
+                    const auto original = read(initial);
+                    const auto scene = specialWorld();
+                    const auto transformed = std::array{Action{player, Action::Kind::SetWerewolf, {}, 1}};
+                    const auto restored = std::array{Action{player, Action::Kind::SetWerewolf, {}, 0}};
+                    auto invalid = transformed; invalid[0].value = 2;
+                    require(!native.prepareNativeTick(authority, id<ServerTick>(actionTick + 1), 1.f/30,
+                            {}, {}, &scene, {}, invalid) && bytes(native) == initial,
+                        "Invalid werewolf transition changed the campaign");
+                    auto pending = native.prepareNativeTick(authority, id<ServerTick>(actionTick + 1), 1.f/30,
+                        {}, {}, &scene, {}, transformed);
+                    require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(native) == initial,
+                        "Rejected werewolf transition leaked equipment or stats");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Werewolf transformation failed to commit");
+                    auto after = read(bytes(native));
+                    require(after.combat->players[owner].werewolf
+                            && after.combat->players[owner].knownWerewolf
+                            && after.combat->players[owner].bounty == 1000
+                            && after.combat->players[owner].normalSkills
+                            && after.combat->players[owner].normalAttributes
+                            && after.combat->players[1-owner] == original.combat->players[1-owner]
+                            && after.combat->actors[owner] != original.combat->actors[owner],
+                        "Werewolf transformation lost normal stats or crossed player identities");
+                    require(std::ranges::none_of(after.timedEffects, [owner](const auto& effect) {
+                            return effect.actor == owner && effect.sourceKind <= 2;
+                        }), "Werewolf transformation retained a temporary spell");
+                    auto forgedStats = after.combat->players[owner];
+                    (*forgedStats.normalSkills)[0] += 1.f;
+                    const std::array forgedStatUpdate{
+                        InventoryService::PlayerAiUpdate{player, forgedStats}};
+                    const auto transformedImage = bytes(native);
+                    require(!native.prepareNativeTick(authority, id<ServerTick>(actionTick + 2), 1.f/30,
+                            {}, {}, &scene, forgedStatUpdate)
+                            && bytes(native) == transformedImage,
+                        "Trusted AI update forged saved werewolf stats");
+                    const auto view = native.projectInventory(authority, id<SessionId>(owner + 1),
+                        id<ServerTick>(actionTick + 1), id<CanonicalRevision>(1));
+                    require(view && view->playerInventory.front().equipment.size() == 1
+                            && view->playerInventory.front().equipment.front().slot == EquipmentSlot::Robe,
+                        "Werewolf transformation did not replace equipped items with the robe");
+                    InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, transformedImage);
+                    replay.service().synchronizeCells(authority);
+                    require(bytes(replay.service()) == transformedImage,
+                        "Werewolf transformation changed on restart");
+                    bool attacked = after.combat->npcAction != 0;
+                    uint64_t frame = actionTick + 2;
+                    for (; frame <= actionTick + 75 && !attacked; ++frame)
+                    {
+                        (void)commit(native, frame); (void)commit(replay.service(), frame);
+                        require(bytes(native) == bytes(replay.service()),
+                            "Werewolf AI diverged after restart");
+                        attacked = read(bytes(native)).combat->npcAction != 0;
+                    }
+                    require(attacked, "Stock AI did not consume transformed werewolf state");
+                    const auto beforeRestore = bytes(native);
+                    auto reverse = native.prepareNativeTick(authority, id<ServerTick>(frame), 1.f/30,
+                        {}, {}, &scene, {}, restored);
+                    require(reverse && reverse->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(native) == beforeRestore,
+                        "Rejected werewolf restoration leaked state");
+                    require(reverse->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Werewolf restoration failed to commit");
+                    const auto human = read(bytes(native));
+                    require(!human.combat->players[owner].werewolf
+                            && !human.combat->players[owner].normalSkills
+                            && !human.combat->players[owner].normalAttributes
+                            && human.combat->players[1-owner] == original.combat->players[1-owner],
+                        "Werewolf restoration lost saved stats or crossed player identities");
+                    const auto humanView = native.projectInventory(authority, id<SessionId>(owner + 1),
+                        id<ServerTick>(frame), id<CanonicalRevision>(1));
+                    require(humanView && humanView->playerInventory.front().equipment.empty(),
+                        "Werewolf robe remained equipped after restoration");
+                    const auto restoredImage = bytes(native);
+                    InventoryHost restoredReplay(descriptor, testContentManifest(), *registry, *crypto, restoredImage);
+                    restoredReplay.service().synchronizeCells(authority);
+                    require(bytes(restoredReplay.service()) == restoredImage,
+                        "Werewolf restoration changed on restart");
+                }
+                for (size_t attackerIndex = 0; attackerIndex < 2; ++attackerIndex)
+                {
+                    auto host = make(); auto& service = dynamic_cast<InventoryService&>(host->service());
+                    const auto attackingPlayer = id<PlayerId>(attackerIndex + 1);
+                    const auto attackingSession = id<SessionId>(attackerIndex + 1);
+                    std::vector<CanonicalPlayerEntityState> close(authority.players().begin(), authority.players().end());
+                    close[attackerIndex] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                        close[attackerIndex], id<ServerTick>(1), Transform(close[attackerIndex].transform().cell(),
+                            Position3(60*1024, -64*1024, 1024), close[attackerIndex].transform().orientation()),
+                        LinearVelocity3(0, 0, 0)));
+                    const auto nearby = std::get<CanonicalServerState>(createCanonicalServerState(
+                        close, authority.activeSessions()));
+                    service.synchronizeCells(nearby);
+                    const auto view = service.projectInventory(nearby, attackingSession,
+                        id<ServerTick>(1), id<CanonicalRevision>(1));
+                    require(view && view->equipment && !view->equipment->motions.empty(),
+                        "Witness crime target absent");
+                    const auto selectedNpc = view->equipment->motions.front().placement;
+                    ClientMeleeAttackCommand attack{attackingSession, SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        id<ActorId>(selectedNpc), id<ServerTick>(1), CombatRevision::initial(),
+                        CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    const auto* attacker = nearby.findPlayer(attackingPlayer);
+                    const ServerCommandProposal attackProposal(attackingSession, SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                        EntityPrecondition(attacker->entityId(), attacker->entityRevision(), attacker->authorityEpoch()),
+                        MeleeAttackCommandProposal(attack));
+                    auto intent = service.prepareMeleeAttack(nearby, attackProposal, id<ServerTick>(1));
+                    require(bool(intent), "Witness crime attack did not prepare");
+                    const auto scene = specialWorld();
+                    const std::array peaceful{Action{attackingPlayer,
+                        Action::Kind::SetCrimeDisposition, {}, 200}};
+                    auto swing = service.prepareNativeTick(nearby, id<ServerTick>(1), 1.f/30,
+                        std::move(intent), {}, &scene, {}, peaceful);
+                    require(swing && swing->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Witness crime swing did not commit");
+                    std::vector<CanonicalPlayerEntityState> chasePlayers(
+                        nearby.players().begin(), nearby.players().end());
+                    chasePlayers[attackerIndex] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                        chasePlayers[attackerIndex], id<ServerTick>(2), Transform(chasePlayers[attackerIndex].transform().cell(),
+                            Position3(60*1024, -160*1024, 1024), chasePlayers[attackerIndex].transform().orientation()),
+                        LinearVelocity3(0, 0, 0)));
+                    const auto chase = std::get<CanonicalServerState>(createCanonicalServerState(
+                        chasePlayers, nearby.activeSessions()));
+                    service.synchronizeCells(chase);
+                    bool reported = false, rejected = false;
+                    uint64_t reportTick = 0;
+                    for (uint64_t frame = 2; frame <= 90; ++frame)
+                    {
+                        auto contact = service.prepareNativeTick(chase, id<ServerTick>(frame),
+                            1.f/30, {}, {}, &scene);
+                        require(bool(contact), "Witness crime contact tick absent");
+                        if (auto events = service.projectCombatEvents(chase, attackingSession,
+                                id<ServerTick>(frame), id<CanonicalRevision>(1), contact.get()))
+                            for (const auto& event : events->events()) if (event.hit)
+                            {
+                                const auto beforeContact = bytes(service);
+                                require(contact->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                        == CanonicalDurabilityResult::Rejected
+                                        && bytes(service) == beforeContact,
+                                    "Rejected bystander witnessed contact leaked crime or hit state");
+                                rejected = true;
+                            }
+                        require(contact->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Witness crime contact failed to commit");
+                        const auto state = read(bytes(service));
+                        const auto& social = state.combat->players[attackerIndex];
+                        reported = social.bounty == 123;
+                        if (reported)
+                        {
+                            require(social.engagements.size() == 2
+                                    && std::ranges::any_of(social.engagements, [selectedNpc](const auto& entry) {
+                                        return entry.witness != selectedNpc && entry.fight == 100;
+                                    })
+                                    && state.combat->players[1-attackerIndex].engagements.empty()
+                                    && state.combat->players[1-attackerIndex].bounty == 0,
+                                "Bystander crime report or persistent engagement crossed identities");
+                            reportTick = frame; break;
+                        }
+                    }
+                    require(reported && rejected, "Bystander did not report authenticated assault atomically");
+                    const auto reportedImage = bytes(service);
+                    auto forgedEngagement = read(reportedImage).combat->players[attackerIndex];
+                    forgedEngagement.engagements.clear();
+                    const std::array forgedEngagementUpdate{
+                        InventoryService::PlayerAiUpdate{attackingPlayer, forgedEngagement}};
+                    require(!service.prepareNativeTick(chase, id<ServerTick>(reportTick + 1), 1.f/30,
+                            {}, {}, &scene, forgedEngagementUpdate)
+                            && bytes(service) == reportedImage,
+                        "Trusted AI update erased durable crime engagement");
+                    InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
+                    replay.service().synchronizeCells(chase);
+                    require(bytes(replay.service()) == reportedImage,
+                        "Crime engagement changed on restart");
+                    bool aiReacted = read(reportedImage).combat->npcAction != 0;
+                    for (uint64_t frame = reportTick + 1; frame <= reportTick + 75 && !aiReacted; ++frame)
+                    {
+                        auto originalTick = service.prepareNativeTick(chase, id<ServerTick>(frame), 1.f/30,
+                            {}, {}, &scene);
+                        auto replayTick = dynamic_cast<InventoryService&>(replay.service()).prepareNativeTick(
+                            chase, id<ServerTick>(frame), 1.f/30, {}, {}, &scene);
+                        require(originalTick && replayTick
+                                && originalTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && replayTick->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && bytes(service) == bytes(replay.service()),
+                            "Crime engagement AI diverged after restart");
+                        aiReacted = read(bytes(service)).combat->npcAction != 0;
+                    }
+                    require(aiReacted, "Persisted victim engagement did not reach stock AI");
+                }
+                std::cout << "werewolf and bystander crime two players effects equipment stats witnesses engagement rejection restart AI\n";
                 return;
             }
             if (effectFamily == "ai-disposition" || effectFamily == "ai-creature")

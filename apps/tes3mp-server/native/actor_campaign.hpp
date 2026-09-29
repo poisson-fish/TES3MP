@@ -4,10 +4,13 @@
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
 #include <apps/openmw/mwmechanics/meleestate.hpp>
+#include <components/esm/attr.hpp>
+#include <components/esm3/loadskil.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
+#include <optional>
 #include <string>
 
 namespace TES3MP::Native
@@ -44,7 +47,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t MovementEffectsCampaignMagic = 0x5550434154335354;
     inline constexpr uint64_t AiDecisionCampaignMagic = 0x5650434154335354;
     inline constexpr uint64_t PlayerAiCampaignMagic = 0x5750434154335354;
-    inline constexpr bool hasPlayerAi(uint64_t magic) { return magic == PlayerAiCampaignMagic; }
+    inline constexpr uint64_t SocialLifecycleCampaignMagic = 0x5850434154335354;
+    inline constexpr bool hasSocialLifecycle(uint64_t magic) { return magic == SocialLifecycleCampaignMagic; }
+    inline constexpr bool hasPlayerAi(uint64_t magic)
+    { return magic == PlayerAiCampaignMagic || hasSocialLifecycle(magic); }
     inline constexpr bool hasAiDecisions(uint64_t magic)
     { return magic == AiDecisionCampaignMagic || hasPlayerAi(magic); }
     inline constexpr bool hasMovementEffects(uint64_t magic)
@@ -153,6 +159,15 @@ namespace TES3MP::Native
             int bounty = 0, crimeDisposition = 0;
             uint64_t drawState = 0;
             bool werewolf = false, knownWerewolf = false;
+            std::optional<std::array<float, ESM::Skill::Length>> normalSkills;
+            std::optional<std::array<float, ESM::Attribute::Length>> normalAttributes;
+            struct CrimeEngagement
+            {
+                uint64_t witness = 0, tick = 0;
+                int fight = 0;
+                bool operator==(const CrimeEngagement&) const = default;
+            };
+            std::vector<CrimeEngagement> engagements;
             ESM::RefId selectedSpell;
             uint64_t selectedEnchantedItem = 0;
             bool operator==(const PlayerAi&) const = default;
@@ -446,6 +461,44 @@ namespace TES3MP::Native
                         std::string_view(bytes.data() + offset, size_t(spellLength)));
                 offset += size_t(spellLength);
                 player.selectedEnchantedItem = getAreaWord(bytes, offset);
+                if (hasSocialLifecycle(magic) && player.werewolf)
+                {
+                    auto& skills = player.normalSkills.emplace();
+                    auto& attributes = player.normalAttributes.emplace();
+                    for (float& value : skills)
+                    {
+                        const auto bits = getAreaWord(bytes, offset);
+                        if (bits > UINT32_MAX) throw std::invalid_argument("Native werewolf skill bits invalid");
+                        value = std::bit_cast<float>(uint32_t(bits));
+                        if (!std::isfinite(value) || std::abs(value) > 1'000'000.f)
+                            throw std::invalid_argument("Native werewolf skill invalid");
+                    }
+                    for (float& value : attributes)
+                    {
+                        const auto bits = getAreaWord(bytes, offset);
+                        if (bits > UINT32_MAX) throw std::invalid_argument("Native werewolf attribute bits invalid");
+                        value = std::bit_cast<float>(uint32_t(bits));
+                        if (!std::isfinite(value) || std::abs(value) > 1'000'000.f)
+                            throw std::invalid_argument("Native werewolf attribute invalid");
+                    }
+                }
+                if (hasSocialLifecycle(magic))
+                {
+                    const auto count = getAreaWord(bytes, offset);
+                    if (count > 128 || count > (bytes.size() - offset) / 24)
+                        throw std::invalid_argument("Native crime engagement count invalid");
+                    player.engagements.reserve(size_t(count));
+                    for (uint64_t i = 0; i < count; ++i)
+                    {
+                        const auto witness = getAreaWord(bytes, offset);
+                        const auto at = getAreaWord(bytes, offset);
+                        const auto fight = getAreaWord(bytes, offset);
+                        if (!witness || !at || at > tick || fight > 100
+                            || (!player.engagements.empty() && player.engagements.back().witness >= witness))
+                            throw std::invalid_argument("Native crime engagement invalid");
+                        player.engagements.push_back({witness, at, int(fight)});
+                    }
+                }
             }
         std::optional<ActorCampaignLife> life;
         if (magic == LifeActorCampaignMagic || magic == ProjectileActorCampaignMagic

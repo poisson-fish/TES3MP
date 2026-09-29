@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 58; ++candidate)
+            for (unsigned candidate = 3; candidate <= 59; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -282,6 +282,7 @@ namespace TES3MP::Native
                 binding.mMovementEffects = descriptorVersion >= 56;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
+                binding.mSocialLifecycle = descriptorVersion >= 59;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -371,6 +372,23 @@ namespace TES3MP::Native
                     // frozen interior. Other inventory/door/script services are
                     // outside its domain, just as in the collision probe.
                     references = loadout.placedActors(cell);
+                    if (start.binding.mSocialLifecycle && cellIndex == 0)
+                    {
+                        for (const auto& placed : references)
+                        {
+                            if (placed.mScripted || placed.mLeveled
+                                || !loadout.store().get<ESM::NPC>().search(placed.mRef.mRefID)) continue;
+                            if (start.binding.mCrimeWitnesses.size() >= 128)
+                                throw std::invalid_argument("Native crime witness capacity exceeded");
+                            const auto& p = placed.mRef.mPos.pos;
+                            start.binding.mCrimeWitnesses.push_back({placed.mIdentity, wireCell,
+                                Position3(std::llround(double(p[0]) * 1024),
+                                    std::llround(double(p[1]) * 1024),
+                                    std::llround(double(p[2]) * 1024)), placed.mRef.mRefID});
+                            placement << "\nwitness:" << placed.mIdentity << ':' << placed.mRef.mRefID
+                                << ':' << p[0] << ':' << p[1] << ':' << p[2];
+                        }
+                    }
                     std::erase_if(references, [&](const auto& ref) { return ref.mRef.mRefID != ESM::RefId::stringRefId(start.navigation->record); });
                     if (cellIndex != 0) references.clear();
                     if (cellIndex == 0 && (references.size()!=1 || references.front().mScripted || references.front().mLeveled))
