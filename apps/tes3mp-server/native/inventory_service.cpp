@@ -69,7 +69,10 @@ namespace TES3MP::Native
         bool rangedSources(const ESM::Weapon& weapon, const ESM::Weapon& ammunition)
         {
             const auto* type = MWMechanics::getWeaponType(weapon.mData.mType);
-            return weapon.mScript.empty() && weapon.mEnchant.empty()
+            // Stock projectile impact reads the projectile enchantment, not the
+            // launcher's. Keep projectile scripts/enchantments closed until their
+            // on-hit effects can commit with damage and recovery.
+            return weapon.mScript.empty()
                 && ammunition.mScript.empty() && ammunition.mEnchant.empty()
                 && (type->mWeaponClass == ESM::WeaponType::Thrown ? weapon.mId == ammunition.mId
                     : type->mWeaponClass == ESM::WeaponType::Ranged && type->mAmmoType == ammunition.mData.mType);
@@ -2435,7 +2438,7 @@ namespace TES3MP::Native
         const bool bow = mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease);
         if (!targetIndex && !bow) return {};
         if (mBinding.mAuthoritativeAim && (bow != attack.aimPoint.has_value())) return {};
-        if (bow && (!attack.commandId.value() || !weapon->mScript.empty() || !weapon->mEnchant.empty()
+        if (bow && (!attack.commandId.value() || !weapon->mScript.empty()
                 || mCombat->arrows.size() >= MaximumActorProjectiles
                 || !equippedAmmunition(mRuntime.installedValues(owner), mRuntime.mStore, *weapon))) return {};
         if (mBinding.mPlayerMelee[owner])
@@ -6787,7 +6790,8 @@ namespace TES3MP::Native
                     const auto* weapon = winningWeapon
                         ? mRuntime.mStore.get<ESM::Weapon>().find(winningWeapon->mRef.mRefID) : nullptr;
                     const bool ranged = rangedWeapon(weapon, mBinding.mRangedRelease);
-                    if (ranged && (!mBinding.mRangedFlight || !weapon->mScript.empty() || !weapon->mEnchant.empty()))
+                    if (ranged && (!mBinding.mRangedFlight || !weapon->mScript.empty()
+                        || (weapon->mData.mType == ESM::Weapon::MarksmanThrown && !weapon->mEnchant.empty())))
                         throw std::invalid_argument("Native NPC ranged selection has unsupported source");
                     if (winningWeapon && winningWeapon->mRef.mRefNum
                         != values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])

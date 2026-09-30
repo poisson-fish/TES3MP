@@ -4220,6 +4220,13 @@ namespace TES3MP::Native::Testing
         };
         if (profile == "bow-aim-flight")
         {
+            const auto launcherSlot = std::ranges::find(inventory.equipment,
+                EquipmentSlot::CarriedRight, &EquipmentBinding::slot);
+            require(launcherSlot != inventory.equipment.end(), "Enchanted launcher was not equipped");
+            const auto launcher = std::ranges::find(inventory.stacks,
+                launcherSlot->stackId, &CanonicalItemStack::stackId);
+            require(launcher != inventory.stacks.end(), "Enchanted launcher stack absent");
+            const auto launcherCharge = launcher->enchantmentCharge;
             CanonicalWorldTimeState time;
             time.daysPassed = 42; time.day = 1; time.year = 427;
             time.millisecondsSinceMidnight = 12 * 3600000;
@@ -4241,7 +4248,7 @@ namespace TES3MP::Native::Testing
             require(!service.prepareMeleeAttack(authority, badRequest, id<ServerTick>(1))
                     && bytes(service) == beforeBadAim,
                 "Unbounded external aim changed canonical state");
-            auto invalid = intent(service, authority, 1, 1, MeleeAttackType::Chop, .7f);
+            auto invalid = intent(service, authority, 1, 1, MeleeAttackType::Slash, .7f);
             require(bool(invalid), "Targetless world aim rejected");
             const auto original = bytes(service);
             auto first = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, std::move(invalid), &world);
@@ -4251,6 +4258,9 @@ namespace TES3MP::Native::Testing
             require(first->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                     == CanonicalDurabilityResult::Committed, "World-shot wind-up failed");
             const auto windup = bytes(service);
+            require(state(service).combat->swings[0]
+                    && state(service).combat->swings[0]->direction == uint64_t(MeleeAttackType::Slash),
+                "Alternate ranged attack mode did not retain the bound shoot clip");
             InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, windup);
             resumed.service().synchronizeCells(authority);
             require(bytes(resumed.service()) == windup, "World aim changed on wind-up restart");
@@ -4264,8 +4274,15 @@ namespace TES3MP::Native::Testing
                 {
                     const auto& arrow = current.combat->arrows.front();
                     require(!arrow.target && !arrow.targetLife && arrow.caster == 1
+                            && arrow.weapon == "aim_enchanted_bow"
                             && arrow.direction[1] < 0 && count(resumed.service()) == 1,
                         "World aim or exact ammunition cost changed at release");
+                    const auto equipped = resumed.service().projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    require(equipped && std::ranges::any_of(equipped->playerInventory.front().stacks,
+                            [&](const auto& stack) { return stack.stackId == launcher->stackId
+                                && stack.enchantmentCharge == launcherCharge; }),
+                        "Firing spent the launcher's non-projectile enchantment charge");
                     release = arrow.releaseTick;
                     if (arrow.terminal) { terminal = tick; break; }
                 }
@@ -6627,7 +6644,16 @@ namespace TES3MP::Native::Testing
                         }
                         throw std::runtime_error("Plain ranged fixture unavailable");
                     };
-                    const auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
+                    auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
+                    if (encounterProfile == "bow-aim-flight")
+                    {
+                        auto enchanted = *base.store().get<ESM::Weapon>().find(weapon);
+                        enchanted.mId = ESM::RefId::stringRefId("aim_enchanted_bow");
+                        enchanted.mEnchant = rangedEnchantment.mId;
+                        out.startRecord(ESM::Weapon::sRecordId, 0);
+                        enchanted.save(out); out.endRecord(ESM::Weapon::sRecordId);
+                        weapon = enchanted.mId;
+                    }
                     if (encounterProfile.find("combined") != std::string_view::npos)
                         std::cout << "combined ranged=" << weapon << " melee=iron longsword\n";
                     for (auto* participant : {&female, &beast})

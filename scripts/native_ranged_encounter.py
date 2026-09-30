@@ -183,6 +183,7 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
     wait_for(lambda: rows("Alice", "traversal_inventory")[-1]["container_count"] == 0,
              "Alice observed the emptied corpse")
     looted_count = rows("Bob", "traversal_inventory")[-1]["player_count"]
+    looted_ammo = ammo("Bob")
     before_generation = rows("Bob", "native_combat_sample")[-1]["generation"]
     command("Bob", "reconnect")
     wait_for(lambda: rows("Bob", "native_combat_sample")[-1]["generation"] > before_generation,
@@ -191,7 +192,7 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
              "empty corpse persisted across reconnect")
     if rows("Bob", "traversal_inventory")[-1]["player_count"] != looted_count:
         raise RuntimeError("corpse loot duplicated on reconnect")
-    if ammo("Alice") != initial["Alice"] - shots or ammo("Bob") != initial["Bob"]:
+    if ammo("Alice") != initial["Alice"] - shots or ammo("Bob") != looted_ammo:
         raise RuntimeError("ammunition changed after the encounter or reconnect")
     for role in evidence:
         if not rows(role, "native_combat_sample")[-1]["actors"][0]["dead"]:
@@ -201,34 +202,37 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
         if [(hit["attacker_revision"], hit["target_revision"]) for hit in current_hits] != identities[role]:
             raise RuntimeError(f"{role} replayed a ranged impact after reconnect")
     world_start = max(shot["release"] for _, shot in flight("Alice", 1, start_tick))
-    command("Alice", "pose 60 -480 1 0 3.14159")
+    # The earlier capture covers expiry and reconnect. Aim at nearby floor
+    # geometry here so the hull contact lands within the terminal cue window.
+    command("Alice", "pose 60 -480 1 1.2 0")
     command("Alice", "shoot 0.25")
     attempted_releases += 1
-    world = wait_for(lambda: next(((tick, shot) for tick, shot in flight("Alice", 1, world_start)
-                                   if shot["terminal"] == 0), None),
-                     "targetless world shot released", 8)
-    world_key = (world[1]["kind"], world[1]["caster"], world[1]["life"], world[1]["command"])
-    wait_for(lambda: ammo("Alice") == initial["Alice"] - shots - 1,
-             "world shot spent one arrow")
-    before_generation = rows("Bob", "native_combat_sample")[-1]["generation"]
-    command("Bob", "reconnect")
-    wait_for(lambda: rows("Bob", "native_combat_sample")[-1]["generation"] > before_generation,
-             "Bob reconnected during targetless flight")
-    wait_for(lambda: any((shot["kind"], shot["caster"], shot["life"], shot["command"]) == world_key
-                         for shot in rows("Bob", "native_combat_sample")[-1]["projectiles"]),
-             "reconnect restored the world flight")
-    wait_for(lambda: all(any((shot["kind"], shot["caster"], shot["life"], shot["command"]) == world_key
-                             and shot["terminal"] for row in rows(role, "native_combat_sample")
+    quick = wait_for(lambda: next(((tick, shot) for tick, shot in flight("Alice", 1, world_start)
+                                   if shot["release"] > world_start), None),
+                     "quick world shot released", 8)
+    quick_key = (quick[1]["kind"], quick[1]["caster"], quick[1]["life"], quick[1]["command"])
+    terminal = wait_for(lambda: next(((tick, shot) for tick, shot in flight("Alice", 1, quick[1]["release"] - 1)
+                                      if (shot["kind"], shot["caster"], shot["life"], shot["command"]) == quick_key
+                                      and shot["terminal"]), None),
+                        "quick world hull resolved", 8)
+    if (terminal[0] - quick[1]["release"] >= 30
+            or abs(terminal[1]["position"][2]) > 5
+            or not -500 < terminal[1]["position"][1] < -350):
+        raise RuntimeError("quick world shot did not contact a nearby hull")
+    wait_for(lambda: all(any(shot.get("terminal") == 1
+                             and (shot["kind"], shot["caster"], shot["life"], shot["command"]) == quick_key
+                             for row in rows(role, "projectile_presentation_frame")
                              for shot in row["projectiles"]) for role in evidence),
-             "both clients observed the targetless terminal receipt", 85)
+             "both desktops rendered the quick world-hull cue", 8)
     if any(len([hit for row in rows(role, "native_combat_sample") for hit in row["player_hits"]
                 if hit["attacker"] == 1]) != len(hits[role]) for role in evidence):
-        raise RuntimeError("world miss produced an actor impact")
-    if ammo("Alice") != initial["Alice"] - shots - 1 or ammo("Bob") != initial["Bob"]:
-        raise RuntimeError("world shot or reconnect duplicated ammunition")
-    report = dict(success=True, scenario="V64 aimed ranged flight, world miss, cue and loot on two desktops",
+        raise RuntimeError("world hull produced an actor impact")
+    if ammo("Alice") != initial["Alice"] - shots - 1 or ammo("Bob") != looted_ammo:
+        raise RuntimeError("quick world shot duplicated ammunition")
+    report = dict(success=True, scenario="V64 aimed ranged flight, quick world hull, cue and loot on two desktops",
                   manifest=manifest, flight=key, shared_ticks=len(overlap), visual_frames=visual_frames,
-                  shots=shots, world_flight=world_key, terminal_cues=[key, second_key],
+                  shots=shots, quick_world_flight=quick_key,
+                  quick_world_ticks=terminal[0] - quick[1]["release"], terminal_cues=[key, second_key, quick_key],
                   attempted_releases=attempted_releases, initial_ammunition=initial,
                   final_ammunition={role: ammo(role) for role in evidence}, impacts=hits,
                   corpse_items=corpse["container_count"], looted_player_items=looted_count,

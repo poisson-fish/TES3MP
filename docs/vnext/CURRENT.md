@@ -1,38 +1,39 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-steps NPCs/doors at 60 Hz and commits at 30 Hz. V63 bounds same-cell
-neighbors to three; others freeze. Player/NPC casts, conditions, stats,
-Disintegration, concealment, visibility, movement effects and twelve AI
-effects have bounded vanilla/TR checks. VFX, sneak stance and AI jumps remain.
+steps NPCs/doors at 60 Hz, commits at 30 Hz and bounds same-cell neighbors
+to three. Player/NPC casts, conditions, stats, Disintegration, concealment, visibility,
+movement and twelve AI effects have bounded vanilla/TR checks. VFX, sneak
+stance and AI jumps remain.
 
 Server-owned bows, crossbows and throwing stars use authored release, durable
-flight, first-hull/world contact and atomic damage, recovery and loot. NPC
-life/placement survives restart; death clears old flights. Narrow real-loadout
-rejection, overlapping-impact, lethal-recovery and restart checks pass:
-`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`. The three-neighbor
-bound is provisional. Mixed passives, non-player Command and scripted or
-enchanted ranged sources remain open; world-transfer conflicts reject atomically.
+flight, first-hull/world contact and atomic damage/recovery/loot. Unscripted
+enchanted bow/crossbow launchers share that path; projectile enchantments and
+scripts await atomic on-hit execution. NPC life survives restart; death clears
+flights. Real-loadout rejection, overlapping-impact, lethal-recovery and
+restart checks pass: `build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`.
+The neighbor cap is provisional. Mixed passives and non-player Command remain;
+world-transfer conflicts reject atomically.
 
-V64 accepts bounded desktop camera aim even without a mapped actor, freezes its
-server launch direction through wind-up/restart and uses server hull/world sweep
-for first contact. Targetless misses pay ammunition once and retain terminal
-receipts. A terminal receipt seen within 30 ticks of release presents a 250 ms
-impact cue, including when no flying snapshot arrived; reconnect does not replay
-an already seen cue. Protocol, timeline and atomic world-miss/restart checks pass:
+V64 accepts bounded desktop camera aim without a mapped actor, freezes launch
+direction through restart and sweeps server hulls. Targetless misses pay once
+and retain receipts. Receipts seen within 30 ticks present a 250 ms impact cue
+even without a flight snapshot; reconnect does not replay it. Checks pass:
 `build/logs/aim-protocol-test.log`, `build/logs/aim-cue-test.log`,
-`build/logs/bow-aim-fixture-final.log`.
+`build/logs/bow-aim-enchanted-test.log`. The V64 fixture retains a Slash intent
+through the bound shoot clip and restart.
 
-`build/logs/desktop-ranged-aim-live-01.log`: two graphical clients with 100 ms
-one-way latency, jitter and 10% loss rendered both terminal cues, shared two
-impacts/death and one 17-item corpse transfer. A targetless world shot after
-death charged one arrow; Bob reconnected mid-flight, and both clients received
-its terminal receipt. The relay dropped 1,519 packets. The world miss expired
-without an actor contact in this fixture; quick world-hull contact still needs
-live coverage.
+`build/logs/desktop-ranged-aim-live-01.log`: two graphical clients under
+100 ms latency, jitter and 10% loss shared two impacts/death, one corpse
+transfer and a targetless expired miss. Bob reconnected mid-flight; both
+received its receipt. Relay drops: 1,519. With a plain bow,
+`build/logs/desktop-ranged-world-hull-05.log` proves targetless floor contact
+in seven ticks, one arrow spent, no actor hit and both terminal cues under
+325 relay drops.
 
-**Next:** extend ranged sources and attack modes beyond plain bows, crossbows
-and thrown weapons, retaining the V64 aim and receipt path.
+**Next:** carry projectile enchantments/scripts through atomic impact and
+recovery, then cover varied ranged sources and attack modes live while retaining
+the V64 aim and receipt path.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
