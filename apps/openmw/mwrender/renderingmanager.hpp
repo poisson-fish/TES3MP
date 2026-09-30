@@ -15,6 +15,7 @@
 #include <osgUtil/IncrementalCompileOperation>
 
 #include <deque>
+#include <array>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -192,6 +193,8 @@ namespace MWRender
         void spawnEffect(VFS::Path::NormalizedView model, std::string_view texture, const osg::Vec3f& worldPosition,
             float scale = 1.f, bool isMagicVFX = true, bool useAmbientLight = true, std::string_view effectId = {},
             bool loop = false);
+        void spawnMagicBolt(const std::vector<VFS::Path::Normalized>& models, std::string_view texture,
+            const osg::Vec3f& worldPosition, const std::array<float, 4>& lightColor, std::string_view effectId);
 
         void removeEffect(std::string_view effectId);
         bool moveEffect(std::string_view effectId, const osg::Vec3f& position, const osg::Quat& attitude);

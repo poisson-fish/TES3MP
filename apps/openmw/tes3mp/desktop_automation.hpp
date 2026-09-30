@@ -121,6 +121,8 @@ namespace TES3MP::OpenMWAdapter
         EngineCoordinator* mCoordinator = nullptr;
         DesktopSemanticInput* mDesktopInput = nullptr;
         std::filesystem::path mTraversalControl;
+        std::size_t mMagicBoltFrames = 0;
+        bool mMagicBoltScreenshotTaken = false;
         std::uint64_t mTraversalSequence = 0;
         std::uint64_t mTraversalReconnectDelay = 0;
         std::optional<ReliableGroundItemBaseline> mTraversalGround;

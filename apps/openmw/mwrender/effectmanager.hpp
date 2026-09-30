@@ -2,6 +2,7 @@
 #define OPENMW_MWRENDER_EFFECTMANAGER_H
 
 #include <memory>
+#include <array>
 #include <vector>
 
 #include <osg/ref_ptr>
@@ -38,6 +39,9 @@ namespace MWRender
         void addEffect(VFS::Path::NormalizedView model, std::string_view textureOverride,
             const osg::Vec3f& worldPosition, float scale, bool isMagicVFX = true, bool useAmbientLight = true,
             std::string_view effectId = {}, bool loop = false);
+
+        void addMagicBolt(const std::vector<VFS::Path::Normalized>& models, std::string_view textureOverride,
+            const osg::Vec3f& worldPosition, const std::array<float, 4>& lightColor, std::string_view effectId);
 
         void removeEffect(std::string_view effectId);
         bool moveEffect(std::string_view effectId, const osg::Vec3f& position, const osg::Quat& attitude);

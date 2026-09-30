@@ -200,8 +200,15 @@ namespace TES3MP::OpenMWAdapter
             PhysicalProjectileSnapshot pose;
             double tick;
         };
+        struct MagicProjectilePoseEvidence
+        {
+            MagicProjectileSnapshot pose;
+            double tick;
+            size_t loopingSounds;
+        };
         std::vector<ActorPoseEvidence> actorPoseEvidence() const;
         std::vector<ProjectilePoseEvidence> projectilePoseEvidence() const;
+        std::vector<MagicProjectilePoseEvidence> magicProjectilePoseEvidence() const;
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
 

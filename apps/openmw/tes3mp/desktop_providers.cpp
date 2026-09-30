@@ -26,6 +26,7 @@
 #include "../mwrender/vismask.hpp"
 #include "../mwrender/animation.hpp"
 #include "../mwrender/renderingmanager.hpp"
+#include "../mwsound/sound.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
@@ -90,26 +91,51 @@ namespace TES3MP::OpenMWAdapter
             return enchantment ? &enchantment->mEffects : nullptr;
         }
 
-        std::optional<std::pair<VFS::Path::Normalized, std::string>> magicBoltVisual(
+        struct MagicBoltVisual
+        {
+            std::vector<VFS::Path::Normalized> models;
+            std::string particle;
+            std::array<float, 4> lightColor{};
+            std::set<ESM::RefId> sounds;
+        };
+
+        std::optional<MagicBoltVisual> magicBoltVisual(
             const MWWorld::ESMStore& store, uint8_t sourceKind, const std::string& record)
         {
             const auto* effects = magicVisualEffects(store, sourceKind, record);
             if (!effects) return {};
-            const ESM::MagicEffect* first = nullptr;
-            size_t count = 0;
+            MagicBoltVisual result;
+            std::vector<ESM::RefId> ids;
             for (const auto& effect : effects->mList)
                 if (effect.mData.mRange == ESM::RT_Target)
                 {
                     const auto* visual = store.get<ESM::MagicEffect>().search(effect.mData.mEffectID);
                     if (!visual) return {};
-                    if (!first) first = visual;
-                    ++count;
+                    ids.push_back(visual->mBolt.empty()
+                        ? ESM::RefId::stringRefId("VFX_DefaultBolt") : visual->mBolt);
+                    if (ids.size() == 1) result.particle = visual->mParticle;
+                    const auto color = visual->getColor();
+                    for (size_t i = 0; i < result.lightColor.size(); ++i)
+                        result.lightColor[i] += color[int(i)];
+                    const auto sound = visual->mBoltSound.empty()
+                        ? store.get<ESM::Skill>().find(visual->mData.mSchool)->mSchool->mBoltSound
+                        : visual->mBoltSound;
+                    if (!sound.empty()) result.sounds.insert(sound);
                 }
-            if (!first) return {};
-            const auto id = first->mBolt.empty() ? ESM::RefId::stringRefId("VFX_DefaultBolt") : first->mBolt;
-            MWWorld::ManualRef ref(store, id);
-            const auto ptr = ref.getPtr();
-            return std::pair{ptr.getClass().getCorrectedModel(ptr), count == 1 ? first->mParticle : std::string{}};
+            if (ids.empty()) return {};
+            for (auto& channel : result.lightColor) channel /= float(ids.size());
+            if (ids.size() > 1)
+            {
+                ids.insert(ids.begin(), ESM::RefId::stringRefId("VFX_Multiple" + std::to_string(effects->mList.size())));
+                result.particle.clear();
+            }
+            for (const auto& id : ids)
+            {
+                MWWorld::ManualRef ref(store, id);
+                const auto ptr = ref.getPtr();
+                result.models.push_back(ptr.getClass().getCorrectedModel(ptr));
+            }
+            return result;
         }
 
         bool presentMagicImpact(MWBase::World& world, const MagicImpactCue& cue)
@@ -130,11 +156,14 @@ namespace TES3MP::OpenMWAdapter
                 if (!area) return false;
                 world.spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)),
                     visual->mParticle, point, effect.mData.mArea > 0 ? float(effect.mData.mArea * 2) : 1.f);
-                auto sound = MWBase::Environment::get().getSoundManager();
-                const auto soundId = visual->mAreaSound.empty()
-                    ? store.get<ESM::Skill>().find(visual->mData.mSchool)->mSchool->mAreaSound
-                    : visual->mAreaSound;
-                if (!soundId.empty()) sound->playSound3D(point, soundId, 1.f, 1.f);
+                if (effect.mData.mArea > 0)
+                {
+                    auto sound = MWBase::Environment::get().getSoundManager();
+                    const auto soundId = visual->mAreaSound.empty()
+                        ? store.get<ESM::Skill>().find(visual->mData.mSchool)->mSchool->mAreaSound
+                        : visual->mAreaSound;
+                    if (!soundId.empty()) sound->playSound3D(point, soundId, 1.f, 1.f);
+                }
             }
             return true;
         }
@@ -1035,7 +1064,9 @@ namespace TES3MP::OpenMWAdapter
         ActorPresentationTimeline actorTimeline;
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedProjectiles;
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedMagicProjectiles;
+        std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::vector<MWBase::Sound*>> magicBoltSounds;
         std::vector<DesktopPresentation::ProjectilePoseEvidence> projectileEvidence;
+        std::vector<DesktopPresentation::MagicProjectilePoseEvidence> magicProjectileEvidence;
         std::vector<DesktopPresentation::ActorPoseEvidence> poseEvidence;
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
         bool sessionBootstrapPending = true;
@@ -1107,6 +1138,7 @@ namespace TES3MP::OpenMWAdapter
             actorTimeline.clear();
             activeMagicEffects.clear();
             projectileEvidence.clear();
+            magicProjectileEvidence.clear();
             try
             {
                 auto world = MWBase::Environment::get().getWorld();
@@ -1122,6 +1154,9 @@ namespace TES3MP::OpenMWAdapter
                         (void)key;
                         world->getRenderingManager()->removeEffect(effect);
                     }
+                    auto sounds = MWBase::Environment::get().getSoundManager();
+                    for (const auto& [key, active] : magicBoltSounds)
+                        for (auto* sound : active) sounds->stopSound(sound);
                     world->setWeatherAuthority(false);
                     world->setWorldTimeAuthority(false);
                     world->setLeveledActorAuthority(false);
@@ -1132,6 +1167,7 @@ namespace TES3MP::OpenMWAdapter
             }
             renderedProjectiles.clear();
             renderedMagicProjectiles.clear();
+            magicBoltSounds.clear();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -2275,6 +2311,7 @@ namespace TES3MP::OpenMWAdapter
             actorTimeline.advance(now);
             poseEvidence.clear();
             projectileEvidence.clear();
+            magicProjectileEvidence.clear();
             const auto presentationTick = actorTimeline.empty() ? std::optional<double>{} : actorTimeline.tick();
             auto world = MWBase::Environment::get().getWorld();
             if (world)
@@ -2328,18 +2365,43 @@ namespace TES3MP::OpenMWAdapter
                     if (velocity.length2() > 0) attitude.makeRotate(osg::Vec3f(0, 1, 0), velocity);
                     if (!rendering->moveEffect(effect, position, attitude))
                     {
+                        if (auto found = magicBoltSounds.find(key); found != magicBoltSounds.end())
+                        {
+                            auto sounds = MWBase::Environment::get().getSoundManager();
+                            for (auto* sound : found->second) sounds->stopSound(sound);
+                            magicBoltSounds.erase(found);
+                        }
                         const auto visual = magicBoltVisual(world->getStore(), flight.sourceKind, flight.record);
                         if (!visual) return ProviderResult::PresentationFailed;
-                        rendering->spawnEffect(visual->first, visual->second, position, 1.f, true, true, effect, true);
+                        rendering->spawnMagicBolt(visual->models, visual->particle, position,
+                            visual->lightColor, effect);
                         if (!rendering->moveEffect(effect, position, attitude))
                             return ProviderResult::PresentationFailed;
+                        auto sounds = MWBase::Environment::get().getSoundManager();
+                        for (const auto& id : visual->sounds)
+                            if (auto* sound = sounds->playSound3D(position, id, 1.f, 1.f,
+                                    MWSound::Type::Sfx, MWSound::PlayMode::Loop))
+                                magicBoltSounds[key].push_back(sound);
+                    }
+                    for (auto* sound : magicBoltSounds[key])
+                    {
+                        sound->setPosition(position);
+                        sound->setVelocity(velocity);
                     }
                     renderedMagicProjectiles[key] = effect;
+                    magicProjectileEvidence.push_back({flight, presentationTick.value_or(0),
+                        magicBoltSounds[key].size()});
                 }
                 for (auto it = renderedMagicProjectiles.begin(); it != renderedMagicProjectiles.end();)
                     if (!desiredMagic.contains(it->first))
                     {
                         rendering->removeEffect(it->second);
+                        if (auto found = magicBoltSounds.find(it->first); found != magicBoltSounds.end())
+                        {
+                            auto sounds = MWBase::Environment::get().getSoundManager();
+                            for (auto* sound : found->second) sounds->stopSound(sound);
+                            magicBoltSounds.erase(found);
+                        }
                         it = renderedMagicProjectiles.erase(it);
                     }
                     else ++it;
@@ -3286,6 +3348,9 @@ namespace TES3MP::OpenMWAdapter
 
     std::vector<DesktopPresentation::ProjectilePoseEvidence> DesktopPresentation::projectilePoseEvidence() const
     { return mImpl ? mImpl->projectileEvidence : std::vector<ProjectilePoseEvidence>{}; }
+
+    std::vector<DesktopPresentation::MagicProjectilePoseEvidence> DesktopPresentation::magicProjectilePoseEvidence() const
+    { return mImpl ? mImpl->magicProjectileEvidence : std::vector<MagicProjectilePoseEvidence>{}; }
 
     std::vector<NativeActorMotion> DesktopPresentation::nativeActorPresentation() const
     {

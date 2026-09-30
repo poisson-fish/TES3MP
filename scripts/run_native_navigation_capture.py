@@ -724,15 +724,15 @@ def run(args):
     config = args.content_config.resolve()
     settings = root / "files/settings-default.cfg"
     movement_capture = args.movement or args.movement_deep
-    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture
-    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.player_swings or args.physical_knockdown or args.creature or args.custom_body else {}
+    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture
+    encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.magic_visual or args.player_swings or args.physical_knockdown or args.creature or args.custom_body else {}
     if args.custom_body and "custom" not in encounter:
         raise ValueError("Custom body capture requires an authored custom NPC fixture")
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
-    if args.npc_casting: spell_name = encounter["spell"]
+    if args.npc_casting or args.magic_visual: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 64 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 64 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting or args.magic_visual else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     if args.creature or args.custom_body: npc = encounter["actor"]
     player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature or args.custom_body else npc if args.life_encounter or spell_capture else "player"
@@ -765,7 +765,7 @@ def run(args):
         common["spawn_positions"] = "-563200:-307200:394240"
     if spell_capture:
         common["spawn_positions"] = "61440:-32768:1024"
-    if args.npc_casting or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture:
+    if args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture:
         common["spawn_positions"] = "61440:-409600:1024"
     if args.ranged:
         common["spawn_positions"] = "61440:-491520:1024"
@@ -791,7 +791,7 @@ def run(args):
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         if spell_capture:
             tokens[10:13] = [str((60 + 25 * index) * 1024), "-32768", "1024"]
-        if args.npc_casting or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture:
+        if args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture:
             tokens[10:13] = [str((60 - 220 * index) * 1024), "-409600", "1024"]
         if args.ranged:
             tokens[10:13] = [str((60 - 220 * index) * 1024), "-491520", "1024"]
@@ -842,7 +842,8 @@ def run(args):
                        f"--tes3mp-port={relay_port}", "--tes3mp-timeout-ms=15000",
                        f"--tes3mp-password-file={password}", f"--tes3mp-player-credential-file={output / (role + '.credential')}",
                        f"--config={user}", "--replace=config", f"--user-data={user}", f"--resources={binary / 'resources'}",
-                       f"--start={cell}", "--skip-menu=1", "--new-game=0", "--no-grab=1", "--no-sound=1",
+                       f"--start={cell}", "--skip-menu=1", "--new-game=0", "--no-grab=1",
+                       f"--no-sound={0 if args.magic_visual else 1}",
                        "--script-console=1", f"--script-run={startup}", "--tes3mp-automation-role=native-traversal",
                        f"--tes3mp-automation-output={evidence[role]}", f"--tes3mp-content-manifest-id={manifest}",
                        "--tes3mp-content-cell-spaces=interior:1", "--tes3mp-content-allowed-cells=interior:1",
@@ -879,6 +880,10 @@ def run(args):
             verify_cast_encounter(output, evidence, processes, relay, manifest, encounter,
                                   lambda: start("server-restarted", [str(binary / "tes3mp_server.exe"), str(output / "server.cfg")]),
                                   lambda selected: start(selected, client_commands[selected]))
+            return
+        if args.magic_visual:
+            from native_magic_visual_capture import verify_magic_visual_capture
+            verify_magic_visual_capture(output, evidence, processes, relay, manifest, encounter["spell"])
             return
         if args.ranged:
             from native_ranged_encounter import verify_ranged_encounter
@@ -1039,6 +1044,7 @@ if __name__ == "__main__":
     parser.add_argument("--actor-effects-restart", action="store_true",
                         help="V35 active timed effect through server restart and two returning desktops")
     parser.add_argument("--npc-casting", action="store_true", help="V53 shared NPC/player cast timeline, interruption, reconnect and restart")
+    parser.add_argument("--magic-visual", action="store_true", help="Two-desktop Target bolt and impact under loss and reconnect")
     parser.add_argument("--player-swings", action="store_true", help="V46 two-client swing presentation, interruption, reconnect and restart")
     parser.add_argument("--ranged", action="store_true", help="V64 aimed physical flight, misses, impacts and cues on two desktops")
     parser.add_argument("--custom-body", action="store_true", help="Exercise the fixture custom NPC melee and body timeline")
@@ -1065,10 +1071,10 @@ if __name__ == "__main__":
     if args.retarget_getup and (not args.physical_knockdown or args.knockout_target != "players"):
         parser.error("--retarget-getup requires --physical-knockdown with player subjects")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
-            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.movement, args.movement_deep)) > 1:
+            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.magic_visual, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.movement, args.movement_deep)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.movement and not args.movement_deep and not args.leave:
+    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.movement and not args.movement_deep and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

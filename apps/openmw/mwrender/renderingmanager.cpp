@@ -864,6 +864,12 @@ namespace MWRender
         mEffectManager->addEffect(model, texture, worldPosition, scale, isMagicVFX, useAmbientLight, effectId, loop);
     }
 
+    void RenderingManager::spawnMagicBolt(const std::vector<VFS::Path::Normalized>& models, std::string_view texture,
+        const osg::Vec3f& worldPosition, const std::array<float, 4>& lightColor, std::string_view effectId)
+    {
+        mEffectManager->addMagicBolt(models, texture, worldPosition, lightColor, effectId);
+    }
+
     void RenderingManager::removeEffect(std::string_view effectId)
     {
         mEffectManager->removeEffect(effectId);

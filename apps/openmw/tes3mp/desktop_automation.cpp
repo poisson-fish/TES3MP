@@ -4,12 +4,14 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/statemanager.hpp"
+#include "../mwbase/world.hpp"
 
 #include <components/debug/debuglog.hpp>
 
 #include <limits>
 #include <ranges>
 #include <thread>
+#include <osgDB/WriteFile>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -475,6 +477,41 @@ namespace TES3MP::OpenMWAdapter
                     }
                     mOutput << "]}\n";
                 }
+                const auto magic = desktop->magicProjectilePoseEvidence();
+                if (!magic.empty())
+                {
+                    mOutput << "{\"event\":\"magic_projectile_presentation_frame\",\"time_ns\":"
+                        << now.nanoseconds() << ",\"projectiles\":[";
+                    bool first = true;
+                    for (const auto& rendered : magic)
+                    {
+                        if (!first) mOutput << ','; first = false;
+                        const auto& p = rendered.pose;
+                        mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
+                            << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
+                            << ",\"tick\":" << rendered.tick << ",\"looping_sounds\":"
+                            << rendered.loopingSounds << ",\"position\":["
+                            << p.position[0] << ',' << p.position[1] << ',' << p.position[2] << "]}";
+                    }
+                    mOutput << "]}\n";
+                    if (mRole == DesktopAutomationRole::NativeTraversal && !mMagicBoltScreenshotTaken
+                        && std::ranges::any_of(magic, [](const auto& rendered) {
+                            return rendered.pose.casterKind == 1 && rendered.pose.caster == 1;
+                        })
+                        && ++mMagicBoltFrames == 20)
+                    {
+                        try
+                        {
+                            osg::ref_ptr<osg::Image> screenshot = new osg::Image;
+                            MWBase::Environment::get().getWorld()->screenshot(screenshot, 1000, 700);
+                            const auto path = mTraversalControl.string() + ".magic-bolt.png";
+                            if (!osgDB::writeImageFile(*screenshot, path))
+                                return ProviderResult::PresentationFailed;
+                            mMagicBoltScreenshotTaken = true;
+                        }
+                        catch (...) { return ProviderResult::PresentationFailed; }
+                    }
+                }
             }
         }
         if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents
@@ -847,6 +884,17 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"position\":[" << p.position[0] << ',' << p.position[1] << ',' << p.position[2]
                     << "]}";
             }
+            mOutput << "],\"magic_flights\":[";
+            first = true;
+            for (const auto& p : snapshot.magicProjectiles())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
+                    << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
+                    << ",\"position\":["
+                    << p.position[0] << ',' << p.position[1] << ',' << p.position[2] << "]}";
+            }
             mOutput << "],\"visibility\":[";
             first = true;
             for (const auto& pose : snapshot.presentation())
@@ -933,6 +981,18 @@ namespace TES3MP::OpenMWAdapter
                         << ",\"magicka_delta\":" << cast.selfMagickaDelta
                         << ",\"target\":" << cast.targetId << ",\"target_kind\":" << unsigned(cast.targetKind)
                         << ",\"target_health_delta\":" << cast.targetHealthDelta << '}';
+                }
+            mOutput << "],\"magic_impacts\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& cue : batch.magicImpactCues())
+                {
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"kind\":" << unsigned(cue.casterKind) << ",\"caster\":" << cue.caster
+                        << ",\"life\":" << cue.casterLife << ",\"command\":" << cue.command
+                        << ",\"range\":" << unsigned(cue.range) << ",\"position\":["
+                        << cue.position[0] << ',' << cue.position[1] << ',' << cue.position[2] << "]}";
                 }
             mOutput << "]}\n";
             mOutput.flush();
