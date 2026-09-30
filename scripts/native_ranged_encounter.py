@@ -1,0 +1,200 @@
+"""Two desktop views of committed physical flight through an impaired relay."""
+
+from dataclasses import asdict
+import json
+import time
+
+
+def verify_ranged_encounter(output, evidence, processes, relay, manifest):
+    from run_native_navigation_capture import records
+
+    sequence = dict.fromkeys(evidence, 0)
+    ammunition_item = None
+
+    def rows(role, event):
+        return [row for row in records(evidence[role]) if row.get("event") == event]
+
+    def wait_for(predicate, description, timeout=35):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                print(description, flush=True)
+                return value
+            if any(process.poll() is not None for process in processes.values()):
+                raise RuntimeError(f"process exited before {description}")
+            time.sleep(.025)
+        raise RuntimeError(f"timed out: {description}")
+
+    def command(role, action):
+        sequence[role] += 1
+        control = evidence[role].with_suffix(".ndjson.control")
+        temporary = control.with_suffix(".tmp")
+        temporary.write_text(f"{sequence[role]} {action}\n", encoding="utf-8")
+        for retry in range(20):
+            try:
+                temporary.replace(control)
+                break
+            except PermissionError:
+                if retry == 19:
+                    raise
+                time.sleep(.01)
+        return wait_for(lambda: any(row.get("sequence") == sequence[role]
+                                    and row.get("event") == "traversal_" + action.split()[0]
+                                    for row in records(evidence[role])), f"{role}: {action}")
+
+    def ammo(role):
+        states = rows(role, "traversal_inventory")
+        if not states:
+            return 0
+        items = states[-1]["player"]
+        if ammunition_item is None:
+            return max((item["count"] for item in items), default=0)
+        return sum(item["count"] for item in items if item["item"] == ammunition_item)
+
+    def flight(role, caster, after_tick=0):
+        return [(row["tick"], shot) for row in rows(role, "native_combat_sample")
+                for shot in row["projectiles"] if shot["kind"] == 1 and shot["caster"] == caster
+                and shot["release"] > after_tick]
+
+    wait_for(lambda: all(rows(role, "native_combat_sample") and ammo(role) >= 20 for role in evidence),
+             "two ranged desktop baselines", 75)
+    initial = {role: ammo(role) for role in evidence}
+    if initial != {"Alice": 20, "Bob": 20}:
+        raise RuntimeError(f"unexpected initial ammunition counts: {initial}")
+    ammunition_item = next(item["item"] for item in rows("Alice", "traversal_inventory")[-1]["player"]
+                             if item["count"] == 20)
+    start_tick = rows("Alice", "native_combat_sample")[-1]["tick"]
+    first = None
+    attempted_releases = 0
+    for y, pitch in ((-480, 0), (-480, .1), (-480, -.1), (-350, 0)):
+        command("Alice", f"pose 60 {y} 1 {pitch} 0")
+        time.sleep(.7)
+        command("Alice", "shoot 0.25")
+        attempted_releases += 1
+        try:
+            first = wait_for(lambda: next(((tick, shot) for tick, shot in flight("Alice", 1, start_tick)
+                                           if shot["terminal"] == 0), None),
+                             "Alice committed ranged release", 3)
+            break
+        except RuntimeError as error:
+            if "timed out" not in str(error) or ammo("Alice") != initial["Alice"]:
+                raise
+    if first is None:
+        raise RuntimeError("no mapped ranged release after bounded aim setups")
+    key = (first[1]["kind"], first[1]["caster"], first[1]["life"], first[1]["command"])
+    def matching(role):
+        return [(tick, shot) for tick, shot in flight(role, 1, start_tick)
+                if (shot["kind"], shot["caster"], shot["life"], shot["command"]) == key]
+    wait_for(lambda: any(shot["terminal"] == 0 for _, shot in matching("Bob")),
+             "Bob observed the committed flight")
+    wait_for(lambda: all(any(shot["terminal"] for _, shot in matching(role)) for role in evidence),
+             "both clients observed terminal contact")
+    shared = {role: dict(matching(role)) for role in evidence}
+    overlap = shared["Alice"].keys() & shared["Bob"].keys()
+    if not overlap or any(shared["Alice"][tick] != shared["Bob"][tick] for tick in overlap):
+        raise RuntimeError("same-tick physical flight diverged between clients")
+    def rendered(role):
+        return [shot for row in rows(role, "projectile_presentation_frame")
+                for shot in row["projectiles"]
+                if (shot["kind"], shot["caster"], shot["life"], shot["command"]) == key]
+    wait_for(lambda: all(len({tuple(shot["position"]) for shot in rendered(role)}) >= 2
+                         for role in evidence), "both desktops rendered moving committed arrows")
+    visual_frames = {role: len(rendered(role)) for role in evidence}
+    wait_for(lambda: ammo("Alice") == initial["Alice"] - 1, "one committed arrow consumed")
+    if ammo("Bob") != initial["Bob"]:
+        raise RuntimeError("observer ammunition changed during Alice's shot")
+    wait_for(lambda: all(any(hit["attacker"] == 1 for row in rows(role, "native_combat_sample")
+                             for hit in row["player_hits"]) for role in evidence),
+             "both clients received the first attributed impact")
+    before_generation = rows("Bob", "native_combat_sample")[-1]["generation"]
+    command("Bob", "reconnect")
+    wait_for(lambda: rows("Bob", "native_combat_sample")[-1]["generation"] > before_generation,
+             "Bob reconnected to the flight receipt")
+    restored = rows("Bob", "native_combat_sample")[-1]
+    receipt = next((shot for shot in restored["projectiles"]
+                    if (shot["kind"], shot["caster"], shot["life"], shot["command"]) == key), None)
+    if not receipt or receipt["terminal"] != 1 or ammo("Alice") != initial["Alice"] - 1 or ammo("Bob") != initial["Bob"]:
+        raise RuntimeError("reconnect lost terminal contact or duplicated ammunition cost")
+    hits = {role: [hit for row in rows(role, "native_combat_sample") for hit in row["player_hits"]
+                   if hit["attacker"] == 1] for role in evidence}
+    for role, events in hits.items():
+        identities = [(event["attacker_revision"], event["target_revision"]) for event in events]
+        if len(identities) != len(set(identities)) or len(events) > 1:
+            raise RuntimeError(f"{role} received duplicate physical impacts")
+    start_health = rows("Alice", "native_combat_sample")[0]["actors"][0]["health"]
+    target = hits["Alice"][0]["target"]
+    victim = next(row for row in reversed(rows("Alice", "native_actor_pose"))
+                  if row["placement"] == target)
+    command("Alice", f"pose {victim['x']} {victim['y'] - 120} {victim['z']} 0 0")
+    time.sleep(1)
+    previous_health = rows("Alice", "native_combat_sample")[-1]["actors"][0]["health"]
+    for retry in range(4):
+        command("Alice", "shoot 1")
+        attempted_releases += 1
+        try:
+            wait_for(lambda: ammo("Alice") == initial["Alice"] - 2,
+                     "second committed arrow consumed", 2)
+            break
+        except RuntimeError as error:
+            if "timed out" not in str(error) or retry == 3:
+                raise
+    wait_for(lambda: rows("Alice", "native_combat_sample")[-1]["actors"][0]["health"] < previous_health,
+             "second arrow hit the original target", 12)
+    shots = 2
+    wait_for(lambda: all(rows(role, "native_combat_sample")[-1]["actors"][0]["dead"]
+                         for role in evidence), "both desktops agreed on the ranged death")
+    wait_for(lambda: rows("Bob", "traversal_inventory")[-1]["container_count"] > 0,
+             "ranged corpse has committed loot")
+    wait_for(lambda: all(any(hit["died"] for row in rows(role, "native_combat_sample")
+                             for hit in row["player_hits"] if hit["attacker"] == 1)
+                         for role in evidence), "both clients received the attributed killing impact")
+    hits = {role: [hit for row in rows(role, "native_combat_sample") for hit in row["player_hits"]
+                   if hit["attacker"] == 1] for role in evidence}
+    identities = {role: [(hit["attacker_revision"], hit["target_revision"])
+                         for hit in events] for role, events in hits.items()}
+    if (identities["Alice"] != identities["Bob"]
+            or len(identities["Alice"]) != len(set(identities["Alice"]))
+            or len(hits["Alice"]) > shots or sum(hit["died"] for hit in hits["Alice"]) != 1):
+        raise RuntimeError("ranged impacts or death duplicated across clients")
+    if abs(max(0, start_health - sum(hit["damage"] for hit in hits["Alice"] if hit["hit"]))
+           - rows("Alice", "native_combat_sample")[-1]["actors"][0]["health"]) > .1:
+        raise RuntimeError("ranged target health differs from committed impacts")
+    pose = next(row for row in reversed(rows("Bob", "native_actor_pose"))
+                if row["placement"] == target)
+    command("Bob", f"pose {pose['x']} {pose['y'] - 55} {pose['z']} 0 0")
+    time.sleep(1)
+    corpse = rows("Bob", "traversal_inventory")[-1]
+    command("Bob", "open")
+    command("Bob", "takeall")
+    wait_for(lambda: rows("Bob", "traversal_inventory")[-1]["container_count"] == 0
+             and rows("Bob", "traversal_inventory")[-1]["player_count"] > corpse["player_count"],
+             "one committed corpse transfer")
+    wait_for(lambda: rows("Alice", "traversal_inventory")[-1]["container_count"] == 0,
+             "Alice observed the emptied corpse")
+    looted_count = rows("Bob", "traversal_inventory")[-1]["player_count"]
+    before_generation = rows("Bob", "native_combat_sample")[-1]["generation"]
+    command("Bob", "reconnect")
+    wait_for(lambda: rows("Bob", "native_combat_sample")[-1]["generation"] > before_generation,
+             "looter reconnected after transfer")
+    wait_for(lambda: rows("Bob", "traversal_inventory")[-1]["container_count"] == 0,
+             "empty corpse persisted across reconnect")
+    if rows("Bob", "traversal_inventory")[-1]["player_count"] != looted_count:
+        raise RuntimeError("corpse loot duplicated on reconnect")
+    if ammo("Alice") != initial["Alice"] - shots or ammo("Bob") != initial["Bob"]:
+        raise RuntimeError("ammunition changed after the encounter or reconnect")
+    for role in evidence:
+        if not rows(role, "native_combat_sample")[-1]["actors"][0]["dead"]:
+            raise RuntimeError(f"{role} lost the committed ranged death")
+        current_hits = [hit for row in rows(role, "native_combat_sample")
+                        for hit in row["player_hits"] if hit["attacker"] == 1]
+        if [(hit["attacker_revision"], hit["target_revision"]) for hit in current_hits] != identities[role]:
+            raise RuntimeError(f"{role} replayed a ranged impact after reconnect")
+    report = dict(success=True, scenario="V63 ranged flight, death and corpse loot on two desktops",
+                  manifest=manifest, flight=key, shared_ticks=len(overlap), visual_frames=visual_frames,
+                  shots=shots, attempted_releases=attempted_releases, initial_ammunition=initial,
+                  final_ammunition={role: ammo(role) for role in evidence}, impacts=hits,
+                  corpse_items=corpse["container_count"], looted_player_items=looted_count,
+                  relay=asdict(relay.stop()))
+    output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)

@@ -1155,7 +1155,12 @@ namespace MWMechanics
             // See notes for melee release above
             if (mReadyToHit)
             {
-                mAnimation->releaseArrow(mAttackStrength);
+                const bool intercepted = mPtr == MWMechanics::getPlayer()
+                    && MWBase::Environment::get().getWorld()->getPlayer().interceptRangedRelease(mAttackStrength);
+                if (intercepted)
+                    mAnimation->detachArrow();
+                else
+                    mAnimation->releaseArrow(mAttackStrength);
                 mReadyToHit = false;
             }
         }

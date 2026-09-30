@@ -39,6 +39,7 @@ namespace MWWorld
         using ActivationInterceptor = std::function<bool(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player)>;
         using MeleeHitInterceptor
             = std::function<bool(float attackStrength, int attackType, const MWWorld::Ptr& victim)>;
+        using RangedReleaseInterceptor = std::function<bool(float attackStrength)>;
         using MeleeTargetProvider = std::function<void(std::vector<MWWorld::Ptr>& targets)>;
         using MagicCastInterceptor = std::function<bool(
             bool release, const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target)>;
@@ -69,6 +70,7 @@ namespace MWWorld
         bool mJumping;
         ActivationInterceptor mActivationInterceptor;
         MeleeHitInterceptor mMeleeHitInterceptor;
+        RangedReleaseInterceptor mRangedReleaseInterceptor;
         MeleeTargetProvider mMeleeTargetProvider;
         MagicCastInterceptor mMagicCastInterceptor;
 
@@ -111,16 +113,21 @@ namespace MWWorld
         }
         void clearActivationInterceptor() { mActivationInterceptor = nullptr; }
         void setMeleeHitInterceptor(MeleeHitInterceptor interceptor) { mMeleeHitInterceptor = std::move(interceptor); }
+        void setRangedReleaseInterceptor(RangedReleaseInterceptor interceptor)
+        { mRangedReleaseInterceptor = std::move(interceptor); }
         void setMeleeTargetProvider(MeleeTargetProvider provider) { mMeleeTargetProvider = std::move(provider); }
         void clearMeleeCombatInterceptors()
         {
             mMeleeHitInterceptor = nullptr;
+            mRangedReleaseInterceptor = nullptr;
             mMeleeTargetProvider = nullptr;
         }
         bool interceptMeleeHit(float attackStrength, int attackType, const MWWorld::Ptr& victim) const
         {
             return mMeleeHitInterceptor && mMeleeHitInterceptor(attackStrength, attackType, victim);
         }
+        bool interceptRangedRelease(float attackStrength) const
+        { return mRangedReleaseInterceptor && mRangedReleaseInterceptor(attackStrength); }
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
         {
             if (mMeleeTargetProvider)

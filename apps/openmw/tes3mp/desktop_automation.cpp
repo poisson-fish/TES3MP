@@ -457,6 +457,23 @@ namespace TES3MP::OpenMWAdapter
                     mOutput << "]}\n";
                     ++mPresentationFrames;
                 }
+                const auto projectiles = desktop->projectilePoseEvidence();
+                if (!projectiles.empty())
+                {
+                    mOutput << "{\"event\":\"projectile_presentation_frame\",\"time_ns\":" << now.nanoseconds()
+                        << ",\"projectiles\":[";
+                    bool first = true;
+                    for (const auto& rendered : projectiles)
+                    {
+                        if (!first) mOutput << ','; first = false;
+                        const auto& p = rendered.pose;
+                        mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
+                            << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
+                            << ",\"tick\":" << rendered.tick << ",\"position\":["
+                            << p.position[0] << ',' << p.position[1] << ',' << p.position[2] << "]}";
+                    }
+                    mOutput << "]}\n";
+                }
             }
         }
         if (mRole == DesktopAutomationRole::NativeTraversal && mOutput && mEvidenceEvents < MaximumEvidenceEvents
@@ -816,6 +833,18 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"cast_phase\":" << unsigned(pose.castPhase) << ",\"cast_range\":" << unsigned(pose.castRange)
                     << ",\"cast_elapsed\":" << pose.castElapsed << ",\"cast_release\":" << pose.castRelease
                     << ",\"cast_stop\":" << pose.castStop << '}';
+            }
+            mOutput << "],\"projectiles\":[";
+            first = true;
+            for (const auto& p : snapshot.projectiles())
+            {
+                if (!first) mOutput << ',';
+                first = false;
+                mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
+                    << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
+                    << ",\"release\":" << p.releaseTick << ",\"terminal\":" << unsigned(p.terminal)
+                    << ",\"position\":[" << p.position[0] << ',' << p.position[1] << ',' << p.position[2]
+                    << "]}";
             }
             mOutput << "],\"visibility\":[";
             first = true;

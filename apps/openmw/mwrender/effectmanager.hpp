@@ -11,6 +11,7 @@
 namespace osg
 {
     class Group;
+    class Quat;
     class Vec3f;
     class PositionAttitudeTransform;
 }
@@ -39,6 +40,7 @@ namespace MWRender
             std::string_view effectId = {}, bool loop = false);
 
         void removeEffect(std::string_view effectId);
+        bool moveEffect(std::string_view effectId, const osg::Vec3f& position, const osg::Quat& attitude);
 
         void update(float dt);
 

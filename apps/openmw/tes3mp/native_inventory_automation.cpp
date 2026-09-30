@@ -362,6 +362,11 @@ namespace TES3MP::OpenMWAdapter
                 || strength < 0.f || strength > 1.f)
                 throw std::runtime_error("Traversal swing arguments invalid");
         }
+        else if (action == "shoot")
+        {
+            if (!(file >> strength) || !std::isfinite(strength) || strength < 0.f || strength > 1.f)
+                throw std::runtime_error("Traversal shoot strength invalid");
+        }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
             || action == "dialogue" || action == "dialoguestart")
         {
@@ -450,6 +455,11 @@ namespace TES3MP::OpenMWAdapter
                 && (!mNativeContainerCount || *mNativeContainerCount == 0))
                 throw std::runtime_error("Traversal attack has no live native actor target");
         }
+        else if (action == "shoot")
+        {
+            if (wm->isGuiMode() || !world->getPlayer().interceptRangedRelease(strength))
+                throw std::runtime_error("Traversal ranged release requires game focus and the desktop input hook");
+        }
         else if (action == "cast" || action == "castactor")
         {
             MWWorld::Ptr target;
@@ -477,9 +487,12 @@ namespace TES3MP::OpenMWAdapter
             auto ptr = placedContainer(*mNativeContainerId);
             std::vector<MWWorld::Ptr> targets;
             mPresentation.appendMeleeTargets(targets);
-            if (targets.size() == 1 && !targets.front().isEmpty()
-                && targets.front().getClass().getCreatureStats(targets.front()).isDead())
-                ptr = targets.front();
+            const auto dead = [](const MWWorld::Ptr& actor) {
+                return !actor.isEmpty() && actor.getClass().getCreatureStats(actor).isDead();
+            };
+            const auto corpse = std::ranges::find_if(targets, dead);
+            if (corpse != targets.end() && std::ranges::count_if(targets, dead) == 1)
+                ptr = *corpse;
             if (ptr.isEmpty()) throw std::runtime_error("Traversal shared container missing");
             wm->pushGuiMode(MWGui::GM_Container, ptr);
         }

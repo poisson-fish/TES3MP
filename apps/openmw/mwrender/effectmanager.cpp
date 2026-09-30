@@ -88,6 +88,16 @@ namespace MWRender
             mEffects.end());
     }
 
+    bool EffectManager::moveEffect(std::string_view effectId, const osg::Vec3f& position,
+        const osg::Quat& attitude)
+    {
+        const auto found = std::ranges::find(mEffects, effectId, &Effect::mEffectId);
+        if (found == mEffects.end()) return false;
+        found->mTransform->setPosition(position);
+        found->mTransform->setAttitude(attitude);
+        return true;
+    }
+
     void EffectManager::update(float dt)
     {
         mEffects.erase(std::remove_if(mEffects.begin(), mEffects.end(),

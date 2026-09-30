@@ -35,6 +35,9 @@ struct PlayerSwingSnapshotBuilder;
 struct ActorPresentationSnapshot;
 struct ActorPresentationSnapshotBuilder;
 
+struct PhysicalProjectileSnapshot;
+struct PhysicalProjectileSnapshotBuilder;
+
 struct LatestWinsCombatSnapshot;
 struct LatestWinsCombatSnapshotBuilder;
 
@@ -1173,6 +1176,202 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
       movement_owned);
 }
 
+struct PhysicalProjectileSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PhysicalProjectileSnapshotBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_CASTER_KIND = 4,
+    VT_TERMINAL = 6,
+    VT_CASTER = 8,
+    VT_CASTER_LIFE = 10,
+    VT_COMMAND = 12,
+    VT_RELEASE_TICK = 14,
+    VT_RECORD = 16,
+    VT_X = 18,
+    VT_Y = 20,
+    VT_Z = 22,
+    VT_VX = 24,
+    VT_VY = 26,
+    VT_VZ = 28
+  };
+  uint8_t caster_kind() const {
+    return GetField<uint8_t>(VT_CASTER_KIND, 0);
+  }
+  uint8_t terminal() const {
+    return GetField<uint8_t>(VT_TERMINAL, 0);
+  }
+  uint64_t caster() const {
+    return GetField<uint64_t>(VT_CASTER, 0);
+  }
+  uint64_t caster_life() const {
+    return GetField<uint64_t>(VT_CASTER_LIFE, 0);
+  }
+  uint64_t command() const {
+    return GetField<uint64_t>(VT_COMMAND, 0);
+  }
+  uint64_t release_tick() const {
+    return GetField<uint64_t>(VT_RELEASE_TICK, 0);
+  }
+  const ::flatbuffers::String *record() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_RECORD);
+  }
+  float x() const {
+    return GetField<float>(VT_X, 0.0f);
+  }
+  float y() const {
+    return GetField<float>(VT_Y, 0.0f);
+  }
+  float z() const {
+    return GetField<float>(VT_Z, 0.0f);
+  }
+  float vx() const {
+    return GetField<float>(VT_VX, 0.0f);
+  }
+  float vy() const {
+    return GetField<float>(VT_VY, 0.0f);
+  }
+  float vz() const {
+    return GetField<float>(VT_VZ, 0.0f);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_CASTER_KIND, 1) &&
+           VerifyField<uint8_t>(verifier, VT_TERMINAL, 1) &&
+           VerifyField<uint64_t>(verifier, VT_CASTER, 8) &&
+           VerifyField<uint64_t>(verifier, VT_CASTER_LIFE, 8) &&
+           VerifyField<uint64_t>(verifier, VT_COMMAND, 8) &&
+           VerifyField<uint64_t>(verifier, VT_RELEASE_TICK, 8) &&
+           VerifyOffset(verifier, VT_RECORD) &&
+           verifier.VerifyString(record()) &&
+           VerifyField<float>(verifier, VT_X, 4) &&
+           VerifyField<float>(verifier, VT_Y, 4) &&
+           VerifyField<float>(verifier, VT_Z, 4) &&
+           VerifyField<float>(verifier, VT_VX, 4) &&
+           VerifyField<float>(verifier, VT_VY, 4) &&
+           VerifyField<float>(verifier, VT_VZ, 4) &&
+           verifier.EndTable();
+  }
+};
+
+struct PhysicalProjectileSnapshotBuilder {
+  typedef PhysicalProjectileSnapshot Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_caster_kind(uint8_t caster_kind) {
+    fbb_.AddElement<uint8_t>(PhysicalProjectileSnapshot::VT_CASTER_KIND, caster_kind, 0);
+  }
+  void add_terminal(uint8_t terminal) {
+    fbb_.AddElement<uint8_t>(PhysicalProjectileSnapshot::VT_TERMINAL, terminal, 0);
+  }
+  void add_caster(uint64_t caster) {
+    fbb_.AddElement<uint64_t>(PhysicalProjectileSnapshot::VT_CASTER, caster, 0);
+  }
+  void add_caster_life(uint64_t caster_life) {
+    fbb_.AddElement<uint64_t>(PhysicalProjectileSnapshot::VT_CASTER_LIFE, caster_life, 0);
+  }
+  void add_command(uint64_t command) {
+    fbb_.AddElement<uint64_t>(PhysicalProjectileSnapshot::VT_COMMAND, command, 0);
+  }
+  void add_release_tick(uint64_t release_tick) {
+    fbb_.AddElement<uint64_t>(PhysicalProjectileSnapshot::VT_RELEASE_TICK, release_tick, 0);
+  }
+  void add_record(::flatbuffers::Offset<::flatbuffers::String> record) {
+    fbb_.AddOffset(PhysicalProjectileSnapshot::VT_RECORD, record);
+  }
+  void add_x(float x) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_X, x, 0.0f);
+  }
+  void add_y(float y) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_Y, y, 0.0f);
+  }
+  void add_z(float z) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_Z, z, 0.0f);
+  }
+  void add_vx(float vx) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_VX, vx, 0.0f);
+  }
+  void add_vy(float vy) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_VY, vy, 0.0f);
+  }
+  void add_vz(float vz) {
+    fbb_.AddElement<float>(PhysicalProjectileSnapshot::VT_VZ, vz, 0.0f);
+  }
+  explicit PhysicalProjectileSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<PhysicalProjectileSnapshot> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<PhysicalProjectileSnapshot>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<PhysicalProjectileSnapshot> CreatePhysicalProjectileSnapshot(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint8_t caster_kind = 0,
+    uint8_t terminal = 0,
+    uint64_t caster = 0,
+    uint64_t caster_life = 0,
+    uint64_t command = 0,
+    uint64_t release_tick = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> record = 0,
+    float x = 0.0f,
+    float y = 0.0f,
+    float z = 0.0f,
+    float vx = 0.0f,
+    float vy = 0.0f,
+    float vz = 0.0f) {
+  PhysicalProjectileSnapshotBuilder builder_(_fbb);
+  builder_.add_release_tick(release_tick);
+  builder_.add_command(command);
+  builder_.add_caster_life(caster_life);
+  builder_.add_caster(caster);
+  builder_.add_vz(vz);
+  builder_.add_vy(vy);
+  builder_.add_vx(vx);
+  builder_.add_z(z);
+  builder_.add_y(y);
+  builder_.add_x(x);
+  builder_.add_record(record);
+  builder_.add_terminal(terminal);
+  builder_.add_caster_kind(caster_kind);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<PhysicalProjectileSnapshot> CreatePhysicalProjectileSnapshotDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint8_t caster_kind = 0,
+    uint8_t terminal = 0,
+    uint64_t caster = 0,
+    uint64_t caster_life = 0,
+    uint64_t command = 0,
+    uint64_t release_tick = 0,
+    const char *record = nullptr,
+    float x = 0.0f,
+    float y = 0.0f,
+    float z = 0.0f,
+    float vx = 0.0f,
+    float vy = 0.0f,
+    float vz = 0.0f) {
+  auto record__ = record ? _fbb.CreateString(record) : 0;
+  return TES3MP::Protocol::Schema::CombatSnapshot::CreatePhysicalProjectileSnapshot(
+      _fbb,
+      caster_kind,
+      terminal,
+      caster,
+      caster_life,
+      command,
+      release_tick,
+      record__,
+      x,
+      y,
+      z,
+      vx,
+      vy,
+      vz);
+}
+
 struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef LatestWinsCombatSnapshotBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -1182,7 +1381,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_PLAYERS = 10,
     VT_ACTIVE_EFFECTS = 12,
     VT_SWINGS = 14,
-    VT_PRESENTATION = 16
+    VT_PRESENTATION = 16,
+    VT_PROJECTILES = 18
   };
   const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *>(VT_HEADER);
@@ -1205,6 +1405,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>> *presentation() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>> *>(VT_PRESENTATION);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>> *projectiles() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>> *>(VT_PROJECTILES);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -1224,6 +1427,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            VerifyOffset(verifier, VT_PRESENTATION) &&
            verifier.VerifyVector(presentation()) &&
            verifier.VerifyVectorOfTables(presentation()) &&
+           VerifyOffset(verifier, VT_PROJECTILES) &&
+           verifier.VerifyVector(projectiles()) &&
+           verifier.VerifyVectorOfTables(projectiles()) &&
            verifier.EndTable();
   }
 };
@@ -1253,6 +1459,9 @@ struct LatestWinsCombatSnapshotBuilder {
   void add_presentation(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>>> presentation) {
     fbb_.AddOffset(LatestWinsCombatSnapshot::VT_PRESENTATION, presentation);
   }
+  void add_projectiles(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>>> projectiles) {
+    fbb_.AddOffset(LatestWinsCombatSnapshot::VT_PROJECTILES, projectiles);
+  }
   explicit LatestWinsCombatSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1272,8 +1481,10 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>>> swings = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>>> presentation = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>>> presentation = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>>> projectiles = 0) {
   LatestWinsCombatSnapshotBuilder builder_(_fbb);
+  builder_.add_projectiles(projectiles);
   builder_.add_presentation(presentation);
   builder_.add_swings(swings);
   builder_.add_active_effects(active_effects);
@@ -1292,13 +1503,15 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot> *players = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot> *active_effects = nullptr,
     const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>> *swings = nullptr,
-    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>> *presentation = nullptr) {
+    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>> *presentation = nullptr,
+    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>> *projectiles = nullptr) {
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot>(*actors) : 0;
   auto self_skills__ = self_skills ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot>(*self_skills) : 0;
   auto players__ = players ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot>(*players) : 0;
   auto active_effects__ = active_effects ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot>(*active_effects) : 0;
   auto swings__ = swings ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PlayerSwingSnapshot>>(*swings) : 0;
   auto presentation__ = presentation ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::ActorPresentationSnapshot>>(*presentation) : 0;
+  auto projectiles__ = projectiles ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::PhysicalProjectileSnapshot>>(*projectiles) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateLatestWinsCombatSnapshot(
       _fbb,
       header,
@@ -1307,7 +1520,8 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
       players__,
       active_effects__,
       swings__,
-      presentation__);
+      presentation__,
+      projectiles__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot *GetLatestWinsCombatSnapshot(const void *buf) {

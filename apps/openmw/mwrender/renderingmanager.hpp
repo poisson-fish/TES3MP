@@ -194,6 +194,7 @@ namespace MWRender
             bool loop = false);
 
         void removeEffect(std::string_view effectId);
+        bool moveEffect(std::string_view effectId, const osg::Vec3f& position, const osg::Quat& attitude);
 
         /// Clear all savegame-specific data
         void clear();

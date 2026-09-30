@@ -877,6 +877,42 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "projectile-presentation")
+    {
+        ActorPresentationTimeline timeline;
+        PhysicalProjectileSnapshot shot{1, 0, 1, 1, 9, 100, "iron arrow", {0, 0, 110}, {0, 900, 0}};
+        std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+        for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = ReplicatedCombatSkill(i);
+        const auto observe = [&](uint64_t tick, uint64_t generation = 1) {
+            const std::array flights{shot};
+            const auto created = LatestWinsCombatSnapshot::create(*SessionId::fromValue(1),
+                *SessionGeneration::fromValue(generation), *ServerTick::fromValue(tick),
+                *CanonicalRevision::fromValue(tick), *PlayerId::fromValue(1), CombatRevision::initial(),
+                100, 100, 100, 100, 100, 100, false, {}, skills, {}, {}, {}, {}, {}, flights);
+            require(std::holds_alternative<LatestWinsCombatSnapshot>(created));
+            const auto& original = std::get<LatestWinsCombatSnapshot>(created);
+            timeline.observe(std::get<LatestWinsCombatSnapshot>(
+                decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(original))));
+        };
+        const auto now = [](uint64_t ns) { return MonotonicInstant::fromNanoseconds(ns); };
+        observe(100); timeline.advance(now(0));
+        shot.position[1] = 120; observe(104);
+        timeline.advance(now(50'000'000));
+        require(timeline.sampleProjectiles().size() == 1
+            && std::abs(timeline.sampleProjectiles()[0].position[1] - 45.f) < .001f);
+        timeline.advance(now(1'000'000'000));
+        require(timeline.sampleProjectiles()[0].position[1] == 120.f); // Loss holds the committed endpoint.
+        shot.terminal = 1; shot.position[1] = 150; observe(108);
+        timeline.advance(now(2'000'000'000));
+        require(timeline.sampleProjectiles().empty()); // Contact removes the model.
+        observe(120, 2);
+        require(timeline.sampleProjectiles().empty()); // Reconnect restores the terminal receipt without replay.
+        timeline.advance(now(2'000'000'000));
+        shot = {1, 0, 1, 1, 10, 124, "iron arrow", {0, 0, 110}, {0, 900, 0}};
+        observe(124, 2); timeline.advance(now(3'000'000'000));
+        require(timeline.sampleProjectiles().size() == 1 && timeline.sampleProjectiles()[0].command == 10);
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "cast-presentation")
     {
         ActorPresentationTimeline timeline;

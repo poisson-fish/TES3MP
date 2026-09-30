@@ -8243,11 +8243,24 @@ namespace TES3MP::Native
             skills[index] = {static_cast<ReplicatedCombatSkill>(index),
                 self.getSkill(skillIds[index]).getModified(), stat[4]};
         }
+        std::vector<PhysicalProjectileSnapshot> projectiles;
+        if (mBinding.mRangedFlight && actorCell(scene) == player->transform().cell())
+        {
+            projectiles.reserve(combat.arrows.size());
+            for (const auto& arrow : combat.arrows)
+                projectiles.push_back({uint8_t(arrow.casterKind), uint8_t(arrow.terminal),
+                    arrow.caster, arrow.casterLife, arrow.command, arrow.releaseTick, arrow.ammoRecord,
+                    arrow.position, arrow.velocity});
+            std::ranges::sort(projectiles, [](const auto& a, const auto& b) {
+                return std::tuple(a.casterKind, a.caster, a.casterLife, a.command)
+                    < std::tuple(b.casterKind, b.caster, b.casterLife, b.command);
+            });
+        }
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick, revision,
             player->playerId(), combatRevision, self.getHealth().getCurrent(), self.getHealth().getModified(),
             self.getFatigue().getCurrent(), self.getFatigue().getModified(), self.getMagicka().getCurrent(),
             self.getMagicka().getModified(), self.getHealth().getCurrent() <= 0,
-            visible, skills, others, {}, swings, knockout(selfIndex), presentation);
+            visible, skills, others, {}, swings, knockout(selfIndex), presentation, projectiles);
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
     }

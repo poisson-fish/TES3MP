@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <tuple>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -19,7 +20,12 @@ namespace TES3MP::OpenMWAdapter
     // unknown action. The server's gameplay clock and callbacks remain untouched.
     class ActorPresentationTimeline
     {
-        struct Frame { uint64_t tick; std::vector<ActorPresentationPose> actors; };
+        struct Frame
+        {
+            uint64_t tick;
+            std::vector<ActorPresentationPose> actors;
+            std::vector<PhysicalProjectileSnapshot> projectiles;
+        };
         std::deque<Frame> mFrames;
         uint64_t mGeneration = 0;
         double mCursor = 0;
@@ -31,13 +37,13 @@ namespace TES3MP::OpenMWAdapter
         double tick() const { return mCursor; }
         void observe(const LatestWinsCombatSnapshot& snapshot)
         {
-            if (snapshot.presentation().empty()) return;
+            if (snapshot.presentation().empty() && snapshot.projectiles().empty()) return;
             const auto generation = snapshot.targetSessionGeneration().value();
             if (generation != mGeneration) { clear(); mGeneration = generation; }
             const auto tick = snapshot.serverTick().value();
             if (!mFrames.empty() && tick <= mFrames.back().tick) return;
             if (mFrames.empty()) mCursor = double(tick);
-            Frame frame{tick, {}};
+            Frame frame{tick, {}, {snapshot.projectiles().begin(), snapshot.projectiles().end()}};
             for (const auto& actor : snapshot.presentation())
             {
                 ActorPresentationPose pose;
@@ -119,6 +125,40 @@ namespace TES3MP::OpenMWAdapter
                     if (result.bodyFrame >= lower->loopStop)
                         result.bodyFrame -= float(lower->loopStop - lower->loopStart);
                 }
+            }
+            return result;
+        }
+
+        std::vector<PhysicalProjectileSnapshot> sampleProjectiles() const
+        {
+            std::vector<PhysicalProjectileSnapshot> result;
+            if (empty()) return result;
+            size_t lo = 0;
+            while (lo + 1 < mFrames.size() && double(mFrames[lo + 1].tick) <= mCursor) ++lo;
+            const auto& lower = mFrames[lo];
+            const auto* upper = lo + 1 < mFrames.size() ? &mFrames[lo + 1] : nullptr;
+            for (const auto& flight : lower.projectiles)
+            {
+                if (flight.terminal) continue;
+                auto sampled = flight;
+                if (upper)
+                {
+                    const auto key = [](const PhysicalProjectileSnapshot& p) {
+                        return std::tuple(p.casterKind, p.caster, p.casterLife, p.command);
+                    };
+                    const auto next = std::ranges::find_if(upper->projectiles,
+                        [&](const auto& p) { return key(p) == key(flight) && p.record == flight.record; });
+                    if (next != upper->projectiles.end())
+                    {
+                        const float ratio = float((mCursor - double(lower.tick)) / double(upper->tick - lower.tick));
+                        for (size_t axis = 0; axis < 3; ++axis)
+                        {
+                            sampled.position[axis] = std::lerp(flight.position[axis], next->position[axis], ratio);
+                            sampled.velocity[axis] = std::lerp(flight.velocity[axis], next->velocity[axis], ratio);
+                        }
+                    }
+                }
+                result.push_back(std::move(sampled));
             }
             return result;
         }

@@ -128,6 +128,22 @@ table ActorPresentationSnapshot {
   movement_owned:bool;
 }
 
+table PhysicalProjectileSnapshot {
+  caster_kind:ubyte;
+  terminal:ubyte;
+  caster:ulong;
+  caster_life:ulong;
+  command:ulong;
+  release_tick:ulong;
+  record:string;
+  x:float;
+  y:float;
+  z:float;
+  vx:float;
+  vy:float;
+  vz:float;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
@@ -136,6 +152,7 @@ table LatestWinsCombatSnapshot {
   active_effects:[ActiveMagicEffectSnapshot] (id: 4);
   swings:[PlayerSwingSnapshot] (id: 5);
   presentation:[ActorPresentationSnapshot] (id: 6);
+  projectiles:[PhysicalProjectileSnapshot] (id: 7);
 }
 
 root_type LatestWinsCombatSnapshot;

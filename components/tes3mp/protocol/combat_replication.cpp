@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 
 namespace
@@ -108,7 +109,8 @@ namespace TES3MP
         std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
         std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects,
         std::span<const PlayerSwingSnapshot> swings, KnockoutSnapshot selfKnockout,
-        std::span<const ActorPresentationSnapshot> presentation)
+        std::span<const ActorPresentationSnapshot> presentation,
+        std::span<const PhysicalProjectileSnapshot> projectiles)
     {
         const auto validKnockout = [](KnockoutSnapshot pose, bool dead) {
             return pose.state <= 3 && pose.frame < 1800
@@ -240,11 +242,32 @@ namespace TES3MP
                 || (p.bodyState == 4 && !p.hitGroup) || (p.dead && (p.phase || p.bodyState != 1)))
                 return error(Code::InvalidFloat, 0, 0, i);
         }
+        if (projectiles.size() > MaximumReplicatedPhysicalProjectiles)
+            return error(Code::TooManyEntries, projectiles.size(), MaximumReplicatedPhysicalProjectiles);
+        for (size_t i = 0; i < projectiles.size(); ++i)
+        {
+            const auto& p = projectiles[i];
+            const auto key = [](const auto& value) {
+                return std::tuple(value.casterKind, value.caster, value.casterLife, value.command);
+            };
+            if ((i && key(projectiles[i - 1]) >= key(p)) || !p.caster || !p.casterLife || !p.command
+                || !p.releaseTick || p.releaseTick > tick.value() || (p.casterKind != 1 && p.casterKind != 2)
+                || p.terminal > 2 || p.record.empty() || p.record.size() > 256
+                || p.record.find('\0') != std::string::npos)
+                return error(Code::InvalidIdentifier, 0, 0, i);
+            for (const float v : p.position)
+                if (!std::isfinite(v) || std::abs(v) > 1e7f)
+                    return error(Code::InvalidFloat, 0, 0, i);
+            for (const float v : p.velocity)
+                if (!std::isfinite(v) || std::abs(v) > 50000.f)
+                    return error(Code::InvalidFloat, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision, selfHealth,
             selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka, selfDead,
             std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()),
             std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()),
-            std::vector(swings.begin(), swings.end()), selfKnockout, std::vector(presentation.begin(), presentation.end()));
+            std::vector(swings.begin(), swings.end()), selfKnockout, std::vector(presentation.begin(), presentation.end()),
+            std::vector(projectiles.begin(), projectiles.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
@@ -367,10 +390,16 @@ namespace TES3MP
                 p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop,
                 builder.CreateVector(p.visibility.data(), p.visibility.size()),
                 builder.CreateVector(p.movement.data(), p.movement.size()), p.movementOwned));
+        std::vector<flatbuffers::Offset<Snapshot::PhysicalProjectileSnapshot>> projectiles;
+        for (const auto& p : input.projectiles())
+            projectiles.push_back(Snapshot::CreatePhysicalProjectileSnapshot(builder, p.casterKind, p.terminal,
+                p.caster, p.casterLife, p.command, p.releaseTick, builder.CreateString(p.record),
+                p.position[0], p.position[1], p.position[2], p.velocity[0], p.velocity[1], p.velocity[2]));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
-                builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings), builder.CreateVector(presentation));
+                builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings), builder.CreateVector(presentation),
+                builder.CreateVector(projectiles));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -616,11 +645,26 @@ namespace TES3MP
             std::copy(p->movement()->begin(), p->movement()->end(), presentation.back().movement.begin());
             presentation.back().movementOwned = p->movement_owned();
         }
+        const size_t projectileCount = root->projectiles() ? root->projectiles()->size() : 0;
+        if (projectileCount > MaximumReplicatedPhysicalProjectiles)
+            return error(Code::TooManyEntries, projectileCount, MaximumReplicatedPhysicalProjectiles);
+        std::vector<PhysicalProjectileSnapshot> projectiles;
+        projectiles.reserve(projectileCount);
+        for (size_t i = 0; i < projectileCount; ++i)
+        {
+            const auto* p = root->projectiles()->Get(flatbuffers::uoffset_t(i));
+            if (!p || !p->record() || p->record()->size() > 256)
+                return error(Code::InvalidIdentifier, 0, 256, i);
+            projectiles.push_back({p->caster_kind(), p->terminal(), p->caster(), p->caster_life(),
+                p->command(), p->release_tick(), p->record()->str(),
+                {p->x(), p->y(), p->z()}, {p->vx(), p->vy(), p->vz()}});
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
             root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
-            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()}, presentation);
+            activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()},
+            presentation, projectiles);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(

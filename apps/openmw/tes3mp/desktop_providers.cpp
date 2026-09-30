@@ -50,6 +50,7 @@
 #include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadskil.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/misc/resourcehelpers.hpp>
 #include <tes3mp/fixed_tick_scheduler.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 
@@ -63,6 +64,8 @@
 #include <numbers>
 #include <optional>
 #include <ranges>
+#include <set>
+#include <tuple>
 #include <utility>
 
 namespace TES3MP::OpenMWAdapter
@@ -484,6 +487,14 @@ namespace TES3MP::OpenMWAdapter
                     if (capture && !self->mImpl->pendingMeleeAttack)
                         self->mImpl->pendingMeleeAttack = std::move(*capture);
                     return capture.has_value();
+                });
+                player.setRangedReleaseInterceptor([self](float strength) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (presentation && !self->mImpl->pendingMeleeAttack)
+                        self->mImpl->pendingMeleeAttack = presentation->captureRangedAttack(strength);
+                    // The server owns the release, ammo cost and impact. A missed
+                    // or unmapped aim must never fall through to local gameplay.
+                    return true;
                 });
                 player.setMagicCastInterceptor([self](bool release, const ESM::RefId& spell, const MWWorld::Ptr& item,
                                                    const MWWorld::Ptr& target) {
@@ -955,6 +966,8 @@ namespace TES3MP::OpenMWAdapter
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
         std::optional<LatestWinsCombatSnapshot> combatSnapshot;
         ActorPresentationTimeline actorTimeline;
+        std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedProjectiles;
+        std::vector<DesktopPresentation::ProjectilePoseEvidence> projectileEvidence;
         std::vector<DesktopPresentation::ActorPoseEvidence> poseEvidence;
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
         bool sessionBootstrapPending = true;
@@ -1025,11 +1038,17 @@ namespace TES3MP::OpenMWAdapter
             combatSnapshot.reset();
             actorTimeline.clear();
             activeMagicEffects.clear();
+            projectileEvidence.clear();
             try
             {
                 auto world = MWBase::Environment::get().getWorld();
                 if (world)
                 {
+                    for (const auto& [key, effect] : renderedProjectiles)
+                    {
+                        (void)key;
+                        world->getRenderingManager()->removeEffect(effect);
+                    }
                     world->setWeatherAuthority(false);
                     world->setWorldTimeAuthority(false);
                     world->setLeveledActorAuthority(false);
@@ -1038,6 +1057,7 @@ namespace TES3MP::OpenMWAdapter
             catch (...)
             {
             }
+            renderedProjectiles.clear();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -1551,6 +1571,18 @@ namespace TES3MP::OpenMWAdapter
             }
             return MeleeAttackCapture{ target, combatSnapshot->serverTick(), combatSnapshot->selfCombatRevision(),
                 targetRevision, type, attackStrength };
+        }
+
+        std::optional<MeleeAttackCapture> captureRangedAttack(float attackStrength) const
+        {
+            if (!combatSnapshot || !std::isfinite(attackStrength) || attackStrength < 0.f || attackStrength > 1.f)
+                return std::nullopt;
+            auto world = MWBase::Environment::get().getWorld();
+            const auto hit = world->getRenderingManager()->castCameraToViewportRay(
+                .5f, .5f, 8192.f, true, false, true);
+            if (!hit.mHit || hit.mHitObject.isEmpty()) return std::nullopt;
+            auto capture = captureMeleeAttack(hit.mHitObject, attackStrength, ESM::Weapon::AT_Chop);
+            return capture && capture->target ? capture : std::nullopt;
         }
 
         std::optional<MagicUseCapture> captureMagicUse(
@@ -2154,8 +2186,45 @@ namespace TES3MP::OpenMWAdapter
         {
             actorTimeline.advance(now);
             poseEvidence.clear();
+            projectileEvidence.clear();
             const auto presentationTick = actorTimeline.empty() ? std::optional<double>{} : actorTimeline.tick();
             auto world = MWBase::Environment::get().getWorld();
+            if (world)
+            {
+                auto* rendering = world->getRenderingManager();
+                const auto flights = actorTimeline.sampleProjectiles();
+                std::set<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>> desired;
+                for (const auto& flight : flights)
+                {
+                    const auto key = std::tuple(flight.casterKind, flight.caster, flight.casterLife, flight.command);
+                    desired.insert(key);
+                    const std::string effect = "tes3mp-projectile/" + std::to_string(flight.casterKind) + '/'
+                        + std::to_string(flight.caster) + '/' + std::to_string(flight.casterLife) + '/'
+                        + std::to_string(flight.command);
+                    const osg::Vec3f position(flight.position[0], flight.position[1], flight.position[2]);
+                    osg::Quat attitude;
+                    const osg::Vec3f velocity(flight.velocity[0], flight.velocity[1], flight.velocity[2]);
+                    if (velocity.length2() > 0) attitude.makeRotate(osg::Vec3f(0, 1, 0), velocity);
+                    if (!rendering->moveEffect(effect, position, attitude))
+                    {
+                        const auto id = ESM::RefId::stringRefId(flight.record);
+                        const auto* weapon = world->getStore().get<ESM::Weapon>().find(id);
+                        const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(weapon->mModel));
+                        rendering->spawnEffect(model, {}, position, 1.f, false, false, effect, true);
+                        if (!rendering->moveEffect(effect, position, attitude))
+                            return ProviderResult::PresentationFailed;
+                    }
+                    renderedProjectiles[key] = effect;
+                    projectileEvidence.push_back({flight, presentationTick.value_or(0)});
+                }
+                for (auto it = renderedProjectiles.begin(); it != renderedProjectiles.end();)
+                    if (!desired.contains(it->first))
+                    {
+                        rendering->removeEffect(it->second);
+                        it = renderedProjectiles.erase(it);
+                    }
+                    else ++it;
+            }
             if (!actorTimeline.empty() && combatSnapshot)
             {
                 const auto apply = [&](const MWWorld::Ptr& ptr, MWRender::Animation* animation, uint8_t kind, uint64_t id) {
@@ -3083,6 +3152,9 @@ namespace TES3MP::OpenMWAdapter
     std::vector<DesktopPresentation::ActorPoseEvidence> DesktopPresentation::actorPoseEvidence() const
     { return mImpl ? mImpl->poseEvidence : std::vector<ActorPoseEvidence>{}; }
 
+    std::vector<DesktopPresentation::ProjectilePoseEvidence> DesktopPresentation::projectilePoseEvidence() const
+    { return mImpl ? mImpl->projectileEvidence : std::vector<ProjectilePoseEvidence>{}; }
+
     std::vector<NativeActorMotion> DesktopPresentation::nativeActorPresentation() const
     {
         std::vector<NativeActorMotion> result;
@@ -3365,6 +3437,12 @@ namespace TES3MP::OpenMWAdapter
         {
             return std::nullopt;
         }
+    }
+
+    std::optional<MeleeAttackCapture> DesktopPresentation::captureRangedAttack(float attackStrength) const noexcept
+    {
+        try { return mImpl->captureRangedAttack(attackStrength); }
+        catch (...) { return std::nullopt; }
     }
 
     std::optional<MagicUseCapture> DesktopPresentation::captureMagicUse(

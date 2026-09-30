@@ -6771,6 +6771,7 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "neighbor-combat"
             || std::string_view(argv[1]) == "neighbor-projectiles"
             || std::string_view(argv[1]) == "neighbor-expanded"
+            || std::string_view(argv[1]) == "neighbor-expanded-ranged"
             || std::string_view(argv[1]) == "npc-ranged-bow"
             || std::string_view(argv[1]) == "npc-ranged-crossbow"
             || std::string_view(argv[1]) == "npc-ranged-thrown"
@@ -6781,6 +6782,7 @@ int main(int argc, char** argv)
             const std::string_view profile = npcRanged
                 ? std::string_view(argv[1]) == "npc-ranged-bow" ? "npc-bow"
                     : std::string_view(argv[1]) == "npc-ranged-crossbow" ? "npc-crossbow" : "npc-thrown"
+                : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? "bow-desktop-recycling-flight"
                 : (std::string_view(argv[1]) == "neighbor-projectiles"
                     || std::string_view(argv[1]) == "neighbor-expanded") ? "bow-basic-flight" : "";
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
@@ -6790,6 +6792,7 @@ int main(int argc, char** argv)
                 profile,
                 std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
                 npcRanged ? std::string_view("npc-ranged")
+                    : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? std::string_view("neighbor-expanded")
                     : std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
                     : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep")
                         ? std::string_view("movement-effects") : std::string_view(argv[1]),

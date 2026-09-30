@@ -176,6 +176,7 @@ namespace TES3MP::OpenMWAdapter
         bool activateReplicatedNpc(const MWWorld::Ptr& target, const MWWorld::Ptr& player) const noexcept;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;
+        std::optional<MeleeAttackCapture> captureRangedAttack(float attackStrength) const noexcept;
         std::optional<MagicUseCapture> captureMagicUse(
             const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const noexcept;
         std::optional<ObjectInteractionCapture> captureSecurityAttempt(
@@ -194,7 +195,13 @@ namespace TES3MP::OpenMWAdapter
             double tick;
             float clipTime;
         };
+        struct ProjectilePoseEvidence
+        {
+            PhysicalProjectileSnapshot pose;
+            double tick;
+        };
         std::vector<ActorPoseEvidence> actorPoseEvidence() const;
+        std::vector<ProjectilePoseEvidence> projectilePoseEvidence() const;
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
 

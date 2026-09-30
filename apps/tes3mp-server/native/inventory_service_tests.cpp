@@ -6453,6 +6453,7 @@ namespace TES3MP::Native::Testing
                     << "actor npc_door_actor\ncustom " << name << "\nmodel " << npc.mModel
                     << "\nmelee weapononehand\n";
             }
+            if (encounterProfile == "bow-desktop-recycling-flight") npc.mNpdt.mHealth = 25;
             if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
                 && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
                 && effectFamily != "concealment" && effectFamily != "visibility"

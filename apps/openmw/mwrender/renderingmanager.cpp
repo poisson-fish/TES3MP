@@ -869,6 +869,12 @@ namespace MWRender
         mEffectManager->removeEffect(effectId);
     }
 
+    bool RenderingManager::moveEffect(std::string_view effectId, const osg::Vec3f& position,
+        const osg::Quat& attitude)
+    {
+        return mEffectManager->moveEffect(effectId, position, attitude);
+    }
+
     void RenderingManager::notifyWorldSpaceChanged()
     {
         mEffectManager->clear();

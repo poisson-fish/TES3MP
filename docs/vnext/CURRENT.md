@@ -1,33 +1,32 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-NPC/biped/doors step at 60 Hz and commit at 30 Hz; three neighbors share one
-collision scene. Additional neighbors freeze. V63 bindings remain active.
+**M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
+steps NPCs/doors at 60 Hz and commits at 30 Hz. V63 bounds same-cell
+neighbors to three; others freeze. Player/NPC casts, conditions, stats,
+Disintegration, concealment, visibility, movement effects and twelve AI
+effects have bounded vanilla/TR checks. VFX, sneak stance and AI jumps remain.
 
-Player/NPC casts, conditions, stats, Disintegration, concealment and visibility
-have vanilla/TR checks; VFX and sneak stance remain incomplete.
+Server-owned bows, crossbows and throwing stars use authored release, durable
+flight, first-hull/world contact and atomic damage, recovery and loot. NPC
+life/placement survives restart; death clears old flights. Narrow real-loadout
+rejection, overlapping-impact, lethal-recovery and restart checks pass:
+`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`. The three-neighbor
+bound is provisional. Mixed passives, non-player Command and scripted or
+enchanted ranged sources remain open; world-transfer conflicts reject atomically.
 
-V56 effects drive motion/breath and drowning; AI lacks jump requests.
+Desktop bow release intercepts OpenMW's shoot key for mapped targets. The
+server charges ammunition, flies shots and writes contact, damage and loot.
+Bounded combat snapshots carry flight/terminal receipts; desktop effects
+interpolate and clear on contact/reconnect. Protocol/timeline checks pass.
+`build/logs/desktop-ranged-live-24.log`: two graphical clients, 100 ms latency,
+jitter and 10% loss; four shared flight ticks, 14/50 rendered frames, two arrow
+costs, identical impacts/death and one 17-item corpse transfer retained through
+reconnect. The fixture check passes in
+`build/logs/desktop-ranged-fixture-test-07.log`.
 
-Twelve AI effects reach timed, item and passive sources; stock Fight/Flee and
-Charm consume them. V58-V63 compose social context, placement combat, neighbor
-lives and player spells/projectiles. Physical shots contact the first server-owned
-hull; world contact ends flight. Two/three-neighbor regression checks pass:
-`build/logs/{neighbor-projectiles-npc-ranged-test-30,neighbor-expanded-npc-ranged-test-01}.log`.
-
-NPC bows, crossbows and stock throwing stars now use server-owned selection,
-authored shoot release, flight and player contact. Flights persist NPC placement
-and life; death clears old-life flights and respawn releases with the next life.
-Stock-chance plain ammunition recovery joins damage, RNG and NPC inventory in
-one durable impact. Rejection, retry, two overlapping impacts, lethal recovery,
-malformed life, death and restart pass narrow real Morrowind loadouts:
-`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`.
-The three-neighbor bound remains provisional. Mixed passives, non-player
-Command, scripts and generic enchanted/scripted ranged sources remain open.
-An impact sharing a world-transfer tick rejects atomically.
-
-**Next: wire desktop ranged input and projectile presentation to committed
-server releases/contacts; verify two-client flight under latency and reconnect.**
+**Next:** carry authoritative aim for misses and world shots. Unmapped aim is
+currently suppressed. Very short flights can finish between delayed snapshots;
+add a durable visual cue while preserving server-owned contact.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
