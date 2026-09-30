@@ -6775,12 +6775,18 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "npc-ranged-bow"
             || std::string_view(argv[1]) == "npc-ranged-crossbow"
             || std::string_view(argv[1]) == "npc-ranged-thrown"
+            || std::string_view(argv[1]) == "npc-ranged-enchanted-bow"
+            || std::string_view(argv[1]) == "npc-ranged-enchanted-crossbow"
+            || std::string_view(argv[1]) == "npc-ranged-enchanted-thrown"
             || std::string_view(argv[1]) == "ai-creature"
             || std::string_view(argv[1]) == "constant-concealment"))
         {
             const bool npcRanged = std::string_view(argv[1]).starts_with("npc-ranged-");
             const std::string_view profile = npcRanged
-                ? std::string_view(argv[1]) == "npc-ranged-bow" ? "npc-bow"
+                ? std::string_view(argv[1]) == "npc-ranged-enchanted-bow" ? "npc-enchanted-bow"
+                    : std::string_view(argv[1]) == "npc-ranged-enchanted-crossbow" ? "npc-enchanted-crossbow"
+                    : std::string_view(argv[1]) == "npc-ranged-enchanted-thrown" ? "npc-enchanted-thrown"
+                    : std::string_view(argv[1]) == "npc-ranged-bow" ? "npc-bow"
                     : std::string_view(argv[1]) == "npc-ranged-crossbow" ? "npc-crossbow" : "npc-thrown"
                 : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? "bow-desktop-recycling-flight"
                 : (std::string_view(argv[1]) == "neighbor-projectiles"

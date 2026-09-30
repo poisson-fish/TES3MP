@@ -5550,6 +5550,7 @@ namespace TES3MP::Native::Testing
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool npcRanged = effectFamily == "npc-ranged";
+        const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded";
         const bool neighborCombat = effectFamily == "neighbor-combat" || projectileNeighbors;
@@ -5668,6 +5669,8 @@ namespace TES3MP::Native::Testing
             }
             ESM::Enchantment strikeEnchantment;
             ESM::Weapon strikeWeapon;
+            ESM::Enchantment projectileEnchantment;
+            ESM::Weapon projectileWeapon;
             std::vector<ESM::Armor> defenseArmor;
             if (defense)
             {
@@ -5924,10 +5927,12 @@ namespace TES3MP::Native::Testing
             }
             if (npcRanged)
             {
-                const int type = encounterProfile == "npc-crossbow" ? ESM::Weapon::MarksmanCrossbow
-                    : encounterProfile == "npc-thrown" ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
+                const int type = encounterProfile.ends_with("crossbow") ? ESM::Weapon::MarksmanCrossbow
+                    : encounterProfile.ends_with("thrown") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
                 require(encounterProfile == "npc-bow" || encounterProfile == "npc-crossbow"
-                    || encounterProfile == "npc-thrown", "Unknown NPC ranged loadout");
+                    || encounterProfile == "npc-thrown" || encounterProfile == "npc-enchanted-bow"
+                    || encounterProfile == "npc-enchanted-crossbow"
+                    || encounterProfile == "npc-enchanted-thrown", "Unknown NPC ranged loadout");
                 const auto plain = [&](int wanted) {
                     if (wanted == ESM::Weapon::MarksmanThrown)
                     {
@@ -5944,9 +5949,26 @@ namespace TES3MP::Native::Testing
                     require(selected, "Real loadout lacks a plain ranged source");
                     return selected->mId;
                 };
-                const auto weapon = plain(type);
-                const auto ammunition = type == ESM::Weapon::MarksmanThrown ? weapon
+                auto weapon = plain(type);
+                auto ammunition = type == ESM::Weapon::MarksmanThrown ? weapon
                     : plain(MWMechanics::getWeaponType(type)->mAmmoType);
+                if (enchantedProjectile)
+                {
+                    projectileEnchantment.blank();
+                    projectileEnchantment.mId = ESM::RefId::stringRefId("ranged_impact_enchantment");
+                    projectileEnchantment.mData.mType = ESM::Enchantment::WhenStrikes;
+                    projectileEnchantment.mData.mCost = 2;
+                    projectileEnchantment.mData.mCharge = 20;
+                    projectileEnchantment.mEffects.populate({
+                        {ESM::MagicEffect::ResistFire, {}, {}, ESM::RT_Self, 0, 20, 4, 4},
+                        {ESM::MagicEffect::ResistFrost, {}, {}, ESM::RT_Touch, 10, 20, 5, 5},
+                        {ESM::MagicEffect::ResistShock, {}, {}, ESM::RT_Target, 0, 20, 6, 6}});
+                    projectileWeapon = *base.store().get<ESM::Weapon>().find(ammunition);
+                    projectileWeapon.mId = ESM::RefId::stringRefId("ranged_impact_projectile");
+                    projectileWeapon.mEnchant = projectileEnchantment.mId;
+                    ammunition = projectileWeapon.mId;
+                    if (type == ESM::Weapon::MarksmanThrown) weapon = ammunition;
+                }
                 npc.mSpells.mList.clear();
                 npc.mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? 40 : 1, weapon}};
                 if (type != ESM::Weapon::MarksmanThrown) npc.mInventory.mList.push_back({40, ammunition});
@@ -6174,6 +6196,13 @@ namespace TES3MP::Native::Testing
                 recovery.mValue.setFloat(100.f);
                 out.startRecord(ESM::GameSetting::sRecordId, 0); recovery.save(out);
                 out.endRecord(ESM::GameSetting::sRecordId);
+                if (enchantedProjectile)
+                {
+                    out.startRecord(ESM::Enchantment::sRecordId, 0);
+                    projectileEnchantment.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                    out.startRecord(ESM::Weapon::sRecordId, 0);
+                    projectileWeapon.save(out); out.endRecord(ESM::Weapon::sRecordId);
+                }
             }
             if (weaponExecution)
             {
@@ -6629,9 +6658,9 @@ namespace TES3MP::Native::Testing
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
                 if (npcRanged || encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))
                 {
-                    const int type = (npcRanged && encounterProfile == "npc-crossbow")
+                    const int type = (npcRanged && encounterProfile.ends_with("crossbow"))
                         || encounterProfile.starts_with("crossbow-") ? ESM::Weapon::MarksmanCrossbow
-                        : (npcRanged && encounterProfile == "npc-thrown")
+                        : (npcRanged && encounterProfile.ends_with("thrown"))
                             || encounterProfile.starts_with("thrown-") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
                     const auto plain = [&](int type) {
                         for (bool preferTr : {true, false})
@@ -6645,6 +6674,7 @@ namespace TES3MP::Native::Testing
                         throw std::runtime_error("Plain ranged fixture unavailable");
                     };
                     auto weapon = encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("long bow") : plain(type);
+                    if (enchantedProjectile && type == ESM::Weapon::MarksmanThrown) weapon = projectileWeapon.mId;
                     if (encounterProfile == "bow-aim-flight")
                     {
                         auto enchanted = *base.store().get<ESM::Weapon>().find(weapon);
@@ -6662,7 +6692,8 @@ namespace TES3MP::Native::Testing
                         participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? ammunitionCount : 1, weapon}};
                         if (type != ESM::Weapon::MarksmanThrown)
                             participant->mInventory.mList.push_back({ammunitionCount,
-                                encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("iron arrow")
+                                enchantedProjectile ? projectileWeapon.mId
+                                    : encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("iron arrow")
                                     : plain(MWMechanics::getWeaponType(type)->mAmmoType)});
                         participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)]
                             = npcRanged || encounterProfile.ends_with("-flight") ? 255 : 100;
@@ -8408,7 +8439,22 @@ namespace TES3MP::Native::Testing
                             require(arrow.targetKind == 1 && arrow.targetLife == 1 && arrow.command,
                                 "NPC flight lost durable player target or release identity");
                             if (arrow.terminal == 1 && state.combat->actors[0][8][2] < playerHealth)
+                            {
                                 contacted = true;
+                                if (enchantedProjectile)
+                                    require(std::ranges::count_if(state.timedEffects, [&](const auto& effect) {
+                                        return effect.actor == 0 && effect.casterKind == 2
+                                            && effect.caster == placement && effect.casterLife == arrow.casterLife
+                                            && effect.sourceKind == 2
+                                            && effect.source == source("ranged_impact_enchantment");
+                                    }) == 3, "NPC projectile failed to commit all three stock impact ranges");
+                                if (enchantedProjectile)
+                                    require(std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                        return effect.actor == 1 && effect.caster == placement
+                                            && effect.sourceKind == 2 && effect.ordinal == 1
+                                            && effect.source == source("ranged_impact_enchantment");
+                                    }), "NPC projectile area missed the second nearby player");
+                            }
                         }
                     if (released && !restarted)
                     {
@@ -8449,6 +8495,78 @@ namespace TES3MP::Native::Testing
                     require(bool(prepared), "Real-loadout player bow intent rejected");
                     return prepared;
                 };
+                if (enchantedProjectile)
+                {
+                    uint64_t impactTick = 0, command = 0;
+                    for (uint64_t tick = 1; tick <= 180; ++tick)
+                    {
+                        auto pending = recovery.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                            tick == 1 ? attack(1, tick) : std::unique_ptr<PreparedNativeInventory>{}, {}, &world);
+                        require(bool(pending), "Enchanted projectile tick absent");
+                        const auto prior = bytes(recovery);
+                        require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && bytes(recovery) == prior,
+                            "Rejected enchanted impact leaked effect, damage, recovery, or receipt");
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Enchanted projectile tick failed");
+                        const auto state = read(bytes(recovery));
+                        for (const auto& arrow : state.combat->arrows)
+                            if (arrow.casterKind == 1 && arrow.terminal == 1)
+                            {
+                                const auto effects = std::ranges::count_if(state.timedEffects, [&](const auto& effect) {
+                                    return effect.actor == 2 && effect.casterKind == 1 && effect.caster == 1
+                                        && effect.sourceKind == 2 && effect.casterLife == 1
+                                        && effect.source == source("ranged_impact_enchantment");
+                                });
+                                const bool areaNeighbor = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                    return effect.actor >= 3 && effect.casterKind == 1 && effect.caster == 1
+                                        && effect.sourceKind == 2 && effect.ordinal == 1
+                                        && effect.source == source("ranged_impact_enchantment");
+                                });
+                                const auto projectileCopies = [](std::string_view core) {
+                                    size_t copies = 0, at = 0;
+                                    while ((at = core.find("ranged_impact_projectile", at)) != std::string_view::npos)
+                                    { ++copies; at += sizeof("ranged_impact_projectile") - 1; }
+                                    return copies;
+                                };
+                                require(effects == 3 && areaNeighbor && state.combat->actors[2][8][2]
+                                        < initialState.combat->actors[2][8][2]
+                                        && projectileCopies({state.inventory.data(), state.inventory.size()})
+                                            == projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()}),
+                                    ("Enchanted impact mismatch: effects=" + std::to_string(effects)
+                                        + " area=" + std::to_string(areaNeighbor)
+                                        + " health=" + std::to_string(state.combat->actors[2][8][2])
+                                        + " initial=" + std::to_string(initialState.combat->actors[2][8][2])
+                                        + " copies=" + std::to_string(projectileCopies({state.inventory.data(), state.inventory.size()}))
+                                        + " prior=" + std::to_string(projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()}))).c_str());
+                                impactTick = tick; command = arrow.command;
+                                break;
+                            }
+                        const auto committed = bytes(recovery);
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Rejected
+                                && bytes(recovery) == committed,
+                            "Enchanted impact retry duplicated a committed outcome");
+                        if (impactTick) break;
+                    }
+                    require(impactTick && command, "Enchanted player projectile never impacted NPC");
+                    const auto image = bytes(recovery);
+                    InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, image);
+                    restored.service().synchronizeCells(authority);
+                    require(bytes(restored.service()) == image,
+                        "Enchanted impact effect or terminal receipt changed on restart");
+                    for (uint64_t owner : {1, 2})
+                    {
+                        const auto view = restored.service().projectCombat(authority, id<SessionId>(owner),
+                            id<ServerTick>(impactTick), id<CanonicalRevision>(impactTick));
+                        require(view && std::ranges::any_of(view->projectiles(), [&](const auto& shot) {
+                            return shot.casterKind == 1 && shot.caster == 1 && shot.command == command
+                                && shot.terminal == 1;
+                        }), "Enchanted terminal receipt missing after restart");
+                    }
+                    std::cout << "enchanted-ranged impact=" << impactTick
+                        << " effects=3 recovery=none retry=atomic restart=stable clients=2\n";
+                    return;
+                }
                 std::set<std::pair<uint64_t, uint64_t>> impacts;
                 size_t contacts = 0;
                 for (uint64_t tick = 1; tick <= 180; ++tick)

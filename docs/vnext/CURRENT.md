@@ -6,12 +6,15 @@ to three. Player/NPC casts, conditions, stats, Disintegration, concealment, visi
 movement and twelve AI effects have bounded vanilla/TR checks. VFX, sneak
 stance and AI jumps remain.
 
-Server-owned bows, crossbows and throwing stars use authored release, durable
-flight, first-hull/world contact and atomic damage/recovery/loot. Unscripted
-enchanted bow/crossbow launchers share that path; projectile enchantments and
-scripts await atomic on-hit execution. NPC life survives restart; death clears
-flights. Real-loadout rejection, overlapping-impact, lethal-recovery and
-restart checks pass: `build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`.
+Server-owned bows, crossbows, arrows, bolts and thrown weapons use authored
+release, durable flight, first-hull/world contact and atomic damage/recovery.
+Unscripted enchanted launchers and projectiles share that path. On successful
+actor impact, projectile WhenStrikes Self/Touch/Target and area effects commit
+with damage and receipt; enchanted ammunition does not recover. Scripts remain
+closed. Death clears flights. Ranged rejection, overlap, recovery and restart pass:
+`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`. Synthetic enchanted
+impact, failed-write, retry and restart checks pass:
+`build/logs/projectile-enchanted-{bow,crossbow,thrown}-complete-01.log`.
 The neighbor cap is provisional. Mixed passives and non-player Command remain;
 world-transfer conflicts reject atomically.
 
@@ -31,9 +34,7 @@ received its receipt. Relay drops: 1,519. With a plain bow,
 in seven ticks, one arrow spent, no actor hit and both terminal cues under
 325 relay drops.
 
-**Next:** carry projectile enchantments/scripts through atomic impact and
-recovery, then cover varied ranged sources and attack modes live while retaining
-the V64 aim and receipt path.
+**Next:** scripted sources and varied two-client ranged loadouts/attack modes.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
