@@ -419,12 +419,14 @@ namespace TES3MP::Native
         return prepareEquipment(validateCommand(caller, command), command);
     }
 
-    EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareNpcEquipment(size_t owner, ESM::RefNum item)
+    EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareNpcEquipment(size_t owner, ESM::RefNum item, int slot)
     {
         if (owner < 2 || owner >= ownerCount() || !inventoryStorage(owner))
             throw std::invalid_argument("Native AI equipment owner invalid");
+        if (slot != InventoryStore::Slot_CarriedRight && slot != InventoryStore::Slot_Ammunition)
+            throw std::invalid_argument("Native AI equipment slot invalid");
         return prepareEquipment(owner, {ownedId(ownerPtr(owner).getCellRef().getRefNum()), ownedId(item),
-            mWorld.getPtrRegistryRevision(), EquipmentRequestedState::Equipped, InventoryStore::Slot_CarriedRight});
+            mWorld.getPtrRegistryRevision(), EquipmentRequestedState::Equipped, slot});
     }
 
     EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareEquipment(size_t actor, EquipmentCommand command)
@@ -792,5 +794,106 @@ namespace TES3MP::Native
         mWorld.mPtrRegistry.mIndex.swap(staged.registry);
         mWorld.mPtrRegistry.mRevision = staged.beforeRevision + 1;
         mWorld.mPtrRegistry.mLastGenerated = staged.counter;
+    }
+
+    struct EquipmentRuntime::PreparedProjectileLoot::State
+    {
+        struct Replacement
+        {
+            size_t owner;
+            std::unique_ptr<RestoredPlainEquipment> restored;
+            ContainerStore* candidate = nullptr;
+            std::vector<ContainerStoreIterator> slots;
+            ContainerStoreIterator selected;
+            Ptr playerItem;
+            Replacement(size_t index, ContainerStore& live)
+                : owner(index), slots(InventoryStore::Slots, live.end()), selected(live.end()) {}
+        };
+        EquipmentRuntime* runtime;
+        size_t beforeRevision;
+        uint64_t revision;
+        ESM::RefNum counter;
+        PtrRegistry::Index registry;
+        std::vector<Replacement> replacements;
+        State(EquipmentRuntime& value, const EquipmentSessionValues& values)
+            : runtime(&value), beforeRevision(value.mWorld.getPtrRegistryRevision()),
+              revision(values.mRevision), counter(values.mActors[0].mLastGenerated),
+              registry(value.mWorld.mPtrRegistry.mIndex) {}
+    };
+    EquipmentRuntime::PreparedProjectileLoot::PreparedProjectileLoot(std::unique_ptr<State> state)
+        : mState(std::move(state)) {}
+    EquipmentRuntime::PreparedProjectileLoot::~PreparedProjectileLoot() = default;
+    bool EquipmentRuntime::PreparedProjectileLoot::replaces(size_t owner) const noexcept
+    {
+        return std::ranges::any_of(mState->replacements,
+            [owner](const auto& replacement) { return replacement.owner == owner; });
+    }
+    uint64_t EquipmentRuntime::PreparedProjectileLoot::beforeRevision() const noexcept
+    { return mState->beforeRevision; }
+
+    std::unique_ptr<EquipmentRuntime::PreparedProjectileLoot> EquipmentRuntime::prepareProjectileLoot(
+        const EquipmentSessionValues& values, std::span<const size_t> owners)
+    {
+        if (!mConnected || mRestartActor || mFailedClosed || owners.empty()
+            || owners.size() > ownerCount() || values.mRevision <= mWorld.getPtrRegistryRevision()
+            || values.mContainers.size() != ownerCount() - 2)
+            throw std::invalid_argument("Projectile loot replacement boundary invalid");
+        auto staged = std::make_unique<PreparedProjectileLoot::State>(*this, values);
+        staged->replacements.reserve(owners.size());
+        for (size_t owner : owners)
+        {
+            if (owner >= ownerCount() || std::ranges::any_of(staged->replacements,
+                    [owner](const auto& entry) { return entry.owner == owner; }))
+                throw std::invalid_argument("Projectile loot replacement owner invalid");
+            auto& live = storage(owner);
+            const auto& replacement = owner < 2 ? values.mActors[owner] : values.mContainers[owner - 2];
+            replacement.validate(mStore, ownerPtr(owner).getCellRef().getRefNum(), mScriptLocals.get());
+            live.forEachStored([&](const auto& item, auto) { staged->registry.erase(item.mRef.getRefNum()); });
+            staged->replacements.emplace_back(owner, live);
+            auto& entry = staged->replacements.back();
+            entry.restored = std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
+                replacement, mStore, ownerPtr(owner).getCellRef().getRefNum(), mScriptLocals));
+            auto& candidate = entry.restored->installationStorage(mStore,
+                ownerPtr(owner).getCellRef().getRefNum(), staged->counter);
+            entry.candidate = &candidate;
+            const auto playerItem = owner < 2 && !mItems[owner].isEmpty()
+                ? mItems[owner].getCellRef().getRefNum() : ESM::RefNum{};
+            candidate.forEachStored([&](auto& node, auto iterator) {
+                iterator.mContainer = &live;
+                Ptr ptr(&node, nullptr);
+                ptr.mContainerStore = &live;
+                const auto id = node.mRef.getRefNum();
+                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                    if (id == replacement.mSlots[slot]) entry.slots[slot] = iterator;
+                if (id == replacement.mSelected) entry.selected = iterator;
+                if (owner < 2 && id == playerItem) entry.playerItem = ptr;
+                if (!staged->registry.emplace(id, ptr).second)
+                    throw std::invalid_argument("Projectile loot identity collision");
+            });
+        }
+        if (staged->registry.size() > registryBound())
+            throw std::invalid_argument("Projectile loot registry capacity exceeded");
+        return std::unique_ptr<PreparedProjectileLoot>(new PreparedProjectileLoot(std::move(staged)));
+    }
+
+    void EquipmentRuntime::installProjectileLoot(PreparedProjectileLoot& prepared) noexcept
+    {
+        auto& staged = *prepared.mState;
+        assert(staged.runtime == this);
+        for (auto& entry : staged.replacements)
+        {
+            auto& live = storage(entry.owner);
+            installStorage(live, *entry.candidate, true);
+            if (auto* equipped = inventoryStorage(entry.owner))
+            {
+                std::copy(entry.slots.begin(), entry.slots.end(), equipped->mSlots.begin());
+                equipped->mSelectedEnchantItem = entry.selected;
+            }
+            if (entry.owner < 2) mItems[entry.owner] = entry.playerItem;
+        }
+        auto& registry = mWorld.mPtrRegistry;
+        registry.mIndex.swap(staged.registry);
+        registry.mRevision = staged.revision;
+        registry.mLastGenerated = staged.counter;
     }
 }

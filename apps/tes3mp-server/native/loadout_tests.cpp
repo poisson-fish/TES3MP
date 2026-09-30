@@ -6771,18 +6771,26 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "neighbor-combat"
             || std::string_view(argv[1]) == "neighbor-projectiles"
             || std::string_view(argv[1]) == "neighbor-expanded"
+            || std::string_view(argv[1]) == "npc-ranged-bow"
+            || std::string_view(argv[1]) == "npc-ranged-crossbow"
+            || std::string_view(argv[1]) == "npc-ranged-thrown"
             || std::string_view(argv[1]) == "ai-creature"
             || std::string_view(argv[1]) == "constant-concealment"))
         {
+            const bool npcRanged = std::string_view(argv[1]).starts_with("npc-ranged-");
+            const std::string_view profile = npcRanged
+                ? std::string_view(argv[1]) == "npc-ranged-bow" ? "npc-bow"
+                    : std::string_view(argv[1]) == "npc-ranged-crossbow" ? "npc-crossbow" : "npc-thrown"
+                : (std::string_view(argv[1]) == "neighbor-projectiles"
+                    || std::string_view(argv[1]) == "neighbor-expanded") ? "bow-basic-flight" : "";
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true, false, false, true, false,
-                false, true, false, true, false, false, false, false, false, false, false, false,
-                (std::string_view(argv[1]) == "neighbor-projectiles"
-                    || std::string_view(argv[1]) == "neighbor-expanded")
-                    ? std::string_view("bow-basic-flight") : std::string_view{},
+                false, true, false, true, false, false, npcRanged, false, npcRanged, npcRanged, npcRanged, false,
+                profile,
                 std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
-                std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
+                npcRanged ? std::string_view("npc-ranged")
+                    : std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
                     : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep")
                         ? std::string_view("movement-effects") : std::string_view(argv[1]),
                 std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep",

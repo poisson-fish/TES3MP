@@ -220,6 +220,11 @@ namespace TES3MP::Native
             float after;
             bool consume = false;
         };
+        struct ProjectileRecovery
+        {
+            size_t owner;
+            ESM::RefId record;
+        };
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};
         std::optional<MeleeAnimation> mMelee;
@@ -252,7 +257,9 @@ namespace TES3MP::Native
             uint64_t requested, float reach) const;
         EquipmentBytes stagedWeaponCore(std::span<const WeaponWear> wear, const PreparedNativeInventory* command,
             std::span<const ItemCharge> charges = {},
-            const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
+            const EquipmentRuntime::PreparedRespawn* respawn = nullptr,
+            std::span<const ProjectileRecovery> recoveries = {},
+            EquipmentSessionValues* stagedValues = nullptr) const;
         PlainEquipmentValues combatEquipmentValues(size_t owner, const PreparedNativeInventory* command) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;

@@ -5450,15 +5450,16 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
-        const bool projectileNeighbors = effectFamily == "neighbor-projectiles"
+        const bool npcRanged = effectFamily == "npc-ranged";
+        const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded";
         const bool neighborCombat = effectFamily == "neighbor-combat" || projectileNeighbors;
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
-        const bool aiDisposition = effectFamily == "ai-disposition" || socialLifecycle;
+        const bool aiDisposition = !npcRanged && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
-        const bool movementEffects = effectFamily == "movement-effects" || aiDisposition
+        const bool movementEffects = npcRanged || effectFamily == "movement-effects" || aiDisposition
             || effectFamily == "ai-creature";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
@@ -5821,6 +5822,41 @@ namespace TES3MP::Native::Testing
                 }
                 std::erase_if(npc.mInventory.mList, [&](const auto& item) { return item.mItem == usedWardItem.mId; });
             }
+            if (npcRanged)
+            {
+                const int type = encounterProfile == "npc-crossbow" ? ESM::Weapon::MarksmanCrossbow
+                    : encounterProfile == "npc-thrown" ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
+                require(encounterProfile == "npc-bow" || encounterProfile == "npc-crossbow"
+                    || encounterProfile == "npc-thrown", "Unknown NPC ranged loadout");
+                const auto plain = [&](int wanted) {
+                    if (wanted == ESM::Weapon::MarksmanThrown)
+                    {
+                        const auto* stock = base.store().get<ESM::Weapon>().find(
+                            ESM::RefId::stringRefId("steel throwing star"));
+                        require(stock->mData.mType == wanted && stock->mScript.empty()
+                            && stock->mEnchant.empty(), "Stock throwing star is not a plain ranged source");
+                        return stock->mId;
+                    }
+                    const ESM::Weapon* selected = nullptr;
+                    for (const auto& record : base.store().get<ESM::Weapon>())
+                        if (record.mData.mType == wanted && record.mScript.empty() && record.mEnchant.empty()
+                            && (!selected || record.mId < selected->mId)) selected = &record;
+                    require(selected, "Real loadout lacks a plain ranged source");
+                    return selected->mId;
+                };
+                const auto weapon = plain(type);
+                const auto ammunition = type == ESM::Weapon::MarksmanThrown ? weapon
+                    : plain(MWMechanics::getWeaponType(type)->mAmmoType);
+                npc.mSpells.mList.clear();
+                npc.mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? 40 : 1, weapon}};
+                if (type != ESM::Weapon::MarksmanThrown) npc.mInventory.mList.push_back({40, ammunition});
+                npc.mNpdt.mHealth = 35;
+                npc.mNpdt.mMana = npc.mNpdt.mFatigue = 1000;
+                npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)] = 255;
+                npc.mAiData.mFight = 100; npc.mAiData.mFlee = 0;
+                std::cout << "npc-ranged profile=" << encounterProfile << " weapon=" << weapon
+                    << " ammunition=" << ammunition << '\n';
+            }
             const bool creatureEncounter = encounterProfile == "vanilla-knockdown-dremora"
                 || effectFamily == "ai-creature";
             const bool customBody = encounterProfile.starts_with("vanilla-knockdown-custom:");
@@ -5856,7 +5892,8 @@ namespace TES3MP::Native::Testing
                     << "\nweapon iron longsword\nmelee-speed "
                     << (creatureEncounter ? 1.f : base.store().get<ESM::Weapon>().find(weapon)->mData.mSpeed) << '\n';
             }
-            else if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
+            else if (!encounterProfile.empty() && !npcRanged
+                && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
             {
                 const bool tr = encounterProfile.starts_with("tr-");
                 const bool itemProfile = encounterProfile.ends_with("item");
@@ -6031,6 +6068,13 @@ namespace TES3MP::Native::Testing
                     }
                 }
             }
+            if (npcRanged)
+            {
+                auto recovery = *base.store().get<ESM::GameSetting>().find("fProjectileThrownStoreChance");
+                recovery.mValue.setFloat(100.f);
+                out.startRecord(ESM::GameSetting::sRecordId, 0); recovery.save(out);
+                out.endRecord(ESM::GameSetting::sRecordId);
+            }
             if (weaponExecution)
             {
                 out.startRecord(ESM::Enchantment::sRecordId, 0);
@@ -6062,7 +6106,7 @@ namespace TES3MP::Native::Testing
                 npc.mNpdt.mHealth = npc.mNpdt.mMana = npc.mNpdt.mFatigue = 100;
                 for (auto& attribute : npc.mNpdt.mAttributes) attribute = 40;
             }
-            if (statDrains || expandedEffects)
+            if ((statDrains || expandedEffects) && !npcRanged)
             {
                 // Synthetic records exercise generic argument handling using real MGEF/KF resources.
                 drainMagickaMultiplier = base.store().get<ESM::GameSetting>().find("fNPCbaseMagickaMult")->mValue.getFloat();
@@ -6096,7 +6140,7 @@ namespace TES3MP::Native::Testing
                 npc.mSpells.mList.push_back(drain.mId);
                 out.startRecord(ESM::Spell::sRecordId, 0); drain.save(out); out.endRecord(ESM::Spell::sRecordId);
             }
-            if (expandedEffects)
+            if (expandedEffects && !npcRanged)
             {
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
@@ -6175,7 +6219,8 @@ namespace TES3MP::Native::Testing
                     }
                 if (aiDisposition || effectFamily == "ai-creature")
                 {
-                    npc.mAiData.mFight = socialLifecycle ? 50 : 20; npc.mAiData.mFlee = 0;
+                    npc.mAiData.mFight = npcRanged ? 100 : socialLifecycle ? 50 : 20;
+                    npc.mAiData.mFlee = 0;
                     if (aiDisposition) npc.mAiData.mAlarm = socialLifecycle ? 50 : 100;
                     npc.mNpdt.mDisposition = 50; npc.mNpdt.mHealth = 200;
                     if (aiDisposition)
@@ -6386,7 +6431,7 @@ namespace TES3MP::Native::Testing
             auto aiPlayerSpells = npc.mSpells.mList;
             if (aiDisposition)
                 aiPlayerSpells.push_back(ESM::RefId::stringRefId("ai_passive_charm"));
-            if (aiDisposition || effectFamily == "ai-creature")
+            if ((aiDisposition && !npcRanged) || effectFamily == "ai-creature")
             {
                 npc.mSpells.mList.clear();
                 npc.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
@@ -6422,7 +6467,7 @@ namespace TES3MP::Native::Testing
                 witness.mAiData.mFight = projectileNeighbors ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = 5;
                 witness.mSpells.mList.clear();
-                if (neighborCombat)
+                if (neighborCombat && !npcRanged)
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
                 out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
@@ -6481,10 +6526,12 @@ namespace TES3MP::Native::Testing
                         female.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 }
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
-                if ((encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight")))
+                if (npcRanged || encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))
                 {
-                    const int type = encounterProfile.starts_with("crossbow-") ? ESM::Weapon::MarksmanCrossbow
-                        : encounterProfile.starts_with("thrown-") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
+                    const int type = (npcRanged && encounterProfile == "npc-crossbow")
+                        || encounterProfile.starts_with("crossbow-") ? ESM::Weapon::MarksmanCrossbow
+                        : (npcRanged && encounterProfile == "npc-thrown")
+                            || encounterProfile.starts_with("thrown-") ? ESM::Weapon::MarksmanThrown : ESM::Weapon::MarksmanBow;
                     const auto plain = [&](int type) {
                         for (bool preferTr : {true, false})
                         {
@@ -6501,14 +6548,14 @@ namespace TES3MP::Native::Testing
                         std::cout << "combined ranged=" << weapon << " melee=iron longsword\n";
                     for (auto* participant : {&female, &beast})
                     {
-                        const int ammunitionCount = encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
+                        const int ammunitionCount = npcRanged || encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
                         participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? ammunitionCount : 1, weapon}};
                         if (type != ESM::Weapon::MarksmanThrown)
                             participant->mInventory.mList.push_back({ammunitionCount,
                                 encounterProfile.starts_with("bow-") ? ESM::RefId::stringRefId("iron arrow")
                                     : plain(MWMechanics::getWeaponType(type)->mAmmoType)});
                         participant->mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Marksman)]
-                            = encounterProfile.ends_with("-flight") ? 255 : 100;
+                            = npcRanged || encounterProfile.ends_with("-flight") ? 255 : 100;
                     }
                 }
                 if (projectileNeighbors)
@@ -6756,12 +6803,12 @@ namespace TES3MP::Native::Testing
                 ESM::CellRef witness; witness.blank();
                 witness.mRefNum = {++index, 0};
                 witness.mRefID = ESM::RefId::stringRefId("npc_witness_alarm");
-                witness.mPos = {{100, -120, 1}, {0, 0, 0}};
+                witness.mPos = {{npcRanged ? 175.f : 100.f, -120, 1}, {0, 0, 0}};
                 witness.save(out);
                 if (neighborCombat)
                 {
                     witness.mRefNum = {++index, 0};
-                    witness.mPos = {{175, -120, 1}, {0, 0, 0}};
+                    witness.mPos = {{npcRanged ? 250.f : 175.f, -120, 1}, {0, 0, 0}};
                     witness.save(out);
                     if (effectFamily == "neighbor-expanded")
                     {
@@ -6805,7 +6852,8 @@ namespace TES3MP::Native::Testing
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
-        if (!encounterProfile.empty() && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))) return;
+        if (!encounterProfile.empty() && !npcRanged
+            && !(encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))) return;
         if (!wetMovement)
         {
             const auto directory = (scratch / "openmw").string();
@@ -8123,14 +8171,14 @@ namespace TES3MP::Native::Testing
         if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
             || effectFamily == "constant-concealment"
             || effectFamily == "visibility" || effectFamily == "movement-effects"
-            || aiDisposition || effectFamily == "ai-creature" || specialConditions)
+            || aiDisposition || npcRanged || effectFamily == "ai-creature" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
                     Transform(placed[i].transform().cell(), Position3(
-                            (i ? -160 : effectFamily == "neighbor-expanded" ? 175 : projectileNeighbors ? 100 : 60)*1024,
-                            (i ? -400 : projectileNeighbors ? -200 : -400)*1024, 1024),
+                            (i ? npcRanged ? 20 : -160 : effectFamily == "neighbor-expanded" ? 175 : projectileNeighbors ? 100 : 60)*1024,
+                            (i ? npcRanged ? -200 : -400 : projectileNeighbors ? -200 : -400)*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
@@ -8224,6 +8272,165 @@ namespace TES3MP::Native::Testing
                         + " item=" + std::to_string(item) + " result=" + std::to_string(int(result))).c_str());
                 return read(bytes(runtime));
             };
+            if (npcRanged)
+            {
+                auto encounter = make(); auto& runtime = dynamic_cast<InventoryService&>(encounter->service());
+                const auto original = bytes(runtime);
+                const auto initialState = read(original);
+                const auto placement = initialState.combat->npcPlacements.front();
+                const float playerHealth = initialState.combat->actors[0][8][2];
+                bool released = false, contacted = false, restarted = false;
+                uint64_t casterLife = 0, release = 0;
+                for (uint64_t tick = 1; tick <= 300; ++tick)
+                {
+                    auto pending = advance(runtime, tick);
+                    const auto beforeTick = bytes(runtime);
+                    if (pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        != CanonicalDurabilityResult::Rejected || bytes(runtime) != beforeTick)
+                        throw std::runtime_error("Rejected NPC ranged tick leaked state");
+                    const auto state = commit(runtime, tick);
+                    for (const auto& arrow : state.combat->arrows)
+                        if (arrow.casterKind == 2 && arrow.caster == placement)
+                        {
+                            released = true;
+                            casterLife = arrow.casterLife;
+                            release = arrow.releaseTick;
+                            require(arrow.targetKind == 1 && arrow.targetLife == 1 && arrow.command,
+                                "NPC flight lost durable player target or release identity");
+                            if (arrow.terminal == 1 && state.combat->actors[0][8][2] < playerHealth)
+                                contacted = true;
+                        }
+                    if (released && !restarted)
+                    {
+                        const auto image = bytes(runtime);
+                        InventoryHost restored(descriptor, testContentManifest(), *registry, *crypto, image);
+                        restored.service().synchronizeCells(authority);
+                        require(bytes(restored.service()) == image, "NPC flight restart changed durable receipt");
+                        const auto flight = read(image);
+                        auto invalid = image;
+                        const auto offset = size_t(flight.inventory.data()
+                            - reinterpret_cast<const char*>(image.data())) - 16;
+                        for (size_t i = 0; i < 8; ++i) invalid.at(offset + i) = std::byte{};
+                        bool rejectedLife = false;
+                        try { InventoryHost malformed(descriptor, testContentManifest(), *registry, *crypto, invalid); }
+                        catch (const std::invalid_argument&) { rejectedLife = true; }
+                        require(rejectedLife && bytes(runtime) == image,
+                            "Malformed NPC caster life installed on restart");
+                        restarted = true;
+                    }
+                    if (contacted) break;
+                }
+                require(released && contacted && casterLife == 1 && release > 0,
+                    "NPC real-loadout shot never released or contacted a player");
+                auto recoveryHost = make(); auto& recovery = dynamic_cast<InventoryService&>(recoveryHost->service());
+                const auto world = specialWorld();
+                const size_t initialCore = read(bytes(recovery)).inventory.size();
+                const auto attack = [&](uint64_t playerId, uint64_t tick) {
+                    const auto* player = authority.findPlayer(id<PlayerId>(playerId));
+                    const ClientMeleeAttackCommand input{id<SessionId>(playerId), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                        id<ActorId>(placement), id<ServerTick>(tick), CombatRevision::initial(),
+                        CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    const ServerCommandProposal request{id<SessionId>(playerId), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
+                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                        MeleeAttackCommandProposal(input)};
+                    auto prepared = recovery.prepareMeleeAttack(authority, request, id<ServerTick>(tick));
+                    require(bool(prepared), "Real-loadout player bow intent rejected");
+                    return prepared;
+                };
+                std::set<std::pair<uint64_t, uint64_t>> impacts;
+                size_t contacts = 0;
+                for (uint64_t tick = 1; tick <= 180; ++tick)
+                {
+                    auto command = tick == 1 ? attack(1, tick) : tick == 2 ? attack(2, tick)
+                        : std::unique_ptr<PreparedNativeInventory>{};
+                    auto pending = recovery.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                        std::move(command), {}, &world);
+                    require(bool(pending), "Real-loadout recovery tick absent");
+                    const auto prior = bytes(recovery);
+                    require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(recovery) == prior,
+                        "Rejected projectile impact changed inventory or RNG");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Real-loadout recovery tick failed");
+                    const auto state = read(bytes(recovery));
+                    const auto priorCore = read(prior).inventory.size();
+                    for (const auto& arrow : state.combat->arrows)
+                        if (arrow.casterKind == 1 && arrow.terminal)
+                            if (impacts.insert({arrow.caster, arrow.command}).second)
+                                require(arrow.terminal == 1 && arrow.target == placement
+                                        && state.inventory.size() > priorCore,
+                                    "Projectile contact did not recover ammunition in its durable impact tick");
+                    contacts = impacts.size();
+                    const auto committed = bytes(recovery);
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Rejected
+                            && bytes(recovery) == committed,
+                        "Projectile impact retry duplicated durable ammunition");
+                    if (contacts >= 2) break;
+                }
+                const auto recoveredImage = bytes(recovery);
+                const auto recovered = read(recoveredImage);
+                require(contacts >= 2 && recovered.inventory.size() > initialCore,
+                    "Concurrent player impacts did not recover stock ammunition into NPC inventory");
+                InventoryHost lootRestart(descriptor, testContentManifest(), *registry, *crypto, recoveredImage);
+                lootRestart.service().synchronizeCells(authority);
+                require(bytes(lootRestart.service()) == recoveredImage,
+                    "Concurrent ammunition recovery changed across restart");
+                uint64_t deathTick = 0;
+                unsigned furtherShots = 0;
+                for (uint64_t tick = recovered.tick + 1; tick <= 500; ++tick)
+                {
+                    const auto previous = read(bytes(recovery));
+                    const bool launch = (!previous.combat->swings[0]
+                        || !previous.combat->swings[0]->pending())
+                        && !previous.combat->hitRecoveryTicks[0];
+                    auto command = launch ? attack(1, tick) : std::unique_ptr<PreparedNativeInventory>{};
+                    furtherShots += launch;
+                    auto pending = recovery.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                        std::move(command), {}, &world);
+                    require(bool(pending), "Real-loadout lethal impact tick absent");
+                    const auto prior = bytes(recovery);
+                    require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && bytes(recovery) == prior,
+                        "Rejected NPC death leaked inventory or flight state");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "NPC death tick failed");
+                    const auto dead = read(bytes(recovery));
+                    if (dead.combat->actors[2][8][2] > 0) continue;
+                    require(dead.inventory.size() > read(prior).inventory.size()
+                            && !dead.life->deaths.empty() && dead.life->deaths.back().killer == 1
+                            && dead.life->deaths.back().killerKind == 1
+                            && std::ranges::none_of(dead.combat->arrows, [](const auto& arrow) {
+                                return arrow.casterKind == 2 && !arrow.terminal;
+                            }), "NPC death retained an old-life flight or lost killer");
+                    deathTick = tick;
+                    break;
+                }
+                require(furtherShots && deathTick, "Real-loadout NPC death did not resolve");
+                const auto deathImage = bytes(recovery);
+                InventoryHost deathRestart(descriptor, testContentManifest(), *registry, *crypto, deathImage);
+                deathRestart.service().synchronizeCells(authority);
+                require(bytes(deathRestart.service()) == deathImage, "NPC death changed across restart");
+                uint64_t nextLifeFlight = 0;
+                for (uint64_t tick = deathTick + 1; tick <= deathTick + 150; ++tick)
+                {
+                    const auto state = commit(recovery, tick);
+                    if (state.life->generation < 2) continue;
+                    for (const auto& arrow : state.combat->arrows)
+                        if (arrow.casterKind == 2 && arrow.caster == placement
+                            && arrow.casterLife == 2)
+                            nextLifeFlight = arrow.releaseTick;
+                    if (nextLifeFlight) break;
+                }
+                require(nextLifeFlight > deathTick, "Respawn reused the dead NPC caster life");
+                std::cout << "npc-ranged release=" << release << " caster-life=" << casterLife
+                    << " contact=server concurrent-impacts=" << contacts
+                    << " recovery-bytes=" << recovered.inventory.size() - initialCore
+                    << " death=" << deathTick << " next-life=" << nextLifeFlight
+                    << " retry=atomic restart=stable\n";
+                return;
+            }
             if (projectileNeighbors)
             {
                 const auto world = specialWorld();

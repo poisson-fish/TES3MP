@@ -50,7 +50,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t SocialLifecycleCampaignMagic = 0x5850434154335354;
     inline constexpr uint64_t PlacementCombatCampaignMagic = 0x5950434154335354;
     inline constexpr uint64_t NeighborCombatCampaignMagic = 0x5a50434154335354;
-    inline constexpr bool hasNeighborCombat(uint64_t magic) { return magic == NeighborCombatCampaignMagic; }
+    inline constexpr uint64_t NpcRangedCampaignMagic = 0x5b50434154335354;
+    inline constexpr bool hasNpcRanged(uint64_t magic) { return magic == NpcRangedCampaignMagic; }
+    inline constexpr bool hasNeighborCombat(uint64_t magic)
+    { return magic == NeighborCombatCampaignMagic || hasNpcRanged(magic); }
     inline constexpr bool hasPlacementCombat(uint64_t magic)
     { return magic == PlacementCombatCampaignMagic || hasNeighborCombat(magic); }
     inline constexpr bool hasSocialLifecycle(uint64_t magic)
@@ -131,6 +134,8 @@ namespace TES3MP::Native
         std::array<float, 3> velocity{};
         float condition = 1;
         uint64_t steps = 0, terminal = 0; // 0 flying, 1 collided, 2 expired.
+        uint64_t casterKind = 1, casterLife = 1;
+        uint64_t targetKind = 2; // Player targets use kind 1.
         bool operator==(const BowProjectile&) const = default;
     };
     struct ActorCampaignCast
@@ -1043,6 +1048,12 @@ namespace TES3MP::Native
                     value.condition = number();
                     value.steps = getAreaWord(bytes, offset);
                     value.terminal = getAreaWord(bytes, offset);
+                    if (hasNpcRanged(magic))
+                    {
+                        value.casterKind = getAreaWord(bytes, offset);
+                        value.casterLife = getAreaWord(bytes, offset);
+                        value.targetKind = getAreaWord(bytes, offset);
+                    }
                     if (value.condition < 0 || value.condition > 1 || value.steps > 3600 || value.terminal > 2
                         || (value.steps == 3600 && !value.terminal)
                         || (value.terminal == 2 && value.steps != 3600)
@@ -1051,17 +1062,29 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native physical flight state invalid");
                 }
                 float norm = 0; for (float v : value.direction) norm += v * v;
-                const auto targetIndex = hasNeighborCombat(magic)
-                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
-                const auto targetGeneration = targetIndex == 2 ? life->generation
+                const size_t targetIndex = value.targetKind == 1 ? 0 : hasNeighborCombat(magic)
+                    ? size_t(std::ranges::find(combat->npcPlacements, value.target)
+                        - combat->npcPlacements.begin()) + 2 : 2;
+                const auto targetGeneration = value.targetKind == 1 ? 1 : targetIndex == 2 ? life->generation
                     : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0;
+                const size_t casterIndex = value.casterKind == 2 && hasNeighborCombat(magic)
+                    ? size_t(std::ranges::find(combat->npcPlacements, value.caster)
+                        - combat->npcPlacements.begin()) + 2 : 0;
+                const auto casterGeneration = casterIndex == 2 ? life->generation
+                    : casterIndex > 2 && casterIndex < combat->actors.size()
+                        ? neighborLives[casterIndex - 3].generation : 0;
                 if (!value.caster || !value.command || !value.source || !value.ammunition || !value.target
                     || !value.targetLife || !targetGeneration || value.targetLife > targetGeneration
+                    || !((value.casterKind == 1 && value.targetKind == 2)
+                        || (value.casterKind == 2 && value.targetKind == 1))
+                    || (value.casterKind == 1 ? value.casterLife != 1
+                        : value.casterKind != 2 || !casterGeneration || value.casterLife > casterGeneration)
                     || !value.releaseTick || value.releaseTick > tick || value.strength < 0 || value.strength > 1
                     || std::abs(norm - 1.f) > .001f
                     || std::ranges::any_of(value.position, [](float v) { return std::abs(v) > 100'000'000; })
                     || std::ranges::any_of(combat->arrows, [&](const auto& prior) {
-                        return prior.caster == value.caster && prior.command == value.command;
+                        return prior.casterKind == value.casterKind && prior.caster == value.caster
+                            && prior.casterLife == value.casterLife && prior.command == value.command;
                     })) throw std::invalid_argument("Native arrow state invalid");
                 combat->arrows.push_back(std::move(value));
             }

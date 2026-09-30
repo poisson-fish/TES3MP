@@ -251,6 +251,20 @@ namespace TES3MP::Native
         // Ordinary item identities and their object state are retained.
         std::unique_ptr<PreparedRespawn> prepareWerewolfEquipment(size_t owner, bool transformed);
         void installRespawn(PreparedRespawn& prepared) noexcept;
+        class PreparedProjectileLoot
+        {
+            friend class EquipmentRuntime;
+            struct State;
+            std::unique_ptr<State> mState;
+            explicit PreparedProjectileLoot(std::unique_ptr<State> state);
+        public:
+            ~PreparedProjectileLoot();
+            bool replaces(size_t owner) const noexcept;
+            uint64_t beforeRevision() const noexcept;
+        };
+        std::unique_ptr<PreparedProjectileLoot> prepareProjectileLoot(
+            const EquipmentSessionValues& values, std::span<const size_t> owners);
+        void installProjectileLoot(PreparedProjectileLoot& prepared) noexcept;
         class PreparedDoor
         {
             friend class EquipmentRuntime;
@@ -323,7 +337,8 @@ namespace TES3MP::Native
         };
         PreparedEquipment prepare(EquipmentCaller caller, EquipmentCommand command);
         // Trusted AI equipment; client commands still authorize player owners only.
-        PreparedEquipment prepareNpcEquipment(size_t owner, ESM::RefNum item);
+        PreparedEquipment prepareNpcEquipment(size_t owner, ESM::RefNum item,
+            int slot = InventoryStore::Slot_CarriedRight);
     private:
         PreparedEquipment prepareEquipment(size_t owner, EquipmentCommand command);
     public:
