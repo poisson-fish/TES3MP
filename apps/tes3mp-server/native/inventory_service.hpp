@@ -183,6 +183,8 @@ namespace TES3MP::Native
         MWScript::CompilerContext mCompilerContext;
         MWScript::ScriptManager mScriptManager;
         EquipmentRuntime mRuntime;
+        std::map<std::pair<uint64_t, uint64_t>, std::string> mMagicVisualRecords;
+        std::string magicVisualRecord(uint64_t sourceKind, uint64_t effectSource) const;
         EquipmentBytes mImage;
         EquipmentBytes mActorImage;
         class Transaction;

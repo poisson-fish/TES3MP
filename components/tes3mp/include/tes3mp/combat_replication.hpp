@@ -50,6 +50,8 @@ namespace TES3MP
     inline constexpr std::size_t MaximumReplicatedActiveMagicEffects = 64;
     inline constexpr std::size_t MaximumReplicatedMagicEffectEvents = MaximumCombatEventsPerBatch;
     inline constexpr std::size_t MaximumReplicatedPhysicalProjectiles = 8;
+    inline constexpr std::size_t MaximumReplicatedMagicProjectiles = 8;
+    inline constexpr std::size_t MaximumReplicatedMagicImpactCues = 32;
 
     // A durable release receipt also carries its last committed flight/terminal
     // position. Identity includes the caster life so respawn cannot revive a shot.
@@ -60,6 +62,27 @@ namespace TES3MP
         std::string record;
         std::array<float, 3> position{}, velocity{};
         friend bool operator==(const PhysicalProjectileSnapshot&, const PhysicalProjectileSnapshot&) = default;
+    };
+
+    // Source is the authored spell or enchantment record. Clients resolve its
+    // target-range visual data locally; flight position and contact stay server-owned.
+    struct MagicProjectileSnapshot
+    {
+        std::uint8_t casterKind = 1, sourceKind = 0;
+        std::uint64_t caster = 0, casterLife = 0, command = 0;
+        std::string record;
+        std::array<float, 3> position{}, velocity{};
+        friend bool operator==(const MagicProjectileSnapshot&, const MagicProjectileSnapshot&) = default;
+    };
+
+    struct MagicImpactCue
+    {
+        std::uint8_t casterKind = 1, sourceKind = 0;
+        std::uint64_t caster = 0, casterLife = 0, command = 0;
+        std::string record;
+        std::array<float, 3> position{};
+        std::uint8_t range = 2; // ESM Target; Self and Touch area cues use 0 and 1.
+        friend bool operator==(const MagicImpactCue&, const MagicImpactCue&) = default;
     };
 
     enum class ReplicatedCombatSkill : std::uint8_t
@@ -231,7 +254,8 @@ namespace TES3MP
             std::span<const ActiveMagicEffectSnapshot> activeEffects = {},
             std::span<const PlayerSwingSnapshot> swings = {}, KnockoutSnapshot selfKnockout = {},
             std::span<const ActorPresentationSnapshot> presentation = {},
-            std::span<const PhysicalProjectileSnapshot> projectiles = {});
+            std::span<const PhysicalProjectileSnapshot> projectiles = {},
+            std::span<const MagicProjectileSnapshot> magicProjectiles = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
@@ -253,6 +277,7 @@ namespace TES3MP
         std::span<const PlayerSwingSnapshot> swings() const noexcept { return mSwings; }
         std::span<const ActorPresentationSnapshot> presentation() const noexcept { return mPresentation; }
         std::span<const PhysicalProjectileSnapshot> projectiles() const noexcept { return mProjectiles; }
+        std::span<const MagicProjectileSnapshot> magicProjectiles() const noexcept { return mMagicProjectiles; }
         friend bool operator==(const LatestWinsCombatSnapshot&, const LatestWinsCombatSnapshot&) noexcept = default;
 
     private:
@@ -263,7 +288,8 @@ namespace TES3MP
             std::vector<CombatSkillSnapshot> skills, std::vector<PlayerCombatSnapshot> players,
             std::vector<ActiveMagicEffectSnapshot> activeEffects, std::vector<PlayerSwingSnapshot> swings,
             KnockoutSnapshot selfKnockout, std::vector<ActorPresentationSnapshot> presentation,
-            std::vector<PhysicalProjectileSnapshot> projectiles)
+            std::vector<PhysicalProjectileSnapshot> projectiles,
+            std::vector<MagicProjectileSnapshot> magicProjectiles)
             : mSession(session)
             , mGeneration(generation)
             , mTick(tick)
@@ -285,6 +311,7 @@ namespace TES3MP
             , mSelfKnockout(selfKnockout)
             , mPresentation(std::move(presentation))
             , mProjectiles(std::move(projectiles))
+            , mMagicProjectiles(std::move(magicProjectiles))
         {
         }
         SessionId mSession;
@@ -308,6 +335,7 @@ namespace TES3MP
         KnockoutSnapshot mSelfKnockout;
         std::vector<ActorPresentationSnapshot> mPresentation;
         std::vector<PhysicalProjectileSnapshot> mProjectiles;
+        std::vector<MagicProjectileSnapshot> mMagicProjectiles;
     };
 
     struct MeleeCombatEvent
@@ -401,7 +429,8 @@ namespace TES3MP
             SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision,
             std::span<const MeleeCombatEvent> events, std::span<const ActorMeleeCombatEvent> actorEvents = {},
             std::span<const MagicUseCombatEvent> magicEvents = {},
-            std::span<const MagicEffectCombatEvent> magicEffectEvents = {});
+            std::span<const MagicEffectCombatEvent> magicEffectEvents = {},
+            std::span<const MagicImpactCue> magicImpactCues = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
@@ -410,13 +439,15 @@ namespace TES3MP
         std::span<const ActorMeleeCombatEvent> actorEvents() const noexcept { return mActorEvents; }
         std::span<const MagicUseCombatEvent> magicEvents() const noexcept { return mMagicEvents; }
         std::span<const MagicEffectCombatEvent> magicEffectEvents() const noexcept { return mMagicEffectEvents; }
+        std::span<const MagicImpactCue> magicImpactCues() const noexcept { return mMagicImpactCues; }
         friend bool operator==(const ReliableCombatEventBatch&, const ReliableCombatEventBatch&) noexcept = default;
 
     private:
         ReliableCombatEventBatch(SessionId session, SessionGeneration generation, ServerTick tick,
             CanonicalRevision revision, std::vector<MeleeCombatEvent> events,
             std::vector<ActorMeleeCombatEvent> actorEvents, std::vector<MagicUseCombatEvent> magicEvents,
-            std::vector<MagicEffectCombatEvent> magicEffectEvents)
+            std::vector<MagicEffectCombatEvent> magicEffectEvents,
+            std::vector<MagicImpactCue> magicImpactCues)
             : mSession(session)
             , mGeneration(generation)
             , mTick(tick)
@@ -425,6 +456,7 @@ namespace TES3MP
             , mActorEvents(std::move(actorEvents))
             , mMagicEvents(std::move(magicEvents))
             , mMagicEffectEvents(std::move(magicEffectEvents))
+            , mMagicImpactCues(std::move(magicImpactCues))
         {
         }
         SessionId mSession;
@@ -435,6 +467,7 @@ namespace TES3MP
         std::vector<ActorMeleeCombatEvent> mActorEvents;
         std::vector<MagicUseCombatEvent> mMagicEvents;
         std::vector<MagicEffectCombatEvent> mMagicEffectEvents;
+        std::vector<MagicImpactCue> mMagicImpactCues;
     };
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& value);

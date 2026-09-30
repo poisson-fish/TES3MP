@@ -29,6 +29,9 @@ struct MagicUseCombatEvent;
 
 struct MagicEffectCombatEvent;
 
+struct MagicImpactCue;
+struct MagicImpactCueBuilder;
+
 struct ReliableCombatEventBatch;
 struct ReliableCombatEventBatchBuilder;
 
@@ -603,6 +606,166 @@ inline ::flatbuffers::Offset<CombatEventHeader> CreateCombatEventHeader(
   return builder_.Finish();
 }
 
+struct MagicImpactCue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef MagicImpactCueBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_CASTER_KIND = 4,
+    VT_SOURCE_KIND = 6,
+    VT_CASTER = 8,
+    VT_CASTER_LIFE = 10,
+    VT_COMMAND = 12,
+    VT_RECORD = 14,
+    VT_X = 16,
+    VT_Y = 18,
+    VT_Z = 20,
+    VT_RANGE = 22
+  };
+  uint8_t caster_kind() const {
+    return GetField<uint8_t>(VT_CASTER_KIND, 0);
+  }
+  uint8_t source_kind() const {
+    return GetField<uint8_t>(VT_SOURCE_KIND, 0);
+  }
+  uint64_t caster() const {
+    return GetField<uint64_t>(VT_CASTER, 0);
+  }
+  uint64_t caster_life() const {
+    return GetField<uint64_t>(VT_CASTER_LIFE, 0);
+  }
+  uint64_t command() const {
+    return GetField<uint64_t>(VT_COMMAND, 0);
+  }
+  const ::flatbuffers::String *record() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_RECORD);
+  }
+  float x() const {
+    return GetField<float>(VT_X, 0.0f);
+  }
+  float y() const {
+    return GetField<float>(VT_Y, 0.0f);
+  }
+  float z() const {
+    return GetField<float>(VT_Z, 0.0f);
+  }
+  uint8_t range() const {
+    return GetField<uint8_t>(VT_RANGE, 2);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_CASTER_KIND, 1) &&
+           VerifyField<uint8_t>(verifier, VT_SOURCE_KIND, 1) &&
+           VerifyField<uint64_t>(verifier, VT_CASTER, 8) &&
+           VerifyField<uint64_t>(verifier, VT_CASTER_LIFE, 8) &&
+           VerifyField<uint64_t>(verifier, VT_COMMAND, 8) &&
+           VerifyOffset(verifier, VT_RECORD) &&
+           verifier.VerifyString(record()) &&
+           VerifyField<float>(verifier, VT_X, 4) &&
+           VerifyField<float>(verifier, VT_Y, 4) &&
+           VerifyField<float>(verifier, VT_Z, 4) &&
+           VerifyField<uint8_t>(verifier, VT_RANGE, 1) &&
+           verifier.EndTable();
+  }
+};
+
+struct MagicImpactCueBuilder {
+  typedef MagicImpactCue Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_caster_kind(uint8_t caster_kind) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_CASTER_KIND, caster_kind, 0);
+  }
+  void add_source_kind(uint8_t source_kind) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_SOURCE_KIND, source_kind, 0);
+  }
+  void add_caster(uint64_t caster) {
+    fbb_.AddElement<uint64_t>(MagicImpactCue::VT_CASTER, caster, 0);
+  }
+  void add_caster_life(uint64_t caster_life) {
+    fbb_.AddElement<uint64_t>(MagicImpactCue::VT_CASTER_LIFE, caster_life, 0);
+  }
+  void add_command(uint64_t command) {
+    fbb_.AddElement<uint64_t>(MagicImpactCue::VT_COMMAND, command, 0);
+  }
+  void add_record(::flatbuffers::Offset<::flatbuffers::String> record) {
+    fbb_.AddOffset(MagicImpactCue::VT_RECORD, record);
+  }
+  void add_x(float x) {
+    fbb_.AddElement<float>(MagicImpactCue::VT_X, x, 0.0f);
+  }
+  void add_y(float y) {
+    fbb_.AddElement<float>(MagicImpactCue::VT_Y, y, 0.0f);
+  }
+  void add_z(float z) {
+    fbb_.AddElement<float>(MagicImpactCue::VT_Z, z, 0.0f);
+  }
+  void add_range(uint8_t range) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_RANGE, range, 2);
+  }
+  explicit MagicImpactCueBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<MagicImpactCue> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<MagicImpactCue>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCue(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint8_t caster_kind = 0,
+    uint8_t source_kind = 0,
+    uint64_t caster = 0,
+    uint64_t caster_life = 0,
+    uint64_t command = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> record = 0,
+    float x = 0.0f,
+    float y = 0.0f,
+    float z = 0.0f,
+    uint8_t range = 2) {
+  MagicImpactCueBuilder builder_(_fbb);
+  builder_.add_command(command);
+  builder_.add_caster_life(caster_life);
+  builder_.add_caster(caster);
+  builder_.add_z(z);
+  builder_.add_y(y);
+  builder_.add_x(x);
+  builder_.add_record(record);
+  builder_.add_range(range);
+  builder_.add_source_kind(source_kind);
+  builder_.add_caster_kind(caster_kind);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCueDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint8_t caster_kind = 0,
+    uint8_t source_kind = 0,
+    uint64_t caster = 0,
+    uint64_t caster_life = 0,
+    uint64_t command = 0,
+    const char *record = nullptr,
+    float x = 0.0f,
+    float y = 0.0f,
+    float z = 0.0f,
+    uint8_t range = 2) {
+  auto record__ = record ? _fbb.CreateString(record) : 0;
+  return TES3MP::Protocol::Schema::CombatEvent::CreateMagicImpactCue(
+      _fbb,
+      caster_kind,
+      source_kind,
+      caster,
+      caster_life,
+      command,
+      record__,
+      x,
+      y,
+      z,
+      range);
+}
+
 struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ReliableCombatEventBatchBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -610,7 +773,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_EVENTS = 6,
     VT_ACTOR_EVENTS = 8,
     VT_MAGIC_EVENTS = 10,
-    VT_MAGIC_EFFECT_EVENTS = 12
+    VT_MAGIC_EFFECT_EVENTS = 12,
+    VT_MAGIC_IMPACT_CUES = 14
   };
   const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *>(VT_HEADER);
@@ -627,6 +791,9 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *> *magic_effect_events() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *> *>(VT_MAGIC_EFFECT_EVENTS);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>> *magic_impact_cues() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>> *>(VT_MAGIC_IMPACT_CUES);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -640,6 +807,9 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(magic_events()) &&
            VerifyOffset(verifier, VT_MAGIC_EFFECT_EVENTS) &&
            verifier.VerifyVector(magic_effect_events()) &&
+           VerifyOffset(verifier, VT_MAGIC_IMPACT_CUES) &&
+           verifier.VerifyVector(magic_impact_cues()) &&
+           verifier.VerifyVectorOfTables(magic_impact_cues()) &&
            verifier.EndTable();
   }
 };
@@ -663,6 +833,9 @@ struct ReliableCombatEventBatchBuilder {
   void add_magic_effect_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *>> magic_effect_events) {
     fbb_.AddOffset(ReliableCombatEventBatch::VT_MAGIC_EFFECT_EVENTS, magic_effect_events);
   }
+  void add_magic_impact_cues(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>>> magic_impact_cues) {
+    fbb_.AddOffset(ReliableCombatEventBatch::VT_MAGIC_IMPACT_CUES, magic_impact_cues);
+  }
   explicit ReliableCombatEventBatchBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -680,8 +853,10 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *>> magic_effect_events = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *>> magic_effect_events = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>>> magic_impact_cues = 0) {
   ReliableCombatEventBatchBuilder builder_(_fbb);
+  builder_.add_magic_impact_cues(magic_impact_cues);
   builder_.add_magic_effect_events(magic_effect_events);
   builder_.add_magic_events(magic_events);
   builder_.add_actor_events(actor_events);
@@ -696,18 +871,21 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent> *events = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent> *actor_events = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent> *magic_events = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent> *magic_effect_events = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent> *magic_effect_events = nullptr,
+    const std::vector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>> *magic_impact_cues = nullptr) {
   auto events__ = events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent>(*events) : 0;
   auto actor_events__ = actor_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent>(*actor_events) : 0;
   auto magic_events__ = magic_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent>(*magic_events) : 0;
   auto magic_effect_events__ = magic_effect_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent>(*magic_effect_events) : 0;
+  auto magic_impact_cues__ = magic_impact_cues ? _fbb.CreateVector<::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::MagicImpactCue>>(*magic_impact_cues) : 0;
   return TES3MP::Protocol::Schema::CombatEvent::CreateReliableCombatEventBatch(
       _fbb,
       header,
       events__,
       actor_events__,
       magic_events__,
-      magic_effect_events__);
+      magic_effect_events__,
+      magic_impact_cues__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatEvent::ReliableCombatEventBatch *GetReliableCombatEventBatch(const void *buf) {

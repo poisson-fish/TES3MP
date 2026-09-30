@@ -8525,6 +8525,10 @@ namespace TES3MP::Native::Testing
                         require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                                 == CanonicalDurabilityResult::Rejected && bytes(recovery) == prior,
                             "Rejected enchanted impact leaked effect, damage, recovery, or receipt");
+                        const auto aliceVisual = recovery.projectCombatEvents(authority, id<SessionId>(1),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                        const auto bobVisual = recovery.projectCombatEvents(authority, id<SessionId>(2),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
                         require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
                             "Enchanted projectile tick failed");
                         const auto state = read(bytes(recovery));
@@ -8557,6 +8561,12 @@ namespace TES3MP::Native::Testing
                                         + " initial=" + std::to_string(initialState.combat->actors[2][8][2])
                                         + " copies=" + std::to_string(projectileCopies({state.inventory.data(), state.inventory.size()}))
                                         + " prior=" + std::to_string(projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()}))).c_str());
+                                require(aliceVisual && bobVisual && aliceVisual->magicImpactCues().size() == 2
+                                    && std::ranges::equal(aliceVisual->magicImpactCues(), bobVisual->magicImpactCues())
+                                    && aliceVisual->magicImpactCues()[0].record == "ranged_impact_enchantment"
+                                    && aliceVisual->magicImpactCues()[0].range == ESM::RT_Touch
+                                    && aliceVisual->magicImpactCues()[1].range == ESM::RT_Target,
+                                    "Enchanted physical impact lost two authored visual cues");
                                 impactTick = tick; command = arrow.command;
                                 break;
                             }
@@ -13541,6 +13551,11 @@ namespace TES3MP::Native::Testing
                             resolved = state.projectiles.empty();
                             if (event) for (const auto& magic : event->magicEvents())
                                 if (magic.castSucceeded && magic.targetHealthDelta < 0) ++contacts;
+                            if (event && !event->magicImpactCues().empty())
+                                require(event->magicImpactCues().size() == 1
+                                    && event->magicImpactCues()[0].record == "npc_once_damage"
+                                    && event->magicImpactCues()[0].range == ESM::RT_Target,
+                                    "CastOnce contact lost its authored explosion cue");
                             if (resolved) require(contacts == 2 && state.combat->actors[2][8][2]
                                     < contacted.combat->actors[2][8][2],
                                 "Stacked CastOnce contacts lost effects after source consumption and restart");
@@ -13558,6 +13573,15 @@ namespace TES3MP::Native::Testing
                     }) == CanonicalDurabilityResult::Rejected
                         && std::ranges::equal(flight.inventoryImage(), contactImage),
                         "Rejected first launch changed the campaign");
+                    const auto firstVisual = flight.projectCombat(playersAtLaunch, id<SessionId>(1),
+                        id<ServerTick>(castTick), id<CanonicalRevision>(castTick), firstTick.get());
+                    const auto secondVisual = flight.projectCombat(playersAtLaunch, id<SessionId>(2),
+                        id<ServerTick>(castTick), id<CanonicalRevision>(castTick), firstTick.get());
+                    require(firstVisual && secondVisual && firstVisual->magicProjectiles().size() == 1
+                        && std::ranges::equal(firstVisual->magicProjectiles(), secondVisual->magicProjectiles())
+                        && firstVisual->magicProjectiles()[0].record == "npc_target_damage"
+                        && firstVisual->magicProjectiles()[0].command == input.commandId.value(),
+                        "Committed spell flight was not projected identically to both observers");
                     require(firstTick->commit(accepted) == CanonicalDurabilityResult::Committed,
                         "First concurrent Target cast did not commit");
                     const auto first = readActorCampaign({reinterpret_cast<const char*>(firstImage.data()), firstImage.size()});
@@ -13611,6 +13635,10 @@ namespace TES3MP::Native::Testing
                     require(rejectedDuplicate, "Duplicate saved pending command installed on recovery");
                     InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, pairedImage);
                     auto& resumed = restarted.service(); resumed.synchronizeCells(playersAtSecond);
+                    const auto resumedVisual = resumed.projectCombat(playersAtSecond, id<SessionId>(1),
+                        id<ServerTick>(castTick + 1), id<CanonicalRevision>(castTick + 1));
+                    require(resumedVisual && resumedVisual->magicProjectiles().size() == 2,
+                        "Restart lost both networked spell flights");
                     require(!resumed.prepareMagicUse(playersAtSecond, proposal(input), id<ServerTick>(castTick + 2)),
                         "Restart admitted duplicate pending command");
                     bool resolvedTogether = false;
@@ -13628,10 +13656,17 @@ namespace TES3MP::Native::Testing
                             candidate.size()});
                         const auto outcome = resumed.projectCombatEvents(playersAtSecond, id<SessionId>(1),
                             id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
+                        const auto otherOutcome = resumed.projectCombatEvents(playersAtSecond, id<SessionId>(2),
+                            id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
                         const size_t hits = outcome ? std::ranges::count_if(outcome->magicEvents(), [&](const auto& event) {
                             return event.targetKind == MagicUseTargetKind::Actor && event.targetId == input.targetId
                                 && event.castSucceeded && event.targetHealthDelta < 0;
                         }) : 0;
+                        if (hits == 2)
+                            require(otherOutcome && outcome->magicImpactCues().size() == 2
+                                && std::ranges::equal(outcome->magicImpactCues(), otherOutcome->magicImpactCues())
+                                && outcome->magicImpactCues()[0].record == "npc_target_damage",
+                                "Two observers did not receive identical committed spell impact cues");
                         if (hits == 2) resolvedTogether = true;
                         require(step->commit(accepted) == CanonicalDurabilityResult::Committed,
                             "Concurrent contact did not commit");
@@ -14387,6 +14422,11 @@ namespace TES3MP::Native::Testing
                                     id<ServerTick>(time), id<CanonicalRevision>(time), step.get());
                                 const size_t expected = distant ? 1 : 2;
                                 require(alice && bob && alice->magicEvents().size() == expected
+                                    && alice->magicImpactCues().size() == 1
+                                    && std::ranges::equal(alice->magicImpactCues(), bob->magicImpactCues())
+                                    && alice->magicImpactCues()[0].range == ESM::RT_Target
+                                    && alice->magicImpactCues()[0].record
+                                        == (enchanted ? "npc_used_damage" : "npc_target_damage")
                                     && std::ranges::equal(alice->magicEvents(), bob->magicEvents())
                                     && std::ranges::count_if(alice->magicEvents(), [&](const auto& event) {
                                         return event.targetKind == MagicUseTargetKind::Actor

@@ -26,6 +26,7 @@ namespace TES3MP::OpenMWAdapter
             uint64_t tick;
             std::vector<ActorPresentationPose> actors;
             std::vector<PhysicalProjectileSnapshot> projectiles;
+            std::vector<MagicProjectileSnapshot> magicProjectiles;
         };
         std::deque<Frame> mFrames;
         uint64_t mGeneration = 0;
@@ -46,7 +47,8 @@ namespace TES3MP::OpenMWAdapter
         double tick() const { return mCursor; }
         void observe(const LatestWinsCombatSnapshot& snapshot)
         {
-            if (snapshot.presentation().empty() && snapshot.projectiles().empty()) return;
+            if (snapshot.presentation().empty() && snapshot.projectiles().empty()
+                && snapshot.magicProjectiles().empty()) return;
             const auto generation = snapshot.targetSessionGeneration().value();
             if (generation != mGeneration) { clear(); mGeneration = generation; }
             const auto tick = snapshot.serverTick().value();
@@ -59,7 +61,8 @@ namespace TES3MP::OpenMWAdapter
                 }
             while (mSeenTerminals.size() > 256) mSeenTerminals.erase(mSeenTerminals.begin());
             if (mFrames.empty()) mCursor = double(tick);
-            Frame frame{tick, {}, {snapshot.projectiles().begin(), snapshot.projectiles().end()}};
+            Frame frame{tick, {}, {snapshot.projectiles().begin(), snapshot.projectiles().end()},
+                {snapshot.magicProjectiles().begin(), snapshot.magicProjectiles().end()}};
             for (const auto& actor : snapshot.presentation())
             {
                 ActorPresentationPose pose;
@@ -189,6 +192,38 @@ namespace TES3MP::OpenMWAdapter
         {
             std::vector<PhysicalProjectileSnapshot> result;
             for (const auto& cue : mTerminalCues) result.push_back(cue.first);
+            return result;
+        }
+        std::vector<MagicProjectileSnapshot> sampleMagicProjectiles() const
+        {
+            std::vector<MagicProjectileSnapshot> result;
+            if (empty()) return result;
+            size_t lo = 0;
+            while (lo + 1 < mFrames.size() && double(mFrames[lo + 1].tick) <= mCursor) ++lo;
+            const auto& lower = mFrames[lo];
+            const auto* upper = lo + 1 < mFrames.size() ? &mFrames[lo + 1] : nullptr;
+            for (const auto& flight : lower.magicProjectiles)
+            {
+                auto sampled = flight;
+                if (upper)
+                {
+                    const auto key = [](const MagicProjectileSnapshot& p) {
+                        return std::tuple(p.casterKind, p.caster, p.casterLife, p.command);
+                    };
+                    const auto next = std::ranges::find_if(upper->magicProjectiles,
+                        [&](const auto& p) { return key(p) == key(flight) && p.record == flight.record; });
+                    if (next != upper->magicProjectiles.end())
+                    {
+                        const float ratio = float((mCursor - double(lower.tick)) / double(upper->tick - lower.tick));
+                        for (size_t axis = 0; axis < 3; ++axis)
+                        {
+                            sampled.position[axis] = std::lerp(flight.position[axis], next->position[axis], ratio);
+                            sampled.velocity[axis] = std::lerp(flight.velocity[axis], next->velocity[axis], ratio);
+                        }
+                    }
+                }
+                result.push_back(std::move(sampled));
+            }
             return result;
         }
     };

@@ -144,6 +144,21 @@ table PhysicalProjectileSnapshot {
   vz:float;
 }
 
+table MagicProjectileSnapshot {
+  caster_kind:ubyte;
+  source_kind:ubyte;
+  caster:ulong;
+  caster_life:ulong;
+  command:ulong;
+  record:string;
+  x:float;
+  y:float;
+  z:float;
+  vx:float;
+  vy:float;
+  vz:float;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
@@ -153,6 +168,7 @@ table LatestWinsCombatSnapshot {
   swings:[PlayerSwingSnapshot] (id: 5);
   presentation:[ActorPresentationSnapshot] (id: 6);
   projectiles:[PhysicalProjectileSnapshot] (id: 7);
+  magic_projectiles:[MagicProjectileSnapshot] (id: 8);
 }
 
 root_type LatestWinsCombatSnapshot;

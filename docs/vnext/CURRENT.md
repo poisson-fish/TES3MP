@@ -1,45 +1,46 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-steps NPCs/doors at 60 Hz and commits at 30 Hz with three neighbors maximum.
+steps NPCs/doors at 60 Hz, commits at 30 Hz and binds three neighbors maximum.
 Casts, conditions, stats, visibility, movement and twelve AI effects have vanilla/TR
-checks. VFX, sneak stance, AI jumps, mixed passives and non-player Command remain.
+checks. Sneak stance, AI jumps, mixed passives and non-player Command remain.
 
-Server-owned bows, crossbows and thrown weapons use authored release, durable
-flight, first contact and atomic damage/recovery. Scripted sources retain locals;
-enchanted impact commits WhenStrikes/area effects and receipts. Enchanted ammunition
-does not recover; item script instructions remain closed. Ranged checks pass:
-`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`. Synthetic enchanted
-impact, failed-write, retry and restart checks pass:
+Server-owned bows, crossbows and thrown weapons have durable release, flight,
+contact, damage and recovery. Enchanted impact commits WhenStrikes/area effects;
+scripted sources retain locals. Enchanted ammunition does not recover; item script
+instructions remain closed. Ranged and enchanted retry/restart checks pass:
+`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`,
 `build/logs/projectile-enchanted-{bow,crossbow,thrown}-complete-01.log`.
 The neighbor cap is provisional.
 
-V64 persists bounded camera aim and sweeps server hulls. Targetless misses pay
-once; 250 ms terminal cues do not replay on reconnect. Checks pass:
-`build/logs/aim-protocol-test.log`, `build/logs/aim-cue-test.log`,
-`build/logs/bow-aim-enchanted-test.log`.
+V64 persists camera aim and sweeps server hulls. Misses pay once; terminal cues
+do not replay on reconnect. Checks: `build/logs/aim-protocol-test.log`,
+`build/logs/aim-cue-test.log`, `build/logs/bow-aim-enchanted-test.log`.
 
-The body timeline interpolates knockdown loops and holds across hit-clip changes.
-Desktop traces use attack/cast text keys. Four-actor checks cover attacks, hit,
-fall, get-up, loss and reconnect:
-`build/logs/body-timeline-test.log`. The desktop object compiled:
-`build/logs/body-pose-object-build.log`. Two-desktop rendering is unverified.
+The body timeline interpolates knockdown loops and holds across hit clips.
+Four-actor attack, hit, fall, get-up, loss and reconnect checks pass:
+`build/logs/body-timeline-test.log`; desktop object compiled in
+`build/logs/body-pose-object-build.log`. Two-desktop body rendering is unverified.
 
-`build/logs/desktop-ranged-aim-live-01.log`: two clients under 100 ms latency,
-jitter and 10% loss shared impacts/death, corpse transfer and an expired miss.
-`build/logs/desktop-ranged-world-hull-05.log` proves targetless floor contact,
-one arrow spent and both terminal cues.
+Two clients under latency/jitter/10% loss shared physical impacts, death, corpse
+transfer and a miss: `build/logs/desktop-ranged-aim-live-01.log`. A floor contact,
+one arrow cost and both cues pass `build/logs/desktop-ranged-world-hull-05.log`.
 
-Eight movement IDs now admit authored passive abilities through the shared
-source lifecycle. An eight-effect ability, timed casts, two-observer projection,
-atomic retry, expiry and exact restart pass `build/logs/movement-passive-test-02.log`.
-Earlier V56 images with ignored abilities need reset. Underwater WaterWalking,
-disabled Levitate, neighbor physics and live visuals remain.
+Eight movement IDs admit passive abilities through shared sources.
+Timed casts, two observers, retry, expiry and restart pass
+`build/logs/movement-passive-test-02.log`. Earlier V56 saves with ignored abilities
+need reset. Underwater WaterWalking, disabled Levitate and neighbor physics remain.
 
-**Next:** close those movement exceptions, then complete AI/disposition, object/travel,
-bound equipment and summons. Generalize actor/life ownership.
-Cut over player movement. Defer two-desktop body,
-ranged loadout, scripted projectile and overlapping-combat runs to M4 acceptance.
+Magic presentation replicates Target flights and reliable spell/enchanted impacts.
+Current rendering lacks stock composite bolts, bolt light/sound and
+cast/hit/loop parity. Protocol, two-observer, CastOnce/restart, area and timeline checks pass:
+`build/logs/magic-vfx-{protocol-test,concurrent-test-10,area-test-02,enchanted-bow-test-01,adapter-test}.log`.
+Client build: `build/logs/magic-vfx-openmw-build-dev.log`. Capability 30 requires
+updated desktops. Live magic rendering is unverified.
+
+**Next:** verify magic bolts and explosions on desktops, then close movement
+exceptions. Continue AI/disposition, object/travel, bound equipment and summons;
+generalize actor/life ownership before player movement cutover.
 
 62 effects remain in the M4 completion inventory across actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

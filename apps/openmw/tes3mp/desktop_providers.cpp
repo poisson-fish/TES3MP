@@ -50,6 +50,10 @@
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadskil.hpp>
+#include <components/esm3/loadench.hpp>
+#include <components/esm3/loadmgef.hpp>
+#include <components/esm3/loadspel.hpp>
+#include <components/esm3/loadstat.hpp>
 #include <components/esm3/loadweap.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <tes3mp/fixed_tick_scheduler.hpp>
@@ -73,6 +77,68 @@ namespace TES3MP::OpenMWAdapter
 {
     namespace
     {
+        const ESM::EffectList* magicVisualEffects(const MWWorld::ESMStore& store,
+            uint8_t sourceKind, const std::string& record)
+        {
+            const auto id = ESM::RefId::stringRefId(record);
+            if (sourceKind == uint8_t(MagicUseSourceKind::Spell))
+            {
+                const auto* spell = store.get<ESM::Spell>().search(id);
+                return spell ? &spell->mEffects : nullptr;
+            }
+            const auto* enchantment = store.get<ESM::Enchantment>().search(id);
+            return enchantment ? &enchantment->mEffects : nullptr;
+        }
+
+        std::optional<std::pair<VFS::Path::Normalized, std::string>> magicBoltVisual(
+            const MWWorld::ESMStore& store, uint8_t sourceKind, const std::string& record)
+        {
+            const auto* effects = magicVisualEffects(store, sourceKind, record);
+            if (!effects) return {};
+            const ESM::MagicEffect* first = nullptr;
+            size_t count = 0;
+            for (const auto& effect : effects->mList)
+                if (effect.mData.mRange == ESM::RT_Target)
+                {
+                    const auto* visual = store.get<ESM::MagicEffect>().search(effect.mData.mEffectID);
+                    if (!visual) return {};
+                    if (!first) first = visual;
+                    ++count;
+                }
+            if (!first) return {};
+            const auto id = first->mBolt.empty() ? ESM::RefId::stringRefId("VFX_DefaultBolt") : first->mBolt;
+            MWWorld::ManualRef ref(store, id);
+            const auto ptr = ref.getPtr();
+            return std::pair{ptr.getClass().getCorrectedModel(ptr), count == 1 ? first->mParticle : std::string{}};
+        }
+
+        bool presentMagicImpact(MWBase::World& world, const MagicImpactCue& cue)
+        {
+            const auto& store = world.getStore();
+            const auto* effects = magicVisualEffects(store, cue.sourceKind, cue.record);
+            if (!effects) return false;
+            const osg::Vec3f point(cue.position[0], cue.position[1], cue.position[2]);
+            for (const auto& effect : effects->mList)
+            {
+                if (effect.mData.mRange != cue.range
+                    || (cue.range != ESM::RT_Target && effect.mData.mArea <= 0)) continue;
+                const auto* visual = store.get<ESM::MagicEffect>().search(effect.mData.mEffectID);
+                if (!visual) return false;
+                const auto areaId = visual->mArea.empty()
+                    ? ESM::RefId::stringRefId("VFX_DefaultArea") : visual->mArea;
+                const auto* area = store.get<ESM::Static>().search(areaId);
+                if (!area) return false;
+                world.spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)),
+                    visual->mParticle, point, effect.mData.mArea > 0 ? float(effect.mData.mArea * 2) : 1.f);
+                auto sound = MWBase::Environment::get().getSoundManager();
+                const auto soundId = visual->mAreaSound.empty()
+                    ? store.get<ESM::Skill>().find(visual->mData.mSchool)->mSchool->mAreaSound
+                    : visual->mAreaSound;
+                if (!soundId.empty()) sound->playSound3D(point, soundId, 1.f, 1.f);
+            }
+            return true;
+        }
+
         void setParalyzed(MWMechanics::CreatureStats& stats, bool paralyzed)
         {
             auto& effects = stats.getMagicEffects();
@@ -968,6 +1034,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<LatestWinsCombatSnapshot> combatSnapshot;
         ActorPresentationTimeline actorTimeline;
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedProjectiles;
+        std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedMagicProjectiles;
         std::vector<DesktopPresentation::ProjectilePoseEvidence> projectileEvidence;
         std::vector<DesktopPresentation::ActorPoseEvidence> poseEvidence;
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
@@ -1050,6 +1117,11 @@ namespace TES3MP::OpenMWAdapter
                         (void)key;
                         world->getRenderingManager()->removeEffect(effect);
                     }
+                    for (const auto& [key, effect] : renderedMagicProjectiles)
+                    {
+                        (void)key;
+                        world->getRenderingManager()->removeEffect(effect);
+                    }
                     world->setWeatherAuthority(false);
                     world->setWorldTimeAuthority(false);
                     world->setLeveledActorAuthority(false);
@@ -1059,6 +1131,7 @@ namespace TES3MP::OpenMWAdapter
             {
             }
             renderedProjectiles.clear();
+            renderedMagicProjectiles.clear();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -2184,6 +2257,9 @@ namespace TES3MP::OpenMWAdapter
                             return ProviderResult::PresentationFailed;
                     }
                 }
+                for (const auto& cue : batch.magicImpactCues())
+                    if (!presentMagicImpact(*world, cue))
+                        return ProviderResult::PresentationFailed;
             }
             std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> confirmedEffects;
             for (const auto& effect : snapshot.activeEffects())
@@ -2236,6 +2312,35 @@ namespace TES3MP::OpenMWAdapter
                     {
                         rendering->removeEffect(it->second);
                         it = renderedProjectiles.erase(it);
+                    }
+                    else ++it;
+                std::set<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>> desiredMagic;
+                for (const auto& flight : actorTimeline.sampleMagicProjectiles())
+                {
+                    const auto key = std::tuple(flight.casterKind, flight.caster, flight.casterLife, flight.command);
+                    desiredMagic.insert(key);
+                    const std::string effect = "tes3mp-magic/" + std::to_string(flight.casterKind) + '/'
+                        + std::to_string(flight.caster) + '/' + std::to_string(flight.casterLife) + '/'
+                        + std::to_string(flight.command);
+                    const osg::Vec3f position(flight.position[0], flight.position[1], flight.position[2]);
+                    const osg::Vec3f velocity(flight.velocity[0], flight.velocity[1], flight.velocity[2]);
+                    osg::Quat attitude;
+                    if (velocity.length2() > 0) attitude.makeRotate(osg::Vec3f(0, 1, 0), velocity);
+                    if (!rendering->moveEffect(effect, position, attitude))
+                    {
+                        const auto visual = magicBoltVisual(world->getStore(), flight.sourceKind, flight.record);
+                        if (!visual) return ProviderResult::PresentationFailed;
+                        rendering->spawnEffect(visual->first, visual->second, position, 1.f, true, true, effect, true);
+                        if (!rendering->moveEffect(effect, position, attitude))
+                            return ProviderResult::PresentationFailed;
+                    }
+                    renderedMagicProjectiles[key] = effect;
+                }
+                for (auto it = renderedMagicProjectiles.begin(); it != renderedMagicProjectiles.end();)
+                    if (!desiredMagic.contains(it->first))
+                    {
+                        rendering->removeEffect(it->second);
+                        it = renderedMagicProjectiles.erase(it);
                     }
                     else ++it;
             }

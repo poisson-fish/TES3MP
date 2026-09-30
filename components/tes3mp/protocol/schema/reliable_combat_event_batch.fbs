@@ -95,12 +95,26 @@ struct MagicEffectCombatEvent {
   effect_kind:ubyte;
 }
 
+table MagicImpactCue {
+  caster_kind:ubyte;
+  source_kind:ubyte;
+  caster:ulong;
+  caster_life:ulong;
+  command:ulong;
+  record:string;
+  x:float;
+  y:float;
+  z:float;
+  range:ubyte = 2;
+}
+
 table ReliableCombatEventBatch {
   header:CombatEventHeader (id: 0);
   events:[MeleeCombatEvent] (id: 1);
   actor_events:[ActorMeleeCombatEvent] (id: 2);
   magic_events:[MagicUseCombatEvent] (id: 3);
   magic_effect_events:[MagicEffectCombatEvent] (id: 4);
+  magic_impact_cues:[MagicImpactCue] (id: 5);
 }
 
 root_type ReliableCombatEventBatch;

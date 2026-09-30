@@ -110,7 +110,8 @@ namespace TES3MP
         std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects,
         std::span<const PlayerSwingSnapshot> swings, KnockoutSnapshot selfKnockout,
         std::span<const ActorPresentationSnapshot> presentation,
-        std::span<const PhysicalProjectileSnapshot> projectiles)
+        std::span<const PhysicalProjectileSnapshot> projectiles,
+        std::span<const MagicProjectileSnapshot> magicProjectiles)
     {
         const auto validKnockout = [](KnockoutSnapshot pose, bool dead) {
             return pose.state <= 3 && pose.frame < 1800
@@ -262,19 +263,42 @@ namespace TES3MP
                 if (!std::isfinite(v) || std::abs(v) > 50000.f)
                     return error(Code::InvalidFloat, 0, 0, i);
         }
+        if (magicProjectiles.size() > MaximumReplicatedMagicProjectiles)
+            return error(Code::TooManyEntries, magicProjectiles.size(), MaximumReplicatedMagicProjectiles);
+        for (size_t i = 0; i < magicProjectiles.size(); ++i)
+        {
+            const auto& p = magicProjectiles[i];
+            const auto key = [](const auto& value) {
+                return std::tuple(value.casterKind, value.caster, value.casterLife, value.command);
+            };
+            if ((i && key(magicProjectiles[i - 1]) >= key(p)) || !p.caster || !p.casterLife || !p.command
+                || (p.casterKind != 1 && p.casterKind != 2) || p.sourceKind > 1
+                || p.record.empty() || p.record.size() > 256 || p.record.find('\0') != std::string::npos)
+                return error(Code::InvalidIdentifier, 0, 0, i);
+            for (const float v : p.position)
+                if (!std::isfinite(v) || std::abs(v) > 1e7f)
+                    return error(Code::InvalidFloat, 0, 0, i);
+            for (const float v : p.velocity)
+                if (!std::isfinite(v) || std::abs(v) > 50000.f)
+                    return error(Code::InvalidFloat, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision, selfHealth,
             selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka, selfDead,
             std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()),
             std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()),
             std::vector(swings.begin(), swings.end()), selfKnockout, std::vector(presentation.begin(), presentation.end()),
-            std::vector(projectiles.begin(), projectiles.end()));
+            std::vector(projectiles.begin(), projectiles.end()),
+            std::vector(magicProjectiles.begin(), magicProjectiles.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
         SessionId session, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
         std::span<const MeleeCombatEvent> events, std::span<const ActorMeleeCombatEvent> actorEvents,
-        std::span<const MagicUseCombatEvent> magicEvents, std::span<const MagicEffectCombatEvent> magicEffectEvents)
+        std::span<const MagicUseCombatEvent> magicEvents, std::span<const MagicEffectCombatEvent> magicEffectEvents,
+        std::span<const MagicImpactCue> magicImpactCues)
     {
+        if (magicImpactCues.size() > MaximumReplicatedMagicImpactCues)
+            return error(Code::TooManyEntries, magicImpactCues.size(), MaximumReplicatedMagicImpactCues);
         if (events.size() > MaximumCombatEventsPerBatch || actorEvents.size() > MaximumCombatEventsPerBatch
             || magicEvents.size() > MaximumCombatEventsPerBatch
             || magicEffectEvents.size() > MaximumReplicatedMagicEffectEvents)
@@ -326,9 +350,21 @@ namespace TES3MP
                 || (event.eventKind != MagicEffectCombatEventKind::Updated && event.startTick == event.endTick))
                 return error(Code::InvalidMagicEffect, 0, 0, i);
         }
+        for (std::size_t i = 0; i < magicImpactCues.size(); ++i)
+        {
+            const auto& cue = magicImpactCues[i];
+            if (!cue.caster || !cue.casterLife || !cue.command
+                || (cue.casterKind != 1 && cue.casterKind != 2) || cue.sourceKind > 1 || cue.range > 2
+                || cue.record.empty() || cue.record.size() > 256 || cue.record.find('\0') != std::string::npos)
+                return error(Code::InvalidIdentifier, 0, 0, i);
+            for (const float v : cue.position)
+                if (!std::isfinite(v) || std::abs(v) > 1e7f)
+                    return error(Code::InvalidFloat, 0, 0, i);
+        }
         return ReliableCombatEventBatch(session, generation, tick, revision, std::vector(events.begin(), events.end()),
             std::vector(actorEvents.begin(), actorEvents.end()), std::vector(magicEvents.begin(), magicEvents.end()),
-            std::vector(magicEffectEvents.begin(), magicEffectEvents.end()));
+            std::vector(magicEffectEvents.begin(), magicEffectEvents.end()),
+            std::vector(magicImpactCues.begin(), magicImpactCues.end()));
     }
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& input)
@@ -398,11 +434,16 @@ namespace TES3MP
             projectiles.push_back(Snapshot::CreatePhysicalProjectileSnapshot(builder, p.casterKind, p.terminal,
                 p.caster, p.casterLife, p.command, p.releaseTick, builder.CreateString(p.record),
                 p.position[0], p.position[1], p.position[2], p.velocity[0], p.velocity[1], p.velocity[2]));
+        std::vector<flatbuffers::Offset<Snapshot::MagicProjectileSnapshot>> magicProjectiles;
+        for (const auto& p : input.magicProjectiles())
+            magicProjectiles.push_back(Snapshot::CreateMagicProjectileSnapshot(builder, p.casterKind, p.sourceKind,
+                p.caster, p.casterLife, p.command, builder.CreateString(p.record),
+                p.position[0], p.position[1], p.position[2], p.velocity[0], p.velocity[1], p.velocity[2]));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
                 builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
                 builder.CreateVectorOfStructs(activeEffects), builder.CreateVector(swings), builder.CreateVector(presentation),
-                builder.CreateVector(projectiles));
+                builder.CreateVector(projectiles), builder.CreateVector(magicProjectiles));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -442,9 +483,14 @@ namespace TES3MP
                 static_cast<Event::MagicEffectCombatEndReason>(event.endReason),
                 static_cast<Event::MagicUseTargetKind>(event.targetKind),
                 static_cast<std::uint8_t>(event.effectKind));
+        std::vector<flatbuffers::Offset<Event::MagicImpactCue>> magicImpactCues;
+        for (const auto& cue : input.magicImpactCues())
+            magicImpactCues.push_back(Event::CreateMagicImpactCue(builder, cue.casterKind, cue.sourceKind,
+                cue.caster, cue.casterLife, cue.command, builder.CreateString(cue.record),
+                cue.position[0], cue.position[1], cue.position[2], cue.range));
         const auto root = Event::CreateReliableCombatEventBatch(builder, header, builder.CreateVectorOfStructs(events),
             builder.CreateVectorOfStructs(actorEvents), builder.CreateVectorOfStructs(magicEvents),
-            builder.CreateVectorOfStructs(magicEffectEvents));
+            builder.CreateVectorOfStructs(magicEffectEvents), builder.CreateVector(magicImpactCues));
         Event::FinishSizePrefixedReliableCombatEventBatchBuffer(builder, root);
         return take(builder);
     }
@@ -669,12 +715,25 @@ namespace TES3MP
                 p->command(), p->release_tick(), p->record()->str(),
                 {p->x(), p->y(), p->z()}, {p->vx(), p->vy(), p->vz()}});
         }
+        const size_t magicProjectileCount = root->magic_projectiles() ? root->magic_projectiles()->size() : 0;
+        if (magicProjectileCount > MaximumReplicatedMagicProjectiles)
+            return error(Code::TooManyEntries, magicProjectileCount, MaximumReplicatedMagicProjectiles);
+        std::vector<MagicProjectileSnapshot> magicProjectiles;
+        magicProjectiles.reserve(magicProjectileCount);
+        for (size_t i = 0; i < magicProjectileCount; ++i)
+        {
+            const auto* p = root->magic_projectiles()->Get(flatbuffers::uoffset_t(i));
+            if (!p || !p->record() || p->record()->size() > 256)
+                return error(Code::InvalidIdentifier, 0, 256, i);
+            magicProjectiles.push_back({p->caster_kind(), p->source_kind(), p->caster(), p->caster_life(),
+                p->command(), p->record()->str(), {p->x(), p->y(), p->z()}, {p->vx(), p->vy(), p->vz()}});
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
             root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
             activeEffects, swings, {root->header()->self_knockout_state(), root->header()->self_knockout_frame(), root->header()->self_paralyzed()},
-            presentation, projectiles);
+            presentation, projectiles, magicProjectiles);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(
@@ -821,8 +880,22 @@ namespace TES3MP
                 static_cast<DirectMagicEffectKind>(current.effect_kind()), current.magnitude_per_second(),
                 current.applied_delta(), *value(start), *value(end), *value(revision) });
         }
+        const auto* encodedMagicImpactCues = root->magic_impact_cues();
+        const size_t magicImpactCount = encodedMagicImpactCues ? encodedMagicImpactCues->size() : 0;
+        if (magicImpactCount > MaximumReplicatedMagicImpactCues)
+            return error(Code::TooManyEntries, magicImpactCount, MaximumReplicatedMagicImpactCues);
+        std::vector<MagicImpactCue> magicImpactCues;
+        magicImpactCues.reserve(magicImpactCount);
+        for (size_t i = 0; i < magicImpactCount; ++i)
+        {
+            const auto* cue = encodedMagicImpactCues->Get(flatbuffers::uoffset_t(i));
+            if (!cue || !cue->record() || cue->record()->size() > 256)
+                return error(Code::InvalidIdentifier, 0, 256, i);
+            magicImpactCues.push_back({cue->caster_kind(), cue->source_kind(), cue->caster(), cue->caster_life(),
+                cue->command(), cue->record()->str(), {cue->x(), cue->y(), cue->z()}, cue->range()});
+        }
         return ReliableCombatEventBatch::create(
             *value(session), *value(generation), *value(tick), *value(canonical), events, actorEvents, magicEvents,
-            magicEffectEvents);
+            magicEffectEvents, magicImpactCues);
     }
 }

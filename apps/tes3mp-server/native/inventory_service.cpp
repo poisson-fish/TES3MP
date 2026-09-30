@@ -1461,6 +1461,28 @@ namespace TES3MP::Native
         }
         if (mImage.size() > MaximumNativeInventoryImageBytes)
             throw std::invalid_argument("Native inventory image exceeds canonical record budget");
+        if (mBinding.mMagicProjectile || mBinding.mRangedFlight)
+        {
+            const auto remember = [&](uint64_t kind, ESM::RefId id) {
+                const auto source = spellRecordId(id);
+                if (!source) return;
+                const auto [entry, inserted] = mMagicVisualRecords.emplace(
+                    std::pair(kind, source), std::string(id.getRefIdString()));
+                if (!inserted) entry->second.clear(); // Ambiguous hashed source cannot drive a visual.
+            };
+            for (const auto& spell : content.get<ESM::Spell>())
+                remember(uint64_t(MagicUseSourceKind::Spell), spell.mId);
+            for (const auto& enchantment : content.get<ESM::Enchantment>())
+                remember(uint64_t(MagicUseSourceKind::EnchantedItem), enchantment.mId);
+        }
+    }
+
+    std::string InventoryService::magicVisualRecord(uint64_t sourceKind, uint64_t effectSource) const
+    {
+        const auto record = mMagicVisualRecords.find({sourceKind, effectSource});
+        if (record == mMagicVisualRecords.end() || record->second.empty())
+            throw std::invalid_argument("Native magic visual source missing or ambiguous");
+        return record->second;
     }
 
     size_t InventoryService::actor(PlayerId player) const
@@ -4039,6 +4061,7 @@ namespace TES3MP::Native
         std::vector<MeleeCombatEvent> playerHits;
         std::vector<ActorMeleeCombatEvent> actorHits;
         std::vector<MagicUseCombatEvent> spellCasts;
+        std::vector<MagicImpactCue> magicImpactCues;
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
         EquipmentBytes wornCore, wornInventory, respawnCore;
@@ -4062,6 +4085,7 @@ namespace TES3MP::Native
             std::vector<MeleeCombatEvent> stagedPlayerHits,
             std::vector<ActorMeleeCombatEvent> stagedActorHits,
             std::vector<MagicUseCombatEvent> stagedSpellCasts,
+            std::vector<MagicImpactCue> stagedMagicImpactCues,
             std::vector<WeaponWear> stagedWear, std::vector<ItemCharge> stagedCharges, EquipmentBytes core,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
@@ -4072,6 +4096,7 @@ namespace TES3MP::Native
               respawn(std::move(stagedRespawn)), loot(std::move(stagedLoot)),
               playerHits(std::move(stagedPlayerHits)),
               actorHits(std::move(stagedActorHits)), spellCasts(std::move(stagedSpellCasts)),
+              magicImpactCues(std::move(stagedMagicImpactCues)),
               wear(std::move(stagedWear)), charges(std::move(stagedCharges)),
               wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
               tick(time), velocity(motion), diagnostics(report)
@@ -5178,6 +5203,7 @@ namespace TES3MP::Native
         std::vector<ActorMeleeCombatEvent> actorHits;
         std::vector<MagicUseCombatEvent> spellCasts;
         EquipmentBytes wornCore;
+        std::vector<MagicImpactCue> magicImpactCues;
         const auto applyStrike = [&](MagicCasterContext context, const EquipmentRuntime::EquippedWeaponCondition& held,
             const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,
             size_t victimIndex, Misc::Rng::Generator& rng) {
@@ -5224,7 +5250,7 @@ namespace TES3MP::Native
             for (size_t axis = 0; axis < 3; ++axis) distance += (a[axis] - b[axis]) * (a[axis] - b[axis]);
             return distance;
         };
-        const auto applyProjectileStrike = [&](ActorCasterIdentity caster, size_t casterIndex,
+        const auto applyProjectileStrike = [&](ActorCasterIdentity caster, uint64_t command, size_t casterIndex,
             const ESM::Weapon& ammunition, const std::array<float, 3>& impact,
             MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim, size_t victimIndex,
             Misc::Rng::Generator& rng) {
@@ -5237,6 +5263,19 @@ namespace TES3MP::Native
             const uint64_t source = spellRecordId(ammunition.mEnchant);
             if (!effects || !source || enchantmentBySource(mRuntime.mStore, source) != enchantment)
                 throw std::invalid_argument("Native projectile enchantment source invalid");
+            for (const int range : {ESM::RT_Self, ESM::RT_Touch, ESM::RT_Target})
+                if (std::ranges::any_of(effects->effects, [&](const auto& effect) {
+                        return effect.mRange == range && (range == ESM::RT_Target || effect.mArea > 0);
+                    }))
+                {
+                    if (magicImpactCues.size() >= MaximumReplicatedMagicImpactCues)
+                        throw std::invalid_argument("Native magic visual cue capacity exhausted");
+                    magicImpactCues.push_back({uint8_t(caster.kind == 2 ? 2 : 1),
+                        uint8_t(MagicUseSourceKind::EnchantedItem), caster.id,
+                        std::max<uint64_t>(1, caster.life), std::max<uint64_t>(1, command),
+                        magicVisualRecord(uint64_t(MagicUseSourceKind::EnchantedItem), source),
+                        impact, uint8_t(range)});
+                }
             // OpenMW casts projectile Self effects on the impact victim. Projectile
             // WhenStrikes ignores charge, and the consumed item is never recovered.
             for (const int range : {ESM::RT_Self, ESM::RT_Touch, ESM::RT_Target})
@@ -6017,7 +6056,7 @@ namespace TES3MP::Native
                 else combat->hitRecoveryTicks[defender] = 0;
             }
             if (success && request.projectile)
-                applyProjectileStrike(magicCaster(owner).identity, owner,
+                applyProjectileStrike(magicCaster(owner).identity, request.projectile->command, owner,
                     *mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->ammoRecord)),
                     request.projectile->position, attacker, victim, defender, rng);
             if (hasWeaponHealth && held
@@ -6172,7 +6211,7 @@ namespace TES3MP::Native
                         startHitRecovery(defender, victim, applied, damage, blocked, rng);
                     else combat->hitRecoveryTicks[defender] = 0;
                 }
-                applyProjectileStrike({flight.caster, flight.casterKind, flight.casterLife}, attackerIndex,
+                applyProjectileStrike({flight.caster, flight.casterKind, flight.casterLife}, flight.command, attackerIndex,
                     *ammunition, flight.position, attacker, victim, defender, rng);
                 retaliate(attacker, victim, attackerIndex, defender, rng);
             }
@@ -7155,6 +7194,18 @@ namespace TES3MP::Native
                     if (range == ESM::RT_Touch && !touching) continue;
                     const auto center = range == ESM::RT_Self ? origin : endpoint;
                     if (!center) continue;
+                    if (std::ranges::any_of(spellRecord.effects.effects, [&](const auto& effect) {
+                            return effect.mRange == range && effect.mArea > 0;
+                        }))
+                    {
+                        if (magicImpactCues.size() >= MaximumReplicatedMagicImpactCues)
+                            throw std::invalid_argument("Native magic visual cue capacity exhausted");
+                        magicImpactCues.push_back({uint8_t(context.identity.kind == 2 ? 2 : 1),
+                            uint8_t(cast.sourceKind), context.identity.id,
+                            std::max<uint64_t>(1, context.identity.life), std::max<uint64_t>(1, cast.commandId),
+                            magicVisualRecord(uint64_t(cast.sourceKind), spellEffectSource),
+                            *center, uint8_t(range)});
+                    }
                     for (size_t index = 0; index < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++index)
                     {
                         if (index == owner || combat->actors[index][8][2] <= 0) continue;
@@ -7398,6 +7449,15 @@ namespace TES3MP::Native
                         for (size_t index = 2; index < selected.size(); ++index) applySelected(index);
                         for (size_t index = 0; index < 2; ++index) applySelected(index);
                         combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                    }
+                    if (hit && validCast)
+                    {
+                        if (magicImpactCues.size() >= MaximumReplicatedMagicImpactCues)
+                            throw std::invalid_argument("Native magic visual cue capacity exhausted");
+                        magicImpactCues.push_back({uint8_t(pending.casterKind == 2 ? 2 : 1), uint8_t(pending.sourceKind),
+                            pending.caster, std::max<uint64_t>(1, pending.casterLife),
+                            std::max<uint64_t>(1, pending.commandId),
+                            magicVisualRecord(pending.sourceKind, pending.effectSource), hit->position});
                     }
                     if (spellCasts.size() == eventCount)
                         spellCasts.push_back(MagicUseCombatEvent{wireCaster({pending.caster, pending.casterKind, pending.casterLife}),
@@ -8070,6 +8130,7 @@ namespace TES3MP::Native
             std::move(neighborLives),
             std::move(projectiles), std::move(timedEffects), casting, std::move(respawn), std::move(loot),
             std::move(playerHits), std::move(actorHits), std::move(spellCasts),
+            std::move(magicImpactCues),
             std::move(wear), std::move(charges), std::move(wornCore),
             tick.value(), velocity, report);
     }
@@ -8432,6 +8493,7 @@ namespace TES3MP::Native
                 self.getSkill(skillIds[index]).getModified(), stat[4]};
         }
         std::vector<PhysicalProjectileSnapshot> projectiles;
+        std::vector<MagicProjectileSnapshot> magicProjectiles;
         if (mBinding.mRangedFlight && actorCell(scene) == player->transform().cell())
         {
             projectiles.reserve(combat.arrows.size());
@@ -8444,11 +8506,25 @@ namespace TES3MP::Native
                     < std::tuple(b.casterKind, b.caster, b.casterLife, b.command);
             });
         }
+        if (mBinding.mMagicProjectileCollection && actorCell(scene) == player->transform().cell())
+        {
+            const auto& flights = moving ? moving->projectiles : mProjectiles;
+            magicProjectiles.reserve(flights.size());
+            for (const auto& flight : flights)
+                magicProjectiles.push_back({uint8_t(flight.casterKind == 2 ? 2 : 1), uint8_t(flight.sourceKind),
+                    flight.caster, std::max<uint64_t>(1, flight.casterLife), flight.commandId,
+                    magicVisualRecord(flight.sourceKind, flight.effectSource),
+                    flight.position, {flight.step[0] * 30.f, flight.step[1] * 30.f, flight.step[2] * 30.f}});
+            std::ranges::sort(magicProjectiles, [](const auto& a, const auto& b) {
+                return std::tuple(a.casterKind, a.caster, a.casterLife, a.command)
+                    < std::tuple(b.casterKind, b.caster, b.casterLife, b.command);
+            });
+        }
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick, revision,
             player->playerId(), combatRevision, self.getHealth().getCurrent(), self.getHealth().getModified(),
             self.getFatigue().getCurrent(), self.getFatigue().getModified(), self.getMagicka().getCurrent(),
             self.getMagicka().getModified(), self.getHealth().getCurrent() <= 0,
-            visible, skills, others, {}, swings, knockout(selfIndex), presentation, projectiles);
+            visible, skills, others, {}, swings, knockout(selfIndex), presentation, projectiles, magicProjectiles);
         auto* value = std::get_if<LatestWinsCombatSnapshot>(&created);
         return value ? std::optional<LatestWinsCombatSnapshot>(std::move(*value)) : std::nullopt;
     }
@@ -8464,14 +8540,15 @@ namespace TES3MP::Native
         const auto* session = players.findActiveSession(target);
         if (!staged || &staged->service != this || staged->consumed || staged->before != mActorImage
             || !session || staged->tick != tick.value()
-            || (staged->playerHits.empty() && staged->actorHits.empty() && staged->spellCasts.empty())) return {};
+            || (staged->playerHits.empty() && staged->actorHits.empty() && staged->spellCasts.empty()
+                && staged->magicImpactCues.empty())) return {};
         const auto* observer = players.findPlayer(session->playerId());
         const auto scene = staged->actor ? staged->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
         if (!observer || observer->transform().cell() != actorCell(scene)) return {};
         const auto& actorEvents = staged->actorHits;
         const auto& magicEvents = staged->spellCasts;
         auto created = ReliableCombatEventBatch::create(target, session->sessionGeneration(), tick,
-            revision, staged->playerHits, actorEvents, magicEvents);
+            revision, staged->playerHits, actorEvents, magicEvents, {}, staged->magicImpactCues);
         auto* value = std::get_if<ReliableCombatEventBatch>(&created);
         return value ? std::optional<ReliableCombatEventBatch>(std::move(*value)) : std::nullopt;
     }

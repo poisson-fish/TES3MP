@@ -80,10 +80,11 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    lifecycle checks, not per-ID sessions. Start with elemental shields and stat/resource
    effects; follow dependencies through conditions, concealment/detection, movement,
    AI, objects/travel, bound equipment and summons. Summons require multi-actor ownership.
-   Keep gameplay, source-type and presentation evidence distinct. Reuse OpenMW's
-   record-driven cast/hit/loop visuals and audio through committed events and active
-   snapshots; reconnect restores loops without replaying impacts. Special visibility
-   and lighting effects use engine consumers. Check family members and semantic
+   Match all stock OpenMW combat visuals/audio: casts, composite bolts, bolt
+   light/sound, hit/area effects, persistent loops, enchanted glow,
+   visibility/lighting and animation timing. Use committed events/active snapshots;
+   reconnect restores loops without replaying impacts. Distinguish gameplay,
+   source and presentation evidence. Check family members and semantic
    exceptions; share stacking/expiry, atomic failure, reconnect and restart fixtures.
    Generalize beyond one selected NPC: simulate neighboring combatants once each
    and persist player death/respawn generations with stale-life rejection.

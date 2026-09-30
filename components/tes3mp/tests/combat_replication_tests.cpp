@@ -425,6 +425,48 @@ namespace
         return rejected();
     }
 
+    bool magic_visuals_round_trip_and_reject_invalid_values()
+    {
+        std::vector<TES3MP::MagicProjectileSnapshot> flights{
+            {1, 0, 1, 1, 91, "fireball", {10, 20, 110}, {0, 300, 0}},
+            {2, 1, 7, 3, 92, "ench_fire", {14, 25, 90}, {0, 200, 0}}};
+        const auto make = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+            value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 100, 100, false,
+            {}, skills(), {}, {}, {}, {}, {}, {}, flights); };
+        const auto good = flights;
+        const auto made = make();
+        if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+        const auto& original = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+        const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(TES3MP::encodeLatestWinsCombatSnapshot(original));
+        if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+            || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != original) return false;
+        const auto rejected = [&] { return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(make()); };
+        flights = good; flights[1] = flights[0]; if (!rejected()) return false;
+        flights = good; flights[0].position[0] = std::numeric_limits<float>::quiet_NaN(); if (!rejected()) return false;
+        flights = good; flights[0].sourceKind = 2; if (!rejected()) return false;
+        flights = good; flights[0].record.clear(); if (!rejected()) return false;
+        flights = good; flights.resize(TES3MP::MaximumReplicatedMagicProjectiles + 1, good.back());
+        if (!rejected()) return false;
+
+        std::vector<TES3MP::MagicImpactCue> cues{
+            {1, 0, 1, 1, 91, "fireball", {10, 200, 80}}};
+        const auto event = [&] { return TES3MP::ReliableCombatEventBatch::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40),
+            value<TES3MP::CanonicalRevision>(40), {}, {}, {}, {}, cues); };
+        const auto built = event();
+        if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(built)) return false;
+        const auto& batch = std::get<TES3MP::ReliableCombatEventBatch>(built);
+        const auto unpacked = TES3MP::decodeReliableCombatEventBatch(TES3MP::encodeReliableCombatEventBatch(batch));
+        if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(unpacked)
+            || std::get<TES3MP::ReliableCombatEventBatch>(unpacked) != batch) return false;
+        cues[0].range = 3;
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(event())) return false;
+        cues[0].range = 1;
+        cues[0].position[1] = std::numeric_limits<float>::infinity();
+        return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(event());
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -443,7 +485,8 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view(argv[1]) == "player-casts")
         return player_cast_timeline_rejects_invalid_values() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "projectiles")
-        return physical_projectiles_round_trip_and_reject_invalid_values() ? 0 : 1;
+        return physical_projectiles_round_trip_and_reject_invalid_values()
+            && magic_visuals_round_trip_and_reject_invalid_values() ? 0 : 1;
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
             && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
             && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing()
