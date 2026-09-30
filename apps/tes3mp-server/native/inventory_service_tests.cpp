@@ -6729,6 +6729,24 @@ namespace TES3MP::Native::Testing
                 }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                     std::erase_if(beast.mSpells.mList, [](auto id) { return id.getRefIdString().starts_with("persistent_"); });
+                if (effectFamily == "movement-effects")
+                {
+                    ESM::Spell ability; ability.blank();
+                    ability.mId = ESM::RefId::stringRefId("movement_passive_family");
+                    ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({
+                        {ESM::MagicEffect::WaterBreathing, {}, {}, ESM::RT_Self, 0, 0, 0, 0},
+                        {ESM::MagicEffect::SwiftSwim, {}, {}, ESM::RT_Self, 0, 0, 10, 10},
+                        {ESM::MagicEffect::WaterWalking, {}, {}, ESM::RT_Self, 0, 0, 0, 0},
+                        {ESM::MagicEffect::Burden, {}, {}, ESM::RT_Self, 0, 0, 10, 10},
+                        {ESM::MagicEffect::Feather, {}, {}, ESM::RT_Self, 0, 0, 10, 10},
+                        {ESM::MagicEffect::Jump, {}, {}, ESM::RT_Self, 0, 0, 10, 10},
+                        {ESM::MagicEffect::Levitate, {}, {}, ESM::RT_Self, 0, 0, 10, 10},
+                        {ESM::MagicEffect::SlowFall, {}, {}, ESM::RT_Self, 0, 0, 10, 10}});
+                    beast.mSpells.mList.push_back(ability.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out);
+                    out.endRecord(ESM::Spell::sRecordId);
+                }
                 if (effectFamily == "constant-concealment")
                 {
                     ESM::Enchantment enchantment; enchantment.blank();
@@ -10215,6 +10233,42 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily == "movement-effects")
             {
+                {
+                    auto passiveHost = make(); auto& passive = passiveHost->service();
+                    const auto before = bytes(passive);
+                    auto pending = advance(passive, 1);
+                    require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(passive) == before,
+                        "Rejected movement ability installation leaked a source");
+                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Movement ability retry failed");
+                    const std::array passiveIds{ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
+                        ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden, ESM::MagicEffect::Feather,
+                        ESM::MagicEffect::Jump, ESM::MagicEffect::Levitate, ESM::MagicEffect::SlowFall};
+                    const auto saved = bytes(passive);
+                    const auto state = read(saved);
+                    for (size_t slot = 0; slot < passiveIds.size(); ++slot)
+                    {
+                        const float magnitude = slot == 0 || slot == 2 ? 1.f : 10.f;
+                        require(std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 1 && effect.sourceKind == 5
+                                && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(passiveIds[slot]))
+                                && effect.magnitude == magnitude && effect.expiresTick == UINT64_MAX;
+                        }), "Movement ability member missing from the durable actor source");
+                        const auto view = passive.projectCombat(authority, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(view && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                            return pose.kind == 1 && pose.id == 2 && pose.movement[slot] == magnitude;
+                        }), "Movement ability member missing from observer presentation");
+                    }
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved,
+                        "Movement ability source changed across restart");
+                    (void)commit(passive, 2); (void)commit(restart.service(), 2);
+                    require(bytes(passive) == bytes(restart.service()),
+                        "Movement ability source rerolled after restart");
+                }
                 if (deepMovement)
                 {
                     auto plain = make(); auto& baseline = plain->service();

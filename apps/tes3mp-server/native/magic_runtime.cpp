@@ -270,8 +270,8 @@ namespace TES3MP::Native
         return result;
     }
 
-    std::optional<PreparedInstantEffects> preparePassiveAiEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content)
+    std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects)
     {
         if (spell.mData.mType != ESM::Spell::ST_Ability || spell.mEffects.mList.empty()
             || spell.mEffects.mList.size() > 8) return std::nullopt;
@@ -279,8 +279,10 @@ namespace TES3MP::Native
         for (const auto& entry : spell.mEffects.mList)
         {
             const auto& effect = entry.mData;
-            if (!aiDispositionEffect(effect.mEffectID)
-                || !content.get<ESM::MagicEffect>().search(effect.mEffectID)
+            const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
+            if (!(aiEffects && aiDispositionEffect(effect.mEffectID))
+                && !(movementEffects && movementEffect(effect.mEffectID))) return std::nullopt;
+            if (!magic
                 || effect.mRange != ESM::RT_Self || effect.mArea || effect.mDuration
                 || !effect.mAttribute.empty() || !effect.mSkill.empty()
                 || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax

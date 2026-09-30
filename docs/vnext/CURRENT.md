@@ -6,25 +6,22 @@ Casts, conditions, stats, visibility, movement and twelve AI effects have vanill
 checks. VFX, sneak stance, AI jumps, mixed passives and non-player Command remain.
 
 Server-owned bows, crossbows and thrown weapons use authored release, durable
-flight, first-hull/world contact and atomic damage/recovery. Scripted sources
-retain locals through saved flight and recover with fresh identity. Enchanted
-launchers/projectiles share flight; actor impact commits WhenStrikes/area effects,
-damage and receipt. Enchanted ammunition does not recover; item script instructions
-remain closed. Death clears flights. Ranged rejection/recovery/restart checks pass:
+flight, first contact and atomic damage/recovery. Scripted sources retain locals;
+enchanted impact commits WhenStrikes/area effects and receipts. Enchanted ammunition
+does not recover; item script instructions remain closed. Ranged checks pass:
 `build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`. Synthetic enchanted
 impact, failed-write, retry and restart checks pass:
 `build/logs/projectile-enchanted-{bow,crossbow,thrown}-complete-01.log`.
 The neighbor cap is provisional.
 
-V64 accepts bounded camera aim without a mapped actor, persists launch direction
-and sweeps server hulls. Targetless misses pay once. Recent terminal receipts
-present 250 ms cues; reconnect does not replay them. Checks pass:
+V64 persists bounded camera aim and sweeps server hulls. Targetless misses pay
+once; 250 ms terminal cues do not replay on reconnect. Checks pass:
 `build/logs/aim-protocol-test.log`, `build/logs/aim-cue-test.log`,
 `build/logs/bow-aim-enchanted-test.log`.
 
-The body timeline now interpolates knockdown loop wraps and holds across hit-clip
-changes. Desktop traces use each attack/cast section's text key. A filtered
-four-actor check covers attacks, hit, fall, loop, get-up, loss and reconnect:
+The body timeline interpolates knockdown loops and holds across hit-clip changes.
+Desktop traces use attack/cast text keys. Four-actor checks cover attacks, hit,
+fall, get-up, loss and reconnect:
 `build/logs/body-timeline-test.log`. The desktop object compiled:
 `build/logs/body-pose-object-build.log`. Two-desktop rendering is unverified.
 
@@ -33,13 +30,18 @@ jitter and 10% loss shared impacts/death, corpse transfer and an expired miss.
 `build/logs/desktop-ranged-world-hull-05.log` proves targetless floor contact,
 one arrow spent and both terminal cues.
 
-**Next:** capture 60-FPS body pose/frame traces on both desktops across attack
-modes, hit, knockdown/knockout and get-up under loss/jitter/reconnect, including
-stock-speed clip comparison. Exercise scripted projectile sources and varied
-two-client ranged loadouts in the deferred testing pass; scripted impact/recovery
-and live convergence remain unverified.
+Eight movement IDs now admit authored passive abilities through the shared
+source lifecycle. An eight-effect ability, timed casts, two-observer projection,
+atomic retry, expiry and exact restart pass `build/logs/movement-passive-test-02.log`.
+Earlier V56 images with ignored abilities need reset. Underwater WaterWalking,
+disabled Levitate, neighbor physics and live visuals remain.
 
-62 effects remain to complete across applicable actors and sources:
+**Next:** close those movement exceptions, then complete AI/disposition, object/travel,
+bound equipment and summons. Generalize actor/life ownership.
+Cut over player movement. Defer two-desktop body,
+ranged loadout, scripted projectile and overlapping-combat runs to M4 acceptance.
+
+62 effects remain in the M4 completion inventory across actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
   Jump, Levitate, SlowFall.
 - AI/disposition (12): Charm, CalmHumanoid, CalmCreature, FrenzyHumanoid,
@@ -58,5 +60,5 @@ and live convergence remain unverified.
   SummonCreature04, SummonCreature05.
 
 81 implemented + 62 incomplete = 143 IDs. Broader multi-NPC combat, summons
-and player lives remain unproven. Ranged/body work precedes movement cutover.
+and player lives remain unproven.
 TR Lua awaits M5.

@@ -689,31 +689,35 @@ namespace TES3MP::Native
             return true;
         }
 
-        bool reconcilePassiveAi(const MWWorld::Ptr& ptr, size_t actor, ActorCasterIdentity caster,
+        bool reconcilePassiveActorEffects(const MWWorld::Ptr& ptr, size_t actor, ActorCasterIdentity caster,
             uint64_t tick, const MWWorld::ESMStore& content,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
-            bool enabled, bool npcActor, bool undeadActor)
+            bool movementEffects, bool aiEffects, bool npcActor, bool undeadActor)
         {
-            if (!enabled) return false;
+            if (!movementEffects && !aiEffects) return false;
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
             for (const auto id : actorSpells(ptr).mList)
             {
                 const auto* spell = content.get<ESM::Spell>().search(id);
                 if (!spell || spell->mData.mType != ESM::Spell::ST_Ability) continue;
-                const bool hasAi = std::ranges::any_of(spell->mEffects.mList, [](const auto& entry) {
-                    return aiDispositionEffect(entry.mData.mEffectID);
+                const bool relevant = std::ranges::any_of(spell->mEffects.mList, [&](const auto& entry) {
+                    return (aiEffects && aiDispositionEffect(entry.mData.mEffectID))
+                        || (movementEffects && movementEffect(entry.mData.mEffectID));
                 });
-                if (!hasAi) continue;
-                const auto plan = preparePassiveAiEffects(*spell, content);
+                if (!relevant) continue;
+                const auto plan = preparePassiveActorEffects(*spell, content, movementEffects, aiEffects);
                 const uint64_t source = spellRecordId(id);
                 if (!plan || !source || spellBySource(content, source) != spell)
                     throw std::invalid_argument("Native passive AI source unsupported or ambiguous");
                 for (size_t ordinal = 0; ordinal < plan->effects.size(); ++ordinal)
                 {
                     const auto& entry = plan->effects[ordinal];
-                    if (!MWMechanics::validAiEffectTarget(entry.mEffectID,
+                    if (aiDispositionEffect(entry.mEffectID)
+                        && !MWMechanics::validAiEffectTarget(entry.mEffectID,
                             actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
+                    const bool noMagnitude = content.get<ESM::MagicEffect>().find(entry.mEffectID)->mData.mFlags
+                        & ESM::MagicEffect::NoMagnitude;
                     ActorCampaignTimedEffect effect{actor, 0.f, UINT64_MAX,
                         uint64_t(ESM::MagicEffect::refIdToIndex(entry.mEffectID)), caster.id,
                         source, 5, 0.f, tick, 0, 0, ordinal, caster.kind, caster.life};
@@ -727,7 +731,8 @@ namespace TES3MP::Native
                             || previous->casterKind != caster.kind || previous->casterLife != caster.life
                             || previous->resistance != 0.f || previous->durationTicks != 0
                             || previous->expiresTick != UINT64_MAX || previous->argument
-                            || previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax
+                            || (noMagnitude ? previous->magnitude != 1.f
+                                : previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax)
                             || std::floor(previous->magnitude) != previous->magnitude)
                             throw std::invalid_argument("Native passive AI effect disagrees with source");
                         effect = *previous;
@@ -735,7 +740,7 @@ namespace TES3MP::Native
                     else if (rng)
                     {
                         changed = true;
-                        effect.magnitude = MWMechanics::rollEffectMagnitude(
+                        effect.magnitude = noMagnitude ? 1.f : MWMechanics::rollEffectMagnitude(
                             float(entry.mMagnMin), float(entry.mMagnMax), *rng);
                     }
                     else if (tick) throw std::invalid_argument("Native saved passive AI effect missing");
@@ -1339,7 +1344,8 @@ namespace TES3MP::Native
                 [&](const ESM::RefId& id) {
                     if (!mBinding.mAiDecisions) return false;
                     const auto* spell = content.get<ESM::Spell>().search(id);
-                    return spell && preparePassiveAiEffects(*spell, content).has_value();
+                    return spell && preparePassiveActorEffects(*spell, content,
+                        mBinding.mMovementEffects, mBinding.mAiDecisions).has_value();
                 });
             if (selected.getType() == ESM::Creature::sRecordId
                 && (!mBinding.mActorPresentation || !creatureSpellsSupported
@@ -2883,25 +2889,30 @@ namespace TES3MP::Native
                     else if (effect.sourceKind == 5)
                     {
                         const auto* spell = spellBySource(mRuntime.mStore, effect.source);
-                        const auto plan = spell ? preparePassiveAiEffects(*spell, mRuntime.mStore) : std::nullopt;
+                        const auto plan = spell ? preparePassiveActorEffects(*spell, mRuntime.mStore,
+                            mBinding.mMovementEffects, mBinding.mAiDecisions) : std::nullopt;
                         const auto ptr = mRuntime.ownerPtr(recoveredOwner(effect.actor));
                         if (plan && effect.ordinal < plan->effects.size())
                         {
                             const auto& entry = plan->effects[effect.ordinal];
-                            sourceKnown = mBinding.mAiDecisions && entry.mEffectID == id
+                            const bool noMagnitude = mRuntime.mStore.get<ESM::MagicEffect>().find(id)->mData.mFlags
+                                & ESM::MagicEffect::NoMagnitude;
+                            sourceKnown = (mBinding.mAiDecisions || mBinding.mMovementEffects)
+                                && entry.mEffectID == id
                                 && std::ranges::find(actorSpells(ptr).mList, spell->mId)
                                     != actorSpells(ptr).mList.end()
-                                && MWMechanics::validAiEffectTarget(id,
+                                && (!aiDispositionEffect(id) || MWMechanics::validAiEffectTarget(id,
                                     effect.actor < 2 || ptr.getType() == ESM::NPC::sRecordId, effect.actor < 2,
                                     effect.actor >= 2 && ptr.getType() == ESM::Creature::sRecordId
-                                        && ptr.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead, true)
+                                        && ptr.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead, true))
                                 && effect.caster == (effect.actor >= 2
                                     ? recoveredPlacement(effect.actor)
                                     : mBinding.mPlayers[size_t(effect.actor)].value())
                                 && effect.resistance == 0.f && effect.argument == 0
                                 && effect.durationTicks == 0 && effect.expiresTick == UINT64_MAX
-                                && effect.magnitude >= entry.mMagnMin
-                                && effect.magnitude <= entry.mMagnMax;
+                                && (noMagnitude ? effect.magnitude == 1.f
+                                    : effect.magnitude >= entry.mMagnMin
+                                        && effect.magnitude <= entry.mMagnMax);
                         }
                     }
                     else if (effect.sourceKind == 0)
@@ -3184,13 +3195,14 @@ namespace TES3MP::Native
                             mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
                     }
                 }
-                if (mBinding.mAiDecisions)
+                if (mBinding.mAiDecisions || mBinding.mMovementEffects)
                     for (size_t actorIndex = 0; actorIndex < 3; ++actorIndex)
-                        reconcilePassiveAi(mRuntime.ownerPtr(actorIndex == 2 ? mCombatNpcOwner : actorIndex),
+                        reconcilePassiveActorEffects(mRuntime.ownerPtr(actorIndex == 2 ? mCombatNpcOwner : actorIndex),
                             actorIndex, {actorIndex == 2 ? mBinding.mNavigatingActor->actorId()
                                     : mBinding.mPlayers[actorIndex].value(), actorIndex == 2 ? 2u : 1u,
                                 actorIndex == 2 ? decoded.life->generation : 1u}, decoded.tick,
-                            mRuntime.mStore, decoded.timedEffects, nullptr, true,
+                            mRuntime.mStore, decoded.timedEffects, nullptr,
+                            mBinding.mMovementEffects, mBinding.mAiDecisions,
                             actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
                 if (mBinding.mPlayerCastLifecycle)
                     for (size_t i = 0; i < 2; ++i)
@@ -5009,14 +5021,15 @@ namespace TES3MP::Native
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
         }
-        if (mBinding.mAiDecisions && combat)
+        if ((mBinding.mAiDecisions || mBinding.mMovementEffects) && combat)
             for (size_t actorIndex = 0; actorIndex < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++actorIndex)
             {
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
-                if (reconcilePassiveAi(mRuntime.ownerPtr(combatOwner(actorIndex)),
+                if (reconcilePassiveActorEffects(mRuntime.ownerPtr(combatOwner(actorIndex)),
                         actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
-                        timedEffects, &rng, true, actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
+                        timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
+                        actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
                         actorIndex == 2 && aiUndead))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
@@ -5518,13 +5531,14 @@ namespace TES3MP::Native
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
-            if (mBinding.mAiDecisions)
+            if (mBinding.mAiDecisions || mBinding.mMovementEffects)
             {
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
-                if (reconcilePassiveAi(mRuntime.ownerPtr(mCombatNpcOwner), 2,
+                if (reconcilePassiveActorEffects(mRuntime.ownerPtr(mCombatNpcOwner), 2,
                         {before.mActor, 2, life->generation + 1}, tick.value(), mRuntime.mStore,
-                        timedEffects, &rng, true, aiNpc, aiUndead))
+                        timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
+                        aiNpc, aiUndead))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5577,13 +5591,14 @@ namespace TES3MP::Native
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
-            if (mBinding.mAiDecisions)
+            if (mBinding.mAiDecisions || mBinding.mMovementEffects)
             {
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
-                if (reconcilePassiveAi(mRuntime.ownerPtr(owner), index,
+                if (reconcilePassiveActorEffects(mRuntime.ownerPtr(owner), index,
                         {combat->npcPlacements.at(i + 1), 2, adjacentLife.generation + 1},
-                        tick.value(), mRuntime.mStore, timedEffects, &rng, true,
+                        tick.value(), mRuntime.mStore, timedEffects, &rng,
+                        mBinding.mMovementEffects, mBinding.mAiDecisions,
                         neighborNpc, neighborUndead))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));

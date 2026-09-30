@@ -275,7 +275,8 @@ namespace TES3MP::Native
         uint64_t expiresTick = 0;
         // V35: ESM effect index and durable launch identity. The old image
         // carries only Resist Magicka; its zero index is decoded as that effect.
-        // sourceKind: 0 cast spell, 1 used item, 2 strike item, 3 equipment, 4 condition.
+        // sourceKind: 0 cast spell, 1 used item, 2 strike item, 3 equipment,
+        // 4 condition, 5 authored passive ability.
         uint64_t effectIndex = 0, caster = 0, source = 0, sourceKind = 0;
         float resistance = 0;
         uint64_t startTick = 0, durationTicks = 0;
@@ -857,8 +858,8 @@ namespace TES3MP::Native
                     }
                     if ((!effect.effectIndex && !hasMovementEffects(magic))
                         || effect.effectIndex > 255 || !effect.caster || !effect.source
-                        || effect.sourceKind > (hasAiDecisions(magic) ? 5u : (magic == PersistentConditionsCampaignMagic
-                            || magic == SpecialConditionsCampaignMagic || hasMovementEffects(magic))
+                        || effect.sourceKind > (hasMovementEffects(magic) ? 5u : (magic == PersistentConditionsCampaignMagic
+                            || magic == SpecialConditionsCampaignMagic)
                             ? 4u : hasConstantState(magic) ? 3u : 2u)
                         || !std::isfinite(effect.resistance)
                         || effect.resistance < -20000 || effect.resistance > 100
