@@ -5554,6 +5554,7 @@ namespace TES3MP::Native::Testing
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded";
         const bool neighborPhysics = effectFamily == "neighbor-physics"
+            || effectFamily == "neighbor-pursuit"
             || effectFamily == "neighbor-physics-deep"
             || (effectFamily == "movement-effects" && deepMovement && !wetMovement);
         const bool neighborCombat = effectFamily == "neighbor-combat" || neighborPhysics || projectileNeighbors;
@@ -6642,6 +6643,8 @@ namespace TES3MP::Native::Testing
                 if (neighborCombat && !npcRanged)
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
+                if (effectFamily == "neighbor-pursuit")
+                    witness.mInventory.mList.push_back({5, ESM::RefId::stringRefId("iron shortsword")});
                 out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
                 out.endRecord(ESM::NPC::sRecordId);
             }
@@ -9118,7 +9121,7 @@ namespace TES3MP::Native::Testing
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
                 return;
             }
-            if (socialLifecycle && !neighborPhysics)
+            if (socialLifecycle && (!neighborPhysics || effectFamily == "neighbor-pursuit"))
             {
                 using Action = InventoryService::PlayerSocialAction;
                 for (size_t owner = 0; owner < 2; ++owner)
@@ -9372,6 +9375,123 @@ namespace TES3MP::Native::Testing
                     }
                     require(reported && rejected, "Bystander did not report authenticated assault atomically");
                     const auto reportedImage = bytes(service);
+                    if (effectFamily == "neighbor-pursuit")
+                    {
+                        require(attackerIndex == 0, "Pursuit movement check must start with the first player");
+                        std::vector<CanonicalPlayerEntityState> moved(chase.players().begin(), chase.players().end());
+                        moved[attackerIndex] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                            moved[attackerIndex], id<ServerTick>(reportTick + 1),
+                            Transform(moved[attackerIndex].transform().cell(), Position3(60*1024, -500*1024, 1024),
+                                moved[attackerIndex].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                        const auto pursuit = std::get<CanonicalServerState>(createCanonicalServerState(
+                            moved, chase.activeSessions()));
+                        const auto world = specialWorld();
+                        const auto placements = read(reportedImage).combat->npcPlacements;
+                        const uint64_t target = placements.at(1);
+                        const auto castingSession = id<SessionId>(2);
+                        const auto castingPlayer = id<PlayerId>(2);
+                        const auto position = [&](InventoryService& runtime, uint64_t tick) {
+                            const auto view = runtime.projectInventory(pursuit, attackingSession,
+                                id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                            require(view && view->equipment, "Pursuing neighbor motion absent");
+                            const auto found = std::ranges::find_if(view->equipment->motions,
+                                [target](const auto& motion) { return motion.placement == target; });
+                            require(found != view->equipment->motions.end(), "Pursuing neighbor placement absent");
+                            return found->position;
+                        };
+                        const auto tick = [&](InventoryService& runtime, uint64_t at,
+                            std::unique_ptr<PreparedNativeInventory> command = {}) {
+                            auto pending = runtime.prepareNativeTick(pursuit, id<ServerTick>(at), 1.f/30,
+                                std::move(command), {}, &world);
+                            require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Pursuing neighbor tick failed");
+                        };
+                        InventoryHost ordinary(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
+                        auto& baseline = dynamic_cast<InventoryService&>(ordinary.service());
+                        baseline.synchronizeCells(pursuit);
+                        for (uint64_t at = reportTick + 1; at <= reportTick + 75; ++at) tick(baseline, at);
+                        const auto ordinaryPosition = position(baseline, reportTick + 75);
+                        for (const auto effectId : {ESM::MagicEffect::SwiftSwim, ESM::MagicEffect::Burden,
+                                ESM::MagicEffect::Feather, ESM::MagicEffect::Levitate,
+                                ESM::MagicEffect::Jump, ESM::MagicEffect::SlowFall})
+                        {
+                            InventoryHost modified(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
+                            auto& current = dynamic_cast<InventoryService&>(modified.service());
+                            current.synchronizeCells(pursuit);
+                            const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(effectId));
+                            const auto name = "movement_npc_" + std::to_string(index);
+                            const auto view = current.projectInventory(pursuit, castingSession,
+                                id<ServerTick>(reportTick + 1), id<CanonicalRevision>(reportTick + 1));
+                            require(view && !view->playerInventory.empty(), "Pursuit spell inventory absent");
+                            const auto* player = pursuit.findPlayer(castingPlayer);
+                            ClientMagicUseCommand use{castingSession, SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(reportTick + 1),
+                                id<CanonicalRevision>(reportTick + 1), MagicUseSourceKind::Spell, source(name),
+                                MagicUseTargetKind::Actor, target, id<ServerTick>(reportTick + 1),
+                                CombatRevision::initial(), CombatRevision::initial(),
+                                view->playerInventory.front().revision};
+                            const ServerCommandProposal cast(castingSession, SessionGeneration::initial(),
+                                CommandSequence::initial(), id<CommandId>(reportTick + 1),
+                                id<CanonicalRevision>(reportTick + 1),
+                                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                MagicUseCommandProposal(use));
+                            auto command = current.prepareMagicUse(pursuit, cast, id<ServerTick>(reportTick + 1));
+                            require(bool(command), "Pursuit movement spell rejected");
+                            bool active = false;
+                            for (uint64_t at = reportTick + 1; at <= reportTick + 75; ++at)
+                            {
+                                tick(current, at, std::move(command));
+                                const auto state = read(bytes(current));
+                                active |= std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                    return effect.actor == 3 && effect.effectIndex == index && effect.magnitude > 0;
+                                });
+                            }
+                            require(active, "Pursuing neighbor never received its movement source");
+                            const auto changed = position(current, reportTick + 75);
+                            const size_t slot = effectId == ESM::MagicEffect::SwiftSwim ? 1
+                                : effectId == ESM::MagicEffect::Burden ? 3
+                                : effectId == ESM::MagicEffect::Feather ? 4
+                                : effectId == ESM::MagicEffect::Jump ? 5
+                                : effectId == ESM::MagicEffect::Levitate ? 6 : 7;
+                            for (uint64_t observer : {1, 2})
+                            {
+                                const auto view = current.projectCombat(pursuit, id<SessionId>(observer),
+                                    id<ServerTick>(reportTick + 75), id<CanonicalRevision>(reportTick + 75));
+                                require(view && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                                    return pose.kind == 2 && pose.id == target && pose.life == 1
+                                        && pose.movementOwned && pose.movement[slot]
+                                            == (effectId == ESM::MagicEffect::Burden ? 100.f : 20.f);
+                                }), "Pursuit movement source missing from an observer");
+                            }
+                            if (effectId == ESM::MagicEffect::SwiftSwim)
+                                require(changed[1] < ordinaryPosition[1] - 5.f,
+                                    "SwiftSwim did not accelerate the swimming pursuer");
+                            else if (effectId == ESM::MagicEffect::Burden)
+                                require(changed[1] > ordinaryPosition[1] + 5.f,
+                                    "Burden did not slow the pursuing neighbor");
+                            else if (effectId == ESM::MagicEffect::Feather)
+                                require(changed[1] < ordinaryPosition[1] - 1.f,
+                                    "Feather did not lighten the pursuing neighbor");
+                            else if (effectId == ESM::MagicEffect::Levitate)
+                                require(changed[1] < ordinaryPosition[1] - 30.f,
+                                    "Levitate did not change the pursuing neighbor's travel");
+                            else
+                                require(changed == ordinaryPosition,
+                                    "Jump or SlowFall changed level pursuit without a jump or fall");
+                            const auto saved = bytes(current);
+                            InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                            auto& resumed = dynamic_cast<InventoryService&>(restart.service());
+                            resumed.synchronizeCells(pursuit);
+                            require(bytes(resumed) == saved, "Pursuit movement source changed on restart");
+                            tick(current, reportTick + 76); tick(resumed, reportTick + 76);
+                            require(bytes(current) == bytes(resumed),
+                                "Pursuit movement continuation diverged after restart");
+                            std::cout << "neighbor pursuit effect=" << index << " ordinary-y="
+                                << ordinaryPosition[1] << " changed-y=" << changed[1]
+                                << " ordinary-z=" << ordinaryPosition[2] << " changed-z=" << changed[2] << '\n';
+                        }
+                        return;
+                    }
                     if (neighborCombat)
                     {
                         const auto state = read(reportedImage);

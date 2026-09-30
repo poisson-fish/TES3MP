@@ -32,7 +32,10 @@ drowning; WaterBreathing protects them through expiry. Disconnect/reconnect
 projections and restart converge. Checks: `build/logs/movement-script-disabled-test-08.log`,
 `movement-player-{deep-test-02,wet-test-01}.log`,
 `movement-neighbor-{physics-test-04,deep-test-01,combat-regression-01}.log`.
-General script scheduling and broader neighbor movement responses remain.
+Engaged neighbors show SwiftSwim, Burden, Feather and Levitate motion during
+pursuit; Jump/SlowFall project but level, submerged pursuit triggers neither.
+All six restart exactly: `build/logs/neighbor-pursuit-test-08.log`. AI jumps
+and general script scheduling remain.
 
 Magic presentation replicates cast/hit cues and active ContinuousVfx by
 actor/life, restoring loops without one-shot replay. Under 10% loss, two
@@ -43,9 +46,8 @@ four loops, reconnect restoration and expiry. Evidence:
 their `build/*/result.json` and screenshots. Audible quality remains unverified.
 Focused checks pass; capability 31 requires updated desktops.
 
-**Next:** verify remaining neighbor movement responses during pursuit, then
-continue AI/disposition, object/travel, bound equipment and summons. Generalize
-actor/life ownership before player movement cutover.
+**Next:** continue AI/disposition, then object/travel, bound equipment and
+summons. Generalize actor/life ownership before player movement cutover.
 
 62 effects remain in the M4 completion inventory across actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

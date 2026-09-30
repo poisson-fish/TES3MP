@@ -6775,6 +6775,7 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "neighbor-projectiles"
             || std::string_view(argv[1]) == "neighbor-expanded"
             || std::string_view(argv[1]) == "neighbor-physics"
+            || std::string_view(argv[1]) == "neighbor-pursuit"
             || std::string_view(argv[1]) == "neighbor-physics-deep"
             || std::string_view(argv[1]) == "neighbor-expanded-ranged"
             || std::string_view(argv[1]) == "npc-ranged-bow"
@@ -6810,6 +6811,7 @@ int main(int argc, char** argv)
                         ? std::string_view("movement-effects") : std::string_view(argv[1]),
                 std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep"
                     || std::string_view(argv[1]) == "neighbor-physics"
+                    || std::string_view(argv[1]) == "neighbor-pursuit"
                     || std::string_view(argv[1]) == "neighbor-physics-deep",
                 std::string_view(argv[1]) == "movement-deep" || std::string_view(argv[1]) == "movement-disabled"
                     || std::string_view(argv[1]) == "neighbor-physics-deep");
