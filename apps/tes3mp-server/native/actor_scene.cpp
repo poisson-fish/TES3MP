@@ -1025,6 +1025,54 @@ namespace TES3MP::Native
         throw std::invalid_argument("WaterWalking actor is outside the bound scene");
     }
 
+    bool InteriorActorScene::waterWalkingCastable(const std::array<float, 3>& position,
+        ESM::RefId race, float scale) const
+    {
+        if (!mImpl || !std::isfinite(scale) || scale <= 0.f || scale > 100.f
+            || std::ranges::any_of(position, [](float value) {
+                return !std::isfinite(value) || std::abs(value) > 1e7f;
+            }) || !contains(position))
+            throw std::invalid_argument("Player WaterWalking position outside bound scene");
+        const auto* record = mImpl->mStore.get<ESM::Race>().search(race);
+        if (!record) throw std::invalid_argument("Player WaterWalking race absent from content");
+        auto model = VFS::Path::Normalized(MWClass::npcModel(*record,
+            mImpl->mBaseAnimation, mImpl->mBeastAnimation));
+        model = Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs);
+        if (!mImpl->mVfs.exists(model))
+            throw std::invalid_argument("Player WaterWalking collision model missing");
+        const auto shape = mImpl->mShapes->getInstance(model);
+        const auto extents = shape->mCollisionBox.mExtents;
+        if (!(extents.x() > 0 && extents.y() > 0 && extents.z() > 0)
+            || !std::isfinite(extents.length2()) || extents.length2() > 1e8f)
+            throw std::invalid_argument("Player WaterWalking collision hull invalid");
+        const osg::Vec3f point(position[0], position[1], position[2]);
+        const float water = mImpl->waterAt(point);
+        if (water <= -1e30f || point.z() >= water) return true;
+        const float height = 2.f * extents.z() * scale;
+        const float swimScale = mImpl->mStore.get<ESM::GameSetting>()
+            .find("fSwimHeightScale")->mValue.getFloat();
+        if (point.z() + (swimScale + 1.f) * height < water) return false;
+
+        auto hull = MWPhysics::makeActorShape(extents, shape->mCollisionBox.mCenter,
+            DetourNavigator::CollisionShapeType::Cylinder);
+        hull.mShape->setLocalScaling(btVector3(scale, scale, scale));
+        auto body = BulletHelpers::makeCollisionObject(hull.mShape.get(),
+            Misc::Convert::toBullet(point + shape->mCollisionBox.mCenter * scale), btQuaternion::getIdentity());
+        auto& world = mImpl->mWorld;
+        world.addCollisionObject(body.get(), MWPhysics::CollisionType_Actor,
+            MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor);
+        struct RemoveBody
+        {
+            btCollisionWorld& world;
+            btCollisionObject& body;
+            ~RemoveBody() { world.removeCollisionObject(&body); }
+        } remove{world, *body};
+        MWPhysics::ActorTracer tracer;
+        tracer.doTrace(body.get(), point + osg::Vec3f(0, 0, height / 2.f),
+            osg::Vec3f(point.x(), point.y(), water + height / 2.f), &world);
+        return tracer.mFraction >= 1.f;
+    }
+
     void InteriorActorScene::enableNavigation(const std::string& settingsFile)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
@@ -1616,12 +1664,12 @@ namespace TES3MP::Native
         prepared.mNeighbor = std::move(neighbor);
     }
 
-    void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, std::span<const float> speeds,
+    void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
         std::span<const ActorSceneDoor> doors,
         std::span<const std::optional<std::array<float, 3>>> destinations)
     {
         if (!mImpl || prepared.mState->lifetime != mImpl->mLifetime
-            || speeds.size() != destinations.size() || speeds.size() != neighborSnapshots().size())
+            || movements.size() != destinations.size() || movements.size() != neighborSnapshots().size())
             throw std::invalid_argument("Neighbor set navigation binding invalid");
         std::vector<InteriorActorScene*> scenes{this};
         for (auto* next = mNeighbor.get(); next; next = next->mNeighbor.get()) scenes.push_back(next);
@@ -1636,7 +1684,7 @@ namespace TES3MP::Native
             }
         } restore{mImpl->mWorld};
         Prepared* parent = &prepared;
-        for (size_t i = 0; i < speeds.size(); ++i)
+        for (size_t i = 0; i < movements.size(); ++i)
         {
             auto* previous = scenes[i]->mImpl->mActor->mCollisionObject;
             restore.bodies.emplace_back(previous, previous->getWorldTransform());
@@ -1645,8 +1693,7 @@ namespace TES3MP::Native
                 + scenes[i]->mImpl->mActorOffset));
             previous->setWorldTransform(candidate);
             mImpl->mWorld.updateSingleAabb(previous);
-            parent->mNeighbor = scenes[i + 1]->prepareNavigation(
-                ActorMovement{.walkSpeed = speeds[i]}, doors, destinations[i]);
+            parent->mNeighbor = scenes[i + 1]->prepareNavigation(movements[i], doors, destinations[i]);
             parent = parent->mNeighbor.get();
         }
         std::vector<Prepared*> frames{&prepared};

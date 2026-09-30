@@ -15,35 +15,37 @@ V64 persists camera aim and sweeps server hulls. Misses pay once; reconnect
 does not replay cues. Checks: `build/logs/aim-protocol-test.log`,
 `build/logs/aim-cue-test.log`, `build/logs/bow-aim-enchanted-test.log`.
 
-The body timeline interpolates knockdown loops across hit clips. Four-actor
-loss/reconnect checks pass `build/logs/body-timeline-test.log`; desktop object
-compiled in `build/logs/body-pose-object-build.log`. Two-desktop rendering is unverified.
+The body timeline interpolates knockdown loops. Four-actor loss/reconnect passes
+`build/logs/body-timeline-test.log`; desktop object builds in
+`build/logs/body-pose-object-build.log`. Two-desktop rendering is unverified.
 
 Two clients under 10% loss shared impacts, death, corpse transfer and a miss:
 `build/logs/desktop-ranged-aim-live-01.log`. Floor contact and cues pass
 `build/logs/desktop-ranged-world-hull-05.log`.
 
-Eight movement IDs admit passive abilities. Cast, expiry and restart pass
-`build/logs/movement-passive-test-02.log`. Earlier V56 saves need reset.
-Deep-water WaterWalking rejects the selected NPC before effect install;
-shallow water still lifts it. Trusted disabled Levitate removes passives,
-constants and casts; restart is exact. Checks:
-`build/logs/movement-{deep-exception-test-02,wet-exception-test-01,disabled-test-05}.log`.
-Player underwater castability, script-driven Levitate toggles and neighbor physics remain.
+Eight movement IDs admit passives; cast, expiry and restart pass
+`build/logs/movement-passive-test-02.log`. Deep-water WaterWalking rejects NPCs
+and players before effect install; shallow water accepts and lifts moving actors.
+V65 commits stock-script Disable/EnableLevitation with effect removal/restoration,
+atomic rejection and restart. Neighbors use effect-derived stock movement and
+drowning; WaterBreathing protects them through expiry. Disconnect/reconnect
+projections and restart converge. Checks: `build/logs/movement-script-disabled-test-08.log`,
+`movement-player-{deep-test-02,wet-test-01}.log`,
+`movement-neighbor-{physics-test-04,deep-test-01,combat-regression-01}.log`.
+General script scheduling and broader neighbor movement responses remain.
 
-Magic presentation now replicates cast/hit cues and active ContinuousVfx by
-actor/life, restoring loops from snapshots without replaying one-shots.
-Two desktops under 10% loss cast stock four-Target-effect `vivec's_wrath`:
-each rendered five bolt models and light color `[.831373,.57549,.521569,1]`.
-An extended-duration fixture using stock visuals showed four active loops,
-reconnect restoration, expiry and no cast/hit replay. Evidence:
+Magic presentation replicates cast/hit cues and active ContinuousVfx by
+actor/life, restoring loops without one-shot replay. Under 10% loss, two
+desktops cast four-Target-effect `vivec's_wrath`, rendering five bolt models
+and light color `[.831373,.57549,.521569,1]` each. An extended fixture showed
+four loops, reconnect restoration and expiry. Evidence:
 `build/logs/magic-multi-live-04.log`, `build/logs/magic-loop-live-02.log`,
 their `build/*/result.json` and screenshots. Audible quality remains unverified.
 Focused checks pass; capability 31 requires updated desktops.
 
-**Next:** bind player underwater castability and script-driven Levitate state,
-then neighbor physics. Continue AI/disposition, object/travel, bound equipment and summons;
-generalize actor/life ownership before player movement cutover.
+**Next:** verify remaining neighbor movement responses during pursuit, then
+continue AI/disposition, object/travel, bound equipment and summons. Generalize
+actor/life ownership before player movement cutover.
 
 62 effects remain in the M4 completion inventory across actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

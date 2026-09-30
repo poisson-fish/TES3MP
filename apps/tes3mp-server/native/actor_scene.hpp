@@ -112,6 +112,8 @@ namespace TES3MP::Native
         bool lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const;
         // Stock underwater cast gate against the selected or bound neighbor hull.
         bool waterWalkingCastable(uint64_t actor) const;
+        bool waterWalkingCastable(const std::array<float, 3>& position, ESM::RefId race,
+            float scale = 1.f) const;
         uint64_t actorId() const noexcept;
         // The same resource hulls used by stock physics, for AiCombat's
         // distance-minus-half-extents flee gate.
@@ -175,7 +177,7 @@ namespace TES3MP::Native
         void prepareNeighborNavigation(Prepared& prepared, float speed,
             std::span<const ActorSceneDoor> doors,
             std::optional<std::array<float, 3>> destination);
-        void prepareNeighborNavigation(Prepared& prepared, std::span<const float> speeds,
+        void prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
             std::span<const ActorSceneDoor> doors,
             std::span<const std::optional<std::array<float, 3>>> destinations);
         std::unique_ptr<Prepared> prepareBlindRun(const ActorMovement& movement,

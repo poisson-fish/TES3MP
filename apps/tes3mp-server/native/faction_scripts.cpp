@@ -44,6 +44,14 @@ namespace TES3MP::Native
             extensions.registerInstruction("pcexpell", "/S", opcodePcExpell);
             extensions.registerInstruction("pcclearexpelled", "/S", opcodePcClearExpelled);
         }
+        class SetLevitation final : public Interpreter::Opcode0
+        {
+            bool& mEnabled;
+            bool mValue;
+        public:
+            SetLevitation(bool& enabled, bool value) : mEnabled(enabled), mValue(value) {}
+            void execute(Interpreter::Runtime&) override { mEnabled = mValue; }
+        };
     }
 
     ActorCampaignCombat::PlayerAi runFactionScript(const MWWorld::ESMStore& content,
@@ -103,6 +111,38 @@ namespace TES3MP::Native
         for (const auto& id : stats.getExpelled())
             if (!stats.isInFaction(id))
                 throw std::invalid_argument("Faction script expelled an absent member");
+        return result;
+    }
+
+    bool runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& scriptId,
+        const MWWorld::Ptr& actor, bool before)
+    {
+        if (scriptId.empty() || scriptId.serializeText().size() > 256 || actor.isEmpty())
+            throw std::invalid_argument("Movement rule script context incomplete");
+        const auto* script = content.get<ESM::Script>().search(scriptId);
+        if (!script || script->mScriptText.empty() || script->mScriptText.size() > 4096)
+            throw std::invalid_argument("Movement rule script missing or exceeds bound");
+        Compiler::Extensions extensions;
+        extensions.registerInstruction("disablelevitation", "", Compiler::Misc::opcodeDisableLevitation);
+        extensions.registerInstruction("enablelevitation", "", Compiler::Misc::opcodeEnableLevitation);
+        FactionCompilerContext compilerContext;
+        compilerContext.setExtensions(&extensions);
+        Compiler::StreamErrorHandler errors;
+        Compiler::FileParser parser(errors, compilerContext);
+        std::istringstream source(script->mScriptText);
+        Compiler::Scanner scanner(errors, source, compilerContext.getExtensions());
+        scanner.scan(parser);
+        if (!errors.isGood()) throw std::invalid_argument("Unsupported or invalid movement rule script");
+        auto program = parser.getProgram();
+        if (program.mInstructions.empty() || program.mInstructions.size() > 256)
+            throw std::invalid_argument("Movement rule script instruction count invalid");
+        bool result = before;
+        MWScript::InterpreterContext context(nullptr, actor, actor, content);
+        Interpreter::Interpreter interpreter;
+        Interpreter::installOpcodes(interpreter);
+        interpreter.installSegment5<SetLevitation>(Compiler::Misc::opcodeDisableLevitation, result, false);
+        interpreter.installSegment5<SetLevitation>(Compiler::Misc::opcodeEnableLevitation, result, true);
+        interpreter.run(program, context, 256);
         return result;
     }
 }

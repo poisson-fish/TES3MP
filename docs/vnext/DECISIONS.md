@@ -53,12 +53,11 @@ source identity survives movement. Door contact precedes physics. Persist avoida
 death. NPC respawn clears body effects; attribution survives. NPC commands never
 enter client input. Death cancels flights.
 
-V39-V42 select the nearest visible living player, breaking ties by ID every eight
-ticks. Stock ratings compare weapons, ammunition, WhenUsed and spells; unsupported
-plans reject. Persist source/life/target, payment, RNG, KF phases, effects and casts
-together. Inactive areas pause; launch revalidates. T3C5/capability 23 and T3C2
-retain caster life. V46 projects swings without replaying gameplay callbacks or
-advancing the authoritative clock.
+V39-V42 select the nearest visible living player every eight ticks, breaking ties
+by ID. Stock weapon/ammunition/WhenUsed/spell ratings reject unsupported plans.
+Persist source/life/target, payment, RNG, KF phases, effects and casts together;
+inactive areas pause and launch revalidates. T3C5/capability 23 and T3C2 retain
+caster life. V46 projects swings without gameplay callbacks or clock advancement.
 
 **Equipped passive sources.** Select constants by item and effect ordinal before
 combat. Rolls persist while equipped; replacement and respawn install new sources.
@@ -79,18 +78,17 @@ V44 persists pre-release targets/clip recipes. Detached transactions equip weapo
 recovery never re-equips. Completion resumes selection; breakage removes passives.
 
 **V52 actor presentation.** Clients sample committed motion/action without gameplay
-callbacks. Persist swing/body clips and life boundaries; hold on pauses or starvation.
-T3C7/capability 25; fresh campaigns. Budget four latest-state streams per pump.
+callbacks. Persist clips/life; hold on pauses or starvation. T3C7/capability 25;
+fresh campaigns. Budget four latest-state streams per pump.
 
 V53 adds participant-bound player casts to this clock. Release revalidation/payment
 and interruption commit atomically; offline casts pause. T3C8/capability 26;
 fresh campaigns.
 
-**V64 physical aim.** T3MC carries bounded optional world aim. The server saves
-flight direction, charges at the authored key and sweeps for contact without a
-mapped target. World misses use target life zero. Recent terminal receipts display
-the endpoint after skipped flights; reconnect never replays seen cues. Fresh
-campaign image required.
+**V64 physical aim.** T3MC carries bounded world aim. The server saves flight
+direction, charges at the authored key and sweeps contact. World misses use target
+life zero. Terminal receipts show skipped-flight endpoints; reconnect suppresses
+seen cues. Fresh campaign required.
 
 T3C9/capability 27 carries bounded aggregate visibility magnitudes with actor
 presentation. Clients feed stock Light, NightEye and Detect consumers; snapshots
@@ -267,6 +265,12 @@ death schema requires an actor life, so drowning records the NPC's own life as
 the environmental cause; distinguish environment explicitly when death ownership
 is generalized.
 
+**V65 movement rules.** Stock EnableLevitation/DisableLevitation opcodes run through
+a bounded trusted script request. Their world rule and effect removal commit in
+the actor image; recovery validates the rule before installing sources. V65 needs
+a fresh campaign. General script scheduling remains M5 work. Bound neighbors use
+their own movement stats/effects in the shared solver and own drowning damage.
+
 **AI decisions (V57).** Persist the selected actor's Flee target, deadline and
 navigation destination with combat and RNG. Reconcile bounded AI-only passive
 abilities and equipped constants as durable sources; never reroll them on recovery.
@@ -282,17 +286,13 @@ fields. Share stock numeric aggression terms while keeping the server the sole
 gameplay writer. V57 remains readable under its prior descriptor; V58 requires
 a fresh campaign rather than implicit migration.
 
-**Social lifecycle (V59/V60).** Commit werewolf equipment, temporary-effect
-purge, stock stats, witness consequences and crime engagement with the actor
-image. Bind at most 128 unscripted, unleveled NPC placements as witnesses.
-V60 stages the first neighbor's stock body/path and engagement pursuit with the
-actor image; its frame shares the selected actor's collision world and sweeps
-against the staged selected pose. Keep engagement keyed by placement and player,
-with no implicit migration. V61 binds combat stat/body vectors and hit resources
-to placement IDs on recovery. V62 gives two neighbors their own melee, effects,
-death and respawn state. V63 binds three neighbors and routes player spells and
-physical projectiles by placement/life in the same collision scene and transaction.
-The cap remains provisional; a new descriptor version binds the larger set.
+**Social lifecycle (V59/V60).** Commit werewolf equipment, effect purge, stats,
+crime and witness engagement together. Bind at most 128 unscripted, unleveled
+witnesses. V60 stages a neighbor's body/path and pursuit in the shared collision
+world. Engagement keys by placement/player; no implicit migration. V61 binds
+stats/body/hit resources by placement on recovery. V62 gives two neighbors melee,
+effects, death and respawn. V63 binds three and routes spells/projectiles by
+placement/life in one scene/transaction. A new descriptor binds a larger cap.
 
 **Determinism and network boundaries.** Save server order/ticks and RNG state;
 measure stream consumption instead of assuming cross-platform replay. Preserve

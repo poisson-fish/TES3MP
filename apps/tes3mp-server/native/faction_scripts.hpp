@@ -13,6 +13,9 @@ namespace TES3MP::Native
     ActorCampaignCombat::PlayerAi runFactionScript(const MWWorld::ESMStore& content,
         const ESM::RefId& script, const MWWorld::Ptr& actor, const MWWorld::Ptr& player,
         const ActorCampaignCombat::PlayerAi& before);
+    // Compile stock world-rule opcodes against a bounded detached result.
+    bool runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& script,
+        const MWWorld::Ptr& actor, bool before);
 }
 
 #endif

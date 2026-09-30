@@ -52,7 +52,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t NeighborCombatCampaignMagic = 0x5a50434154335354;
     inline constexpr uint64_t NpcRangedCampaignMagic = 0x5b50434154335354;
     inline constexpr uint64_t AuthoritativeAimCampaignMagic = 0x5c50434154335354;
-    inline constexpr bool hasAuthoritativeAim(uint64_t magic) { return magic == AuthoritativeAimCampaignMagic; }
+    inline constexpr uint64_t MovementRuleCampaignMagic = 0x5d50434154335354;
+    inline constexpr bool hasMovementRules(uint64_t magic) { return magic == MovementRuleCampaignMagic; }
+    inline constexpr bool hasAuthoritativeAim(uint64_t magic)
+    { return magic == AuthoritativeAimCampaignMagic || hasMovementRules(magic); }
     inline constexpr bool hasNpcRanged(uint64_t magic)
     { return magic == NpcRangedCampaignMagic || hasAuthoritativeAim(magic); }
     inline constexpr bool hasNeighborCombat(uint64_t magic)
@@ -214,6 +217,7 @@ namespace TES3MP::Native
         std::vector<NeighborAttack> neighborAttacks;
         std::vector<Stats> actors = std::vector<Stats>(3);
         uint32_t rng = 1;
+        bool levitationEnabled = true;
         std::vector<bool> knockedDown = std::vector<bool>(3);
         std::vector<uint32_t> knockoutFrame = std::vector<uint32_t>(3);
         std::vector<bool> hitKnockdown = std::vector<bool>(3);
@@ -379,6 +383,12 @@ namespace TES3MP::Native
             if (rng < 1 || rng > 2147483646)
                 throw std::invalid_argument("Native combat RNG state invalid");
             state.rng = uint32_t(rng);
+            if (hasMovementRules(magic))
+            {
+                const auto enabled = getAreaWord(bytes, offset);
+                if (enabled > 1) throw std::invalid_argument("Native Levitate world rule invalid");
+                state.levitationEnabled = enabled != 0;
+            }
             if (hasPlacementCombat(magic))
             {
                 const auto count = getAreaWord(bytes, offset);

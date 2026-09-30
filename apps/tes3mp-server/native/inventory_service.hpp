@@ -119,6 +119,7 @@ namespace TES3MP::Native
         bool mSpecialConditions = false; // V55 game-time Corprus and weather-sensitive effects.
         bool mMovementEffects = false; // V56 committed movement effects; inherited player movement remains client-side.
         bool mLevitationEnabled = true; // Trusted world rule; a disabled world removes Levitate effects.
+        bool mScriptedMovementRules = false; // V65 persists stock Enable/DisableLevitation results.
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
         bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.
@@ -322,6 +323,10 @@ namespace TES3MP::Native
             PlayerId player;
             ESM::RefId script;
         };
+        struct MovementRuleScriptRequest
+        {
+            ESM::RefId script;
+        };
         // Trusted gameplay results. The caller has already established script or
         // crime authority; no packet decoder may construct these actions.
         struct PlayerSocialAction
@@ -434,7 +439,8 @@ namespace TES3MP::Native
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
             std::span<const PlayerAiUpdate> playerAiUpdates = {},
             std::span<const PlayerSocialAction> socialActions = {},
-            std::optional<FactionScriptRequest> factionScript = {});
+            std::optional<FactionScriptRequest> factionScript = {},
+            std::optional<MovementRuleScriptRequest> movementRuleScript = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

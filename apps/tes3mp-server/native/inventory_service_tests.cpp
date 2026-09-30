@@ -5553,14 +5553,19 @@ namespace TES3MP::Native::Testing
         const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded";
-        const bool neighborCombat = effectFamily == "neighbor-combat" || projectileNeighbors;
+        const bool neighborPhysics = effectFamily == "neighbor-physics"
+            || effectFamily == "neighbor-physics-deep"
+            || (effectFamily == "movement-effects" && deepMovement && !wetMovement);
+        const bool neighborCombat = effectFamily == "neighbor-combat" || neighborPhysics || projectileNeighbors;
+        const size_t expectedNeighbors = effectFamily == "movement-effects" && deepMovement && !wetMovement
+            ? 3u : neighborCombat ? 2u : 1u;
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
         const bool aiDisposition = !npcRanged && encounterProfile != "bow-aim-flight"
             && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
-        const bool movementEffects = npcRanged || effectFamily == "movement-effects" || aiDisposition
+        const bool movementEffects = npcRanged || effectFamily == "movement-effects" || neighborPhysics || aiDisposition
             || effectFamily == "ai-creature";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
@@ -6368,7 +6373,7 @@ namespace TES3MP::Native::Testing
                         spell("visibility_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
                             {effect(id, ESM::RT_Self, 5, 20)});
                 }
-                if (effectFamily == "movement-effects")
+                if (effectFamily == "movement-effects" || neighborPhysics)
                     for (const auto id : {ESM::MagicEffect::WaterBreathing, ESM::MagicEffect::SwiftSwim,
                             ESM::MagicEffect::WaterWalking, ESM::MagicEffect::Burden,
                             ESM::MagicEffect::Feather, ESM::MagicEffect::Jump,
@@ -6620,10 +6625,10 @@ namespace TES3MP::Native::Testing
                     << "\nmelee weapononehand\n";
             }
             if (encounterProfile == "bow-desktop-recycling-flight") npc.mNpdt.mHealth = 25;
-            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
+                if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
                 && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
                 && effectFamily != "concealment" && effectFamily != "visibility"
-                && effectFamily != "movement-effects"
+                && effectFamily != "movement-effects" && !neighborPhysics
                 && effectFamily != "constant-concealment" && !specialConditions)
             { out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId); }
             if (socialLifecycle)
@@ -6631,8 +6636,8 @@ namespace TES3MP::Native::Testing
                 auto witness = npc;
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
-                witness.mAiData.mFight = projectileNeighbors ? 0 : 100;
-                if (neighborCombat) witness.mNpdt.mHealth = 5;
+                witness.mAiData.mFight = projectileNeighbors || neighborPhysics ? 0 : 100;
+                if (neighborCombat) witness.mNpdt.mHealth = neighborPhysics ? 200 : 5;
                 witness.mSpells.mList.clear();
                 if (neighborCombat && !npcRanged)
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
@@ -6766,7 +6771,7 @@ namespace TES3MP::Native::Testing
                 }
                 if (effectFamily == "persistent-conditions" || specialConditions)
                     std::erase_if(beast.mSpells.mList, [](auto id) { return id.getRefIdString().starts_with("persistent_"); });
-                if (effectFamily == "movement-effects")
+                if (effectFamily == "movement-effects" || neighborPhysics)
                 {
                     ESM::Spell ability; ability.blank();
                     ability.mId = ESM::RefId::stringRefId("movement_passive_family");
@@ -6783,6 +6788,17 @@ namespace TES3MP::Native::Testing
                     beast.mSpells.mList.push_back(ability.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out);
                     out.endRecord(ESM::Spell::sRecordId);
+                    if (deepMovement && !wetMovement)
+                        for (const auto [id, body] : {
+                                std::pair{"movement_disable_levitation", "DisableLevitation\n"},
+                                {"movement_enable_levitation", "EnableLevitation\n"},
+                                {"movement_invalid_rule", "ModHealth 10\n"}})
+                        {
+                            ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(id);
+                            script.mScriptText = "Begin " + std::string(id) + "\n" + body + "End " + id + "\n";
+                            out.startRecord(ESM::Script::sRecordId, 0); script.save(out);
+                            out.endRecord(ESM::Script::sRecordId);
+                        }
                 }
                 if (effectFamily == "constant-concealment")
                 {
@@ -6805,7 +6821,7 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
                 || effectFamily == "persistent-conditions" || effectFamily == "disintegration"
                 || effectFamily == "concealment" || effectFamily == "visibility"
-                || effectFamily == "movement-effects"
+                || effectFamily == "movement-effects" || neighborPhysics
                 || effectFamily == "constant-concealment" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
@@ -6819,7 +6835,7 @@ namespace TES3MP::Native::Testing
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return !id.getRefIdString().starts_with("visibility_");
                     });
-                else if (effectFamily == "movement-effects")
+                else if (effectFamily == "movement-effects" || neighborPhysics)
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return !id.getRefIdString().starts_with("movement_");
                     });
@@ -7007,7 +7023,8 @@ namespace TES3MP::Native::Testing
                     witness.mRefNum = {++index, 0};
                     witness.mPos = {{npcRanged ? 250.f : 175.f, -120, 1}, {0, 0, 0}};
                     witness.save(out);
-                    if (effectFamily == "neighbor-expanded")
+                    if (effectFamily == "neighbor-expanded"
+                        || (effectFamily == "movement-effects" && deepMovement && !wetMovement))
                     {
                         witness.mRefNum = {++index, 0};
                         witness.mPos = {{250, -120, 1}, {0, 0, 0}};
@@ -8327,7 +8344,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8355,8 +8372,6 @@ namespace TES3MP::Native::Testing
             if (melee) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
-            if (effectFamily == "movement-effects" && !wetMovement && deepMovement)
-                out << "levitation 0\n";
         }
         if (playerCastLifecycle)
         {
@@ -8369,7 +8384,7 @@ namespace TES3MP::Native::Testing
         }
         if (effectFamily == "persistent-conditions" || effectFamily == "concealment"
             || effectFamily == "constant-concealment"
-            || effectFamily == "visibility" || effectFamily == "movement-effects"
+            || effectFamily == "visibility" || effectFamily == "movement-effects" || neighborPhysics
             || aiDisposition || npcRanged || effectFamily == "ai-creature" || specialConditions)
         {
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
@@ -8413,7 +8428,7 @@ namespace TES3MP::Native::Testing
             for (size_t owner : {0u, 1u}) for (const auto [stat, value] :
                 {std::pair<size_t, float>{8, 40.f}, {9, 30.f}, {10, 60.f}})
             {
-                if (projectileNeighbors) continue;
+                if (projectileNeighbors || neighborPhysics) continue;
                 const auto offset = statsOffset + (owner * ActorCampaignCombat::StatCount * 5 + stat * 5 + 2) * 8;
                 const uint64_t bits = std::bit_cast<uint32_t>(value);
                 for (unsigned i = 0; i < 8; ++i) seed.at(offset + i) = std::byte(bits >> (i * 8));
@@ -8727,6 +8742,138 @@ namespace TES3MP::Native::Testing
                     << " retry=atomic restart=stable\n";
                 return;
             }
+            if (effectFamily == "neighbor-physics-deep")
+            {
+                auto plainHost = make(); auto& plain = plainHost->service();
+                const auto health = [&](auto& current) { return read(bytes(current)).combat->actors[3][8][2]; };
+                const float initial = health(plain);
+                for (uint64_t tick = 1; tick <= 90; ++tick) (void)commit(plain, tick);
+                require(health(plain) < initial, "Deep neighbor did not take stock drowning damage");
+                auto protectedHost = make(); auto& protectedNpc = protectedHost->service();
+                const auto placement = read(bytes(protectedNpc)).combat->npcPlacements.at(1);
+                const uint64_t breathing = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterBreathing));
+                bool activeBreathing = false;
+                uint64_t tick = 0;
+                for (; tick < 90 && !activeBreathing; )
+                {
+                    ++tick;
+                    const auto state = commit(protectedNpc, tick,
+                        tick == 1 ? "movement_npc_0" : std::string{}, 1, placement, false, tick == 1);
+                    activeBreathing = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 3 && effect.effectIndex == breathing && effect.magnitude > 0;
+                    });
+                }
+                require(activeBreathing, "WaterBreathing did not reach the deep neighbor");
+                const float protectedHealth = health(protectedNpc);
+                const auto saved = bytes(protectedNpc);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == saved, "Deep neighbor source changed across restart");
+                bool expired = false, damaged = false;
+                for (unsigned frame = 0; frame < 600; ++frame)
+                {
+                    const auto state = commit(protectedNpc, ++tick);
+                    (void)commit(restart.service(), tick);
+                    require(bytes(protectedNpc) == bytes(restart.service()),
+                        "Deep neighbor drowning or effect expiry diverged after restart");
+                    const bool stillActive = std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 3 && effect.effectIndex == breathing && effect.magnitude > 0;
+                    });
+                    if (stillActive)
+                        require(health(protectedNpc) == protectedHealth,
+                            "Deep neighbor drowned while WaterBreathing was active");
+                    else { expired = true; damaged |= health(protectedNpc) < protectedHealth; }
+                    if (damaged) break;
+                }
+                require(expired && damaged, "Deep neighbor did not resume drowning after expiry");
+                std::cout << "neighbor deep-water damage=stock breathing=protected expiry=damage restart=exact\n";
+                return;
+            }
+            if (effectFamily == "neighbor-physics")
+            {
+                auto walkingHost = make(); auto& walking = walkingHost->service();
+                const auto placement = read(bytes(walking)).combat->npcPlacements.at(1);
+                const uint64_t index = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterWalking));
+                bool activeWalking = false;
+                for (uint64_t tick = 1; tick <= 90; ++tick)
+                {
+                    const auto state = commit(walking, tick,
+                        tick == 1 ? "movement_npc_" + std::to_string(index) : std::string{},
+                        1, placement, false, tick == 1);
+                    activeWalking |= std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 3 && effect.effectIndex == index && effect.magnitude > 0;
+                    });
+                }
+                const auto motion = [&](auto& current, uint64_t observer, uint64_t tick) {
+                    const auto view = current.projectInventory(authority, id<SessionId>(observer),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    require(view && view->equipment && view->equipment->motions.size() == 3,
+                        "Neighbor physics projection lost a placement");
+                    return view->equipment->motions.at(1).position;
+                };
+                require(activeWalking && motion(walking, 1, 90) == motion(walking, 2, 90),
+                    "Neighbor WaterWalking source or observer convergence missing");
+                const auto configDirectory = (scratch / "openmw").string();
+                const char* arguments[]{"neighbor-physics", "--config", configDirectory.c_str()};
+                Loadout loadout(readLoadoutOptions(3, arguments));
+                const auto room = ESM::RefId::stringRefId("NPC Door Contact Test");
+                const auto placements = read(bytes(walking)).combat->npcPlacements;
+                const std::array neighborIds{placements[1], placements[2]};
+                const auto doorId = loadout.ordinaryDoors(room, 128).at(0).mIdentity;
+                const std::array doorIds{doorId};
+                const std::array open{ActorSceneDoor{doorId, osg::PIf / 2}};
+                InteriorActorScene waterScene(loadout, std::array{room}, placements[0],
+                    "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborIds);
+                InteriorActorScene plainScene(loadout, std::array{room}, placements[0],
+                    "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborIds);
+                for (auto* scene : {&waterScene, &plainScene})
+                {
+                    scene->bindDoors(doorIds, true);
+                    scene->enableMovementEffects();
+                    scene->enableNavigation(settings.string());
+                }
+                const auto start = waterScene.neighborSnapshots();
+                const std::array destinations{
+                    std::optional(std::array{start[0].mPosition[0], start[0].mPosition[1] - 160.f, 1.f}),
+                    std::optional(std::array{start[1].mPosition[0], start[1].mPosition[1] - 160.f, 1.f})};
+                const auto stepNeighbors = [&](InteriorActorScene& scene, bool walkingEffect) {
+                    std::array<ActorMovement, 2> movement;
+                    for (auto& actor : movement)
+                    { actor.enabled = true; actor.walkSpeed = actor.swimSpeed = 120.f; }
+                    movement[0].waterWalking = walkingEffect;
+                    auto prepared = scene.prepareSelectedRestore(scene.selectedImage(), open);
+                    scene.prepareNeighborNavigation(*prepared, movement, open, destinations);
+                    scene.install(*prepared);
+                };
+                for (unsigned frame = 0; frame < 45; ++frame)
+                { stepNeighbors(waterScene, true); stepNeighbors(plainScene, false); }
+                require(waterScene.neighborSnapshots()[0].mPosition[2]
+                        > plainScene.neighborSnapshots()[0].mPosition[2] + 100.f,
+                    "Moving neighbor WaterWalking missed the shared stock water plane");
+                const auto saved = bytes(walking);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restart.service().synchronizeCells(authority);
+                require(bytes(restart.service()) == saved, "Neighbor physics changed across restart");
+                const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+                walking.synchronizeCells(offline);
+                restart.service().synchronizeCells(offline);
+                const auto world = specialWorld();
+                for (auto* current : {&walking, &restart.service()})
+                {
+                    auto paused = current->prepareNativeTick(offline, id<ServerTick>(91), 1.f/30, {}, &world);
+                    require(paused && paused->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Neighbor physics disconnect tick failed");
+                    current->synchronizeCells(authority);
+                }
+                require(bytes(walking) == bytes(restart.service())
+                    && motion(walking, 2, 91) == motion(restart.service(), 2, 91),
+                    "Neighbor physics reconnect or restart diverged");
+                (void)commit(walking, 92); (void)commit(restart.service(), 92);
+                require(bytes(walking) == bytes(restart.service()),
+                    "Neighbor physics continuation diverged after reconnect");
+                std::cout << "neighbor physics water-plane=stock observers=two disconnect=stable restart=exact\n";
+                return;
+            }
             if (projectileNeighbors)
             {
                 const auto world = specialWorld();
@@ -8971,7 +9118,7 @@ namespace TES3MP::Native::Testing
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
                 return;
             }
-            if (socialLifecycle)
+            if (socialLifecycle && !neighborPhysics)
             {
                 using Action = InventoryService::PlayerSocialAction;
                 for (size_t owner = 0; owner < 2; ++owner)
@@ -9104,15 +9251,15 @@ namespace TES3MP::Native::Testing
                         for (const auto& motion : view->equipment->motions)
                             if (motion.placement != selectedNpc) neighboring.push_back(motion.placement);
                         require(neighbor != view->equipment->motions.end()
-                                && state.combat->actors.size() == (neighborCombat ? 5u : 4u)
-                                && neighboring.size() == (neighborCombat ? 2u : 1u)
+                                && state.combat->actors.size() == expectedNeighbors + 3
+                                && neighboring.size() == expectedNeighbors
                                 && state.combat->npcPlacements.front() == selectedNpc
                                 && std::ranges::equal(std::span(state.combat->npcPlacements).subspan(1), neighboring)
                                 && state.combat->actors[3][8][2] > 0,
                             "V61 combat state did not bind both NPC placements");
                         const auto combatView = service.projectCombat(nearby, attackingSession,
                             id<ServerTick>(1), id<CanonicalRevision>(1));
-                        require(combatView && combatView->actors().size() == (neighborCombat ? 3u : 2u)
+                        require(combatView && combatView->actors().size() == expectedNeighbors + 1
                                 && std::ranges::any_of(combatView->actors(), [&](const auto& actor) {
                                     return actor.actorId.value() == neighbor->placement
                                         && actor.health == state.combat->actors[3][8][2];
@@ -9213,7 +9360,7 @@ namespace TES3MP::Native::Testing
                         reported = social.bounty == 123;
                         if (reported)
                         {
-                            require(social.engagements.size() == (neighborCombat ? 3u : 2u)
+                            require(social.engagements.size() == expectedNeighbors + 1
                                     && std::ranges::any_of(social.engagements, [selectedNpc](const auto& entry) {
                                         return entry.witness != selectedNpc && entry.fight == 100;
                                     })
@@ -10293,17 +10440,51 @@ namespace TES3MP::Native::Testing
                         });
                     };
                     (void)commit(disabled, 1);
-                    require(noLevitation(disabled), "Disabled world retained passive Levitate");
+                    require(!noLevitation(disabled), "Enabled world omitted passive Levitate");
+                    const auto rule = [&](auto& current, uint64_t tick, std::string_view script) {
+                        const auto world = specialWorld();
+                        auto pending = dynamic_cast<InventoryService&>(current).prepareNativeTick(authority,
+                            id<ServerTick>(tick), 1.f/30, {}, {}, &world, {}, {}, {},
+                            InventoryService::MovementRuleScriptRequest{ESM::RefId::stringRefId(script)});
+                        require(bool(pending), "Movement rule script tick absent");
+                        return pending;
+                    };
+                    const auto beforeRule = bytes(disabled);
+                    auto rejected = rule(disabled, 2, "movement_disable_levitation");
+                    require(rejected->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && bytes(disabled) == beforeRule,
+                        "Rejected DisableLevitation leaked its world rule or passive source");
+                    require(rejected->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && noLevitation(disabled) && !read(bytes(disabled)).combat->levitationEnabled,
+                        "Stock DisableLevitation did not remove existing sources");
+                    const auto disabledBytes = bytes(disabled);
+                    bool unsupportedRejected = false;
+                    try { (void)rule(disabled, 3, "movement_invalid_rule"); }
+                    catch (const std::exception&) { unsupportedRejected = true; }
+                    require(unsupportedRejected && bytes(disabled) == disabledBytes,
+                        "Unsupported movement rule script changed actor state");
                     const auto inventory = disabled.projectInventory(authority, id<SessionId>(1),
                         id<ServerTick>(1), id<CanonicalRevision>(1));
                     require(inventory && inventory->equipment && !inventory->equipment->motions.empty(),
                         "Disabled world NPC identity absent");
                     const uint64_t npc = inventory->equipment->motions.front().placement;
                     const auto spell = "movement_npc_" + std::to_string(levitate);
-                    for (uint64_t tick = 2; tick < 95; ++tick)
-                        (void)commit(disabled, tick, tick == 2 ? spell : std::string{},
-                            1, npc, false, tick == 2);
+                    for (uint64_t tick = 3; tick < 95; ++tick)
+                        (void)commit(disabled, tick, tick == 3 ? spell : std::string{},
+                            1, npc, false, tick == 3);
                     require(noLevitation(disabled), "Disabled world accepted a targeted Levitate cast");
+                    const auto disconnected = std::get<CanonicalServerState>(
+                        createCanonicalServerState(authority.players(), {}));
+                    disabled.synchronizeCells(disconnected);
+                    disabled.synchronizeCells(authority);
+                    for (uint64_t observer : {1ull, 2ull})
+                    {
+                        const auto view = disabled.projectCombat(authority, id<SessionId>(observer),
+                            id<ServerTick>(94), id<CanonicalRevision>(94));
+                        require(view && std::ranges::none_of(view->presentation(), [&](const auto& pose) {
+                            return pose.movementOwned && pose.movement[6] > 0.f;
+                        }), "Reconnect restored disabled Levitate presentation");
+                    }
                     const auto saved = bytes(disabled);
                     InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
                     restart.service().synchronizeCells(authority);
@@ -10311,7 +10492,13 @@ namespace TES3MP::Native::Testing
                     (void)commit(disabled, 95); (void)commit(restart.service(), 95);
                     require(bytes(disabled) == bytes(restart.service()) && noLevitation(restart.service()),
                         "Disabled Levitate diverged after restart");
-                    std::cout << "disabled Levitate passive=removed target=blocked restart=exact\n";
+                    auto enabled = rule(disabled, 96, "movement_enable_levitation");
+                    require(enabled->commit(accepted) == CanonicalDurabilityResult::Committed
+                        && read(bytes(disabled)).combat->levitationEnabled,
+                        "Stock EnableLevitation did not commit its world rule");
+                    (void)commit(disabled, 97);
+                    require(!noLevitation(disabled), "EnableLevitation did not restore passive sources");
+                    std::cout << "script Levitate disable=remove target=blocked enable=restore rejection=atomic restart=exact\n";
                     return;
                 }
                 {
@@ -10352,6 +10539,35 @@ namespace TES3MP::Native::Testing
                 }
                 if (deepMovement && wetMovement)
                 {
+                    auto playerHost = make(); auto& underwaterPlayer = playerHost->service();
+                    const uint64_t playerWalkingIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterWalking));
+                    for (uint64_t frame = 1; frame <= 90; ++frame)
+                        (void)commit(underwaterPlayer, frame,
+                            frame == 1 ? "movement_" + std::to_string(playerWalkingIndex) : std::string{});
+                    require(std::ranges::none_of(read(bytes(underwaterPlayer)).timedEffects,
+                        [&](const auto& effect) { return effect.actor == 0 && effect.effectIndex == playerWalkingIndex; }),
+                        "Deep underwater player accepted WaterWalking");
+                    const auto disconnected = std::get<CanonicalServerState>(
+                        createCanonicalServerState(authority.players(), {}));
+                    underwaterPlayer.synchronizeCells(disconnected);
+                    underwaterPlayer.synchronizeCells(authority);
+                    for (uint64_t observer : {1ull, 2ull})
+                    {
+                        const auto view = underwaterPlayer.projectCombat(authority,
+                            id<SessionId>(observer), id<ServerTick>(90), id<CanonicalRevision>(90));
+                        require(view && std::ranges::none_of(view->presentation(), [&](const auto& pose) {
+                            return pose.kind == 1 && pose.id == 1 && pose.movementOwned
+                                && pose.movement[2] > 0.f;
+                        }), "Reconnect restored rejected underwater WaterWalking");
+                    }
+                    const auto playerSaved = bytes(underwaterPlayer);
+                    InventoryHost playerRestart(descriptor, testContentManifest(), *registry, *crypto, playerSaved);
+                    playerRestart.service().synchronizeCells(authority);
+                    require(bytes(playerRestart.service()) == playerSaved,
+                        "Underwater player WaterWalking changed across restart");
+                    (void)commit(underwaterPlayer, 91); (void)commit(playerRestart.service(), 91);
+                    require(bytes(underwaterPlayer) == bytes(playerRestart.service()),
+                        "Underwater player WaterWalking diverged after restart");
                     auto plain = make(); auto& baseline = plain->service();
                     const auto health = [&](auto& current) { return read(bytes(current)).combat->actors[2][8][2]; };
                     const float initial = health(baseline);
