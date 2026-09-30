@@ -77,7 +77,14 @@ namespace TES3MP::Native
 
     void OrdinaryDoor::validate(const ESM::DoorState& state) const
     {
-        require(fields(state.mRef) == fields(mPlacement), "Native door saved placement differs from bound content");
+        auto authored = state.mRef;
+        authored.mLockLevel = mPlacement.mLockLevel;
+        authored.mIsLocked = mPlacement.mIsLocked;
+        require(fields(authored) == fields(mPlacement), "Native door saved placement differs from bound content");
+        require(state.mRef.mLockLevel >= 0 && state.mRef.mLockLevel <= 1000
+                && (state.mRef.mIsLocked ? state.mRef.mLockLevel > 0 : state.mRef.mLockLevel == 0)
+                && (state.mRef.mLockLevel == 0 || state.mHasCustomState),
+            "Native door lock state outside committed bounds");
         require((state.mVersion == ESM::DefaultFormatVersion || state.mVersion == ESM::CurrentSaveGameFormatVersion)
                 && !state.mActorIdConverter && state.mEnabled == 1 && state.mFlags == 0
                 && !state.mHasLocals && state.mLocals.mVariables.empty() && state.mLuaScripts.mScripts.empty()
@@ -102,6 +109,7 @@ namespace TES3MP::Native
     PreparedDoorChange OrdinaryDoor::activate(const ESM::DoorState& state) const
     {
         validate(state);
+        require(!state.mRef.mIsLocked, "Native locked door cannot activate");
         const auto movement = MWWorld::activatedDoorState(static_cast<MWWorld::DoorState>(state.mDoorState),
             mPlacement.mPos.rot[2], state.mPosition.rot[2]);
         PreparedDoorChange result{state};
@@ -111,6 +119,40 @@ namespace TES3MP::Native
         result.mPlaySound = opening ? mOpenSound : mCloseSound;
         result.mFadeSound = opening ? mCloseSound : mOpenSound;
         result.mSoundOffset = MWWorld::doorSoundOffset(movement, mPlacement.mPos.rot[2], state.mPosition.rot[2]);
+        return result;
+    }
+
+    PreparedDoorChange OrdinaryDoor::applyLockMagic(const ESM::DoorState& state,
+        LockMagic effect, int magnitude) const
+    {
+        validate(state);
+        require(magnitude >= 1 && magnitude <= 1000, "Native Lock/Open magnitude outside bounds");
+        PreparedDoorChange result{state};
+        if (effect == LockMagic::Lock)
+        {
+            if (state.mRef.mLockLevel < magnitude)
+            {
+                result.mState.mRef.mLockLevel = magnitude;
+                result.mState.mRef.mIsLocked = true;
+            }
+        }
+        else if (effect == LockMagic::Open)
+        {
+            if (state.mRef.mLockLevel <= magnitude && state.mRef.mIsLocked)
+            {
+                result.mState.mRef.mLockLevel = 0;
+                result.mState.mRef.mIsLocked = false;
+            }
+        }
+        else throw std::invalid_argument("Native object magic kind invalid");
+        if (result.mState.mRef.mLockLevel != state.mRef.mLockLevel
+            || result.mState.mRef.mIsLocked != state.mRef.mIsLocked)
+        {
+            result.mState.mHasCustomState = true;
+            result.mPlaySound = ESM::RefId::stringRefId("Open Lock");
+        }
+        else if (effect == LockMagic::Open && state.mRef.mLockLevel > magnitude)
+            result.mPlaySound = ESM::RefId::stringRefId("Open Lock Fail");
         return result;
     }
 

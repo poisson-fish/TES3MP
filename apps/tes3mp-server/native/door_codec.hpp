@@ -17,6 +17,7 @@ namespace TES3MP::Native
         OrdinaryDoor mDoor;
         ESM::Position mInitialPosition;
         std::vector<char> mTemplate;
+        size_t mLockInsertion = 0;
     public:
         DoorBinding(const ESM::Door& base, const ESM::CellRef& placement);
         const OrdinaryDoor& door() const { return mDoor; }

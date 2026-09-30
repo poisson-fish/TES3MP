@@ -126,7 +126,7 @@ namespace TES3MP::Native
         bool mNeighborAi = false; // V60 first neighboring witness has a durable body and stock navigation.
         bool mPlacementCombat = false; // V61 bounds NPC combat slots by placement identity.
         bool mNeighborCombat = false; // V62 gives bound neighbors attack/effect/life state.
-        uint8_t mNeighborLimit = 1; // V63 binds a third placement to the same scene and transaction.
+        uint8_t mNeighborLimit = 1; // V66 binds four neighboring placements to one scene and transaction.
         struct CrimeWitness
         {
             uint64_t placement = 0;
@@ -370,6 +370,11 @@ namespace TES3MP::Native
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
         std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
+        // Trusted object-effect entry point. The first slice binds a streamed
+        // ordinary door without actor composition; player spell targeting/payment
+        // and actor-tick composition are wired separately.
+        std::unique_ptr<PreparedNativeInventory> prepareObjectMagic(
+            uint64_t doorPlacement, ESM::RefId effect, int magnitude);
         bool appendMagicUse(const CanonicalServerState& players, const ServerCommandProposal& command,
             ServerTick tick, PreparedNativeInventory& candidate) override;
         std::span<const std::byte> inventoryImage() const noexcept override;

@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 65; ++candidate)
+            for (unsigned candidate = 3; candidate <= 66; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -298,7 +298,8 @@ namespace TES3MP::Native
                 binding.mPlacementCombat = descriptorVersion >= 61;
                 binding.mNeighborCombat = descriptorVersion >= 62;
                 binding.mAuthoritativeAim = descriptorVersion >= 64;
-                binding.mNeighborLimit = descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
+                binding.mNeighborLimit = descriptorVersion >= 66 ? 4
+                    : descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
                 binding.mConstantEffects = descriptorVersion >= 36;
@@ -308,7 +309,8 @@ namespace TES3MP::Native
                 binding.mNpcWeaponCompetition = descriptorVersion >= 40;
                 binding.mNpcFullSelection = descriptorVersion >= 41;
                 binding.mNpcCastLifecycle = descriptorVersion >= 42;
-                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 63 ? 6
+                if (descriptorVersion >= 43) binding.mBoundHits.emplace(descriptorVersion >= 66 ? 7
+                    : descriptorVersion >= 63 ? 6
                     : descriptorVersion >= 62 ? 5
                     : descriptorVersion >= 61 ? 4 : 3);
             }
@@ -410,19 +412,35 @@ namespace TES3MP::Native
                     if (start.binding.mNeighborAi)
                         std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
                     const auto selectedBase = ESM::RefId::stringRefId(start.navigation->record);
+                    const auto eligibleNpc = [&](const auto& ref) {
+                        return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
+                            && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
+                    };
+                    const auto eligibleCreature = [&](const auto& ref) {
+                        if (ref.mRef.mRefID == selectedBase || ref.mScripted || ref.mLeveled) return false;
+                        const auto* creature = loadout.store().get<ESM::Creature>().search(ref.mRef.mRefID);
+                        return creature && (creature->mFlags & ESM::Creature::Bipedal)
+                            && !(creature->mFlags & ESM::Creature::Flies);
+                    };
                     const auto firstNeighbor = start.binding.mNeighborAi && cellIndex == 0
-                        ? std::ranges::find_if(references, [&](const auto& ref) {
-                            return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
-                                && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
-                        }) : references.end();
+                        ? std::ranges::find_if(references, eligibleNpc) : references.end();
                     std::vector<uint64_t> neighborIds;
                     if (firstNeighbor != references.end()) neighborIds.push_back(firstNeighbor->mIdentity);
                     if (start.binding.mNeighborCombat)
                         for (auto next = firstNeighbor == references.end() ? references.end() : firstNeighbor + 1;
                             next != references.end() && neighborIds.size() < start.binding.mNeighborLimit; ++next)
-                            if (next->mRef.mRefID != selectedBase && !next->mScripted && !next->mLeveled
-                                && loadout.store().get<ESM::NPC>().search(next->mRef.mRefID))
+                            if (eligibleNpc(*next))
                                 neighborIds.push_back(next->mIdentity);
+                    if (start.binding.mNeighborLimit >= 4 && start.binding.mNeighborCombat && cellIndex == 0)
+                    {
+                        const auto creature = std::ranges::find_if(references, eligibleCreature);
+                        if (creature != references.end())
+                        {
+                            if (neighborIds.size() == start.binding.mNeighborLimit) neighborIds.pop_back();
+                            neighborIds.push_back(creature->mIdentity);
+                            std::ranges::sort(neighborIds);
+                        }
+                    }
                     std::erase_if(references, [&](const auto& ref) {
                         return ref.mRef.mRefID != selectedBase
                             && std::ranges::find(neighborIds, ref.mIdentity) == neighborIds.end();
@@ -619,10 +637,7 @@ namespace TES3MP::Native
                 std::vector<InventoryContainerBinding> neighborOwners;
                 for (const auto& value : start.binding.mContainers)
                     if (start.binding.mNeighborAi && value.mCell == start.wireCell
-                        && value.mId != owner.mId
-                        && std::ranges::any_of(start.binding.mCrimeWitnesses, [&](const auto& witness) {
-                            return witness.placement == value.mId.value();
-                        })) neighborOwners.push_back(value);
+                        && value.mId != owner.mId) neighborOwners.push_back(value);
                 std::ranges::sort(neighborOwners, {}, [](const auto& value) { return value.mId.value(); });
                 if (start.binding.mNeighborAi && neighborOwners.empty())
                     throw std::invalid_argument("Native neighbor witness has no inventory owner");

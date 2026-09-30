@@ -6774,6 +6774,10 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "neighbor-combat"
             || std::string_view(argv[1]) == "neighbor-projectiles"
             || std::string_view(argv[1]) == "neighbor-expanded"
+            || std::string_view(argv[1]) == "neighbor-many"
+            || std::string_view(argv[1]) == "neighbor-creature"
+            || std::string_view(argv[1]) == "neighbor-creature-ranged"
+            || std::string_view(argv[1]) == "neighbor-many-ranged"
             || std::string_view(argv[1]) == "neighbor-physics"
             || std::string_view(argv[1]) == "neighbor-pursuit"
             || std::string_view(argv[1]) == "neighbor-disposition"
@@ -6795,9 +6799,13 @@ int main(int argc, char** argv)
                     : std::string_view(argv[1]) == "npc-ranged-enchanted-thrown" ? "npc-enchanted-thrown"
                     : std::string_view(argv[1]) == "npc-ranged-bow" ? "npc-bow"
                     : std::string_view(argv[1]) == "npc-ranged-crossbow" ? "npc-crossbow" : "npc-thrown"
-                : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? "bow-desktop-recycling-flight"
+                : (std::string_view(argv[1]) == "neighbor-expanded-ranged"
+                    || std::string_view(argv[1]) == "neighbor-many-ranged"
+                    || std::string_view(argv[1]) == "neighbor-creature-ranged") ? "bow-desktop-recycling-flight"
                 : (std::string_view(argv[1]) == "neighbor-projectiles"
-                    || std::string_view(argv[1]) == "neighbor-expanded") ? "bow-basic-flight" : "";
+                    || std::string_view(argv[1]) == "neighbor-expanded"
+                    || std::string_view(argv[1]) == "neighbor-many"
+                    || std::string_view(argv[1]) == "neighbor-creature") ? "bow-basic-flight" : "";
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
                 true, true, true, true, true, true, true, true, false, false, true, false,
@@ -6806,6 +6814,8 @@ int main(int argc, char** argv)
                 std::string_view(argv[1]) != "disintegration", false, true, false, false, false, false, true, false, false, false,
                 npcRanged ? std::string_view("npc-ranged")
                     : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? std::string_view("neighbor-expanded")
+                    : std::string_view(argv[1]) == "neighbor-many-ranged" ? std::string_view("neighbor-many")
+                    : std::string_view(argv[1]) == "neighbor-creature-ranged" ? std::string_view("neighbor-creature")
                     : std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
                     : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep"
                         || std::string_view(argv[1]) == "movement-disabled")

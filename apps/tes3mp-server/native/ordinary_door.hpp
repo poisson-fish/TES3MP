@@ -30,6 +30,12 @@ namespace TES3MP::Native
         void validate(const ESM::DoorState& state) const;
         void validatePosition(const ESM::Position& position) const;
         PreparedDoorChange activate(const ESM::DoorState& state) const;
+        enum class LockMagic { Lock, Open };
+        // Stock Lock raises the level only; Open succeeds at or above the
+        // current level. Stock ESM saves omit unlocked levels, so normalize
+        // the transient negative value to its durable zero representation.
+        // The returned state is detached until the owning door transaction commits.
+        PreparedDoorChange applyLockMagic(const ESM::DoorState& state, LockMagic effect, int magnitude) const;
 
         // Query obstruction at the proposed transform without mutating live
         // physics. True cancels the whole step, preserving motion for retry.

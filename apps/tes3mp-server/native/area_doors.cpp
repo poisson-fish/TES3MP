@@ -1,5 +1,6 @@
 #include "inventory_service.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <components/esm3/loadmgef.hpp>
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -192,6 +193,30 @@ namespace TES3MP::Native
             catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
         }
     };
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareObjectMagic(
+        uint64_t doorPlacement, ESM::RefId effect, int magnitude)
+    {
+        if (!mBinding.mStreamExteriors || mBinding.mNavigatingActor || mRuntime.mFailedClosed || inventoryImage().empty()
+            || !doorPlacement || magnitude < 1 || magnitude > 1000) return {};
+        if (effect != ESM::MagicEffect::Lock && effect != ESM::MagicEffect::Open) return {};
+        const auto kind = effect == ESM::MagicEffect::Lock ? OrdinaryDoor::LockMagic::Lock
+            : OrdinaryDoor::LockMagic::Open;
+        const auto found = std::ranges::find(mBinding.mDoors, doorPlacement,
+            &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
+        if (found == mBinding.mDoors.end()) return {};
+        const size_t index = size_t(found - mBinding.mDoors.begin());
+        auto result = std::make_unique<AreaDoorTransaction>(*this);
+        const auto change = mAreaDoors[index].binding.door().applyLockMagic(
+            *result->states[index], kind, magnitude);
+        // A no-op spell may still pay through the cast transaction later. This
+        // door-only entry point publishes a state change only when one exists.
+        if (change.mState.mRef.mLockLevel == result->states[index]->mRef.mLockLevel
+            && change.mState.mRef.mIsLocked == result->states[index]->mRef.mIsLocked) return {};
+        result->states[index] = std::make_shared<const ESM::DoorState>(change.mState);
+        result->image = sealInventory(mCoreImage, result->states);
+        return result;
+    }
 
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareAreaDoor(size_t index, bool activation,
         const CanonicalServerState& players, ServerTick tick, float seconds,

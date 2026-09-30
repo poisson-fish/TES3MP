@@ -7,6 +7,7 @@
 
 namespace TES3MP::Native
 {
+    // V66 binds four neighbors after shared placement/life-aware AI targeting.
     // V63 binds three neighboring NPCs to the collision scene and composed
     // actor/inventory tick. Player spells and physical projectiles resolve by
     // placement and life, including durable restart and respawn boundaries.

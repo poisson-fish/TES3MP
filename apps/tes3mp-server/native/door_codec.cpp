@@ -75,6 +75,12 @@ namespace TES3MP::Native
         // With default object state, the record contains only CellRef::save.
         state.mHasCustomState = true;
         mTemplate = save(state);
+        const std::span reference(mTemplate.data() + HeaderBytes + RecordHeaderBytes,
+            mTemplate.size() - HeaderBytes - RecordHeaderBytes);
+        valid(reference.size() >= 32);
+        mLockInsertion = reference.size() - 32; // Stock CellRef::save ends with DATA + six floats.
+        Cursor position{reference.subspan(mLockInsertion)};
+        (void)position.field(ESM::fourCC("DATA"), 24);
         preflight(mTemplate);
     }
 
@@ -87,10 +93,23 @@ namespace TES3MP::Native
         valid(file.number() == ESM::REC_DOOR);
         valid(file.number() == bytes.size() - HeaderBytes - RecordHeaderBytes);
         valid(file.number() == 0 && file.number() == 0);
-        const auto reference = file.take(mTemplate.size() - HeaderBytes - RecordHeaderBytes);
-        valid(std::equal(reference.begin(), reference.end(), mTemplate.begin() + HeaderBytes + RecordHeaderBytes));
-        // The only variable fields are stock position, custom-state flag and
-        // ANIM direction, in stock order. No external names enter ESMReader.
+        const std::span reference(mTemplate.data() + HeaderBytes + RecordHeaderBytes,
+            mTemplate.size() - HeaderBytes - RecordHeaderBytes);
+        const bool locked = file.bytes.size() >= reference.size() + 12
+            && std::equal(file.bytes.begin() + mLockInsertion,
+                file.bytes.begin() + mLockInsertion + 4, "FLTV");
+        const auto encoded = file.take(reference.size() + (locked ? 12 : 0));
+        valid(std::equal(encoded.begin(), encoded.begin() + mLockInsertion, reference.begin()));
+        if (locked)
+        {
+            Cursor lock{encoded.subspan(mLockInsertion, 12)};
+            const int level = int(lock.field(ESM::fourCC("FLTV"), 4).number());
+            valid(level >= 1 && level <= 1000);
+        }
+        valid(std::equal(encoded.begin() + mLockInsertion + (locked ? 12 : 0), encoded.end(),
+            reference.begin() + mLockInsertion));
+        // Only bounded FLTV, stock position, custom-state flag and ANIM may
+        // differ from the bound content. No external names enter ESMReader.
         if (file.next(ESM::fourCC("POS_")))
         {
             auto position = file.field(ESM::fourCC("POS_"), 24);

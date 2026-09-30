@@ -732,7 +732,7 @@ def run(args):
     if args.npc_casting or args.magic_visual: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 64 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting or args.magic_visual else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 66 if args.neighbor_many else 64 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting or args.magic_visual else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     if args.creature or args.custom_body: npc = encounter["actor"]
     player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature or args.custom_body else npc if args.life_encounter or spell_capture else "player"
@@ -887,7 +887,9 @@ def run(args):
             return
         if args.ranged:
             from native_ranged_encounter import verify_ranged_encounter
-            verify_ranged_encounter(output, evidence, processes, relay, manifest)
+            verify_ranged_encounter(output, evidence, processes, relay, manifest,
+                                    expected_actors=5 if args.neighbor_many else 0,
+                                    creature_damage=args.neighbor_creature_damage)
             return
         if args.visibility:
             from native_visibility_capture import verify_visibility_capture
@@ -1047,6 +1049,9 @@ if __name__ == "__main__":
     parser.add_argument("--magic-visual", action="store_true", help="Two-desktop Target bolt and impact under loss and reconnect")
     parser.add_argument("--player-swings", action="store_true", help="V46 two-client swing presentation, interruption, reconnect and restart")
     parser.add_argument("--ranged", action="store_true", help="V64 aimed physical flight, misses, impacts and cues on two desktops")
+    parser.add_argument("--neighbor-many", action="store_true", help="Use V66 four-neighbor binding with --ranged")
+    parser.add_argument("--neighbor-creature-damage", action="store_true",
+                        help="Require a player arrow hit and reconnect convergence on the V66 bound creature")
     parser.add_argument("--custom-body", action="store_true", help="Exercise the fixture custom NPC melee and body timeline")
     parser.add_argument("--creature", action="store_true", help="Use the bound bipedal creature fixture with --knockout-target npc")
     parser.add_argument("--knockout", action="store_true", help="V51 fatigue knockout/get-up on two desktops, reconnect and restart")
@@ -1075,6 +1080,10 @@ if __name__ == "__main__":
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
+    if args.neighbor_many and not args.ranged:
+        parser.error("--neighbor-many requires --ranged")
+    if args.neighbor_creature_damage and not args.neighbor_many:
+        parser.error("--neighbor-creature-damage requires --ranged --neighbor-many")
     if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.movement and not args.movement_deep and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

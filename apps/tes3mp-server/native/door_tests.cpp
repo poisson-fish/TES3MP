@@ -225,6 +225,27 @@ namespace TES3MP::Native::Testing
             encodeDoor(state, door, bytes);
             require(save(*decodeDoor(bytes, door)) == save(state), "Door endpoint/default state changed");
         }
+        const auto locked = door.door().applyLockMagic(moving, OrdinaryDoor::LockMagic::Lock, 50).mState;
+        EquipmentBytes lockedBytes;
+        encodeDoor(locked, door, lockedBytes);
+        require(save(*decodeDoor(lockedBytes, door)) == save(locked),
+            "Stock FLTV lock field did not round trip through the bounded door codec");
+        const std::string_view lockTag = "FLTV";
+        const auto lockAt = std::search(lockedBytes.begin(), lockedBytes.end(), lockTag.begin(), lockTag.end());
+        require(lockAt != lockedBytes.end(), "Committed lock field missing from ESM door bytes");
+        for (int invalid : {0, 1001})
+        {
+            auto corrupt = lockedBytes;
+            const size_t value = size_t(lockAt - lockedBytes.begin()) + 8;
+            for (unsigned byte = 0; byte < 4; ++byte) corrupt[value + byte] = char(unsigned(invalid) >> (8 * byte));
+            MWWorld::Testing::Allocations::Trace trace;
+            bool rejected = false;
+            {
+                MWWorld::Testing::Allocations::Observe observe(trace);
+                try { door.preflight(corrupt); } catch (const std::invalid_argument&) { rejected = true; }
+            }
+            require(rejected && trace.mTotal <= 1, "Unbounded saved lock level passed preflight");
+        }
         values.mDoor = std::make_shared<const ESM::DoorState>(moving);
         EquipmentBytes image, bytes;
         encodeEquipmentSession(values, bindings, image, {}, &bindings[0], &door);
@@ -396,6 +417,28 @@ namespace TES3MP::Native::Testing
                 "Restored moving door did not continue at the same angle/direction");
         }
 
+        const auto locked = door.applyLockMagic(closed, OrdinaryDoor::LockMagic::Lock, 50);
+        require(locked.mState.mRef.mIsLocked && locked.mState.mRef.mLockLevel == 50
+                && locked.mState.mHasCustomState && save(closed) == closedBytes,
+            "Lock did not stage a detached stronger level");
+        door.validate(load(save(locked.mState)));
+        rejects([&] { door.activate(locked.mState); }, "Locked door activated");
+        require(save(door.applyLockMagic(locked.mState, OrdinaryDoor::LockMagic::Lock, 30).mState)
+                    == save(locked.mState)
+                && save(door.applyLockMagic(locked.mState, OrdinaryDoor::LockMagic::Open, 49).mState)
+                    == save(locked.mState), "Weaker Lock/Open changed the door");
+        const auto unlocked = door.applyLockMagic(locked.mState, OrdinaryDoor::LockMagic::Open, 50);
+        require(!unlocked.mState.mRef.mIsLocked && unlocked.mState.mRef.mLockLevel == 0,
+            "Open lost the durable unlocked level");
+        door.validate(load(save(unlocked.mState)));
+        require(door.activate(unlocked.mState).mState.mDoorState == 1,
+            "Unlocked door did not resume ordinary activation");
+        require(door.applyLockMagic(unlocked.mState, OrdinaryDoor::LockMagic::Lock, 20)
+                    .mState.mRef.mLockLevel == 20, "Relock did not replace unlocked level");
+        for (int invalid : {0, -1, 1001})
+            rejects([&] { door.applyLockMagic(closed, OrdinaryDoor::LockMagic::Lock, invalid); },
+                "Unbounded Lock magnitude accepted");
+
         // No prepared operation mutates its input; discard and query failure
         // leave the same source bytes. This is not a durability-commit test.
         rejects([&] { door.advance(opening.mState, .1f, {}); }, "Absent collision query accepted");
@@ -417,6 +460,7 @@ namespace TES3MP::Native::Testing
             [](auto& s) { s.mAnimationState.mScriptedAnims.emplace_back(); },
             [](auto& s) { s.mVersion = 12345; }, [](auto& s) { s.mRef.mRefNum.mIndex++; },
             [](auto& s) { s.mRef.mScale = .75f; }, [](auto& s) { s.mRef.mIsLocked = true; },
+            [](auto& s) { s.mRef.mLockLevel = -50; },
             [](auto& s) { s.mRef.mPos.rot[2] += .1f; }, [](auto& s) { s.mPosition.pos[0]++; },
             [](auto& s) { s.mPosition.rot[0]++; }, [](auto& s) { s.mPosition.rot[2] = 4.9f; },
             [](auto& s) { s.mPosition.rot[2] = 7.f; },

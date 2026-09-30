@@ -100,10 +100,11 @@ OpenMW player movement. The server owns source, caster and deadline.
 WaterBreathing's index zero differs from legacy ResistMagicka by source identity.
 Movement cutover still requires M4 collision/combat acceptance.
 
-**AI source navigation.** Stock target rules gate disposition effects. Command
-stages pursuit of its player caster in the actor image. Expiry restores authored
-travel in the same tick; rejected writes retain path and position. Combat
-aggression, flee routes and dialogue still need owning consumers.
+**AI source navigation.** Stock target rules gate disposition effects per actor
+record. Command stages pursuit of its living player or bound actor caster only
+while caster life matches the source. Expiry restores authored travel in the same
+tick; rejected writes retain path and position. Combat aggression, flee routes
+and dialogue still need owning consumers.
 
 **Movement smoothness (target).** After unified collision/replication, use stock
 physics, interpolation and bounded extrapolation. Predict fixed steps; restore
@@ -214,13 +215,12 @@ starts a new lifetime; assignment preserves the destination. Check witnesses
 before dereferencing, then registry/script ownership. Addresses/serialized checks
 cannot establish lifetime or authorize installation.
 
-**Native inventory cutover.** Session image and dispositions share one file transaction,
-never CanonicalInventoryWorld. One player inventory intent composes with the native
-actor tick and hit wear; later intents reject in ingress order. Fingerprints bind
-roles, winning placements and domain.
-Reference IDs use record-plugin order, not reader slots. One registry/counter and
-stock loot stream initialize players then placements in stable order. Recovery never
-reloads/rerolls/auto-equips. Identities preserve raw condition/light-time/charge bits.
+**Native inventory cutover.** Session image and dispositions share one file
+transaction. One inventory intent composes with actor tick/hit wear; later intents
+reject in ingress order. Fingerprints bind roles, placements and domain.
+Reference IDs use record-plugin order. One registry/counter and stock loot stream
+initialize players then placements. Recovery never rerolls or auto-equips;
+identities preserve raw condition/light-time/charge bits.
 
 **Versioned domains.** V3–V13 retain their documented
 [meanings](../../apps/tes3mp-server/native/inventory_host.hpp). Descriptor changes
@@ -271,6 +271,12 @@ the actor image; recovery validates the rule before installing sources. V65 need
 a fresh campaign. General script scheduling remains M5 work. Bound neighbors use
 their own movement stats/effects in the shared solver and own drowning damage.
 
+**Initial object magic.** Trusted Lock/Open uses the streamed door image/commit.
+Stock ESM saves FLTV only while locked; Open stores zero because negative
+transient levels have no durable meaning. Recovery accepts bounded FLTV and fixes
+all other authored bytes. Player payment and actor composition must join this
+transaction before client use.
+
 **AI decisions (V57).** Persist the selected actor's Flee target, deadline and
 navigation destination with combat and RNG. Reconcile bounded AI-only passive
 abilities and equipped constants as durable sources; never reroll them on recovery.
@@ -286,17 +292,17 @@ fields. Share stock numeric aggression terms while keeping the server the sole
 gameplay writer. V57 remains readable under its prior descriptor; V58 requires
 a fresh campaign rather than implicit migration.
 
-**Social lifecycle (V59/V60).** Commit werewolf equipment, effect purge, stats,
-crime and witness engagement together. Bind at most 128 unscripted, unleveled
-witnesses. V60 stages a neighbor's body/path and pursuit in the shared collision
-world. Engagement keys by placement/player; no implicit migration. V61 binds
-stats/body/hit resources by placement on recovery. V62 gives two neighbors melee,
-effects, death and respawn. V63 binds three and routes spells/projectiles by
-placement/life in one scene/transaction. A new descriptor binds a larger cap.
+**Social lifecycle (V59–V66).** Commit werewolf equipment, effects, stats, crime
+and witness engagement together. Bind at most 128 unscripted, unleveled
+witnesses. Neighbor bodies, paths and pursuit share one collision world.
+Engagement keys by placement/player; no implicit migration. V61 binds
+stats/body/hit resources by placement on recovery. V62 gives two neighbors
+combat/lives; V63 gives three placement/life-bound spells/projectiles; V66 gives
+four with shared social targeting. Player Command follows an available, living
+caster; older caps persist.
 
-**Determinism and network boundaries.** Save server order/ticks and RNG state;
-measure stream consumption instead of assuming cross-platform replay. Preserve
-authentication/session separation, stable identities, stale/retry rejection,
-reliable/latest-state traffic, bounded queues, backpressure and secret-free evidence.
-Existing direct-IP encryption does not authenticate server endpoint identity.
-Protocol/save changes may be deliberate without maintaining competing authorities.
+**Determinism and network boundaries.** Save server order/ticks and RNG;
+measure stream consumption across platforms. Preserve session authentication,
+identities, stale/retry rejection, bounded reliable/latest-state traffic and
+secret-free evidence. Direct-IP encryption lacks server identity authentication.
+Protocol/save changes need no competing authority.

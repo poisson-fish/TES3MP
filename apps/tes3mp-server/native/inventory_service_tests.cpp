@@ -3265,6 +3265,41 @@ namespace TES3MP::Native::Testing
         };
         const NativeInventoryCommit accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
         const NativeInventoryCommit rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+        if (streaming)
+        {
+            const auto lock = ESM::MagicEffect::Lock, open = ESM::MagicEffect::Open;
+            const std::vector initialBytes(service.inventoryImage().begin(), service.inventoryImage().end());
+            require(!service.prepareObjectMagic(binding.mDoorId, lock, 0)
+                    && !service.prepareObjectMagic(binding.mDoorId + 1, lock, 50)
+                    && !service.prepareObjectMagic(binding.mDoorId, ESM::MagicEffect::FireDamage, 50),
+                "Invalid trusted object magic entered the door transaction");
+            auto pendingLock = service.prepareObjectMagic(binding.mDoorId, lock, 50);
+            auto staleLock = service.prepareObjectMagic(binding.mDoorId, lock, 60);
+            require(pendingLock && std::ranges::equal(initialBytes, service.inventoryImage()),
+                "Prepared Lock mutated the live door");
+            require(pendingLock->commit(rejected) == CanonicalDurabilityResult::Rejected
+                    && std::ranges::equal(initialBytes, service.inventoryImage()),
+                "Rejected Lock leaked door state");
+            require(pendingLock->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && staleLock->commit(accepted) == CanonicalDurabilityResult::Rejected
+                    && !service.prepareDoorActivation(authority, command(service))
+                    && !service.prepareObjectMagic(binding.mDoorId, open, 49),
+                "Committed Lock did not block activation and weaker Open");
+            const std::vector lockedBytes(service.inventoryImage().begin(), service.inventoryImage().end());
+            InventoryService lockedRestore(content.store, content.readers, binding, true);
+            const std::array lockRefs{content.actor, content.shirt, base.mId};
+            lockedRestore.recover(service.inventoryImage(), lockRefs);
+            require(std::ranges::equal(lockedBytes, lockedRestore.inventoryImage())
+                    && !lockedRestore.prepareDoorActivation(authority, command(lockedRestore)),
+                "Restart lost the committed door lock");
+            auto pendingOpen = service.prepareObjectMagic(binding.mDoorId, open, 50);
+            require(pendingOpen && pendingOpen->commit(rejected) == CanonicalDurabilityResult::Rejected
+                    && std::ranges::equal(lockedBytes, service.inventoryImage()),
+                "Rejected Open leaked door state");
+            require(pendingOpen->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && service.prepareDoorActivation(authority, command(service)),
+                "Committed Open did not restore door activation");
+        }
         auto activation = service.prepareDoorActivation(authority, command(service));
         auto contender = service.prepareDoorActivation(authority, command(service, 2));
         auto inventoryBeforeDoor = service.prepareInventory(authority, bind(authority, wire(service, authority, 1, true, 1)).proposal());
@@ -5550,9 +5585,11 @@ namespace TES3MP::Native::Testing
     {
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool npcRanged = effectFamily == "npc-ranged";
+        const bool neighborCreature = effectFamily == "neighbor-creature";
+        const bool manyNeighbors = effectFamily == "neighbor-many" || neighborCreature;
         const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
-            || effectFamily == "neighbor-expanded";
+            || effectFamily == "neighbor-expanded" || manyNeighbors;
         const bool neighborPhysics = effectFamily == "neighbor-physics"
             || effectFamily == "neighbor-pursuit"
             || effectFamily == "neighbor-disposition"
@@ -6413,12 +6450,23 @@ namespace TES3MP::Native::Testing
                             spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
                                 {effect(ESM::MagicEffect::DemoralizeHumanoid, ESM::RT_Target, 5, 300),
                                     effect(id, ESM::RT_Target, 5, magnitude)});
-                        else spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
-                            {effect(id, ESM::RT_Target, 5, magnitude)});
+                        else
+                        {
+                            auto applied = effect(id, ESM::RT_Target, 5, magnitude);
+                            if (neighborCreature) applied.mArea = 20;
+                            spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)), {applied});
+                        }
                     }
                     spell("ai_calm_stack", {effect(ESM::MagicEffect::CalmHumanoid, ESM::RT_Target, 5, 25)});
                     spell("ai_calm_creature_stack", {effect(ESM::MagicEffect::CalmCreature, ESM::RT_Target, 5, 25)});
                     spell("ai_hurt", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Target, 0, 170)});
+                    if (neighborCreature)
+                    {
+                        spell("npc_command_creature_area", {{ESM::MagicEffect::CommandCreature,
+                            {}, {}, ESM::RT_Target, 20, 5, 100, 100}});
+                        spell("npc_command_kill", {effect(ESM::MagicEffect::DamageHealth,
+                            ESM::RT_Target, 0, 1000)});
+                    }
                     spell("ai_flee_force", {effect(effectFamily == "ai-creature"
                         ? ESM::MagicEffect::FrenzyCreature : ESM::MagicEffect::FrenzyHumanoid,
                         ESM::RT_Target, 5, 100), effect(effectFamily == "ai-creature"
@@ -6618,6 +6666,8 @@ namespace TES3MP::Native::Testing
             {
                 npc.mSpells.mList.clear();
                 npc.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
+                if (neighborCreature)
+                    npc.mSpells.mList.push_back(ESM::RefId::stringRefId("npc_command_creature_area"));
             }
             if (aiDisposition)
                 std::erase_if(npc.mInventory.mList, [](const auto& item) {
@@ -6658,6 +6708,21 @@ namespace TES3MP::Native::Testing
                     witness.mInventory.mList.push_back({5, ESM::RefId::stringRefId("iron shortsword")});
                 out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
                 out.endRecord(ESM::NPC::sRecordId);
+                if (neighborCreature)
+                {
+                    auto creature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("dremora"));
+                    require((creature.mFlags & ESM::Creature::Bipedal) && !(creature.mFlags & ESM::Creature::Flies),
+                        "Neighbor creature fixture requires a walking biped");
+                    creature.mId = ESM::RefId::stringRefId("neighbor_test_creature");
+                    creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
+                    creature.mData.mHealth = 5; creature.mData.mMana = 100; creature.mData.mFatigue = 100;
+                    creature.mData.mLevel = 1; creature.mAiData.mFight = 0;
+                    creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
+                    creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)] = 0;
+                    creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower)] = 0;
+                    out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out);
+                    out.endRecord(ESM::Creature::sRecordId);
+                }
             }
             ESM::RefId placedActor = npc.mId;
             if (creatureEncounter)
@@ -7037,12 +7102,19 @@ namespace TES3MP::Native::Testing
                     witness.mRefNum = {++index, 0};
                     witness.mPos = {{npcRanged ? 250.f : 175.f, -120, 1}, {0, 0, 0}};
                     witness.save(out);
-                    if (effectFamily == "neighbor-expanded"
+                    if (effectFamily == "neighbor-expanded" || manyNeighbors
                         || (effectFamily == "movement-effects" && deepMovement && !wetMovement))
                     {
                         witness.mRefNum = {++index, 0};
                         witness.mPos = {{250, -120, 1}, {0, 0, 0}};
                         witness.save(out);
+                        if (manyNeighbors)
+                        {
+                            witness.mRefNum = {++index, 0};
+                            if (neighborCreature) witness.mRefID = ESM::RefId::stringRefId("neighbor_test_creature");
+                            witness.mPos = {{325, -120, 1}, {0, 0, 0}};
+                            witness.save(out);
+                        }
                     }
                 }
             }
@@ -7134,7 +7206,8 @@ namespace TES3MP::Native::Testing
                     {
                         const auto placements = loadout.placedActors(combatRoom);
                         std::vector<uint64_t> neighbors;
-                        for (size_t i = 1; i < (effectFamily == "neighbor-expanded" ? 4u : 3u); ++i)
+                        for (size_t i = 1; i < (manyNeighbors ? 5u
+                                : effectFamily == "neighbor-expanded" ? 4u : 3u); ++i)
                             neighbors.push_back(placements.at(i).mIdentity);
                         InteriorActorScene hulls(loadout, std::array{combatRoom}, combatActor.mIdentity,
                             "meshes/base_anim.nif", "meshes/base_animkna.nif", neighbors);
@@ -8358,7 +8431,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8405,7 +8478,8 @@ namespace TES3MP::Native::Testing
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
                     Transform(placed[i].transform().cell(), Position3(
-                            (i ? npcRanged ? 20 : -160 : effectFamily == "neighbor-expanded" ? 175 : projectileNeighbors ? 100 : 60)*1024,
+                            (i ? npcRanged ? 20 : -160 : effectFamily == "neighbor-expanded"
+                                || manyNeighbors ? 175 : projectileNeighbors ? 100 : 60)*1024,
                             (i ? npcRanged ? -200 : -400 : projectileNeighbors ? -200 : -400)*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
@@ -8891,11 +8965,24 @@ namespace TES3MP::Native::Testing
             if (projectileNeighbors)
             {
                 const auto world = specialWorld();
-                const size_t boundNeighbors = effectFamily == "neighbor-expanded" ? 3 : 2;
+                const size_t boundNeighbors = manyNeighbors ? 4
+                    : effectFamily == "neighbor-expanded" ? 3 : 2;
                 size_t maxImageBytes = 0, maxSceneBytes = 0;
-                for (size_t neighbor = 0; neighbor < boundNeighbors; ++neighbor)
+                for (size_t neighbor = neighborCreature ? 3u : 0u; neighbor < boundNeighbors; ++neighbor)
                     for (bool magic : {true, false})
                     {
+                        if (manyNeighbors || effectFamily == "neighbor-expanded")
+                        {
+                            std::vector<CanonicalPlayerEntityState> moved(
+                                authority.players().begin(), authority.players().end());
+                            moved[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                moved[0], id<ServerTick>(1),
+                                Transform(moved[0].transform().cell(),
+                                    Position3((100 + int(neighbor) * 75) * 1024, -240 * 1024, 1024),
+                                    moved[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(
+                                moved, authority.activeSessions()));
+                        }
                         auto host = make(); auto& runtime = dynamic_cast<InventoryService&>(host->service());
                         const auto initial = read(bytes(runtime));
                         const auto placements = initial.combat->npcPlacements;
@@ -8923,17 +9010,28 @@ namespace TES3MP::Native::Testing
                         else
                         {
                             const auto* player = authority.findPlayer(id<PlayerId>(1));
-                            const ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
+                            ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
                                 CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                                 id<ActorId>(target), id<ServerTick>(1), CombatRevision::initial(),
                                 CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            if (manyNeighbors)
+                            {
+                                const auto motion = std::ranges::find_if(appearance->equipment->motions,
+                                    [target](const auto& value) { return value.placement == target; });
+                                require(motion != appearance->equipment->motions.end(),
+                                    "Four-neighbor bow target motion absent");
+                                attack.aimPoint = {motion->position[0], motion->position[1],
+                                    motion->position[2] + (neighborCreature && neighbor == 3 ? 40.f : 80.f)};
+                            }
                             const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
                                 CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                                 EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
                                 MeleeAttackCommandProposal(attack)};
                             command = runtime.prepareMeleeAttack(authority, request, id<ServerTick>(1));
                         }
-                        require(bool(command), magic ? "Neighbor spell intent rejected" : "Neighbor bow intent rejected");
+                        const auto missingIntent = std::string(magic ? "Neighbor spell intent rejected at "
+                            : "Neighbor bow intent rejected at ") + std::to_string(neighbor);
+                        require(bool(command), missingIntent.c_str());
                         const auto prior = bytes(runtime);
                         auto first = runtime.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
                             std::move(command), {}, &world);
@@ -8947,6 +9045,7 @@ namespace TES3MP::Native::Testing
                         replay.service().synchronizeCells(authority);
                         require(bytes(replay.service()) == launched, "Neighbor launch changed on restart");
                         bool damaged = false;
+                        uint64_t terminalTick = 0;
                         for (uint64_t tick = 2; tick <= 150; ++tick)
                         {
                             auto live = runtime.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
@@ -8960,6 +9059,14 @@ namespace TES3MP::Native::Testing
                             const auto state = read(bytes(runtime));
                             maxImageBytes = std::max(maxImageBytes, bytes(runtime).size());
                             maxSceneBytes = std::max(maxSceneBytes, state.actor.size());
+                            if (neighborCreature && neighbor == 3 && !magic
+                                && state.neighborLives[neighbor].deaths.empty()
+                                && std::ranges::any_of(state.combat->arrows, [&](const auto& arrow) {
+                                    return arrow.terminal == 1 && arrow.target == target;
+                                }))
+                            {
+                                damaged = true; terminalTick = tick; break;
+                            }
                             if (state.neighborLives[neighbor].deaths.empty()) continue;
                             require(state.neighborLives[neighbor].deaths.size() == 1
                                     && state.life->deaths.empty()
@@ -8969,10 +9076,275 @@ namespace TES3MP::Native::Testing
                                 if (other != neighbor)
                                     require(state.neighborLives[other].deaths.empty(),
                                         "Neighbor projectile killed another placement");
-                            damaged = true; break;
+                            damaged = true; terminalTick = tick; break;
                         }
-                        require(damaged, magic ? "Neighbor spell never hit" : "Neighbor arrow never hit");
+                        const auto missingHit = std::string(magic ? "Neighbor spell never hit at "
+                            : "Neighbor arrow never hit at ") + std::to_string(neighbor);
+                        if (!damaged && neighborCreature && neighbor == 3)
+                        {
+                            const auto state = read(bytes(runtime));
+                            std::ostringstream detail;
+                            detail << missingHit << " placement=" << target
+                                << " health=" << state.combat->actors[neighbor + 3][8][2]
+                                << " arrows=" << state.combat->arrows.size();
+                            for (const auto& arrow : state.combat->arrows)
+                                detail << " [terminal=" << arrow.terminal << " target=" << arrow.target
+                                    << " position=" << arrow.position[0] << ',' << arrow.position[1]
+                                    << ',' << arrow.position[2] << ']';
+                            require(false, detail.str().c_str());
+                        }
+                        require(damaged, missingHit.c_str());
+                        if (manyNeighbors)
+                        {
+                            const auto terminal = bytes(runtime);
+                            const auto offline = std::get<CanonicalServerState>(
+                                createCanonicalServerState(authority.players(), {}));
+                            runtime.synchronizeCells(offline);
+                            replay.service().synchronizeCells(offline);
+                            require(bytes(runtime) == terminal && bytes(replay.service()) == terminal,
+                                "Four-neighbor unload changed the committed deaths or actor image");
+                            runtime.synchronizeCells(authority);
+                            replay.service().synchronizeCells(authority);
+                            require(bytes(runtime) == terminal && bytes(replay.service()) == terminal,
+                                "Four-neighbor reload or restart changed the campaign");
+                            for (uint64_t observer : {1ull, 2ull})
+                            {
+                                const auto view = runtime.projectCombat(authority, id<SessionId>(observer),
+                                    id<ServerTick>(terminalTick), id<CanonicalRevision>(terminalTick));
+                                const auto inventory = runtime.projectInventory(authority, id<SessionId>(observer),
+                                    id<ServerTick>(terminalTick), id<CanonicalRevision>(terminalTick));
+                                require(view && inventory && inventory->equipment
+                                        && view->actors().size() == placements.size()
+                                        && inventory->equipment->motions.size() == placements.size(),
+                                    "Four-neighbor observer lost a combatant after reload");
+                                for (const auto placement : placements)
+                                    require(std::ranges::any_of(view->actors(), [&](const auto& actor) {
+                                            return actor.actorId.value() == placement;
+                                        }) && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                                            return pose.kind == 2 && pose.id == placement && pose.life == 1;
+                                        }), "Four-neighbor observer lost placement or life identity");
+                            }
+                            auto live = runtime.prepareNativeTick(authority, id<ServerTick>(terminalTick + 1),
+                                1.f/30, {}, {}, &world);
+                            auto restored = dynamic_cast<InventoryService&>(replay.service())
+                                .prepareNativeTick(authority, id<ServerTick>(terminalTick + 1),
+                                    1.f/30, {}, {}, &world);
+                            require(live && restored && live->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && restored->commit(accepted) == CanonicalDurabilityResult::Committed
+                                    && bytes(runtime) == bytes(replay.service()),
+                                "Four-neighbor combat diverged after unload and restart");
+                            if (neighborCreature && neighbor == 3 && magic)
+                            {
+                                require(read(bytes(runtime)).neighborLives[neighbor].respawnTick == terminalTick + 3,
+                                    "Creature death lost its bounded respawn deadline");
+                                for (uint64_t at = terminalTick + 2; at <= terminalTick + 3; ++at)
+                                {
+                                    auto next = runtime.prepareNativeTick(authority, id<ServerTick>(at),
+                                        1.f/30, {}, {}, &world);
+                                    auto replayed = dynamic_cast<InventoryService&>(replay.service())
+                                        .prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                                    if (at == terminalTick + 3)
+                                    {
+                                        const auto beforeRespawn = bytes(runtime);
+                                        require(next && next->commit([](auto) {
+                                                return CanonicalDurabilityResult::Rejected;
+                                            }) == CanonicalDurabilityResult::Rejected
+                                            && bytes(runtime) == beforeRespawn,
+                                            "Rejected creature respawn changed its committed life");
+                                    }
+                                    require(next && replayed && next->commit(accepted) == CanonicalDurabilityResult::Committed
+                                            && replayed->commit(accepted) == CanonicalDurabilityResult::Committed
+                                            && bytes(runtime) == bytes(replay.service()),
+                                        "Creature respawn diverged after restart");
+                                }
+                                const auto revived = read(bytes(runtime));
+                                require(revived.neighborLives[neighbor].generation == 2
+                                        && !revived.neighborLives[neighbor].respawnTick
+                                        && revived.combat->actors[neighbor + 3][8][2] > 0,
+                                    "Creature respawn did not restore a fresh living generation");
+                                for (uint64_t observer : {1ull, 2ull})
+                                {
+                                    const auto view = runtime.projectCombat(authority, id<SessionId>(observer),
+                                        id<ServerTick>(terminalTick + 3), id<CanonicalRevision>(terminalTick + 3));
+                                    require(view && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                                        return pose.kind == 2 && pose.id == target && pose.life == 2;
+                                    }), "Creature respawn life absent from observer presentation");
+                                }
+                            }
+                        }
                     }
+                if (neighborCreature)
+                {
+                    const auto world = specialWorld();
+                    for (const auto [effectId, shouldApply] : {
+                            std::pair{ESM::MagicEffect::CalmCreature, true},
+                            std::pair{ESM::MagicEffect::FrenzyCreature, true},
+                            std::pair{ESM::MagicEffect::DemoralizeCreature, true},
+                            std::pair{ESM::MagicEffect::RallyCreature, true},
+                            std::pair{ESM::MagicEffect::CommandCreature, true},
+                            std::pair{ESM::MagicEffect::CommandHumanoid, false},
+                            std::pair{ESM::MagicEffect::Charm, false},
+                            std::pair{ESM::MagicEffect::TurnUndead, false}})
+                    {
+                        auto isolated = make(); auto& runtime = dynamic_cast<InventoryService&>(isolated->service());
+                        const auto placements = read(bytes(runtime)).combat->npcPlacements;
+                        require(placements.size() == 5, "Creature target left the V66 placement set");
+                        const auto effectIndex = uint64_t(ESM::MagicEffect::refIdToIndex(effectId));
+                        auto command = runtime.prepareMagicUse(authority,
+                            proposal(runtime, 1, 1, "ai_" + std::to_string(effectIndex),
+                                placements[3], false, true), id<ServerTick>(1));
+                        require(bool(command), "Creature effect targeting intent rejected");
+                        bool applied = false;
+                        for (uint64_t at = 1; at <= 90; ++at)
+                        {
+                            auto pending = runtime.prepareNativeTick(authority, id<ServerTick>(at),
+                                1.f/30, std::move(command), {}, &world);
+                            require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Creature effect targeting tick failed");
+                            const auto state = read(bytes(runtime));
+                            applied |= std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                return effect.actor == 6 && effect.effectIndex == effectIndex
+                                    && effect.casterKind == 1 && effect.caster == 1;
+                            });
+                            if (applied) break;
+                        }
+                        if (applied != shouldApply)
+                        {
+                            const auto state = read(bytes(runtime));
+                            std::ostringstream detail;
+                            detail << "Creature Command target mismatch effect=" << effectIndex
+                                << " applied=" << applied << " health=" << state.combat->actors[6][8][2]
+                                << " dead=" << state.neighborLives[3].respawnTick
+                                << " projectiles=" << state.projectiles.size();
+                            for (const auto& effect : state.timedEffects)
+                                detail << " [actor=" << effect.actor << " effect=" << effect.effectIndex
+                                    << " caster=" << effect.casterKind << ']';
+                            require(false, detail.str().c_str());
+                        }
+                    }
+                    auto commandedHost = make();
+                    auto& commanded = dynamic_cast<InventoryService&>(commandedHost->service());
+                    const auto placements = read(bytes(commanded)).combat->npcPlacements;
+                    const auto creature = placements.back();
+                    const auto motion = [&](auto& runtime, uint64_t at) {
+                        const auto view = runtime.projectInventory(authority, id<SessionId>(1),
+                            id<ServerTick>(at), id<CanonicalRevision>(at));
+                        require(view && view->equipment, "Commanded creature observer snapshot missing");
+                        const auto found = std::ranges::find_if(view->equipment->motions,
+                            [creature](const auto& value) { return value.placement == creature; });
+                        require(found != view->equipment->motions.end(), "Commanded creature motion missing");
+                        return found->position;
+                    };
+                    const auto initialPosition = motion(commanded, 1);
+                    const auto commandIndex = uint64_t(ESM::MagicEffect::refIdToIndex(
+                        ESM::MagicEffect::CommandCreature));
+                    uint64_t applied = 0;
+                    for (uint64_t at = 1; at <= 90 && !applied; ++at)
+                    {
+                        auto pending = commanded.prepareNativeTick(authority, id<ServerTick>(at),
+                            1.f/30, {}, at == 1 ? std::optional{ActorMagicCast{placements.front(), 1, 1,
+                                MagicUseSourceKind::Spell, source("npc_command_creature_area"),
+                                MagicUseTargetKind::Player, 1}} : std::nullopt, &world);
+                        require(bool(pending), "NPC Command cast tick absent");
+                        if (at == 1)
+                        {
+                            const auto before = bytes(commanded);
+                            require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && bytes(commanded) == before,
+                                "Rejected NPC Command cast leaked payment, RNG or effect");
+                        }
+                        require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "NPC Command cast failed");
+                        const auto state = read(bytes(commanded));
+                        if (std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                return effect.actor == 6 && effect.effectIndex == commandIndex
+                                    && effect.caster == placements.front() && effect.casterKind == 2
+                                    && effect.casterLife == 1;
+                            })) applied = at;
+                    }
+                    require(applied, "NPC Command area never reached the creature");
+                    const auto saved = bytes(commanded);
+                    InventoryHost commandRestart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    auto& replay = dynamic_cast<InventoryService&>(commandRestart.service());
+                    replay.synchronizeCells(authority);
+                    require(bytes(replay) == saved, "NPC Command caster identity changed on restart");
+                    for (uint64_t at = applied + 1; at <= applied + 20; ++at)
+                    {
+                        auto live = commanded.prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                        auto restored = replay.prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                        if (at == applied + 1)
+                        {
+                            const auto beforeFollow = bytes(commanded);
+                            require(live && live->commit([](auto) {
+                                    return CanonicalDurabilityResult::Rejected;
+                                }) == CanonicalDurabilityResult::Rejected && bytes(commanded) == beforeFollow,
+                                "Rejected NPC Command follow changed creature movement");
+                        }
+                        require(live && restored && live->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && restored->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && bytes(commanded) == bytes(replay),
+                            "NPC Command follow diverged after restart");
+                    }
+                    require(motion(commanded, applied + 20)[0] < initialPosition[0] - 1.f,
+                        "Creature did not follow its non-player caster");
+                    const auto originalAuthority = authority;
+                    std::vector<CanonicalPlayerEntityState> moved(authority.players().begin(), authority.players().end());
+                    moved[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                        moved[0], id<ServerTick>(applied + 21),
+                        Transform(moved[0].transform().cell(), Position3(60*1024, -240*1024, 1024),
+                            moved[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(moved,
+                        authority.activeSessions()));
+                    commanded.synchronizeCells(authority); replay.synchronizeCells(authority);
+                    const uint64_t killStart = applied + 21;
+                    auto kill = commanded.prepareMagicUse(authority,
+                        proposal(commanded, 1, killStart, "npc_command_kill", placements.front(), false, true),
+                        id<ServerTick>(killStart));
+                    require(bool(kill), "NPC caster kill intent rejected");
+                    uint64_t deathTick = 0;
+                    for (uint64_t at = killStart; at <= killStart + 90 && !deathTick; ++at)
+                    {
+                        auto live = commanded.prepareNativeTick(authority, id<ServerTick>(at),
+                            1.f/30, std::move(kill), {}, &world);
+                        require(live && live->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "NPC caster death tick failed");
+                        if (read(bytes(commanded)).life->respawnTick) deathTick = at;
+                    }
+                    require(deathTick, "NPC Command caster did not die before effect expiry");
+                    const auto deathImage = bytes(commanded);
+                    InventoryHost deathRestart(descriptor, testContentManifest(), *registry, *crypto, deathImage);
+                    auto& revived = dynamic_cast<InventoryService&>(deathRestart.service());
+                    revived.synchronizeCells(authority);
+                    require(bytes(revived) == deathImage, "NPC Command caster death changed on restart");
+                    for (uint64_t at = deathTick + 1; at <= deathTick + 3; ++at)
+                    {
+                        auto live = commanded.prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                        auto restored = revived.prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                        require(live && restored && live->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && restored->commit(accepted) == CanonicalDurabilityResult::Committed
+                                && bytes(commanded) == bytes(revived),
+                            "NPC Command stale-life replay diverged");
+                    }
+                    const auto respawned = read(bytes(commanded));
+                    require(respawned.life->generation == 2
+                            && std::ranges::any_of(respawned.timedEffects, [&](const auto& effect) {
+                                return effect.actor == 6 && effect.effectIndex == commandIndex
+                                    && effect.caster == placements.front() && effect.casterKind == 2
+                                    && effect.casterLife == 1;
+                            }), "NPC Command source life was lost before stale-life check");
+                    const auto stopped = motion(commanded, deathTick + 3);
+                    for (uint64_t at = deathTick + 4; at <= deathTick + 13; ++at)
+                    {
+                        auto live = commanded.prepareNativeTick(authority, id<ServerTick>(at), 1.f/30, {}, {}, &world);
+                        require(live && live->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Stale NPC Command continuation failed");
+                    }
+                    const auto idle = motion(commanded, deathTick + 13);
+                    require(std::abs(idle[0] - stopped[0]) < 1.f
+                            && std::abs(idle[1] - stopped[1]) < 1.f,
+                        "Creature followed a respawned caster through its stale Command life");
+                    authority = originalAuthority;
+                }
                 {
                     // Aim through the front placement at a farther one. The
                     // launch target cannot override the first server hull.
@@ -8987,10 +9359,22 @@ namespace TES3MP::Native::Testing
                     runtime.synchronizeCells(obstructed);
                     const auto placements = read(bytes(runtime)).combat->npcPlacements;
                     const auto* player = obstructed.findPlayer(id<PlayerId>(1));
-                    const ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
+                    ClientMeleeAttackCommand attack{id<SessionId>(1), SessionGeneration::initial(),
                         CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                         id<ActorId>(placements.back()), id<ServerTick>(1), CombatRevision::initial(),
                         CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                    if (manyNeighbors)
+                    {
+                        const auto view = runtime.projectInventory(obstructed, id<SessionId>(1),
+                            id<ServerTick>(1), id<CanonicalRevision>(1));
+                        require(view && view->equipment, "Obstructed four-neighbor scene absent");
+                        const auto motion = std::ranges::find_if(view->equipment->motions,
+                            [&](const auto& value) { return value.placement == placements.back(); });
+                        require(motion != view->equipment->motions.end(),
+                            "Obstructed four-neighbor target absent");
+                        attack.aimPoint = {motion->position[0], motion->position[1],
+                            motion->position[2] + 80.f};
+                    }
                     const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
                         CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
                         EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
@@ -9429,7 +9813,8 @@ namespace TES3MP::Native::Testing
                             for (const auto effectId : {ESM::MagicEffect::CalmHumanoid,
                                     ESM::MagicEffect::FrenzyHumanoid,
                                     ESM::MagicEffect::DemoralizeHumanoid,
-                                    ESM::MagicEffect::RallyHumanoid})
+                                    ESM::MagicEffect::RallyHumanoid,
+                                    ESM::MagicEffect::CommandHumanoid})
                             {
                                 InventoryHost modified(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
                                 auto& current = dynamic_cast<InventoryService&>(modified.service());
@@ -9471,27 +9856,81 @@ namespace TES3MP::Native::Testing
                                         })) { applied = at; break; }
                                 }
                                 require(applied, "Neighbor AI source never landed");
+                                if (effectId == ESM::MagicEffect::CommandHumanoid)
+                                    require(std::ranges::any_of(read(bytes(current)).timedEffects,
+                                            [&](const auto& effect) {
+                                                return effect.actor == 3 && effect.effectIndex == index
+                                                    && effect.caster == castingPlayer.value()
+                                                    && effect.casterKind == 1;
+                                            }), "Neighboring Command lost its player caster identity");
                                 const auto start = position(current, applied);
                                 const auto saved = bytes(current);
                                 InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, saved);
                                 auto& resumed = dynamic_cast<InventoryService&>(replay.service());
                                 resumed.synchronizeCells(pursuit);
                                 require(bytes(resumed) == saved, "Neighbor AI effect changed on restart");
-                                std::vector<CanonicalSessionProgress> firstSession(
-                                    pursuit.activeSessions().begin(), pursuit.activeSessions().begin() + 1);
+                                std::vector<CanonicalSessionProgress> firstSession;
+                                for (const auto& session : pursuit.activeSessions())
+                                    if (session.playerId() != castingPlayer) firstSession.push_back(session);
+                                require(firstSession.size() == 1 && firstSession.front().playerId() == attackingPlayer,
+                                    "Neighbor AI disconnect fixture retained the wrong player");
+                                std::vector<CanonicalPlayerEntityState> availablePlayers(
+                                    pursuit.players().begin(), pursuit.players().end());
+                                if (effectId == ESM::MagicEffect::CommandHumanoid)
+                                {
+                                    availablePlayers[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                        availablePlayers[0], id<ServerTick>(applied + 10),
+                                        Transform(availablePlayers[0].transform().cell(),
+                                            Position3(60*1024, -250*1024, 1024),
+                                            availablePlayers[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                                    availablePlayers[1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                        availablePlayers[1], id<ServerTick>(applied + 10),
+                                        Transform(availablePlayers[1].transform().cell(),
+                                            Position3(600*1024, 600*1024, 1024),
+                                            availablePlayers[1].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                                }
                                 const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(
-                                    pursuit.players(), firstSession));
+                                    availablePlayers, firstSession));
+                                require(std::ranges::none_of(disconnected.activeSessions(), [&](const auto& session) {
+                                    return session.playerId() == castingPlayer;
+                                }), "Neighbor AI disconnect retained the caster session");
                                 bool selectedSecond = false;
+                                std::array<float, 3> beforeDisconnect{};
                                 for (uint64_t at = applied + 1; at <= applied + 25; ++at)
                                 {
+                                    const bool commandFollow = effectId == ESM::MagicEffect::CommandHumanoid;
+                                    const bool unavailable = at >= applied + 10
+                                        && at <= applied + (commandFollow ? 20 : 10);
+                                    if (commandFollow && at == applied + 9)
+                                        beforeDisconnect = position(current, at - 1);
                                     if (at == applied + 10)
                                     { current.synchronizeCells(disconnected); resumed.synchronizeCells(disconnected); }
-                                    if (at == applied + 11)
+                                    if (at == applied + (commandFollow ? 21 : 11))
                                     { current.synchronizeCells(pursuit); resumed.synchronizeCells(pursuit); }
-                                    const auto* state = at == applied + 10 ? &disconnected : nullptr;
+                                    const auto* state = unavailable ? &disconnected : nullptr;
+                                    if (effectId == ESM::MagicEffect::CommandHumanoid && at == applied + 1)
+                                    {
+                                        const auto beforeFollow = bytes(current);
+                                        auto pending = current.prepareNativeTick(pursuit, id<ServerTick>(at),
+                                            1.f/30, {}, {}, &world);
+                                        require(pending && pending->commit([](auto) {
+                                                return CanonicalDurabilityResult::Rejected;
+                                            }) == CanonicalDurabilityResult::Rejected
+                                            && bytes(current) == beforeFollow,
+                                            "Rejected neighboring Command Follow changed body or AI");
+                                    }
                                     tick(current, at, {}, state); tick(resumed, at, {}, state);
                                     require(bytes(current) == bytes(resumed),
                                         "Neighbor AI target or flee path diverged after restart");
+                                    if (effectId == ESM::MagicEffect::CommandHumanoid)
+                                    {
+                                        if (!unavailable)
+                                            require(!read(bytes(current)).combat->neighborAttacks[0].target,
+                                                "Commanded neighbor attacked while following its caster");
+                                        if (at == applied + 20)
+                                            require(position(current, at)[1] < beforeDisconnect[1] - 1.f,
+                                                "Neighbor did not resume pursuit while Command caster was unavailable");
+                                    }
                                     if (!selectedSecond
                                         && read(bytes(current)).combat->neighborAttacks[0].target == 2)
                                     {
@@ -9516,6 +9955,10 @@ namespace TES3MP::Native::Testing
                                 else if (effectId == ESM::MagicEffect::FrenzyHumanoid)
                                     require(selectedSecond,
                                         "Frenzy did not select the closer unengaged player");
+                                else if (effectId == ESM::MagicEffect::CommandHumanoid)
+                                    require(changed[1] < start[1] - 1.f
+                                            && !read(bytes(current)).combat->neighborAttacks[0].target,
+                                        "Commanded neighbor did not follow its caster without attacking");
                                 else require(changed[1] < start[1] - 1.f,
                                     "Rally did not counter Demoralize and restore pursuit");
                                 for (uint64_t observer : {1, 2})
@@ -9528,11 +9971,24 @@ namespace TES3MP::Native::Testing
                                             }), "Observer lost committed neighbor AI movement");
                                 }
                                 std::array<float, 3> preExpiryPosition{};
+                                std::optional<std::array<float, 3>> ordinaryCommandPosition;
+                                if (effectId == ESM::MagicEffect::CommandHumanoid)
+                                {
+                                    InventoryHost ordinary(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
+                                    auto& baseline = dynamic_cast<InventoryService&>(ordinary.service());
+                                    baseline.synchronizeCells(pursuit);
+                                    for (uint64_t at = reportTick + 1; at <= applied + 75; ++at)
+                                        tick(baseline, at);
+                                    ordinaryCommandPosition = position(baseline, applied + 75);
+                                }
                                 for (uint64_t at = applied + 26; at <= applied + 175; ++at)
                                 {
                                     tick(current, at); tick(resumed, at);
                                     require(bytes(current) == bytes(resumed),
                                         "Neighbor AI expiry diverged after restart");
+                                    if (at == applied + 75 && ordinaryCommandPosition)
+                                        require(position(current, at)[1] > (*ordinaryCommandPosition)[1] + 20.f,
+                                            "Commanded neighbor continued pursuing its former target");
                                     if (at == applied + 165) preExpiryPosition = position(current, at);
                                 }
                                 require(std::ranges::none_of(read(bytes(current)).timedEffects,
@@ -9551,7 +10007,8 @@ namespace TES3MP::Native::Testing
                                                         ESM::MagicEffect::DemoralizeHumanoid));
                                             }), "Paired Demoralize survived Rally expiry");
                                 if (effectId == ESM::MagicEffect::CalmHumanoid
-                                    || effectId == ESM::MagicEffect::DemoralizeHumanoid)
+                                    || effectId == ESM::MagicEffect::DemoralizeHumanoid
+                                    || effectId == ESM::MagicEffect::CommandHumanoid)
                                     require(position(current, applied + 175)[1] < preExpiryPosition[1] - 1.f,
                                         "Neighbor did not resume pursuit after AI effect expiry");
                                 std::cout << "neighbor disposition effect=" << index << " start="

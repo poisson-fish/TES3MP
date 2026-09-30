@@ -1,58 +1,54 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-steps NPCs/doors at 60 Hz, commits at 30 Hz and binds three neighbors.
-Casts, conditions, stats, visibility, movement and twelve AI effects have vanilla/TR checks.
-Sneak, AI jumps, mixed passives and non-player Command remain.
+steps NPCs/doors at 60 Hz, commits at 30 Hz and binds four neighbors.
+Casts, stats, conditions, visibility, movement and AI have vanilla/TR checks;
+sneak, AI jumps and mixed passives remain.
 
-Server bows/crossbows/throws persist flight, contact, damage, recovery,
-enchanted WhenStrikes/area and script locals. Enchanted ammo does not recover;
-item scripts remain closed. Checks:
-`build/logs/npc-ranged-{bow,crossbow,thrown}-test-30.log`,
-`build/logs/projectile-enchanted-{bow,crossbow,thrown}-complete-01.log`.
+Ranged flight, damage, recovery, enchanted impacts and script locals persist.
+Enchanted ammo does not recover; item scripts remain closed
+(`build/logs/projectile-enchanted-bow-complete-01.log`). V64 aim pays once on
+misses and suppresses replayed cues (`build/logs/aim-cue-test.log`). Desktops
+shared impacts, death, loot and misses under 10% loss
+(`build/logs/desktop-ranged-aim-live-01.log`). Knockdown interpolation passes
+`build/logs/body-timeline-test.log`; two-desktop body rendering remains open.
 
-V64 persists camera aim and server hull sweeps. Misses pay once; reconnect
-does not replay cues. Checks: `build/logs/aim-protocol-test.log`,
-`build/logs/aim-cue-test.log`, `build/logs/bow-aim-enchanted-test.log`.
+Eight movement IDs pass cast/expiry/restart. V65 Levitation scripts commit
+atomically; water effects use stock rules. Neighbor movement/restart pass
+`build/logs/movement-script-disabled-test-08.log` and
+`build/logs/neighbor-pursuit-test-08.log`.
 
-Knockdown loops interpolate; four-actor loss/reconnect passes
-`build/logs/body-timeline-test.log`. Two-desktop rendering is unverified.
+Neighbor disposition, Command life, selected NPC/creature context and V66
+four-neighbor combat pass `build/logs/neighbor-disposition-test-29.log`,
+`build/logs/actor-context-creature-01.log`, `build/logs/neighbor-many-05.log`,
+`build/logs/neighbor-creature-13.log` and
+`build/logs/neighbor-creature-ranged-01.log`. Two desktops see all five
+placements and two NPC arrow deaths under loss
+(`build/logs/desktop-neighbor-creature-live-02.log`). Alice's arrow kills the
+bound creature: both desktops receive one attributed hit, render its terminal
+cue nearby, and agree on health 5 to 0 and death after Bob reconnects under
+10% loss (`build/logs/desktop-neighbor-creature-damage-live-04.log`). Creature
+hit/death body clips remain unverified.
 
-Two clients under 10% loss shared impacts, death, corpse transfer and a miss:
-`build/logs/desktop-ranged-aim-live-01.log`. Floor contact and cues pass
-`build/logs/desktop-ranged-world-hull-05.log`.
+Magic replicates actor/life cast/hit cues and ContinuousVfx. Five bolt models,
+four loops and reconnect/expiry pass under loss
+(`build/logs/magic-multi-live-04.log`, `build/logs/magic-loop-live-02.log`).
+Audio is unverified; capability 31 needs updated desktops.
 
-Eight movement IDs admit passives; cast, expiry and restart pass
-`build/logs/movement-passive-test-02.log`. Deep-water WaterWalking rejects actors;
-shallow water lifts them. V65 commits stock-script Disable/EnableLevitation,
-atomic rejection and restart. Neighbors use effect-derived movement and
-drowning; WaterBreathing protects through expiry. Reconnect and restart converge.
-Checks: `build/logs/movement-script-disabled-test-08.log`,
-`movement-player-{deep-test-02,wet-test-01}.log`,
-`movement-neighbor-{physics-test-04,deep-test-01,combat-regression-01}.log`.
-Pursuit consumes SwiftSwim, Burden, Feather and Levitate; Jump/SlowFall project
-without a jump or fall. All six restart exactly:
-`build/logs/neighbor-pursuit-test-08.log`. AI jumps remain.
+**Objects/travel started:** trusted Lock/Open stages one ordinary door in its
+durable image. Rejection preserves state; committed Lock blocks activation,
+Open restores it, and restart retains the lock
+(`build/logs/object-lock-open-ordinary-04.log`,
+`build/logs/object-lock-open-codec-02.log`,
+`build/logs/object-lock-open-area-04.log`).
+Player spell payment/contact, actor-tick composition, containers, client lock
+projection and sound remain open.
 
-Engaged neighbors consume stock Calm, Frenzy, Demoralize and Rally. Calm stops;
-Frenzy switches targets; Demoralize flees; Rally counters Flee. Unavailable
-pathgrid routes fall back to blind runs. A two-observer synthetic fixture checks
-expiry, reconnect, exact restart and rejected writes:
-`build/logs/neighbor-disposition-test-16.log`, `build/logs/neighbor-pursuit-test-11.log`.
-Creature/social targeting and live desktops remain unverified.
+**Next:** wire Lock/Open through player spell contact and the actor tick; then
+containers/travel. Capture creature body reaction and mixed combat; bound
+equipment, summons and actor/life ownership follow.
 
-Magic presentation replicates cast/hit cues and active ContinuousVfx by actor/life.
-Under 10% loss, two desktops cast four-Target-effect `vivec's_wrath`, rendering
-five bolt models and light color `[.831373,.57549,.521569,1]` each. A fixture
-showed four loops, reconnect restoration and expiry. Evidence:
-`build/logs/magic-multi-live-04.log`, `build/logs/magic-loop-live-02.log`,
-their `build/*/result.json` and screenshots. Audible quality remains unverified;
-capability 31 requires updated desktops.
-
-**Next:** finish AI/disposition consumers, then objects/travel, bound equipment
-and summons. Generalize actor/life ownership before player movement cutover.
-
-62 effects remain in the M4 completion inventory across actors and sources:
+62 M4 effects remain:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
   Jump, Levitate, SlowFall.
 - AI/disposition (12): Charm, CalmHumanoid, CalmCreature, FrenzyHumanoid,

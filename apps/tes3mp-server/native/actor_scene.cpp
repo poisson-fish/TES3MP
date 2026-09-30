@@ -696,7 +696,7 @@ namespace TES3MP::Native
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
         if (!neighbors.empty())
         {
-            if (neighbors.size() > 3 || !neighbors.front()
+            if (neighbors.size() > 4 || !neighbors.front()
                 || std::ranges::find(neighbors, actor) != neighbors.end()
                 || std::ranges::find(neighbors.begin() + 1, neighbors.end(), neighbors.front()) != neighbors.end())
                 throw std::invalid_argument("Neighbor actor placements invalid");
