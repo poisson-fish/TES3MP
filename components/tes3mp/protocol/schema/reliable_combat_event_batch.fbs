@@ -105,7 +105,7 @@ table MagicImpactCue {
   x:float;
   y:float;
   z:float;
-  range:ubyte = 2;
+  range:ubyte = 2; // 0..2 hit range; 3 committed cast.
 }
 
 table ReliableCombatEventBatch {

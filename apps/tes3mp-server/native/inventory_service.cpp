@@ -591,7 +591,7 @@ namespace TES3MP::Native
             uint64_t tick, const MWWorld::ESMStore& content, bool general,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
             bool expanded, bool specialConditions, bool movementEffects, bool aiDecisions,
-            bool npcActor, bool undeadActor)
+            bool npcActor, bool undeadActor, bool levitationEnabled = true)
         {
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
@@ -624,6 +624,7 @@ namespace TES3MP::Native
                 for (size_t ordinal = 0; ordinal < plan.effects.size(); ++ordinal)
                 {
                     const auto& entry = plan.effects[ordinal];
+                    if (!levitationEnabled && entry.mEffectID == ESM::MagicEffect::Levitate) continue;
                     if (aiDispositionEffect(entry.mEffectID)
                         && !MWMechanics::validAiEffectTarget(entry.mEffectID,
                             actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
@@ -692,7 +693,8 @@ namespace TES3MP::Native
         bool reconcilePassiveActorEffects(const MWWorld::Ptr& ptr, size_t actor, ActorCasterIdentity caster,
             uint64_t tick, const MWWorld::ESMStore& content,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
-            bool movementEffects, bool aiEffects, bool npcActor, bool undeadActor)
+            bool movementEffects, bool aiEffects, bool npcActor, bool undeadActor,
+            bool levitationEnabled = true)
         {
             if (!movementEffects && !aiEffects) return false;
             std::vector<ActorCampaignTimedEffect> desired;
@@ -713,6 +715,7 @@ namespace TES3MP::Native
                 for (size_t ordinal = 0; ordinal < plan->effects.size(); ++ordinal)
                 {
                     const auto& entry = plan->effects[ordinal];
+                    if (!levitationEnabled && entry.mEffectID == ESM::MagicEffect::Levitate) continue;
                     if (aiDispositionEffect(entry.mEffectID)
                         && !MWMechanics::validAiEffectTarget(entry.mEffectID,
                             actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
@@ -828,7 +831,8 @@ namespace TES3MP::Native
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
             bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {},
             const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {},
-            bool npcActor = true, bool undeadActor = false)
+            bool npcActor = true, bool undeadActor = false,
+            const std::function<bool(size_t, ESM::RefId)>& castable = {})
         {
             if (identities.size() != combat.actors.size() || targetIndex >= identities.size())
                 throw std::invalid_argument("Native effect participant domain invalid");
@@ -886,6 +890,7 @@ namespace TES3MP::Native
                 size_t recipient, size_t author, ActorCasterIdentity attribution, bool protections) -> void {
                 auto& victim = *states[recipient];
                 if (victim.getHealth().getCurrent() <= 0) return;
+                if (castable && !castable(recipient, effect.mEffectID)) return;
                 if (aiDispositionEffect(effect.mEffectID)
                     && !MWMechanics::validAiEffectTarget(effect.mEffectID,
                         recipient < 2 || npcActor, recipient < 2, recipient == 2 && undeadActor,
@@ -2990,7 +2995,8 @@ namespace TES3MP::Native
                         if (effect.beneficiary != expected)
                             throw std::invalid_argument("Native absorb beneficiary life invalid");
                     }
-                    if (!casterKnown || !sourceKnown || !constantCaster || !launchLifeKnown)
+                    if (!casterKnown || !sourceKnown || !constantCaster || !launchLifeKnown
+                        || (!mBinding.mLevitationEnabled && id == ESM::MagicEffect::Levitate))
                         throw std::invalid_argument("Native saved actor effect source invalid");
                 }
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
@@ -3214,7 +3220,8 @@ namespace TES3MP::Native
                             mBinding.mDurableCasters ? (actorIndex == 2 ? decoded.life->generation : 1u) : 0u},
                             decoded.tick, mRuntime.mStore, mBinding.mGeneralConstants, decoded.timedEffects, nullptr,
                             mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                            mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
+                            mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead,
+                            mBinding.mLevitationEnabled);
                     }
                 }
                 if (mBinding.mAiDecisions || mBinding.mMovementEffects)
@@ -3225,7 +3232,8 @@ namespace TES3MP::Native
                                 actorIndex == 2 ? decoded.life->generation : 1u}, decoded.tick,
                             mRuntime.mStore, decoded.timedEffects, nullptr,
                             mBinding.mMovementEffects, mBinding.mAiDecisions,
-                            actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead);
+                            actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead,
+                            mBinding.mLevitationEnabled);
                 if (mBinding.mPlayerCastLifecycle)
                     for (size_t i = 0; i < 2; ++i)
                     {
@@ -4319,6 +4327,7 @@ namespace TES3MP::Native
             if (!mCombat) throw std::logic_error("NPC movement requires committed actor stats");
             const auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[2], mTimedEffects, 2);
             const auto magnitude = [&](ESM::RefId id) {
+                if (id == ESM::MagicEffect::Levitate && !mBinding.mLevitationEnabled) return 0.f;
                 const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
                 float result = 0.f;
                 for (const auto& effect : mTimedEffects)
@@ -4669,7 +4678,13 @@ namespace TES3MP::Native
                 ordinals, casterStats, false, sunExposure, stageDisintegrate,
                 mRuntime.ownerPtr(mCombatNpcOwner).getType() == ESM::NPC::sRecordId,
                 mRuntime.ownerPtr(mCombatNpcOwner).getType() == ESM::Creature::sRecordId
-                    && mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead);
+                    && mRuntime.ownerPtr(mCombatNpcOwner).get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead,
+                [&](size_t recipient, ESM::RefId effect) {
+                    if (effect == ESM::MagicEffect::Levitate) return mBinding.mLevitationEnabled;
+                    if (effect == ESM::MagicEffect::WaterWalking && recipient >= 2)
+                        return mBinding.mNavigatingActor->waterWalkingCastable(identities[recipient].id);
+                    return true;
+                });
             for (size_t i = 2; i < result.deaths.size(); ++i)
             {
                 auto* victimLife = i == 2 ? &*life
@@ -4740,7 +4755,7 @@ namespace TES3MP::Native
                             {mBinding.mPlayers[index].value(), 1, 1}, tick.value(), mRuntime.mStore,
                             mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                             mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                            mBinding.mAiDecisions, false, false))
+                            mBinding.mAiDecisions, false, false, mBinding.mLevitationEnabled))
                         updateResources(index, beforeEquipment, timedEffects, mBinding.mKnockoutAnimation);
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                 }
@@ -5041,7 +5056,7 @@ namespace TES3MP::Native
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
                         mBinding.mAiDecisions, actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
-                        actorIndex == 2 && aiUndead))
+                        actorIndex == 2 && aiUndead, mBinding.mLevitationEnabled))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5055,7 +5070,7 @@ namespace TES3MP::Native
                         actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
                         timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
                         actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
-                        actorIndex == 2 && aiUndead))
+                        actorIndex == 2 && aiUndead, mBinding.mLevitationEnabled))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5566,7 +5581,7 @@ namespace TES3MP::Native
                         mBinding.mDurableCasters ? 2u : 0u, mBinding.mDurableCasters ? life->generation + 1 : 0u}, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                        mBinding.mAiDecisions, aiNpc, aiUndead))
+                        mBinding.mAiDecisions, aiNpc, aiUndead, mBinding.mLevitationEnabled))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5577,7 +5592,7 @@ namespace TES3MP::Native
                 if (reconcilePassiveActorEffects(mRuntime.ownerPtr(mCombatNpcOwner), 2,
                         {before.mActor, 2, life->generation + 1}, tick.value(), mRuntime.mStore,
                         timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
-                        aiNpc, aiUndead))
+                        aiNpc, aiUndead, mBinding.mLevitationEnabled))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5626,7 +5641,7 @@ namespace TES3MP::Native
                         {combat->npcPlacements.at(i + 1), 2, adjacentLife.generation + 1},
                         tick.value(), mRuntime.mStore, mBinding.mGeneralConstants, timedEffects, &rng,
                         mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                        mBinding.mAiDecisions, neighborNpc, neighborUndead))
+                        mBinding.mAiDecisions, neighborNpc, neighborUndead, mBinding.mLevitationEnabled))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5638,7 +5653,7 @@ namespace TES3MP::Native
                         {combat->npcPlacements.at(i + 1), 2, adjacentLife.generation + 1},
                         tick.value(), mRuntime.mStore, timedEffects, &rng,
                         mBinding.mMovementEffects, mBinding.mAiDecisions,
-                        neighborNpc, neighborUndead))
+                        neighborNpc, neighborUndead, mBinding.mLevitationEnabled))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -6993,7 +7008,7 @@ namespace TES3MP::Native
                             if (reconcileConstants(equipped, 2, magicCaster(2).identity, tick.value(), mRuntime.mStore,
                                     mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                                     mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                                    mBinding.mAiDecisions, aiNpc, aiUndead))
+                                    mBinding.mAiDecisions, aiNpc, aiUndead, mBinding.mLevitationEnabled))
                                 updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                             command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
@@ -7176,6 +7191,16 @@ namespace TES3MP::Native
                 cast.targetKind, cast.targetId, CombatRevision::fromValue(tick.value()).value(),
                 CombatRevision::fromValue(tick.value()).value(), launch.succeeded, launch.result.health,
                 launch.result.fatigue, launch.result.magicka, 0.f, 0.f, 0.f, false, std::max(uint64_t(1), context.identity.life)});
+            if (launch.succeeded && mBinding.mMagicProjectileCollection)
+                if (const auto origin = combatPosition(owner))
+                {
+                    if (magicImpactCues.size() >= MaximumReplicatedMagicImpactCues)
+                        throw std::invalid_argument("Native magic visual cue capacity exhausted");
+                    magicImpactCues.push_back({uint8_t(context.identity.kind == 2 ? 2 : 1),
+                        uint8_t(cast.sourceKind), context.identity.id,
+                        std::max<uint64_t>(1, context.identity.life), std::max<uint64_t>(1, cast.commandId),
+                        magicVisualRecord(uint64_t(cast.sourceKind), spellEffectSource), *origin, 3});
+                }
             if (launch.succeeded && mBinding.mNpcCastLifecycle && caster.getHealth().getCurrent() > 0)
             {
                 const auto origin = combatPosition(owner);
@@ -7195,7 +7220,7 @@ namespace TES3MP::Native
                     const auto center = range == ESM::RT_Self ? origin : endpoint;
                     if (!center) continue;
                     if (std::ranges::any_of(spellRecord.effects.effects, [&](const auto& effect) {
-                            return effect.mRange == range && effect.mArea > 0;
+                            return effect.mRange == range;
                         }))
                     {
                         if (magicImpactCues.size() >= MaximumReplicatedMagicImpactCues)
@@ -7803,7 +7828,8 @@ namespace TES3MP::Native
                 if (reconcileConstants(values, index, magicCaster(index).identity, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                        mBinding.mAiDecisions, index == 2 && aiNpc, index == 2 && aiUndead))
+                        mBinding.mAiDecisions, index == 2 && aiNpc, index == 2 && aiUndead,
+                        mBinding.mLevitationEnabled))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -8408,6 +8434,13 @@ namespace TES3MP::Native
                 for (const auto& effect : effects)
                     if (effect.actor == index)
                     {
+                        if (!p.dead && effect.effectIndex < ESM::MagicEffect::Length)
+                        {
+                            const auto* visual = mRuntime.mStore.get<ESM::MagicEffect>().search(
+                                ESM::MagicEffect::indexToRefId(int(effect.effectIndex)));
+                            if (visual && (visual->mData.mFlags & ESM::MagicEffect::ContinuousVfx))
+                                p.visualEffects.push_back(uint16_t(effect.effectIndex));
+                        }
                         for (size_t i = 0; i < visibleEffects.size(); ++i)
                             if (effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(visibleEffects[i])))
                                 p.visibility[i] += effect.magnitude;
@@ -8416,6 +8449,8 @@ namespace TES3MP::Native
                                 if (effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(movementEffects[i])))
                                     p.movement[i] += effect.magnitude;
                     }
+                std::ranges::sort(p.visualEffects);
+                p.visualEffects.erase(std::unique(p.visualEffects.begin(), p.visualEffects.end()), p.visualEffects.end());
                 const auto setSwing = [&](const MeleeAnimation& clip, uint64_t action) {
                     p.action = action; p.group = clip.group(); p.phase = uint8_t(unsigned(clip.snapshot().mPhase) + 1);
                     p.direction = uint8_t(clip.direction()); p.strength = clip.snapshot().mStrength;

@@ -110,6 +110,8 @@ namespace TES3MP::Native
         // Stock LOS collision mask. Player eye positions use the server proxy
         // until native player hulls are bound.
         bool lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const;
+        // Stock underwater cast gate against the selected or bound neighbor hull.
+        bool waterWalkingCastable(uint64_t actor) const;
         uint64_t actorId() const noexcept;
         // The same resource hulls used by stock physics, for AiCombat's
         // distance-minus-half-extents flee gate.

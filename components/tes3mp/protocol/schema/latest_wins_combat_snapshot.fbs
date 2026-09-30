@@ -126,6 +126,7 @@ table ActorPresentationSnapshot {
   visibility:[float];
   movement:[float];
   movement_owned:bool;
+  visual_effects:[ushort];
 }
 
 table PhysicalProjectileSnapshot {

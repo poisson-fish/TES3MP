@@ -490,7 +490,10 @@ namespace TES3MP::OpenMWAdapter
                         mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
                             << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
                             << ",\"tick\":" << rendered.tick << ",\"looping_sounds\":"
-                            << rendered.loopingSounds << ",\"position\":["
+                            << rendered.loopingSounds << ",\"models\":" << rendered.models
+                            << ",\"light_color\":[" << rendered.lightColor[0] << ','
+                            << rendered.lightColor[1] << ',' << rendered.lightColor[2] << ','
+                            << rendered.lightColor[3] << "],\"position\":["
                             << p.position[0] << ',' << p.position[1] << ',' << p.position[2] << "]}";
                     }
                     mOutput << "]}\n";
@@ -924,6 +927,22 @@ namespace TES3MP::OpenMWAdapter
                 }
                 mOutput << "]}";
             }
+            mOutput << "],\"visual_loops\":[";
+            first = true;
+            for (const auto& pose : snapshot.presentation())
+                if (!pose.visualEffects.empty())
+                {
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id
+                        << ",\"life\":" << pose.life << ",\"effects\":[";
+                    for (size_t i = 0; i < pose.visualEffects.size(); ++i)
+                    {
+                        if (i) mOutput << ',';
+                        mOutput << pose.visualEffects[i];
+                    }
+                    mOutput << "]}";
+                }
             mOutput << "],\"swings\":[";
             first = true;
             for (const auto& swing : snapshot.swings())
@@ -982,11 +1001,23 @@ namespace TES3MP::OpenMWAdapter
                         << ",\"target\":" << cast.targetId << ",\"target_kind\":" << unsigned(cast.targetKind)
                         << ",\"target_health_delta\":" << cast.targetHealthDelta << '}';
                 }
+            mOutput << "],\"magic_casts\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& cue : batch.magicImpactCues())
+                    if (cue.range == 3)
+                    {
+                        if (!first) mOutput << ',';
+                        first = false;
+                        mOutput << "{\"kind\":" << unsigned(cue.casterKind) << ",\"caster\":" << cue.caster
+                            << ",\"life\":" << cue.casterLife << ",\"command\":" << cue.command << '}';
+                    }
             mOutput << "],\"magic_impacts\":[";
             first = true;
             for (const auto& batch : events)
                 for (const auto& cue : batch.magicImpactCues())
                 {
+                    if (cue.range == 3) continue;
                     if (!first) mOutput << ',';
                     first = false;
                     mOutput << "{\"kind\":" << unsigned(cue.casterKind) << ",\"caster\":" << cue.caster

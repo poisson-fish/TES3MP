@@ -118,6 +118,7 @@ namespace TES3MP::Native
         bool mPersistentConditions = false; // V54 source membership survives selective cures.
         bool mSpecialConditions = false; // V55 game-time Corprus and weather-sensitive effects.
         bool mMovementEffects = false; // V56 committed movement effects; inherited player movement remains client-side.
+        bool mLevitationEnabled = true; // Trusted world rule; a disabled world removes Levitate effects.
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
         bool mSocialLifecycle = false; // V59 durable werewolf transformation and crime witnesses.

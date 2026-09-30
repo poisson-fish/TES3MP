@@ -41,6 +41,8 @@ namespace TES3MP
         // Levitate, SlowFall; committed magnitudes for inherited OpenMW movement.
         std::array<float, 8> movement{};
         bool movementOwned = false;
+        // Distinct stock MGEF indices with active ContinuousVfx on this life.
+        std::vector<std::uint16_t> visualEffects;
         friend bool operator==(const ActorPresentationSnapshot&, const ActorPresentationSnapshot&) = default;
     };
     inline constexpr std::size_t MaximumCombatSnapshotActors = 248;
@@ -81,7 +83,7 @@ namespace TES3MP
         std::uint64_t caster = 0, casterLife = 0, command = 0;
         std::string record;
         std::array<float, 3> position{};
-        std::uint8_t range = 2; // ESM Target; Self and Touch area cues use 0 and 1.
+        std::uint8_t range = 2; // ESM Self/Touch/Target hit: 0..2; committed cast: 3.
         friend bool operator==(const MagicImpactCue&, const MagicImpactCue&) = default;
     };
 

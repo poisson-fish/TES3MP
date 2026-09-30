@@ -205,6 +205,8 @@ namespace TES3MP::OpenMWAdapter
             MagicProjectileSnapshot pose;
             double tick;
             size_t loopingSounds;
+            size_t models;
+            std::array<float, 4> lightColor;
         };
         std::vector<ActorPoseEvidence> actorPoseEvidence() const;
         std::vector<ProjectilePoseEvidence> projectilePoseEvidence() const;

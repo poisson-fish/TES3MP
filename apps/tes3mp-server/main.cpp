@@ -714,6 +714,7 @@ int main(int argc, char** argv)
         requiredCapabilities.push_back(TES3MP::expandedCombatEffectsCapability());
         requiredCapabilities.push_back(TES3MP::actorPresentationCapability());
         requiredCapabilities.push_back(TES3MP::magicVisualReplicationCapability());
+        requiredCapabilities.push_back(TES3MP::magicEffectVisualLoopsCapability());
     }
     std::ranges::sort(requiredCapabilities);
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,

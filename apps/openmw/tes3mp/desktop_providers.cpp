@@ -138,31 +138,59 @@ namespace TES3MP::OpenMWAdapter
             return result;
         }
 
+        std::string continuousVisualId(std::uint16_t effect)
+        {
+            return "tes3mp-active-magic/" + std::to_string(effect);
+        }
+
         bool presentMagicImpact(MWBase::World& world, const MagicImpactCue& cue)
         {
             const auto& store = world.getStore();
             const auto* effects = magicVisualEffects(store, cue.sourceKind, cue.record);
             if (!effects) return false;
             const osg::Vec3f point(cue.position[0], cue.position[1], cue.position[2]);
+            auto sounds = MWBase::Environment::get().getSoundManager();
+            std::set<std::string> castModels;
             for (const auto& effect : effects->mList)
             {
-                if (effect.mData.mRange != cue.range
-                    || (cue.range != ESM::RT_Target && effect.mData.mArea <= 0)) continue;
+                if (cue.range != 3 && effect.mData.mRange != cue.range) continue;
                 const auto* visual = store.get<ESM::MagicEffect>().search(effect.mData.mEffectID);
                 if (!visual) return false;
-                const auto areaId = visual->mArea.empty()
-                    ? ESM::RefId::stringRefId("VFX_DefaultArea") : visual->mArea;
-                const auto* area = store.get<ESM::Static>().search(areaId);
-                if (!area) return false;
-                world.spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)),
-                    visual->mParticle, point, effect.mData.mArea > 0 ? float(effect.mData.mArea * 2) : 1.f);
+                const auto staticId = cue.range == 3
+                    ? (visual->mCasting.empty() ? ESM::RefId::stringRefId("VFX_DefaultCast") : visual->mCasting)
+                    : (visual->mHit.empty() ? ESM::RefId::stringRefId("VFX_DefaultHit") : visual->mHit);
+                const auto* vfx = store.get<ESM::Static>().search(staticId);
+                if (!vfx) return false;
+                const auto model = vfx->mModel.empty() ? VFS::Path::Normalized{}
+                    : Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(vfx->mModel));
+                const bool playCast = cue.range != 3
+                    || castModels.insert(vfx->mModel.empty() ? std::string(staticId.getRefIdString())
+                        : std::string(model.value())).second;
+                if (!vfx->mModel.empty())
+                {
+                    if (playCast)
+                        world.spawnEffect(model, visual->mParticle, point, 1.f);
+                }
+                const auto* school = store.get<ESM::Skill>().search(visual->mData.mSchool);
+                if (!school || !school->mSchool) return false;
+                const auto soundId = cue.range == 3
+                    ? (visual->mCastSound.empty() ? school->mSchool->mCastSound : visual->mCastSound)
+                    : (visual->mHitSound.empty() ? school->mSchool->mHitSound : visual->mHitSound);
+                if (!soundId.empty() && playCast)
+                    sounds->playSound3D(point, soundId, 1.f, 1.f);
                 if (effect.mData.mArea > 0)
                 {
-                    auto sound = MWBase::Environment::get().getSoundManager();
-                    const auto soundId = visual->mAreaSound.empty()
-                        ? store.get<ESM::Skill>().find(visual->mData.mSchool)->mSchool->mAreaSound
-                        : visual->mAreaSound;
-                    if (!soundId.empty()) sound->playSound3D(point, soundId, 1.f, 1.f);
+                    if (cue.range == 3) continue;
+                    const auto areaId = visual->mArea.empty()
+                        ? ESM::RefId::stringRefId("VFX_DefaultArea") : visual->mArea;
+                    const auto* area = store.get<ESM::Static>().search(areaId);
+                    if (!area) return false;
+                    if (!area->mModel.empty())
+                        world.spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)),
+                            visual->mParticle, point, float(effect.mData.mArea * 2));
+                    const auto areaSound = visual->mAreaSound.empty()
+                        ? school->mSchool->mAreaSound : visual->mAreaSound;
+                    if (!areaSound.empty()) sounds->playSound3D(point, areaSound, 1.f, 1.f);
                 }
             }
             return true;
@@ -1065,10 +1093,12 @@ namespace TES3MP::OpenMWAdapter
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedProjectiles;
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::string> renderedMagicProjectiles;
         std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::vector<MWBase::Sound*>> magicBoltSounds;
+        std::map<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>, std::pair<size_t, std::array<float, 4>>> magicBoltAppearance;
         std::vector<DesktopPresentation::ProjectilePoseEvidence> projectileEvidence;
         std::vector<DesktopPresentation::MagicProjectilePoseEvidence> magicProjectileEvidence;
         std::vector<DesktopPresentation::ActorPoseEvidence> poseEvidence;
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
+        std::map<std::pair<uint8_t, uint64_t>, std::pair<uint64_t, std::vector<std::uint16_t>>> visualLoops;
         bool sessionBootstrapPending = true;
 
         void clear() noexcept
@@ -1102,6 +1132,10 @@ namespace TES3MP::OpenMWAdapter
                     world->clearDoorAuthority();
                     if (auto* animation = world->getAnimation(world->getPlayerPtr()))
                     {
+                        for (const auto& [actor, active] : visualLoops)
+                            if (combatSnapshot && actor.first == 1 && actor.second == combatSnapshot->selfPlayerId().value())
+                                for (auto effect : active.second)
+                                    animation->removeEffect(continuousVisualId(effect));
                         animation->setCommittedMelee({}, 0, 0, 0, 0);
                         animation->setCommittedKnockout(0, 0);
                         const auto ptr = world->getPlayerPtr();
@@ -1137,6 +1171,7 @@ namespace TES3MP::OpenMWAdapter
             combatSnapshot.reset();
             actorTimeline.clear();
             activeMagicEffects.clear();
+            visualLoops.clear();
             projectileEvidence.clear();
             magicProjectileEvidence.clear();
             try
@@ -1168,6 +1203,7 @@ namespace TES3MP::OpenMWAdapter
             renderedProjectiles.clear();
             renderedMagicProjectiles.clear();
             magicBoltSounds.clear();
+            magicBoltAppearance.clear();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -2375,6 +2411,7 @@ namespace TES3MP::OpenMWAdapter
                         if (!visual) return ProviderResult::PresentationFailed;
                         rendering->spawnMagicBolt(visual->models, visual->particle, position,
                             visual->lightColor, effect);
+                        magicBoltAppearance[key] = {visual->models.size(), visual->lightColor};
                         if (!rendering->moveEffect(effect, position, attitude))
                             return ProviderResult::PresentationFailed;
                         auto sounds = MWBase::Environment::get().getSoundManager();
@@ -2389,8 +2426,10 @@ namespace TES3MP::OpenMWAdapter
                         sound->setVelocity(velocity);
                     }
                     renderedMagicProjectiles[key] = effect;
+                    const auto appearance = magicBoltAppearance.find(key);
+                    if (appearance == magicBoltAppearance.end()) return ProviderResult::PresentationFailed;
                     magicProjectileEvidence.push_back({flight, presentationTick.value_or(0),
-                        magicBoltSounds[key].size()});
+                        magicBoltSounds[key].size(), appearance->second.first, appearance->second.second});
                 }
                 for (auto it = renderedMagicProjectiles.begin(); it != renderedMagicProjectiles.end();)
                     if (!desiredMagic.contains(it->first))
@@ -2402,6 +2441,7 @@ namespace TES3MP::OpenMWAdapter
                             for (auto* sound : found->second) sounds->stopSound(sound);
                             magicBoltSounds.erase(found);
                         }
+                        magicBoltAppearance.erase(it->first);
                         it = renderedMagicProjectiles.erase(it);
                     }
                     else ++it;
@@ -2490,6 +2530,29 @@ namespace TES3MP::OpenMWAdapter
                     const float chameleon = pose.visibility[1] > 0.f
                         ? std::clamp(1.f - pose.visibility[1] / 100.f, 0.25f, 0.75f) : 1.f;
                     animation->setAlpha(invisibility * chameleon);
+                    const auto key = std::pair(pose.kind, pose.id);
+                    auto& previous = visualLoops[key];
+                    for (const auto effect : previous.second)
+                        if (previous.first != pose.life
+                            || !std::ranges::binary_search(pose.visualEffects, effect))
+                            animation->removeEffect(continuousVisualId(effect));
+                    for (const auto effect : pose.visualEffects)
+                    {
+                        if (previous.first == pose.life
+                            && std::ranges::binary_search(previous.second, effect)) continue;
+                        const auto* visual = world->getStore().get<ESM::MagicEffect>().search(
+                            ESM::MagicEffect::indexToRefId(effect));
+                        if (!visual || !(visual->mData.mFlags & ESM::MagicEffect::ContinuousVfx)) return false;
+                        const auto staticId = visual->mHit.empty()
+                            ? ESM::RefId::stringRefId("VFX_DefaultHit") : visual->mHit;
+                        const auto* model = world->getStore().get<ESM::Static>().search(staticId);
+                        if (!model) return false;
+                        if (!model->mModel.empty())
+                            animation->addEffect(Misc::ResourceHelpers::correctMeshPath(
+                                VFS::Path::Normalized(model->mModel)).value(), continuousVisualId(effect),
+                                true, {}, visual->mParticle);
+                    }
+                    previous = {pose.life, pose.visualEffects};
                     return true;
                 };
                 for (const auto& pose : combatSnapshot->presentation())
@@ -2518,6 +2581,35 @@ namespace TES3MP::OpenMWAdapter
                             && remote.lastObserved->playerId().value() == pose.id)
                             found = apply(pose, remote.actor->ptr(), remote.actor->animation());
                     // Appearance may follow the combat snapshot; its next render samples it.
+                }
+                for (auto it = visualLoops.begin(); it != visualLoops.end();)
+                {
+                    const auto [kind, id] = it->first;
+                    if (std::ranges::any_of(combatSnapshot->presentation(), [&](const auto& pose) {
+                            return pose.kind == kind && pose.id == id;
+                        })) { ++it; continue; }
+                    MWRender::Animation* animation = nullptr;
+                    if (kind == 1 && id == combatSnapshot->selfPlayerId().value())
+                        animation = world->getAnimation(world->getPlayerPtr());
+                    if (kind == 1)
+                    {
+                        for (auto& [entity, remote] : remotes)
+                            if (remote.actor && remote.lastObserved && remote.lastObserved->playerId().value() == id)
+                                animation = remote.actor->animation();
+                    }
+                    else
+                    {
+                        const auto native = nativeRemotes.find(id);
+                        if (native != nativeRemotes.end() && native->second.actor)
+                            animation = native->second.actor->animation();
+                        for (auto& [entity, remote] : actorRemotes)
+                            if (remote.actor && remote.lastObserved && remote.lastObserved->actorId().value() == id)
+                                animation = remote.actor->animation();
+                    }
+                    if (animation)
+                        for (const auto effect : it->second.second)
+                            animation->removeEffect(continuousVisualId(effect));
+                    it = visualLoops.erase(it);
                 }
             }
             for (auto& [identity, remote] : leveledActors)

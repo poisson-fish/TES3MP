@@ -14,6 +14,7 @@
 #include <apps/openmw/mwphysics/doorcontact.hpp>
 #include <apps/openmw/mwphysics/movementdata.hpp>
 #include <apps/openmw/mwphysics/movementsolver.hpp>
+#include <apps/openmw/mwphysics/trace.h>
 #include <apps/openmw/mwmechanics/pathfinding.hpp>
 #include <apps/openmw/mwmechanics/pathgrid.hpp>
 #include <apps/openmw/mwmechanics/breathing.hpp>
@@ -1001,6 +1002,27 @@ namespace TES3MP::Native
         if (!mImpl || mImpl->mNavigator) throw std::logic_error("Actor movement binding must precede navigation");
         mImpl->mWaterNavigation = true;
         if (mNeighbor) mNeighbor->enableMovementEffects();
+    }
+    bool InteriorActorScene::waterWalkingCastable(uint64_t actor) const
+    {
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+        {
+            if (!scene->mImpl || scene->mImpl->mActorId != actor) continue;
+            const auto& frame = *scene->mImpl->mActor;
+            const float water = scene->mImpl->waterAt(frame.mPosition);
+            if (water <= -1e30f) return true;
+            const float swimScale = scene->mImpl->mStore.get<ESM::GameSetting>()
+                .find("fSwimHeightScale")->mValue.getFloat();
+            const float height = 2.f * frame.mHalfExtentsZ;
+            if (frame.mPosition.z() + (swimScale + 1.f) * height < water) return false;
+            if (frame.mPosition.z() >= water) return true;
+            const osg::Vec3f start = frame.mPosition + osg::Vec3f(0, 0, frame.mHalfExtentsZ);
+            const osg::Vec3f end(frame.mPosition.x(), frame.mPosition.y(), water + frame.mHalfExtentsZ);
+            MWPhysics::ActorTracer tracer;
+            tracer.doTrace(frame.mCollisionObject, start, end, &scene->mImpl->mWorld);
+            return tracer.mFraction >= 1.f;
+        }
+        throw std::invalid_argument("WaterWalking actor is outside the bound scene");
     }
 
     void InteriorActorScene::enableNavigation(const std::string& settingsFile)

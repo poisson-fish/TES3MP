@@ -6019,7 +6019,8 @@ namespace TES3MP::Native::Testing
             {
                 const bool tr = encounterProfile.starts_with("tr-");
                 const bool itemProfile = encounterProfile.ends_with("item");
-                require(encounterProfile == "vanilla-spell" || encounterProfile == "tr-spell"
+                require(encounterProfile == "vanilla-spell" || encounterProfile == "vanilla-multi-spell"
+                    || encounterProfile == "vanilla-multi-loop" || encounterProfile == "tr-spell"
                     || encounterProfile == "vanilla-item" || encounterProfile == "tr-item", "Unknown encounter profile");
                 auto eligible = [&](const ESM::EffectList& effects) {
                     const auto plan = prepareInstantEffects(effects, base.store(), true);
@@ -6040,7 +6041,12 @@ namespace TES3MP::Native::Testing
                 for (const auto& source : base.store().get<ESM::Spell>())
                     if (origin(source.mId) && source.mData.mType == ESM::Spell::ST_Spell
                         && eligible(source.mEffects) && MWMechanics::calcSpellCost(source, base.store()) <= 40)
-                        spells.push_back(&source);
+                    {
+                        const auto targets = std::ranges::count_if(source.mEffects.mList,
+                            [](const auto& effect) { return effect.mData.mRange == ESM::RT_Target; });
+                        if (!encounterProfile.starts_with("vanilla-multi-") || targets >= 2)
+                            spells.push_back(&source);
+                    }
                 std::ranges::sort(spells, {}, [](const auto* source) { return source->mId.getRefIdString(); });
                 require(!spells.empty(), "Real loadout has no eligible encounter spell");
                 // Copy only the actor/placement fixture. Spell, enchantment and item
@@ -6051,6 +6057,27 @@ namespace TES3MP::Native::Testing
                 for (auto& skill : npc.mNpdt.mSkills) skill = 100;
                 std::ofstream metadata(scratch / "encounter.txt");
                 metadata << "profile " << encounterProfile << "\nspell " << spells.front()->mId.getRefIdString() << '\n';
+                if (encounterProfile.starts_with("vanilla-multi-"))
+                {
+                    osg::Vec4 color(0.f, 0.f, 0.f, 0.f);
+                    size_t count = 0;
+                    size_t continuous = 0;
+                    int duration = 0;
+                    for (const auto& entry : spells.front()->mEffects.mList)
+                        if (entry.mData.mRange == ESM::RT_Target)
+                        {
+                            const auto* visual = base.store().get<ESM::MagicEffect>().find(entry.mData.mEffectID);
+                            color += visual->getColor();
+                            continuous += (visual->mData.mFlags & ESM::MagicEffect::ContinuousVfx) != 0;
+                            duration = std::max(duration, entry.mData.mDuration);
+                            ++count;
+                        }
+                    color /= float(count);
+                    if (encounterProfile == "vanilla-multi-loop") duration = 12;
+                    metadata << "target_effects " << count << "\nbolt_light "
+                        << color[0] << ' ' << color[1] << ' ' << color[2] << ' ' << color[3]
+                        << "\ncontinuous_effects " << continuous << "\nmaximum_duration " << duration << '\n';
+                }
                 if (itemProfile)
                 {
                     std::vector<const ESM::Clothing*> items;
@@ -6099,6 +6126,16 @@ namespace TES3MP::Native::Testing
             std::ofstream stream(scratch / "NpcDoors.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
+            if (encounterProfile == "vanilla-multi-loop")
+            {
+                auto loop = *base.store().get<ESM::Spell>().find(npc.mSpells.mList.front());
+                loop.mData.mFlags |= ESM::Spell::F_Always;
+                loop.mData.mCost = 1;
+                for (auto& effect : loop.mEffects.mList)
+                    if (effect.mData.mRange == ESM::RT_Target)
+                        effect.mData.mDuration = 12;
+                out.startRecord(ESM::Spell::sRecordId, 0); loop.save(out); out.endRecord(ESM::Spell::sRecordId);
+            }
             if (socialLifecycle)
             {
                 ESM::Clothing robe; robe.blank();
@@ -6932,7 +6969,8 @@ namespace TES3MP::Native::Testing
             }
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
             if (!encounterProfile.empty() || effectFamily == "movement-effects")
-                cell.mAmbi.mAmbient = cell.mAmbi.mSunlight = 0x00b0b0b0;
+                cell.mAmbi.mAmbient = cell.mAmbi.mSunlight
+                    = encounterProfile.starts_with("vanilla-multi-") ? 0x00181818 : 0x00b0b0b0;
             cell.mData.mFlags = ESM::Cell::Interior | (specialConditions ? ESM::Cell::QuasiEx : 0);
             if (wetMovement)
             {
@@ -8317,6 +8355,8 @@ namespace TES3MP::Native::Testing
             if (melee) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
             if (lifecycle) out << "respawn 3\n";
+            if (effectFamily == "movement-effects" && !wetMovement && deepMovement)
+                out << "levitation 0\n";
         }
         if (playerCastLifecycle)
         {
@@ -10243,6 +10283,37 @@ namespace TES3MP::Native::Testing
             }
             if (effectFamily == "movement-effects")
             {
+                if (deepMovement && !wetMovement)
+                {
+                    auto disabledHost = make(); auto& disabled = disabledHost->service();
+                    const uint64_t levitate = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Levitate));
+                    const auto noLevitation = [&](const auto& current) {
+                        return std::ranges::none_of(read(bytes(current)).timedEffects, [&](const auto& effect) {
+                            return effect.effectIndex == levitate;
+                        });
+                    };
+                    (void)commit(disabled, 1);
+                    require(noLevitation(disabled), "Disabled world retained passive Levitate");
+                    const auto inventory = disabled.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(1), id<CanonicalRevision>(1));
+                    require(inventory && inventory->equipment && !inventory->equipment->motions.empty(),
+                        "Disabled world NPC identity absent");
+                    const uint64_t npc = inventory->equipment->motions.front().placement;
+                    const auto spell = "movement_npc_" + std::to_string(levitate);
+                    for (uint64_t tick = 2; tick < 95; ++tick)
+                        (void)commit(disabled, tick, tick == 2 ? spell : std::string{},
+                            1, npc, false, tick == 2);
+                    require(noLevitation(disabled), "Disabled world accepted a targeted Levitate cast");
+                    const auto saved = bytes(disabled);
+                    InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                    restart.service().synchronizeCells(authority);
+                    require(bytes(restart.service()) == saved, "Disabled Levitate changed across restart");
+                    (void)commit(disabled, 95); (void)commit(restart.service(), 95);
+                    require(bytes(disabled) == bytes(restart.service()) && noLevitation(restart.service()),
+                        "Disabled Levitate diverged after restart");
+                    std::cout << "disabled Levitate passive=removed target=blocked restart=exact\n";
+                    return;
+                }
                 {
                     auto passiveHost = make(); auto& passive = passiveHost->service();
                     const auto before = bytes(passive);
@@ -10279,13 +10350,42 @@ namespace TES3MP::Native::Testing
                     require(bytes(passive) == bytes(restart.service()),
                         "Movement ability source rerolled after restart");
                 }
-                if (deepMovement)
+                if (deepMovement && wetMovement)
                 {
                     auto plain = make(); auto& baseline = plain->service();
                     const auto health = [&](auto& current) { return read(bytes(current)).combat->actors[2][8][2]; };
                     const float initial = health(baseline);
                     for (uint64_t tick = 1; tick <= 90; ++tick) (void)commit(baseline, tick);
                     require(health(baseline) < initial, "Deep content water did not cause authoritative drowning damage");
+
+                    auto walkingHost = make(); auto& walking = walkingHost->service();
+                    const auto walkingInventory = walking.projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(1), id<CanonicalRevision>(1));
+                    require(walkingInventory && walkingInventory->equipment
+                        && !walkingInventory->equipment->motions.empty(), "Deep-water NPC identity absent");
+                    const uint64_t walkingNpc = walkingInventory->equipment->motions.front().placement;
+                    const uint64_t walkingIndex = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterWalking));
+                    auto walkingState = read(bytes(walking));
+                    for (uint64_t frame = 1; frame <= 90; ++frame)
+                        walkingState = commit(walking, frame,
+                            frame == 1 ? "movement_npc_" + std::to_string(walkingIndex) : std::string{},
+                            1, walkingNpc, false, frame == 1);
+                    require(std::ranges::none_of(walkingState.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 2 && effect.effectIndex == walkingIndex;
+                    }), "Deep underwater NPC accepted WaterWalking");
+                    const auto walkingPosition = walking.travelDiagnostics();
+                    const auto baselinePosition = baseline.travelDiagnostics();
+                    require(walkingPosition && baselinePosition
+                        && std::abs(walkingPosition->position[2] - baselinePosition->position[2]) < 1.f,
+                        "Rejected deep WaterWalking lifted the NPC");
+                    const auto walkingSaved = bytes(walking);
+                    InventoryHost walkingRestart(descriptor, testContentManifest(), *registry, *crypto, walkingSaved);
+                    walkingRestart.service().synchronizeCells(authority);
+                    require(bytes(walkingRestart.service()) == walkingSaved,
+                        "Rejected deep WaterWalking changed across restart");
+                    (void)commit(walking, 91); (void)commit(walkingRestart.service(), 91);
+                    require(bytes(walking) == bytes(walkingRestart.service()),
+                        "Deep WaterWalking rejection diverged after restart");
 
                     auto protectedHost = make(); auto& protectedNpc = protectedHost->service();
                     const auto inventory = protectedNpc.projectInventory(authority, id<SessionId>(1),

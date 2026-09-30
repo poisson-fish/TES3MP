@@ -1120,7 +1120,7 @@ int main(int argc, char** argv)
         const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),
             nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability() };
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
             versions, {}, required, testContentManifestId()));

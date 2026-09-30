@@ -883,7 +883,7 @@ def run(args):
             return
         if args.magic_visual:
             from native_magic_visual_capture import verify_magic_visual_capture
-            verify_magic_visual_capture(output, evidence, processes, relay, manifest, encounter["spell"])
+            verify_magic_visual_capture(output, evidence, processes, relay, manifest, encounter)
             return
         if args.ranged:
             from native_ranged_encounter import verify_ranged_encounter

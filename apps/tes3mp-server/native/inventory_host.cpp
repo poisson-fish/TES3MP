@@ -247,6 +247,15 @@ namespace TES3MP::Native
                 nav.settings = settings.string();
                 navigation = std::move(nav);
             }
+            bool levitationEnabled = true;
+            in >> std::ws;
+            if (descriptorVersion >= 56 && in.rdbuf()->sgetc() != std::char_traits<char>::eof())
+            {
+                key("levitation"); int enabled = -1; in >> enabled;
+                if (!in || (enabled != 0 && enabled != 1))
+                    throw std::invalid_argument("Native levitation rule invalid");
+                levitationEnabled = enabled != 0;
+            }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
                 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
@@ -280,6 +289,7 @@ namespace TES3MP::Native
                 binding.mPersistentConditions = descriptorVersion >= 54;
                 binding.mSpecialConditions = descriptorVersion >= 55;
                 binding.mMovementEffects = descriptorVersion >= 56;
+                binding.mLevitationEnabled = levitationEnabled;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;

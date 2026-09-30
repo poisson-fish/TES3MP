@@ -46,6 +46,7 @@ namespace TES3MP
 
     inline constexpr std::uint32_t ActorPresentationCapabilityValue = 29;
     inline constexpr std::uint32_t MagicVisualReplicationCapabilityValue = 30;
+    inline constexpr std::uint32_t MagicEffectVisualLoopsCapabilityValue = 31;
 
     class CapabilityId
     {
@@ -84,6 +85,9 @@ namespace TES3MP
 
     inline constexpr CapabilityId magicVisualReplicationCapability() noexcept
     { return *CapabilityId::fromValue(MagicVisualReplicationCapabilityValue); }
+
+    inline constexpr CapabilityId magicEffectVisualLoopsCapability() noexcept
+    { return *CapabilityId::fromValue(MagicEffectVisualLoopsCapabilityValue); }
 
     inline constexpr CapabilityId expandedCombatEffectsCapability() noexcept
     { return *CapabilityId::fromValue(ExpandedCombatEffectsCapabilityValue); }

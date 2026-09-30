@@ -230,6 +230,10 @@ namespace TES3MP
                 }) || std::ranges::any_of(p.movement, [](float magnitude) {
                     return !std::isfinite(magnitude) || magnitude < 0.f || magnitude > 512000.f;
                 })) return error(Code::InvalidFloat, 0, 0, i);
+            if (p.visualEffects.size() > 143 || !std::ranges::is_sorted(p.visualEffects)
+                || std::adjacent_find(p.visualEffects.begin(), p.visualEffects.end()) != p.visualEffects.end()
+                || std::ranges::any_of(p.visualEffects, [](auto effect) { return effect >= 143; }))
+                return error(Code::InvalidMagicEffect, 0, 143, i);
             if (p.phase > 4 || p.direction > 2 || p.bodyState < 1 || p.bodyState > 4 || p.hitGroup > 16
                 || !std::isfinite(p.strength) || p.strength < 0 || p.strength > 1
                 || !std::isfinite(p.completion) || p.completion < 0 || p.completion > 1
@@ -354,7 +358,7 @@ namespace TES3MP
         {
             const auto& cue = magicImpactCues[i];
             if (!cue.caster || !cue.casterLife || !cue.command
-                || (cue.casterKind != 1 && cue.casterKind != 2) || cue.sourceKind > 1 || cue.range > 2
+                || (cue.casterKind != 1 && cue.casterKind != 2) || cue.sourceKind > 1 || cue.range > 3
                 || cue.record.empty() || cue.record.size() > 256 || cue.record.find('\0') != std::string::npos)
                 return error(Code::InvalidIdentifier, 0, 0, i);
             for (const float v : cue.position)
@@ -428,7 +432,8 @@ namespace TES3MP
                 p.rate, p.bodyFrame, p.bodyStop, p.loopStart, p.loopStop, builder.CreateString(p.group), p.dead,
                 p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop,
                 builder.CreateVector(p.visibility.data(), p.visibility.size()),
-                builder.CreateVector(p.movement.data(), p.movement.size()), p.movementOwned));
+                builder.CreateVector(p.movement.data(), p.movement.size()), p.movementOwned,
+                builder.CreateVector(p.visualEffects)));
         std::vector<flatbuffers::Offset<Snapshot::PhysicalProjectileSnapshot>> projectiles;
         for (const auto& p : input.projectiles())
             projectiles.push_back(Snapshot::CreatePhysicalProjectileSnapshot(builder, p.casterKind, p.terminal,
@@ -700,6 +705,8 @@ namespace TES3MP
             std::copy(p->visibility()->begin(), p->visibility()->end(), presentation.back().visibility.begin());
             std::copy(p->movement()->begin(), p->movement()->end(), presentation.back().movement.begin());
             presentation.back().movementOwned = p->movement_owned();
+            if (p->visual_effects())
+                presentation.back().visualEffects.assign(p->visual_effects()->begin(), p->visual_effects()->end());
         }
         const size_t projectileCount = root->projectiles() ? root->projectiles()->size() : 0;
         if (projectileCount > MaximumReplicatedPhysicalProjectiles)

@@ -6689,7 +6689,9 @@ int main(int argc, char** argv)
                 true, true, true, true, true, true, true, true,
                 false, false, false, true, false, false, false, true, false, false, true, false, true,
                 true, true, true, argv[5]);
-            std::cout << "PASS real-record fixture " << argv[5] << " (synthetic actor/placements)\n"; return 0;
+            std::cout << "PASS " << (std::string_view(argv[5]) == "vanilla-multi-loop"
+                ? "stock visual records with extended spell durations " : "real-record fixture ")
+                << argv[5] << " (synthetic actor/placements)\n"; return 0;
         }
         if (argc == 5 && (std::string_view(argv[1]) == "npc-auto-spells"
             || std::string_view(argv[1]) == "npc-weapon-selection" || std::string_view(argv[1]) == "npc-full-selection" || std::string_view(argv[1]) == "npc-cast-lifecycle"))
@@ -6764,6 +6766,7 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "concealment" || std::string_view(argv[1]) == "visibility"
             || std::string_view(argv[1]) == "movement-effects" || std::string_view(argv[1]) == "movement-wet"
             || std::string_view(argv[1]) == "movement-deep"
+            || std::string_view(argv[1]) == "movement-disabled"
             || std::string_view(argv[1]) == "ai-disposition"
             || std::string_view(argv[1]) == "social-lifecycle"
             || std::string_view(argv[1]) == "neighbor-ai"
@@ -6800,10 +6803,11 @@ int main(int argc, char** argv)
                 npcRanged ? std::string_view("npc-ranged")
                     : std::string_view(argv[1]) == "neighbor-expanded-ranged" ? std::string_view("neighbor-expanded")
                     : std::string_view(argv[1]) == "expanded-effects" ? std::string_view{}
-                    : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep")
+                    : (std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep"
+                        || std::string_view(argv[1]) == "movement-disabled")
                         ? std::string_view("movement-effects") : std::string_view(argv[1]),
                 std::string_view(argv[1]) == "movement-wet" || std::string_view(argv[1]) == "movement-deep",
-                std::string_view(argv[1]) == "movement-deep");
+                std::string_view(argv[1]) == "movement-deep" || std::string_view(argv[1]) == "movement-disabled");
             std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "stat-drains")

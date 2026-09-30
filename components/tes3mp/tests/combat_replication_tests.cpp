@@ -344,6 +344,7 @@ namespace
         p.visibility = {1.f, 25.f, 40.f, 60.f, 80.f, 100.f, 120.f, 35.f};
         p.movement = {1.f, 15.f, 1.f, 20.f, 25.f, 30.f, 35.f, 40.f};
         p.movementOwned = true;
+        p.visualEffects = {0, 7, 142};
         const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
             value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 100, 100, false,
@@ -374,6 +375,12 @@ namespace
         if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         p = valid;
         p.movementOwned = false;
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        p = valid;
+        p.visualEffects = {7, 7};
+        if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        p = valid;
+        p.visualEffects = {143};
         if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
         p = valid;
         for (uint8_t phase = 1; phase <= 5; ++phase)
@@ -461,6 +468,8 @@ namespace
         if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(unpacked)
             || std::get<TES3MP::ReliableCombatEventBatch>(unpacked) != batch) return false;
         cues[0].range = 3;
+        if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(event())) return false;
+        cues[0].range = 4;
         if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(event())) return false;
         cues[0].range = 1;
         cues[0].position[1] = std::numeric_limits<float>::infinity();
