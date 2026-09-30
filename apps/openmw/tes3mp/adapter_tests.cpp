@@ -1018,6 +1018,91 @@ int main(int argc, char** argv)
         require(std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(wire)) == snapshot(300,2));
         return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "body-timeline")
+    {
+        ActorPresentationTimeline timeline;
+        ActorPresentationSnapshot pose;
+        pose.life = 1; pose.action = 10; pose.phase = 1;
+        pose.group = "weapononehand"; pose.rate = 3;
+        std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+        for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = ReplicatedCombatSkill(i);
+        const auto observe = [&](uint64_t tick, uint64_t generation = 1) {
+            std::array<ActorPresentationSnapshot, 4> actors{pose, pose, pose, pose};
+            actors[0].kind = actors[1].kind = 1;
+            actors[2].kind = actors[3].kind = 2;
+            actors[0].id = 1; actors[1].id = 2; actors[2].id = 9; actors[3].id = 10;
+            const std::array combatActors{ActorCombatSnapshot{*ActorId::fromValue(9)},
+                ActorCombatSnapshot{*ActorId::fromValue(10)}};
+            const std::array combatPlayers{PlayerCombatSnapshot{*PlayerId::fromValue(2),
+                CombatRevision::initial(), 100, 100, 100, 100, 100, 100}};
+            const auto created = LatestWinsCombatSnapshot::create(
+                *SessionId::fromValue(1), *SessionGeneration::fromValue(generation), *ServerTick::fromValue(tick),
+                *CanonicalRevision::fromValue(tick), *PlayerId::fromValue(1), CombatRevision::initial(),
+                100, 100, 100, 100, 100, 100, false, combatActors, skills, combatPlayers, {}, {}, {}, actors);
+            require(std::holds_alternative<LatestWinsCombatSnapshot>(created));
+            const auto& snapshot = std::get<LatestWinsCombatSnapshot>(created);
+            timeline.observe(std::get<LatestWinsCombatSnapshot>(
+                decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(snapshot))));
+        };
+        const auto advance = [&](uint64_t ns) { timeline.advance(MonotonicInstant::fromNanoseconds(ns)); };
+        const auto sample = [&] {
+            const auto self = timeline.sample(1, 1);
+            require(self.has_value());
+            for (const auto [kind, id] : {std::pair{1u, 2u}, std::pair{2u, 9u}, std::pair{2u, 10u}})
+            {
+                const auto other = timeline.sample(uint8_t(kind), id);
+                require(other && other->phase == self->phase && other->direction == self->direction
+                    && other->completion == self->completion && other->bodyState == self->bodyState
+                    && other->bodyFrame == self->bodyFrame && other->life == self->life);
+            }
+            return *self;
+        };
+        observe(100); advance(0);
+        pose.completion = .4f; observe(104); advance(16'666'667);
+        require(std::abs(sample().completion - .05f) < .0001f); // 60 FPS wind-up.
+        advance(1'000'000'000);
+        require(sample().completion == .4f); // Snapshot starvation holds.
+        pose.phase = 2; pose.direction = 2; pose.completion = .1f; observe(108);
+        advance(1'050'000'000);
+        require(sample().phase == 1 && sample().direction == 0); // No early release or mode change.
+        advance(1'200'000'000);
+        require(sample().phase == 2 && sample().direction == 2);
+        pose.phase = 3; pose.completion = .2f; observe(112);
+        advance(1'400'000'000);
+        require(sample().phase == 3); // Follow-through uses the committed mode.
+        pose.bodyState = 4; pose.bodyAction = 120; pose.hitGroup = 1; pose.bodyFrame = 0;
+        pose.bodyStop = 12; pose.phase = 4; observe(116);
+        advance(1'600'000'000);
+        require(sample().bodyState == 4 && sample().bodyFrame == 0);
+        pose.bodyFrame = 4; observe(120); advance(1'650'000'000);
+        require(std::abs(sample().bodyFrame - 1.5f) < .0001f); // Hit sampled between commits.
+        advance(2'000'000'000);
+        require(sample().bodyFrame == 4);
+        pose.hitGroup = 2; pose.bodyFrame = 8; observe(124); advance(2'050'000'000);
+        require(sample().bodyFrame == 4 && sample().hitGroup == 1); // Changed clip holds until committed.
+        advance(2'200'000'000);
+        require(sample().hitGroup == 2);
+        pose.bodyState = 3; pose.bodyAction = 130; pose.hitGroup = 0;
+        pose.bodyFrame = 29; pose.bodyStop = 90; pose.loopStart = 10; pose.loopStop = 30;
+        observe(128); advance(2'400'000'000);
+        require(sample().bodyState == 3 && sample().bodyFrame == 29); // Fall/knockdown.
+        pose.bodyFrame = 12; observe(132); advance(2'450'000'000);
+        require(std::abs(sample().bodyFrame - 10.125f) < .0001f); // Committed loop wrap.
+        advance(3'000'000'000);
+        require(sample().bodyFrame == 12); // Loss holds the down pose.
+        pose.bodyFrame = 60; observe(136); advance(3'133'333'333);
+        require(sample().bodyFrame == 60); // Get-up tail, after fatigue returned.
+        pose.bodyFrame = 70; observe(140); advance(3'200'000'000);
+        require(std::abs(sample().bodyFrame - 65.f) < .0001f); // Get-up tail has not completed.
+        pose.bodyState = 1; pose.bodyAction = 0; pose.bodyFrame = 0; pose.bodyStop = 0;
+        pose.loopStart = pose.loopStop = 0; observe(144); advance(3'400'000'000);
+        require(sample().bodyState == 1);
+        pose.life = 2; pose.bodyState = 2; pose.bodyAction = 200; pose.bodyFrame = 8;
+        pose.bodyStop = 90; observe(150, 2);
+        require(sample().life == 2 && sample().bodyState == 2 && sample().bodyFrame == 8);
+        std::cout << "PASS body-timeline: four actors, attack modes, hit, fall, loop, get-up, loss, reconnect\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "native-capabilities")
     {
         const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),

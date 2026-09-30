@@ -19,6 +19,7 @@
 #include "../mwgui/worlditemmodel.hpp"
 #include "../mwinput/actions.hpp"
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwrender/replicatedactor.hpp"
@@ -2255,12 +2256,25 @@ namespace TES3MP::OpenMWAdapter
                     const auto group = p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
                         : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup) : casting ? "spellcast" : p.group;
                     const float clipTime = group.empty() ? -1.f : animation->getCurrentTime(group);
-                    const std::array<std::string, 3> ranges{"self", "touch", "target"};
-                    const float clipStart = group.empty() ? -1.f : animation->getTextKeyTime(group + ": "
-                        + (casting ? ranges[p.castRange] + " start" : "start"));
+                    std::string startKey = "start";
+                    if (casting)
+                    {
+                        const std::array<std::string, 3> ranges{"self", "touch", "target"};
+                        startKey = ranges[p.castRange] + (p.castFrame < p.castRelease ? " start" : " release");
+                    }
+                    else if (p.bodyState == 1 && p.phase >= 1 && p.phase <= 3)
+                    {
+                        const bool shoot = group == "bowandarrow" || group == "crossbow" || group == "throwweapon";
+                        const std::array<std::string, 3> directions{"chop", "slash", "thrust"};
+                        startKey = (shoot ? "shoot" : directions[p.direction]) + std::string(" ")
+                            + (p.phase == 1 ? "start" : p.phase == 2 ? "max attack"
+                                : shoot ? "follow start"
+                                    : std::string(MWMechanics::attackFollowStrength(p.strength)) + " follow start");
+                    }
+                    const float clipStart = group.empty() ? -1.f : animation->getTextKeyTime(group + ": " + startKey);
                     // First/third-person resources have different absolute KF origins.
-                    poseEvidence.push_back({p, actorTimeline.tick(), clipTime < 0 ? -1.f
-                        : clipTime - std::max(0.f, clipStart)});
+                    poseEvidence.push_back({p, actorTimeline.tick(), clipTime < 0 || clipStart < 0
+                        ? -1.f : clipTime - clipStart});
                     return true;
                 };
                 if (!apply(world->getPlayerPtr(), world->getAnimation(world->getPlayerPtr()), 1, combatSnapshot->selfPlayerId().value()))

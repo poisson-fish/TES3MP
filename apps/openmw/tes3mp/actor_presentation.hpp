@@ -133,11 +133,14 @@ namespace TES3MP::OpenMWAdapter
                 else if (lower->phase < upper->phase)
                     result.completion = std::min(1.f, lower->completion + float(elapsed / 30.) * lower->rate);
             }
-            if (lower->bodyAction && lower->bodyAction == upper->bodyAction && lower->bodyState == upper->bodyState)
+            if (lower->bodyAction && lower->bodyAction == upper->bodyAction && lower->bodyState == upper->bodyState
+                && lower->hitGroup == upper->hitGroup && lower->bodyStop == upper->bodyStop
+                && lower->loopStart == upper->loopStart && lower->loopStop == upper->loopStop)
             {
                 if (upper->bodyFrame >= lower->bodyFrame)
                     result.bodyFrame = std::lerp(lower->bodyFrame, upper->bodyFrame, ratio);
-                else if (lower->bodyState == 2 && lower->loopStop > lower->loopStart)
+                else if ((lower->bodyState == 2 || lower->bodyState == 3)
+                    && lower->loopStop > lower->loopStart)
                 {
                     // The bracket proves a committed loop wrap. Do not blend backwards.
                     const float distance = float(lower->loopStop - lower->loopStart) + upper->bodyFrame - lower->bodyFrame;
