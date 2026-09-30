@@ -469,6 +469,7 @@ namespace TES3MP::OpenMWAdapter
                         const auto& p = rendered.pose;
                         mOutput << "{\"kind\":" << unsigned(p.casterKind) << ",\"caster\":" << p.caster
                             << ",\"life\":" << p.casterLife << ",\"command\":" << p.command
+                            << ",\"terminal\":" << unsigned(p.terminal)
                             << ",\"tick\":" << rendered.tick << ",\"position\":["
                             << p.position[0] << ',' << p.position[1] << ',' << p.position[2] << "]}";
                     }

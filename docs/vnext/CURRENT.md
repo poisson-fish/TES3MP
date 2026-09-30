@@ -14,19 +14,25 @@ rejection, overlapping-impact, lethal-recovery and restart checks pass:
 bound is provisional. Mixed passives, non-player Command and scripted or
 enchanted ranged sources remain open; world-transfer conflicts reject atomically.
 
-Desktop bow release intercepts OpenMW's shoot key for mapped targets. The
-server charges ammunition, flies shots and writes contact, damage and loot.
-Bounded combat snapshots carry flight/terminal receipts; desktop effects
-interpolate and clear on contact/reconnect. Protocol/timeline checks pass.
-`build/logs/desktop-ranged-live-24.log`: two graphical clients, 100 ms latency,
-jitter and 10% loss; four shared flight ticks, 14/50 rendered frames, two arrow
-costs, identical impacts/death and one 17-item corpse transfer retained through
-reconnect. The fixture check passes in
-`build/logs/desktop-ranged-fixture-test-07.log`.
+V64 accepts bounded desktop camera aim even without a mapped actor, freezes its
+server launch direction through wind-up/restart and uses server hull/world sweep
+for first contact. Targetless misses pay ammunition once and retain terminal
+receipts. A terminal receipt seen within 30 ticks of release presents a 250 ms
+impact cue, including when no flying snapshot arrived; reconnect does not replay
+an already seen cue. Protocol, timeline and atomic world-miss/restart checks pass:
+`build/logs/aim-protocol-test.log`, `build/logs/aim-cue-test.log`,
+`build/logs/bow-aim-fixture-final.log`.
 
-**Next:** carry authoritative aim for misses and world shots. Unmapped aim is
-currently suppressed. Very short flights can finish between delayed snapshots;
-add a durable visual cue while preserving server-owned contact.
+`build/logs/desktop-ranged-aim-live-01.log`: two graphical clients with 100 ms
+one-way latency, jitter and 10% loss rendered both terminal cues, shared two
+impacts/death and one 17-item corpse transfer. A targetless world shot after
+death charged one arrow; Bob reconnected mid-flight, and both clients received
+its terminal receipt. The relay dropped 1,519 packets. The world miss expired
+without an actor contact in this fixture; quick world-hull contact still needs
+live coverage.
+
+**Next:** extend ranged sources and attack modes beyond plain bows, crossbows
+and thrown weapons, retaining the V64 aim and receipt path.
 
 62 effects remain to complete across applicable actors and sources:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

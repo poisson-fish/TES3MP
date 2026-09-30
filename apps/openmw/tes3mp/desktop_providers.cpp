@@ -1578,11 +1578,22 @@ namespace TES3MP::OpenMWAdapter
             if (!combatSnapshot || !std::isfinite(attackStrength) || attackStrength < 0.f || attackStrength > 1.f)
                 return std::nullopt;
             auto world = MWBase::Environment::get().getWorld();
-            const auto hit = world->getRenderingManager()->castCameraToViewportRay(
+            auto* rendering = world->getRenderingManager();
+            const auto hit = rendering->castCameraToViewportRay(
                 .5f, .5f, 8192.f, true, false, true);
-            if (!hit.mHit || hit.mHitObject.isEmpty()) return std::nullopt;
-            auto capture = captureMeleeAttack(hit.mHitObject, attackStrength, ESM::Weapon::AT_Chop);
-            return capture && capture->target ? capture : std::nullopt;
+            const osg::Vec3d far = osg::Vec3d(0, 0, -8192)
+                * osg::Matrixd::inverse(rendering->getSceneCamera().getViewMatrix());
+            const osg::Vec3f point = hit.mHit ? hit.mHitPointWorld : osg::Vec3f(far);
+            if (!std::isfinite(point.x()) || !std::isfinite(point.y()) || !std::isfinite(point.z()))
+                return std::nullopt;
+            auto capture = hit.mHit && !hit.mHitObject.isEmpty()
+                ? captureMeleeAttack(hit.mHitObject, attackStrength, ESM::Weapon::AT_Chop) : std::nullopt;
+            if (!capture)
+                capture = MeleeAttackCapture{std::nullopt, combatSnapshot->serverTick(),
+                    combatSnapshot->selfCombatRevision(), CombatRevision::initial(),
+                    MeleeAttackType::Chop, attackStrength};
+            capture->aimPoint = std::array{point.x(), point.y(), point.z()};
+            return capture;
         }
 
         std::optional<MagicUseCapture> captureMagicUse(
@@ -2192,7 +2203,9 @@ namespace TES3MP::OpenMWAdapter
             if (world)
             {
                 auto* rendering = world->getRenderingManager();
-                const auto flights = actorTimeline.sampleProjectiles();
+                auto flights = actorTimeline.sampleProjectiles();
+                const auto cues = actorTimeline.sampleTerminalCues();
+                flights.insert(flights.end(), cues.begin(), cues.end());
                 std::set<std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>> desired;
                 for (const auto& flight : flights)
                 {

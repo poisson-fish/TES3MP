@@ -148,7 +148,11 @@ struct ClientMeleeAttackCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_EXPECTED_ATTACKER_REVISION = 10,
     VT_EXPECTED_TARGET_REVISION = 12,
     VT_ATTACK_TYPE = 14,
-    VT_ATTACK_STRENGTH = 16
+    VT_ATTACK_STRENGTH = 16,
+    VT_HAS_AIM = 18,
+    VT_AIM_X = 20,
+    VT_AIM_Y = 22,
+    VT_AIM_Z = 24
   };
   const TES3MP::Protocol::Schema::CombatCommand::ClientCommandHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatCommand::ClientCommandHeader *>(VT_HEADER);
@@ -171,6 +175,18 @@ struct ClientMeleeAttackCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   float attack_strength() const {
     return GetField<float>(VT_ATTACK_STRENGTH, 0.0f);
   }
+  bool has_aim() const {
+    return GetField<uint8_t>(VT_HAS_AIM, 0) != 0;
+  }
+  float aim_x() const {
+    return GetField<float>(VT_AIM_X, 0.0f);
+  }
+  float aim_y() const {
+    return GetField<float>(VT_AIM_Y, 0.0f);
+  }
+  float aim_z() const {
+    return GetField<float>(VT_AIM_Z, 0.0f);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -182,6 +198,10 @@ struct ClientMeleeAttackCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            VerifyField<uint64_t>(verifier, VT_EXPECTED_TARGET_REVISION, 8) &&
            VerifyField<uint8_t>(verifier, VT_ATTACK_TYPE, 1) &&
            VerifyField<float>(verifier, VT_ATTACK_STRENGTH, 4) &&
+           VerifyField<uint8_t>(verifier, VT_HAS_AIM, 1) &&
+           VerifyField<float>(verifier, VT_AIM_X, 4) &&
+           VerifyField<float>(verifier, VT_AIM_Y, 4) &&
+           VerifyField<float>(verifier, VT_AIM_Z, 4) &&
            verifier.EndTable();
   }
 };
@@ -211,6 +231,18 @@ struct ClientMeleeAttackCommandBuilder {
   void add_attack_strength(float attack_strength) {
     fbb_.AddElement<float>(ClientMeleeAttackCommand::VT_ATTACK_STRENGTH, attack_strength, 0.0f);
   }
+  void add_has_aim(bool has_aim) {
+    fbb_.AddElement<uint8_t>(ClientMeleeAttackCommand::VT_HAS_AIM, static_cast<uint8_t>(has_aim), 0);
+  }
+  void add_aim_x(float aim_x) {
+    fbb_.AddElement<float>(ClientMeleeAttackCommand::VT_AIM_X, aim_x, 0.0f);
+  }
+  void add_aim_y(float aim_y) {
+    fbb_.AddElement<float>(ClientMeleeAttackCommand::VT_AIM_Y, aim_y, 0.0f);
+  }
+  void add_aim_z(float aim_z) {
+    fbb_.AddElement<float>(ClientMeleeAttackCommand::VT_AIM_Z, aim_z, 0.0f);
+  }
   explicit ClientMeleeAttackCommandBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -230,14 +262,22 @@ inline ::flatbuffers::Offset<ClientMeleeAttackCommand> CreateClientMeleeAttackCo
     uint64_t expected_attacker_revision = 0,
     uint64_t expected_target_revision = 0,
     TES3MP::Protocol::Schema::CombatCommand::MeleeAttackType attack_type = TES3MP::Protocol::Schema::CombatCommand::MeleeAttackType::Chop,
-    float attack_strength = 0.0f) {
+    float attack_strength = 0.0f,
+    bool has_aim = false,
+    float aim_x = 0.0f,
+    float aim_y = 0.0f,
+    float aim_z = 0.0f) {
   ClientMeleeAttackCommandBuilder builder_(_fbb);
   builder_.add_expected_target_revision(expected_target_revision);
   builder_.add_expected_attacker_revision(expected_attacker_revision);
   builder_.add_source_server_tick(source_server_tick);
   builder_.add_target_actor_id(target_actor_id);
+  builder_.add_aim_z(aim_z);
+  builder_.add_aim_y(aim_y);
+  builder_.add_aim_x(aim_x);
   builder_.add_attack_strength(attack_strength);
   builder_.add_header(header);
+  builder_.add_has_aim(has_aim);
   builder_.add_attack_type(attack_type);
   return builder_.Finish();
 }

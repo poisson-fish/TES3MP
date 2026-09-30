@@ -36,9 +36,14 @@ namespace
         auto empty = input;
         empty.targetActorId.reset();
         empty.expectedTargetRevision = TES3MP::CombatRevision::initial();
+        empty.aimPoint = std::array{25.f, -80.f, 130.f};
         const auto decodedEmpty = TES3MP::decodeClientMeleeAttackCommand(TES3MP::encodeClientMeleeAttackCommand(empty));
+        auto invalidAim = empty;
+        invalidAim.aimPoint = std::array{std::numeric_limits<float>::quiet_NaN(), 0.f, 0.f};
         return std::get<TES3MP::ClientMeleeAttackCommand>(decoded) == input
             && std::get<TES3MP::ClientMeleeAttackCommand>(decodedEmpty) == empty
+            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(
+                TES3MP::decodeClientMeleeAttackCommand(TES3MP::encodeClientMeleeAttackCommand(invalidAim)))
             && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(
                 TES3MP::decodeClientMeleeAttackCommand(truncated));
     }

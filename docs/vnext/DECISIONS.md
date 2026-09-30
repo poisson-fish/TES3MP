@@ -33,34 +33,32 @@ and semantic serialization. Never persist pointers, render objects or sessions.
 
 ## M4 actor simulation
 
-**Runtime ownership.** An app-local OpenMW actor runtime exposes owned commands/
-snapshots and explicit activity/identity. AI, physics, combat, wear, charge, death
-and loot share authoritative inventories. Preserve stock callers and dependency
-checks; avoid World/UI wrappers.
+**Runtime ownership.** An app-local OpenMW actor runtime exposes owned commands,
+snapshots, activity and identity. AI, physics, combat and loot share authoritative
+inventories. Preserve stock callers/dependency checks; avoid World/UI wrappers.
 
-**Gameplay animation.** Keep CPU movement, hit keys and releases; clients render
-commits. Bind timing/collision resources; null presentation cannot suppress
-mechanics. V22 persists wind-up selection and rechecks reach at the hit key.
+**Gameplay animation.** Retain CPU movement, hit keys and releases. Bind timing/
+collision resources; null presentation cannot suppress mechanics. V22 persists
+wind-up selection and rechecks reach at the hit key.
 
 **Travel scheduling.** Simulate the player/traveler area union once per actor.
-Persist destinations and stock guards. Saturation pauses substeps. Placement IDs
-prevent duplicates; offline players freeze.
+Persist destinations/guards. Saturation pauses substeps; placement IDs prevent
+duplicates; offline players freeze.
 
-**Composed ticks.** One transaction stages intents, simulation, resources, effects,
-wear, death/loot, RNG and receipts; persist before publication. WhenUsed pays at
-launch, and source identities survive item movement. Door contact precedes physics.
-Persist avoidance and private RNG.
+**Composed ticks.** Stage intents, simulation, resources, effects, wear, death/
+loot, RNG and receipts; persist before publication. WhenUsed pays at launch;
+source identity survives movement. Door contact precedes physics. Persist avoidance.
 
-**Casting authority and recovery.** Retain caster kind, ID and launch life through
-flight, effects and death. NPC respawn clears body effects; attribution on others
-survives. Trusted NPC commands never enter client input. Death cancels flights.
+**Casting authority.** Retain caster kind/ID/life through flight, effects and
+death. NPC respawn clears body effects; attribution survives. NPC commands never
+enter client input. Death cancels flights.
 
-V39-V42 select the nearest visible living player with ID ties every eight ticks.
-Stock ratings compare weapons/ammunition, equipped WhenUsed and spells; unsupported
+V39-V42 select the nearest visible living player, breaking ties by ID every eight
+ticks. Stock ratings compare weapons, ammunition, WhenUsed and spells; unsupported
 plans reject. Persist source/life/target, payment, RNG, KF phases, effects and casts
 together. Inactive areas pause; launch revalidates. T3C5/capability 23 and T3C2
-events retain caster life. V46 projects swing sections without replaying gameplay
-keys or Lua callbacks; clients never advance the authoritative clock.
+retain caster life. V46 projects swings without replaying gameplay callbacks or
+advancing the authoritative clock.
 
 **Equipped passive sources.** Select constants by item and effect ordinal before
 combat. Rolls persist while equipped; replacement and respawn install new sources.
@@ -72,15 +70,13 @@ events and latest-wins motion. V31 uses a 32-unit active player sphere until
 shared hulls are bound.
 
 **Melee state.** Negative fatigue prevents attacks and routes unarmed damage to
-health; stock restoration continues. V50 persists knockout/knockdown clocks:
-exhaustion loops and recovery finishes the current get-up clip. Stock health-hit
-rolls select physical knockdown. Hits cannot restart an active knockdown; inactive
-actors pause, and death clears body clocks. V34 shares shield visibility/recovery;
-V43 fingerprints hit clips and validates timers. Fresh campaigns are required.
+health. V50 persists knockout/knockdown clocks and finishes get-up clips. Stock
+health-hit rolls select knockdown; hits cannot restart it. Inactivity pauses and
+death clears body clocks. V34 shares shield visibility/recovery; V43 fingerprints
+hit clips and validates timers. Fresh campaigns are required.
 
-V44 persists pre-release targets and clip recipes. Detached transactions equip
-selected weapons; recovery never re-equips. Completion resumes selection; breakage
-and passive-source removal commit together.
+V44 persists pre-release targets/clip recipes. Detached transactions equip weapons;
+recovery never re-equips. Completion resumes selection; breakage removes passives.
 
 **V52 actor presentation.** Clients sample committed motion/action without gameplay
 callbacks. Persist swing/body clips and life boundaries; hold on pauses or starvation.
@@ -90,29 +86,31 @@ V53 adds participant-bound player casts to this clock. Release revalidation/paym
 and interruption commit atomically; offline casts pause. T3C8/capability 26;
 fresh campaigns.
 
+**V64 physical aim.** T3MC carries bounded optional world aim. The server saves
+flight direction, charges at the authored key and sweeps for contact without a
+mapped target. World misses use target life zero. Recent terminal receipts display
+the endpoint after skipped flights; reconnect never replays seen cues. Fresh
+campaign image required.
+
 T3C9/capability 27 carries bounded aggregate visibility magnitudes with actor
 presentation. Clients feed stock Light, NightEye and Detect consumers; snapshots
 restore loops and expiry after reconnect. An action suppresses an equipped
 Invisibility effect without deleting its durable source or rerolling magnitude.
 
-V56/T3D0/capability 28 adds eight bounded movement magnitudes to the committed
-actor presentation snapshot. The inherited player movement path consumes them in
-OpenMW; the server retains source, caster and deadline ownership. WaterBreathing's
-effect index zero is distinguished from legacy ResistMagicka by its source identity.
-The later player movement authority cutover remains subject to M4 collision and
-combat acceptance.
+V56/T3D0/capability 28 carries eight movement magnitudes consumed by inherited
+OpenMW player movement. The server owns source, caster and deadline.
+WaterBreathing's index zero differs from legacy ResistMagicka by source identity.
+Movement cutover still requires M4 collision/combat acceptance.
 
-**AI source navigation.** Shared stock target rules gate committed disposition
-effects. A valid Command on the selected actor follows its player caster using a
-staged OpenMW navigation destination in the actor image. Source expiry restores
-the descriptor's authored travel goal in the same composed tick; rejected writes
-retain the prior path and position. General combat aggression, flee routes and
-dialogue still require their owning actor/context consumers.
+**AI source navigation.** Stock target rules gate disposition effects. Command
+stages pursuit of its player caster in the actor image. Expiry restores authored
+travel in the same tick; rejected writes retain path and position. Combat
+aggression, flee routes and dialogue still need owning consumers.
 
-**Movement smoothness (target).** Cut over after unified collision and replication.
-Use stock physics, interpolation and bounded extrapolation. Predict with fixed
-steps; restore acknowledged physics and replay input. Reset on teleport, respawn
-and cell change. Measure jitter and overruns.
+**Movement smoothness (target).** After unified collision/replication, use stock
+physics, interpolation and bounded extrapolation. Predict fixed steps; restore
+acknowledged physics and replay input. Reset on teleport, respawn or cell change;
+measure jitter/overruns.
 
 ## Cooperative progression design
 

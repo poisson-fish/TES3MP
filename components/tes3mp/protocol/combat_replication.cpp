@@ -340,7 +340,10 @@ namespace TES3MP
         const auto root = Command::CreateClientMeleeAttackCommand(builder, header,
             input.targetActorId ? input.targetActorId->value() : 0, input.sourceServerTick.value(),
             input.expectedAttackerRevision.value(), input.expectedTargetRevision.value(),
-            static_cast<Command::MeleeAttackType>(input.attackType), input.attackStrength);
+            static_cast<Command::MeleeAttackType>(input.attackType), input.attackStrength,
+            input.aimPoint.has_value(), input.aimPoint ? (*input.aimPoint)[0] : 0.f,
+            input.aimPoint ? (*input.aimPoint)[1] : 0.f,
+            input.aimPoint ? (*input.aimPoint)[2] : 0.f);
         Command::FinishSizePrefixedClientMeleeAttackCommandBuffer(builder, root);
         return take(builder);
     }
@@ -492,9 +495,16 @@ namespace TES3MP
             return error(Code::InvalidFloat);
         if (root->attack_strength() < 0.f || root->attack_strength() > 1.f)
             return error(Code::InvalidAttackStrength);
+        std::optional<std::array<float, 3>> aim;
+        if (root->has_aim())
+        {
+            aim = std::array{root->aim_x(), root->aim_y(), root->aim_z()};
+            if (std::ranges::any_of(*aim, [](float v) { return !std::isfinite(v) || std::abs(v) > 10'000'000.f; }))
+                return error(Code::InvalidFloat);
+        }
         return ClientMeleeAttackCommand{ *value(session), *value(generation), *value(sequence), *value(command),
             *value(canonical), target, *value(tick), *value(attackerRevision), *value(targetRevision), *type,
-            root->attack_strength() };
+            root->attack_strength(), aim };
     }
 
     std::variant<LatestWinsCombatSnapshot, CombatReplicationDecodeError> decodeLatestWinsCombatSnapshot(

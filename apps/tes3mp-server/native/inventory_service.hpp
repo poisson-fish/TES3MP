@@ -146,6 +146,7 @@ namespace TES3MP::Native
         bool mBowRelease = false;
         bool mRangedRelease = false; // V48 extends the V47 layout to crossbows/thrown.
         bool mRangedFlight = false; // V49 persists physical flight and terminal outcomes.
+        bool mAuthoritativeAim = false; // V64 binds world aim to the player swing.
         bool mOnlyAppropriateAmmunitionBypassesResistance = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mUncappedDamageFatigue = false;

@@ -108,6 +108,7 @@ namespace TES3MP::OpenMWAdapter
         CombatRevision expectedTargetRevision = CombatRevision::initial();
         MeleeAttackType attackType = MeleeAttackType::Chop;
         float attackStrength = 0.f;
+        std::optional<std::array<float, 3>> aimPoint;
     };
 
     struct MagicUseCapture

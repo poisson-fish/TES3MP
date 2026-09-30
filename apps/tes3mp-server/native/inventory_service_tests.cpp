@@ -4139,7 +4139,8 @@ namespace TES3MP::Native::Testing
             std::ifstream input(descriptor);
             std::string text((std::istreambuf_iterator<char>(input)), {}); input.close();
             text.replace(0, std::string_view("native-inventory-44").size(),
-                profile.find("combined") != std::string_view::npos ? "native-inventory-50"
+                profile == "bow-aim-flight" ? "native-inventory-64"
+                    : profile.find("combined") != std::string_view::npos ? "native-inventory-50"
                     : profile.ends_with("-flight") ? "native-inventory-49"
                     : profile == "bow-release" ? "native-inventory-47" : "native-inventory-48");
             std::ofstream(descriptor) << text;
@@ -4185,8 +4186,10 @@ namespace TES3MP::Native::Testing
             require(view && !view->equipment->motions.empty(), "Player swing NPC projection missing");
             ClientMeleeAttackCommand attack{id<SessionId>(owner), SessionGeneration::initial(),
                 CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
-                id<ActorId>(view->equipment->motions.front().placement), id<ServerTick>(tick),
+                profile == "bow-aim-flight" ? std::optional<ActorId>{}
+                    : std::optional<ActorId>{id<ActorId>(view->equipment->motions.front().placement)}, id<ServerTick>(tick),
                 CombatRevision::initial(), CombatRevision::initial(), mode, strength};
+            if (profile == "bow-aim-flight") attack.aimPoint = std::array{300.f, -600.f, 0.f};
             ServerCommandProposal proposal(id<SessionId>(owner), SessionGeneration::initial(),
                 CommandSequence::initial(), id<CommandId>(tick), id<CanonicalRevision>(tick),
                 EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
@@ -4215,6 +4218,76 @@ namespace TES3MP::Native::Testing
                 if (stack.prototypeId == prototype) total += stack.count;
             return total;
         };
+        if (profile == "bow-aim-flight")
+        {
+            CanonicalWorldTimeState time;
+            time.daysPassed = 42; time.day = 1; time.year = 427;
+            time.millisecondsSinceMidnight = 12 * 3600000;
+            const auto world = CanonicalWorldState::initial(time,
+                GlobalVariableCatalog::create({}).value(),
+                QuestJournalCatalog::create(testContentManifestId(), {}, {}).value(),
+                FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value()).value();
+            require(count(service) == 2, "World-shot fixture ammunition missing");
+            const auto* shooter = authority.findPlayer(id<PlayerId>(1));
+            ClientMeleeAttackCommand unbounded{id<SessionId>(1), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1), {},
+                id<ServerTick>(1), CombatRevision::initial(), CombatRevision::initial(),
+                MeleeAttackType::Chop, .7f, std::array{1'000'000.f, 0.f, 0.f}};
+            const ServerCommandProposal badRequest(id<SessionId>(1), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                EntityPrecondition(shooter->entityId(), shooter->entityRevision(), shooter->authorityEpoch()),
+                MeleeAttackCommandProposal(unbounded));
+            const auto beforeBadAim = bytes(service);
+            require(!service.prepareMeleeAttack(authority, badRequest, id<ServerTick>(1))
+                    && bytes(service) == beforeBadAim,
+                "Unbounded external aim changed canonical state");
+            auto invalid = intent(service, authority, 1, 1, MeleeAttackType::Chop, .7f);
+            require(bool(invalid), "Targetless world aim rejected");
+            const auto original = bytes(service);
+            auto first = service.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, std::move(invalid), &world);
+            require(first && first->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(service) == original,
+                "Rejected world shot changed canonical state");
+            require(first->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed, "World-shot wind-up failed");
+            const auto windup = bytes(service);
+            InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, windup);
+            resumed.service().synchronizeCells(authority);
+            require(bytes(resumed.service()) == windup, "World aim changed on wind-up restart");
+            uint64_t release = 0, terminal = 0;
+            for (uint64_t tick = 2; tick <= 1900; ++tick)
+            {
+                auto pending = resumed.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+                commit(pending);
+                const auto current = state(resumed.service());
+                if (!current.combat->arrows.empty())
+                {
+                    const auto& arrow = current.combat->arrows.front();
+                    require(!arrow.target && !arrow.targetLife && arrow.caster == 1
+                            && arrow.direction[1] < 0 && count(resumed.service()) == 1,
+                        "World aim or exact ammunition cost changed at release");
+                    release = arrow.releaseTick;
+                    if (arrow.terminal) { terminal = tick; break; }
+                }
+            }
+            require(release && terminal && terminal > release, "World shot did not contact or expire");
+            const auto done = state(resumed.service());
+            require(done.combat->actors[2][8][2] == state(service).combat->actors[2][8][2],
+                "World miss damaged the mapped NPC");
+            InventoryHost recovered(descriptor, testContentManifest(), *registry, *crypto, bytes(resumed.service()));
+            recovered.service().synchronizeCells(authority);
+            for (uint64_t owner : {1, 2})
+            {
+                const auto view = recovered.service().projectCombat(authority, id<SessionId>(owner),
+                    id<ServerTick>(terminal), id<CanonicalRevision>(terminal));
+                require(view && std::ranges::any_of(view->projectiles(), [&](const auto& shot) {
+                    return shot.command == 1 && shot.terminal && shot.releaseTick == release;
+                }), "World-shot terminal cue absent for a client");
+            }
+            std::cout << "bow-aim release=" << release << " terminal=" << terminal
+                << " clients=2 restart=stable miss=undamaged ammunition=once\n";
+            return;
+        }
         if (profile.find("combined") != std::string_view::npos)
         {
             bool rangedHit = false, meleeHit = false, modifiers = false, killed = false;
@@ -4712,11 +4785,20 @@ namespace TES3MP::Native::Testing
         require(profile == "bow-combined-flight" || profile == "crossbow-combined-flight"
             || profile == "thrown-combined-flight" || profile == "bow-release" || profile == "crossbow-release" || profile == "thrown-release"
             || profile == "bow-flight" || profile == "crossbow-flight" || profile == "thrown-flight"
+            || profile == "bow-aim-flight"
             || profile == "bow-recycling-flight" || profile == "crossbow-recycling-flight" || profile == "thrown-recycling-flight",
             "Unknown ranged release fixture");
-        checkNpcDoors(scratch, config, settings,
-            true, true, true, true, true, false, false, false, false, false, false, false,
-            false, true, false, false, false, false, false, false, false, false, false, false, std::string(profile), true, true);
+        if (profile == "bow-aim-flight")
+            checkNpcDoors(scratch, config, settings,
+                true, true, true, true, true, false, false, false, false, false, false, false,
+                false, true, false, false, false, false, false, false, false, false, false, false,
+                std::string(profile), true, true, false, false, false, false, false, true, false, false, false,
+                "neighbor-expanded");
+        else
+            checkNpcDoors(scratch, config, settings,
+                true, true, true, true, true, false, false, false, false, false, false, false,
+                false, true, false, false, false, false, false, false, false, false, false, false,
+                std::string(profile), true, true);
         checkPreparedRangedRelease(scratch, profile);
     }
 
@@ -5457,7 +5539,8 @@ namespace TES3MP::Native::Testing
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
         const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
-        const bool aiDisposition = !npcRanged && (effectFamily == "ai-disposition" || socialLifecycle);
+        const bool aiDisposition = !npcRanged && encounterProfile != "bow-aim-flight"
+            && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
         const bool movementEffects = npcRanged || effectFamily == "movement-effects" || aiDisposition
             || effectFamily == "ai-creature";
@@ -6217,7 +6300,7 @@ namespace TES3MP::Native::Testing
                                 || id == ESM::MagicEffect::WaterWalking ? 0
                                 : id == ESM::MagicEffect::Burden ? 100 : 20)});
                     }
-                if (aiDisposition || effectFamily == "ai-creature")
+                if (aiDisposition || effectFamily == "ai-creature" || encounterProfile == "bow-aim-flight")
                 {
                     npc.mAiData.mFight = npcRanged ? 100 : socialLifecycle ? 50 : 20;
                     npc.mAiData.mFlee = 0;

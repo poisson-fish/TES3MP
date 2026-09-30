@@ -51,7 +51,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlacementCombatCampaignMagic = 0x5950434154335354;
     inline constexpr uint64_t NeighborCombatCampaignMagic = 0x5a50434154335354;
     inline constexpr uint64_t NpcRangedCampaignMagic = 0x5b50434154335354;
-    inline constexpr bool hasNpcRanged(uint64_t magic) { return magic == NpcRangedCampaignMagic; }
+    inline constexpr uint64_t AuthoritativeAimCampaignMagic = 0x5c50434154335354;
+    inline constexpr bool hasAuthoritativeAim(uint64_t magic) { return magic == AuthoritativeAimCampaignMagic; }
+    inline constexpr bool hasNpcRanged(uint64_t magic)
+    { return magic == NpcRangedCampaignMagic || hasAuthoritativeAim(magic); }
     inline constexpr bool hasNeighborCombat(uint64_t magic)
     { return magic == NeighborCombatCampaignMagic || hasNpcRanged(magic); }
     inline constexpr bool hasPlacementCombat(uint64_t magic)
@@ -119,6 +122,7 @@ namespace TES3MP::Native
         uint64_t ammunition = 0;
         std::string ammoRecord;
         uint64_t target = 0; // V62 placement; earlier campaigns always target the selected NPC.
+        std::array<float, 3> aim{}; // V64 frozen world-space flight direction; zero for melee.
         bool pending() const { return interruption == None && state.mPhase != MeleeAnimation::Phase::Complete; }
         bool operator==(const PlayerSwing&) const = default;
     };
@@ -988,16 +992,6 @@ namespace TES3MP::Native
                 const auto phase = getAreaWord(bytes, offset);
                 value.state.mTime = number(); value.state.mStrength = number();
                 const auto released = getAreaWord(bytes, offset), hit = getAreaWord(bytes, offset);
-                const auto targetIndex = hasNeighborCombat(magic)
-                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
-                const auto targetGeneration = targetIndex == 2 ? life->generation
-                    : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0;
-                if (!value.command || !value.targetLife || !targetGeneration || value.targetLife > targetGeneration
-                    || value.direction > 2 || value.interruption > PlayerSwing::TargetLost
-                    || value.strength < 0 || value.strength > 1 || value.identity.empty()
-                    || bool(value.source) != !value.weapon.empty()
-                    || phase > uint64_t(MeleeAnimation::Phase::Complete) || released > 1 || hit > 1)
-                    throw std::invalid_argument("Native player swing state invalid");
                 value.state.mPhase = MeleeAnimation::Phase(phase);
                 value.state.mReleased = bool(released); value.state.mHit = bool(hit);
                 if (hasRangedRelease(magic))
@@ -1010,6 +1004,28 @@ namespace TES3MP::Native
                     if (bool(value.ammunition) != !value.ammoRecord.empty()
                         || value.ammoRecord.find('\0') != std::string::npos)
                         throw std::invalid_argument("Native arrow identity invalid");
+                }
+                if (hasAuthoritativeAim(magic)) for (auto& axis : value.aim) axis = number();
+                const bool worldShot = hasAuthoritativeAim(magic) && value.ammunition && !value.target;
+                const auto targetIndex = worldShot ? 0 : hasNeighborCombat(magic)
+                    ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
+                const auto targetGeneration = targetIndex == 2 ? life->generation
+                    : targetIndex > 2 && targetIndex < combat->actors.size()
+                        ? neighborLives[targetIndex - 3].generation : 0;
+                if (!value.command || (worldShot ? value.targetLife != 0
+                        : !value.targetLife || !targetGeneration || value.targetLife > targetGeneration)
+                    || value.direction > 2 || value.interruption > PlayerSwing::TargetLost
+                    || value.strength < 0 || value.strength > 1 || value.identity.empty()
+                    || bool(value.source) != !value.weapon.empty()
+                    || phase > uint64_t(MeleeAnimation::Phase::Complete) || released > 1 || hit > 1)
+                    throw std::invalid_argument("Native player swing state invalid");
+                if (hasAuthoritativeAim(magic))
+                {
+                    const float norm = std::sqrt(value.aim[0] * value.aim[0]
+                        + value.aim[1] * value.aim[1] + value.aim[2] * value.aim[2]);
+                    if ((value.ammunition && std::abs(norm - 1.f) > .001f)
+                        || (!value.ammunition && norm != 0.f))
+                        throw std::invalid_argument("Native player aim invalid");
                 }
             }
         if (hasRangedRelease(magic))
@@ -1062,19 +1078,23 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native physical flight state invalid");
                 }
                 float norm = 0; for (float v : value.direction) norm += v * v;
-                const size_t targetIndex = value.targetKind == 1 ? 0 : hasNeighborCombat(magic)
+                const bool worldShot = hasAuthoritativeAim(magic) && value.casterKind == 1
+                    && value.targetKind == 2 && !value.target && !value.targetLife;
+                const size_t targetIndex = worldShot || value.targetKind == 1 ? 0 : hasNeighborCombat(magic)
                     ? size_t(std::ranges::find(combat->npcPlacements, value.target)
                         - combat->npcPlacements.begin()) + 2 : 2;
                 const auto targetGeneration = value.targetKind == 1 ? 1 : targetIndex == 2 ? life->generation
-                    : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0;
+                    : targetIndex > 2 && targetIndex < combat->actors.size()
+                        ? neighborLives[targetIndex - 3].generation : 0;
                 const size_t casterIndex = value.casterKind == 2 && hasNeighborCombat(magic)
                     ? size_t(std::ranges::find(combat->npcPlacements, value.caster)
                         - combat->npcPlacements.begin()) + 2 : 0;
                 const auto casterGeneration = casterIndex == 2 ? life->generation
                     : casterIndex > 2 && casterIndex < combat->actors.size()
                         ? neighborLives[casterIndex - 3].generation : 0;
-                if (!value.caster || !value.command || !value.source || !value.ammunition || !value.target
-                    || !value.targetLife || !targetGeneration || value.targetLife > targetGeneration
+                if (!value.caster || !value.command || !value.source || !value.ammunition
+                    || (!worldShot && (!value.target || !value.targetLife || !targetGeneration
+                        || value.targetLife > targetGeneration))
                     || !((value.casterKind == 1 && value.targetKind == 2)
                         || (value.casterKind == 2 && value.targetKind == 1))
                     || (value.casterKind == 1 ? value.casterLife != 1

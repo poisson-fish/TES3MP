@@ -2378,7 +2378,7 @@ namespace TES3MP::Native
         if (!player || session->sessionGeneration() != proposal.sessionGeneration()
             || attack.sessionId != proposal.sessionId() || attack.sessionGeneration != proposal.sessionGeneration()
             || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
-            || !attack.targetActorId
+            || (!attack.targetActorId && !mBinding.mAuthoritativeAim)
             || (attack.attackType != MeleeAttackType::Chop && attack.attackType != MeleeAttackType::Slash
                 && attack.attackType != MeleeAttackType::Thrust)
             || !std::isfinite(attack.attackStrength) || attack.attackStrength < 0 || attack.attackStrength > 1
@@ -2386,18 +2386,21 @@ namespace TES3MP::Native
             || attack.sourceServerTick.value() > tick.value()
             || tick.value() - attack.sourceServerTick.value() > PhysicalAttackRetryTicks)
             return {};
-        size_t targetIndex = attack.targetActorId->value() == mBinding.mNavigatingActor->actorId() ? 2 : 0;
-        if (!targetIndex && mBinding.mNeighborCombat)
+        size_t targetIndex = attack.targetActorId
+            && attack.targetActorId->value() == mBinding.mNavigatingActor->actorId() ? 2 : 0;
+        if (!targetIndex && attack.targetActorId && mBinding.mNeighborCombat)
         {
             const auto neighbors = mBinding.mNavigatingActor->neighborSnapshots();
             const auto found = std::ranges::find(neighbors, attack.targetActorId->value(),
                 &ActorSceneSnapshot::mActor);
             if (found != neighbors.end()) targetIndex = size_t(found - neighbors.begin()) + 3;
         }
-        if (!targetIndex) return {};
-        const auto& targetLife = targetIndex == 2 ? *mLife : mNeighborLives.at(targetIndex - 3);
-        if (attack.sourceServerTick.value() < targetLife.bornTick
-            || attack.expectedTargetRevision.value() < targetLife.bornTick || targetLife.respawnTick)
+        if (attack.targetActorId && !targetIndex) return {};
+        if (targetIndex && ([&] {
+                const auto& life = targetIndex == 2 ? *mLife : mNeighborLives.at(targetIndex - 3);
+                return attack.sourceServerTick.value() < life.bornTick
+                    || attack.expectedTargetRevision.value() < life.bornTick || life.respawnTick;
+            }()))
             return {};
         const size_t owner = actor(player->playerId());
         if (mBinding.mBowRelease && std::ranges::any_of(mCombat->arrows, [&](const auto& arrow) {
@@ -2407,12 +2410,12 @@ namespace TES3MP::Native
                 || (mBinding.mPlayerCastLifecycle && mCombat->playerCasts[owner])
                 || (mCombat->swings[owner] && (mCombat->swings[owner]->pending()
                     || mCombat->swings[owner]->command == attack.commandId.value())))) return {};
-        if (mCombat->actors[owner][8][2] <= 0 || mCombat->actors[targetIndex][8][2] <= 0
+        if (mCombat->actors[owner][8][2] <= 0 || (targetIndex && mCombat->actors[targetIndex][8][2] <= 0)
             || hasParalysis(mTimedEffects, owner)
             || (mBinding.mKnockoutRules && mCombat->knockedDown[owner]))
             return {};
         const auto held = mRuntime.equippedWeaponCondition(owner);
-        if (player->transform().cell() != actorCell(targetIndex == 2
+        if (player->transform().cell() != actorCell(targetIndex <= 2
                 ? mBinding.mNavigatingActor->snapshot()
                 : mBinding.mNavigatingActor->neighborSnapshots().at(targetIndex - 3)))
             return {};
@@ -2430,6 +2433,8 @@ namespace TES3MP::Native
             && (!mBinding.mRangedRelease
                 || (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth))) return {};
         const bool bow = mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease);
+        if (!targetIndex && !bow) return {};
+        if (mBinding.mAuthoritativeAim && (bow != attack.aimPoint.has_value())) return {};
         if (bow && (!attack.commandId.value() || !weapon->mScript.empty() || !weapon->mEnchant.empty()
                 || mCombat->arrows.size() >= MaximumActorProjectiles
                 || !equippedAmmunition(mRuntime.installedValues(owner), mRuntime.mStore, *weapon))) return {};
@@ -2441,9 +2446,18 @@ namespace TES3MP::Native
         const auto& position = player->transform().position();
         const osg::Vec3f origin(float(double(position.x()) / 1024), float(double(position.y()) / 1024),
             float(double(position.z()) / 1024));
-        const auto scene = targetIndex == 2 ? mBinding.mNavigatingActor->snapshot()
+        const auto scene = targetIndex <= 2 ? mBinding.mNavigatingActor->snapshot()
             : mBinding.mNavigatingActor->neighborSnapshots().at(targetIndex - 3);
         const osg::Vec3f target(scene.mPosition[0], scene.mPosition[1], scene.mPosition[2]);
+        if (attack.aimPoint)
+        {
+            const auto& aim = *attack.aimPoint;
+            if (std::ranges::any_of(aim, [](float v) { return !std::isfinite(v) || std::abs(v) > 10'000'000.f; }))
+                return {};
+            const osg::Vec3f direction(aim[0] - origin.x(), aim[1] - origin.y(), aim[2] - origin.z() - 110.f);
+            if (!std::isfinite(direction.length2()) || direction.length2() < 1.f
+                || direction.length2() > 16384.f * 16384.f) return {};
+        }
         if (!bow && !MWMechanics::isInMeleeReach(origin, target, 0, 0,
                 MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon, true)))
             return {};
@@ -2538,6 +2552,7 @@ namespace TES3MP::Native
                 || mBinding.mBowRelease != hasRangedRelease(magic)
                 || mBinding.mRangedRelease != (magic == RangedReleaseCampaignMagic || hasRangedFlight(magic))
                 || mBinding.mRangedFlight != hasRangedFlight(magic)
+                || mBinding.mAuthoritativeAim != hasAuthoritativeAim(magic)
                 || mBinding.mKnockoutAnimation != hasKnockoutAnimation(magic)
                 || mBinding.mExpandedEffects != hasExpandedEffects(magic)
                 || mBinding.mActorPresentation != hasActorPresentation(magic)
@@ -2979,7 +2994,8 @@ namespace TES3MP::Native
                             : caster >= decoded.combat->actors.size()
                                 || arrow.casterLife > (caster == 2 ? decoded.life->generation
                                     : decoded.neighborLives.at(caster - 3).generation))
-                        || (arrow.targetKind == 1
+                        || (mBinding.mAuthoritativeAim && arrow.casterKind == 1
+                            && !arrow.target && !arrow.targetLife ? false : arrow.targetKind == 1
                             ? std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) { return id.value() == arrow.target; })
                             : mBinding.mNeighborCombat
                             ? std::ranges::find(decoded.combat->npcPlacements, arrow.target)
@@ -3063,13 +3079,14 @@ namespace TES3MP::Native
                                     return item.mRef.mRefNum == slot && item.mRef.mCount > 0
                                         && item.mRef.mRefID == weapon->mId;
                                 })) throw std::invalid_argument("Saved player swing weapon identity changed");
-                            const auto victim = mBinding.mNeighborCombat
+                            const bool worldShot = mBinding.mAuthoritativeAim && swing.ammunition && !swing.target;
+                            const auto victim = worldShot ? 0 : mBinding.mNeighborCombat
                                 ? std::ranges::find(decoded.combat->npcPlacements, swing.target)
                                     - decoded.combat->npcPlacements.begin() + 2 : 2;
-                            if (victim >= decoded.combat->actors.size()
+                            if (!worldShot && (victim >= decoded.combat->actors.size()
                                 || swing.targetLife != (victim == 2 ? decoded.life->generation
                                     : decoded.neighborLives[victim - 3].generation)
-                                || decoded.combat->actors[victim][8][2] <= 0)
+                                || decoded.combat->actors[victim][8][2] <= 0))
                                 throw std::invalid_argument("Saved player swing target life invalid");
                         }
                         if (decoded.combat->actors[i][8][2] <= 0 || decoded.combat->knockedDown[i]
@@ -3330,7 +3347,8 @@ namespace TES3MP::Native
         size_t swingSize = 0;
         if (mBinding.mPlayerMelee[0])
             for (const auto& swing : combat->swings)
-                swingSize += 8 + (swing ? (13 + size_t(mBinding.mNeighborCombat)) * 8 + swing->weapon.size() + swing->identity.size()
+                swingSize += 8 + (swing ? (13 + size_t(mBinding.mNeighborCombat)
+                    + (mBinding.mAuthoritativeAim ? 3 : 0)) * 8 + swing->weapon.size() + swing->identity.size()
                     + (mBinding.mBowRelease ? 16 + swing->ammoRecord.size() : 0) : 0);
         if (mBinding.mBowRelease)
         {
@@ -3348,7 +3366,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - neighborAttackSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mNeighborCombat ? NpcRangedCampaignMagic
+        putAreaWord(result, mBinding.mAuthoritativeAim ? AuthoritativeAimCampaignMagic
+            : mBinding.mNeighborCombat ? NpcRangedCampaignMagic
             : mBinding.mPlacementCombat ? PlacementCombatCampaignMagic
             : mBinding.mSocialLifecycle ? SocialLifecycleCampaignMagic
             : mBinding.mPlayerAi ? PlayerAiCampaignMagic
@@ -3618,6 +3637,8 @@ namespace TES3MP::Native
                     putAreaWord(result, swing->ammunition); putAreaWord(result, swing->ammoRecord.size());
                     result.insert(result.end(), swing->ammoRecord.begin(), swing->ammoRecord.end());
                 }
+                if (mBinding.mAuthoritativeAim)
+                    for (float axis : swing->aim) putAreaWord(result, std::bit_cast<uint32_t>(axis));
             }
         if (mBinding.mBowRelease)
         {
@@ -5460,6 +5481,7 @@ namespace TES3MP::Native
                 : size_t(found - combat->npcPlacements.begin()) + 2;
         };
         const auto swingVictim = [&](const PlayerSwing& swing) -> size_t {
+            if (mBinding.mAuthoritativeAim && swing.ammunition && !swing.target) return 0;
             return mBinding.mNeighborCombat ? npcVictim(swing.target) : 2;
         };
         const auto victimLife = [&](size_t index) -> ActorCampaignLife& {
@@ -5487,19 +5509,33 @@ namespace TES3MP::Native
                     weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
                 }
                 auto clip = mBinding.mPlayerMelee[owner](weapon, directions[size_t(playerAttack->attackType)]);
-                const size_t victim = npcVictim(playerAttack->targetActorId->value());
-                if (!victim) throw std::invalid_argument("Player swing target placement changed");
+                const size_t victim = playerAttack->targetActorId
+                    ? npcVictim(playerAttack->targetActorId->value()) : 0;
+                if (playerAttack->targetActorId && !victim)
+                    throw std::invalid_argument("Player swing target placement changed");
                 combat->swings[owner] = PlayerSwing{playerAttack->commandId.value(),
-                    held ? wireId(held->mItem).value() : 0, victimLife(victim).generation, uint64_t(playerAttack->attackType),
+                    held ? wireId(held->mItem).value() : 0, victim ? victimLife(victim).generation : 0,
+                    uint64_t(playerAttack->attackType),
                     PlayerSwing::None, playerAttack->attackStrength,
                     weapon ? std::string(weapon->mId.getRefIdString()) : std::string{}, clip.identity(), clip.snapshot()};
-                combat->swings[owner]->target = playerAttack->targetActorId->value();
+                combat->swings[owner]->target = playerAttack->targetActorId
+                    ? playerAttack->targetActorId->value() : 0;
                 if (mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease))
                 {
                     const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon);
                     if (!ammo) throw std::invalid_argument("Bow release ammunition missing");
                     combat->swings[owner]->ammunition = wireId(ammo->mRef.mRefNum).value();
                     combat->swings[owner]->ammoRecord = std::string(ammo->mRef.mRefID.getRefIdString());
+                    if (mBinding.mAuthoritativeAim)
+                    {
+                        const auto* shooter = players.findPlayer(playerAttacker);
+                        const auto position = shooter->transform().position();
+                        osg::Vec3f aim((*playerAttack->aimPoint)[0] - float(double(position.x()) / 1024),
+                            (*playerAttack->aimPoint)[1] - float(double(position.y()) / 1024),
+                            (*playerAttack->aimPoint)[2] - float(double(position.z()) / 1024) - 110.f);
+                        if (aim.normalize() == 0) throw std::invalid_argument("Player aim direction invalid");
+                        combat->swings[owner]->aim = {aim.x(), aim.y(), aim.z()};
+                    }
                 }
             }
             for (size_t owner = 0; owner < combat->swings.size(); ++owner)
@@ -5508,9 +5544,10 @@ namespace TES3MP::Native
                 if (!pending || !pending->pending()) continue;
                 auto& swing = *pending;
                 const size_t victim = swingVictim(swing);
-                if (!victim) { swing.interruption = PlayerSwing::TargetLost; continue; }
-                const auto targetScene = victimScene(victim);
-                if (!mBinding.mNeighborCombat) swing.target = targetScene.mActor;
+                const bool worldShot = mBinding.mAuthoritativeAim && swing.ammunition && !swing.target;
+                if (!victim && !worldShot) { swing.interruption = PlayerSwing::TargetLost; continue; }
+                const auto targetScene = victim ? victimScene(victim) : after;
+                if (!mBinding.mNeighborCombat && victim) swing.target = targetScene.mActor;
                 const auto* weapon = swing.weapon.empty() ? nullptr
                     : mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(swing.weapon));
                 if (combat->actors[owner][8][2] <= 0 || combat->knockedDown[owner] || hasParalysis(timedEffects, owner) || combat->hitRecoveryTicks[owner])
@@ -5536,7 +5573,7 @@ namespace TES3MP::Native
                 }
                 // All-offline areas retain a restartable image. If a peer keeps
                 // the encounter active, the departing player's swing cancels.
-                const bool recoveryActive = swing.state.mHit && combat->actors[victim][8][2] <= 0
+                const bool recoveryActive = victim && swing.state.mHit && combat->actors[victim][8][2] <= 0
                     && std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
                         const auto* peer = players.findPlayer(session.playerId());
                         return peer && peer->transform().cell() == actorCell(targetScene);
@@ -5549,10 +5586,11 @@ namespace TES3MP::Native
                 if (!swing.state.mHit)
                 {
                     if (!player || player->transform().cell() != actorCell(targetScene)
-                        || victimLife(victim).generation != swing.targetLife || combat->actors[victim][8][2] <= 0)
+                        || (victim && (victimLife(victim).generation != swing.targetLife
+                            || combat->actors[victim][8][2] <= 0)))
                     { swing.interruption = PlayerSwing::TargetLost; continue; }
                     const auto position = player->transform().position();
-                    if (!mBinding.mNavigatingActor->lineOfSight(
+                    if (!swing.ammunition && !mBinding.mNavigatingActor->lineOfSight(
                             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
                                 float(double(position.z()) / 1024) + 110.f},
                             {targetScene.mPosition[0], targetScene.mPosition[1], targetScene.mPosition[2] + 110.f}))
@@ -5589,8 +5627,10 @@ namespace TES3MP::Native
                         if (!ammo) throw std::invalid_argument("Bow release lost ammunition");
                         // Temporary server body-center launch proxy, shared with
                         // spell targeting. Flight will replace this with bound geometry.
-                        osg::Vec3f direction(targetScene.mPosition[0] - origin.x(), targetScene.mPosition[1] - origin.y(),
-                            targetScene.mPosition[2] - origin.z());
+                        osg::Vec3f direction = mBinding.mAuthoritativeAim
+                            ? osg::Vec3f(swing.aim[0], swing.aim[1], swing.aim[2])
+                            : osg::Vec3f(targetScene.mPosition[0] - origin.x(),
+                                targetScene.mPosition[1] - origin.y(), targetScene.mPosition[2] - origin.z());
                         if (direction.normalize() == 0) throw std::invalid_argument("Bow launch direction invalid");
                         combat->arrows.push_back({mBinding.mPlayers[owner].value(), swing.command, swing.source,
                             swing.ammunition, swing.target, swing.targetLife, tick.value(),
@@ -7581,7 +7621,8 @@ namespace TES3MP::Native
                 if (!swing || !swing->pending()) continue;
                 if (combat->actors[i][8][2] <= 0 || combat->knockedDown[i] || hasParalysis(timedEffects, i) || combat->hitRecoveryTicks[i])
                     swing->interruption = PlayerSwing::Incapacitated;
-                else if (!swing->state.mHit)
+                else if (!swing->state.mHit
+                    && !(mBinding.mAuthoritativeAim && swing->ammunition && !swing->target))
                 {
                     const auto victim = mBinding.mNeighborCombat
                         ? std::ranges::find(combat->npcPlacements, swing->target)
@@ -8080,7 +8121,10 @@ namespace TES3MP::Native
                     const std::array<std::string_view, 3> directions{"chop", "slash", "thrust"};
                     auto clip = mBinding.mPlayerMelee[index](weapon, directions[swing->direction]);
                     clip.restore(swing->state);
-                    projected = {owner, swing->command, swing->source, swing->targetLife,
+                    // Presentation requires a nonzero life; world shots carry no
+                    // target life in the durable swing and never use this value.
+                    projected = {owner, swing->command, swing->source,
+                        swing->targetLife ? swing->targetLife : 1,
                         uint8_t(swing->direction), uint8_t(unsigned(swing->state.mPhase) + 1),
                         uint8_t(swing->interruption), swing->strength, clip.phaseCompletion(), clip.group()};
                 }

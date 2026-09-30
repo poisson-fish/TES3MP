@@ -127,6 +127,9 @@ namespace TES3MP
         CombatRevision expectedTargetRevision = CombatRevision::initial();
         MeleeAttackType attackType = MeleeAttackType::Chop;
         float attackStrength = 0.f;
+        // World-space point on the camera ray. The server derives flight from
+        // its committed player position and owns all contacts.
+        std::optional<std::array<float, 3>> aimPoint;
         friend constexpr bool operator==(ClientMeleeAttackCommand, ClientMeleeAttackCommand) noexcept = default;
     };
 

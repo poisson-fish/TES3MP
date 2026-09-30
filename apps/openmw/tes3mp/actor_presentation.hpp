@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <set>
 #include <tuple>
 
 namespace TES3MP::OpenMWAdapter
@@ -31,8 +32,16 @@ namespace TES3MP::OpenMWAdapter
         double mCursor = 0;
         std::optional<MonotonicInstant> mLast;
         bool mStarted = false;
+        using FlightKey = std::tuple<uint8_t, uint64_t, uint64_t, uint64_t>;
+        std::set<FlightKey> mSeenTerminals;
+        std::vector<PhysicalProjectileSnapshot> mPendingTerminalCues;
+        std::vector<std::pair<PhysicalProjectileSnapshot, uint64_t>> mTerminalCues;
     public:
-        void clear() { mFrames.clear(); mLast.reset(); mStarted = false; mCursor = 0; mGeneration = 0; }
+        void clear()
+        {
+            mFrames.clear(); mLast.reset(); mStarted = false; mCursor = 0; mGeneration = 0;
+            mPendingTerminalCues.clear(); mTerminalCues.clear();
+        }
         bool empty() const { return mFrames.empty(); }
         double tick() const { return mCursor; }
         void observe(const LatestWinsCombatSnapshot& snapshot)
@@ -42,6 +51,13 @@ namespace TES3MP::OpenMWAdapter
             if (generation != mGeneration) { clear(); mGeneration = generation; }
             const auto tick = snapshot.serverTick().value();
             if (!mFrames.empty() && tick <= mFrames.back().tick) return;
+            for (const auto& flight : snapshot.projectiles())
+                if (flight.terminal && tick >= flight.releaseTick && tick - flight.releaseTick <= 30)
+                {
+                    const FlightKey key{flight.casterKind, flight.caster, flight.casterLife, flight.command};
+                    if (mSeenTerminals.insert(key).second) mPendingTerminalCues.push_back(flight);
+                }
+            while (mSeenTerminals.size() > 256) mSeenTerminals.erase(mSeenTerminals.begin());
             if (mFrames.empty()) mCursor = double(tick);
             Frame frame{tick, {}, {snapshot.projectiles().begin(), snapshot.projectiles().end()}};
             for (const auto& actor : snapshot.presentation())
@@ -69,6 +85,10 @@ namespace TES3MP::OpenMWAdapter
             const double seconds = mLast && now >= *mLast
                 ? double(now.nanoseconds() - mLast->nanoseconds()) / 1e9 : 0;
             mLast = now;
+            for (const auto& cue : mPendingTerminalCues)
+                mTerminalCues.emplace_back(cue, now.nanoseconds() + 250'000'000);
+            mPendingTerminalCues.clear();
+            std::erase_if(mTerminalCues, [&](const auto& cue) { return cue.second <= now.nanoseconds(); });
             if (empty()) return;
             if (!mStarted)
             {
@@ -160,6 +180,12 @@ namespace TES3MP::OpenMWAdapter
                 }
                 result.push_back(std::move(sampled));
             }
+            return result;
+        }
+        std::vector<PhysicalProjectileSnapshot> sampleTerminalCues() const
+        {
+            std::vector<PhysicalProjectileSnapshot> result;
+            for (const auto& cue : mTerminalCues) result.push_back(cue.first);
             return result;
         }
     };

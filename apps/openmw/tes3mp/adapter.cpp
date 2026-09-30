@@ -754,7 +754,7 @@ namespace TES3MP::OpenMWAdapter
                     {
                         const auto queued = mRuntime->queueMeleeAttack(attack->target, attack->sourceTick,
                             attack->expectedAttackerRevision, attack->expectedTargetRevision, attack->attackType,
-                            attack->attackStrength);
+                            attack->attackStrength, attack->aimPoint);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);

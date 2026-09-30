@@ -121,7 +121,7 @@ namespace TES3MP
             std::optional<DropPlacementView> placement = std::nullopt);
         ClientRuntimeQueueResult queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
             CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision, MeleeAttackType attackType,
-            float attackStrength);
+            float attackStrength, std::optional<std::array<float, 3>> aimPoint = std::nullopt);
         ClientRuntimeQueueResult queueMagicUse(MagicUseSourceKind sourceKind, std::uint64_t sourceId,
             MagicUseTargetKind targetKind, std::uint64_t targetId, ServerTick sourceTick,
             CombatRevision expectedCasterRevision, CombatRevision expectedTargetRevision,

@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 63; ++candidate)
+            for (unsigned candidate = 3; candidate <= 64; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
@@ -286,6 +286,7 @@ namespace TES3MP::Native
                 binding.mNeighborAi = descriptorVersion >= 60;
                 binding.mPlacementCombat = descriptorVersion >= 61;
                 binding.mNeighborCombat = descriptorVersion >= 62;
+                binding.mAuthoritativeAim = descriptorVersion >= 64;
                 binding.mNeighborLimit = descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;

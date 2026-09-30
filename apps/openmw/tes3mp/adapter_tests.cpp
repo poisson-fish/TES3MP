@@ -905,11 +905,20 @@ int main(int argc, char** argv)
         shot.terminal = 1; shot.position[1] = 150; observe(108);
         timeline.advance(now(2'000'000'000));
         require(timeline.sampleProjectiles().empty()); // Contact removes the model.
+        require(timeline.sampleTerminalCues().size() == 1
+            && timeline.sampleTerminalCues()[0].position[1] == 150.f);
         observe(120, 2);
         require(timeline.sampleProjectiles().empty()); // Reconnect restores the terminal receipt without replay.
         timeline.advance(now(2'000'000'000));
+        require(timeline.sampleTerminalCues().empty());
+        shot = {1, 1, 1, 1, 11, 122, "iron arrow", {0, 15, 110}, {0, 0, 0}};
+        observe(125, 2); timeline.advance(now(2'100'000'000));
+        require(timeline.sampleTerminalCues().size() == 1
+            && timeline.sampleTerminalCues()[0].command == 11); // No flight snapshot arrived.
+        timeline.advance(now(2'400'000'000));
+        require(timeline.sampleTerminalCues().empty());
         shot = {1, 0, 1, 1, 10, 124, "iron arrow", {0, 0, 110}, {0, 900, 0}};
-        observe(124, 2); timeline.advance(now(3'000'000'000));
+        observe(126, 2); timeline.advance(now(3'000'000'000));
         require(timeline.sampleProjectiles().size() == 1 && timeline.sampleProjectiles()[0].command == 10);
         return 0;
     }

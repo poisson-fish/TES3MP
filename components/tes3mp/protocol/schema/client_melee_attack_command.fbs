@@ -22,6 +22,10 @@ table ClientMeleeAttackCommand {
   expected_target_revision:ulong (id: 4);
   attack_type:MeleeAttackType (id: 5);
   attack_strength:float (id: 6);
+  has_aim:bool (id: 7);
+  aim_x:float (id: 8);
+  aim_y:float (id: 9);
+  aim_z:float (id: 10);
 }
 
 root_type ClientMeleeAttackCommand;

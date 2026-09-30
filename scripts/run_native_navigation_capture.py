@@ -732,7 +732,7 @@ def run(args):
     if args.npc_casting: spell_name = encounter["spell"]
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
-    version = 63 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    version = 64 if args.ranged else 57 if args.ai_charm else 56 if movement_capture else 55 if args.visibility else 53 if args.npc_casting else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     if args.creature or args.custom_body: npc = encounter["actor"]
     player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature or args.custom_body else npc if args.life_encounter or spell_capture else "player"
@@ -1040,7 +1040,7 @@ if __name__ == "__main__":
                         help="V35 active timed effect through server restart and two returning desktops")
     parser.add_argument("--npc-casting", action="store_true", help="V53 shared NPC/player cast timeline, interruption, reconnect and restart")
     parser.add_argument("--player-swings", action="store_true", help="V46 two-client swing presentation, interruption, reconnect and restart")
-    parser.add_argument("--ranged", action="store_true", help="V63 committed physical flight and impacts on two desktops")
+    parser.add_argument("--ranged", action="store_true", help="V64 aimed physical flight, misses, impacts and cues on two desktops")
     parser.add_argument("--custom-body", action="store_true", help="Exercise the fixture custom NPC melee and body timeline")
     parser.add_argument("--creature", action="store_true", help="Use the bound bipedal creature fixture with --knockout-target npc")
     parser.add_argument("--knockout", action="store_true", help="V51 fatigue knockout/get-up on two desktops, reconnect and restart")

@@ -1147,7 +1147,7 @@
     {
       "path": "components/tes3mp/protocol/generated/client_melee_attack_command_generated.h",
       "status": "A",
-      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded authoritative melee intent."
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded physical attack and world-aim intent."
     },
     {
       "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
@@ -1327,7 +1327,7 @@
     {
       "path": "components/tes3mp/protocol/schema/client_melee_attack_command.fbs",
       "status": "A",
-      "purpose": "Explicit-ID T3MC schema for bounded player melee intent without client-authored outcomes or weapon data."
+      "purpose": "Explicit-ID T3MC schema for bounded player physical attacks and optional world aim without client-authored outcomes."
     },
     {
       "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",

@@ -679,7 +679,7 @@ namespace TES3MP
 
     ClientRuntimeQueueResult ClientSessionRuntime::queueMeleeAttack(std::optional<ActorId> target,
         ServerTick sourceTick, CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
-        MeleeAttackType attackType, float attackStrength)
+        MeleeAttackType attackType, float attackStrength, std::optional<std::array<float, 3>> aimPoint)
     {
         const auto& spatial = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
@@ -697,7 +697,7 @@ namespace TES3MP
             return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         const ClientMeleeAttackCommand command{ *sessionId, spatial->header().targetSessionGeneration(), *sequence,
             *commandId, spatial->header().canonicalRevision(), target, sourceTick, expectedAttackerRevision,
-            expectedTargetRevision, attackType, attackStrength };
+            expectedTargetRevision, attackType, attackStrength, aimPoint };
         const auto encoded = encodeClientMeleeAttackCommand(command);
         const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientMeleeAttackCommand, encoded);
         if (queued == ClientRuntimeResult::Accepted)

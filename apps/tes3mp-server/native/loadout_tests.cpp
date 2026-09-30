@@ -6864,6 +6864,7 @@ int main(int argc, char** argv)
                 || std::string_view(argv[1]) == "bow-release"
                 || std::string_view(argv[1]) == "crossbow-release" || std::string_view(argv[1]) == "thrown-release"
                 || std::string_view(argv[1]) == "bow-flight" || std::string_view(argv[1]) == "crossbow-flight"
+                || std::string_view(argv[1]) == "bow-aim-flight"
                 || std::string_view(argv[1]) == "thrown-flight"
                 || std::string_view(argv[1]) == "bow-recycling-flight"
                 || std::string_view(argv[1]) == "crossbow-recycling-flight"

@@ -98,6 +98,8 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
         return [shot for row in rows(role, "projectile_presentation_frame")
                 for shot in row["projectiles"]
                 if (shot["kind"], shot["caster"], shot["life"], shot["command"]) == key]
+    wait_for(lambda: all(any(shot.get("terminal") == 1 for shot in rendered(role))
+                         for role in evidence), "both desktops rendered the terminal impact cue")
     wait_for(lambda: all(len({tuple(shot["position"]) for shot in rendered(role)}) >= 2
                          for role in evidence), "both desktops rendered moving committed arrows")
     visual_frames = {role: len(rendered(role)) for role in evidence}
@@ -141,6 +143,14 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
                 raise
     wait_for(lambda: rows("Alice", "native_combat_sample")[-1]["actors"][0]["health"] < previous_health,
              "second arrow hit the original target", 12)
+    second_key = wait_for(lambda: next(((shot["kind"], shot["caster"], shot["life"], shot["command"])
+                                        for _, shot in flight("Alice", 1, first[1]["release"])
+                                        if shot["terminal"]), None), "short second flight resolved")
+    wait_for(lambda: all(any(shot.get("terminal") == 1
+                             and (shot["kind"], shot["caster"], shot["life"], shot["command"]) == second_key
+                             for row in rows(role, "projectile_presentation_frame")
+                             for shot in row["projectiles"]) for role in evidence),
+             "both desktops rendered the short-flight terminal cue")
     shots = 2
     wait_for(lambda: all(rows(role, "native_combat_sample")[-1]["actors"][0]["dead"]
                          for role in evidence), "both desktops agreed on the ranged death")
@@ -190,9 +200,36 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest):
                         for hit in row["player_hits"] if hit["attacker"] == 1]
         if [(hit["attacker_revision"], hit["target_revision"]) for hit in current_hits] != identities[role]:
             raise RuntimeError(f"{role} replayed a ranged impact after reconnect")
-    report = dict(success=True, scenario="V63 ranged flight, death and corpse loot on two desktops",
+    world_start = max(shot["release"] for _, shot in flight("Alice", 1, start_tick))
+    command("Alice", "pose 60 -480 1 0 3.14159")
+    command("Alice", "shoot 0.25")
+    attempted_releases += 1
+    world = wait_for(lambda: next(((tick, shot) for tick, shot in flight("Alice", 1, world_start)
+                                   if shot["terminal"] == 0), None),
+                     "targetless world shot released", 8)
+    world_key = (world[1]["kind"], world[1]["caster"], world[1]["life"], world[1]["command"])
+    wait_for(lambda: ammo("Alice") == initial["Alice"] - shots - 1,
+             "world shot spent one arrow")
+    before_generation = rows("Bob", "native_combat_sample")[-1]["generation"]
+    command("Bob", "reconnect")
+    wait_for(lambda: rows("Bob", "native_combat_sample")[-1]["generation"] > before_generation,
+             "Bob reconnected during targetless flight")
+    wait_for(lambda: any((shot["kind"], shot["caster"], shot["life"], shot["command"]) == world_key
+                         for shot in rows("Bob", "native_combat_sample")[-1]["projectiles"]),
+             "reconnect restored the world flight")
+    wait_for(lambda: all(any((shot["kind"], shot["caster"], shot["life"], shot["command"]) == world_key
+                             and shot["terminal"] for row in rows(role, "native_combat_sample")
+                             for shot in row["projectiles"]) for role in evidence),
+             "both clients observed the targetless terminal receipt", 85)
+    if any(len([hit for row in rows(role, "native_combat_sample") for hit in row["player_hits"]
+                if hit["attacker"] == 1]) != len(hits[role]) for role in evidence):
+        raise RuntimeError("world miss produced an actor impact")
+    if ammo("Alice") != initial["Alice"] - shots - 1 or ammo("Bob") != initial["Bob"]:
+        raise RuntimeError("world shot or reconnect duplicated ammunition")
+    report = dict(success=True, scenario="V64 aimed ranged flight, world miss, cue and loot on two desktops",
                   manifest=manifest, flight=key, shared_ticks=len(overlap), visual_frames=visual_frames,
-                  shots=shots, attempted_releases=attempted_releases, initial_ammunition=initial,
+                  shots=shots, world_flight=world_key, terminal_cues=[key, second_key],
+                  attempted_releases=attempted_releases, initial_ammunition=initial,
                   final_ammunition={role: ammo(role) for role in evidence}, impacts=hits,
                   corpse_items=corpse["container_count"], looted_player_items=looted_count,
                   relay=asdict(relay.stop()))
