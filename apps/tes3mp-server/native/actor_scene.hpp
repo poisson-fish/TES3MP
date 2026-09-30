@@ -150,6 +150,7 @@ namespace TES3MP::Native
         // Stock AiCombat candidates: connected pathgrid points other than the
         // closest point. An empty result selects the one-second blind run.
         std::vector<std::array<float, 3>> fleePathgridDestinations() const;
+        std::vector<std::array<float, 3>> neighborFleePathgridDestinations(size_t index) const;
         void travelTo(const std::array<float, 3>& destination, bool retainUnavailable = false);
         ActorSceneSnapshot navigate(float speed);
         bool arrived() const;
@@ -179,7 +180,8 @@ namespace TES3MP::Native
             std::optional<std::array<float, 3>> destination);
         void prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
             std::span<const ActorSceneDoor> doors,
-            std::span<const std::optional<std::array<float, 3>>> destinations);
+            std::span<const std::optional<std::array<float, 3>>> destinations,
+            std::span<const std::optional<std::array<float, 3>>> fleeEnemies = {});
         std::unique_ptr<Prepared> prepareBlindRun(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors, const std::array<float, 3>& enemy);
         void setFacing(Prepared& prepared, float yaw) const;

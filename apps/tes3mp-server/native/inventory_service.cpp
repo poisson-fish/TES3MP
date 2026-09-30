@@ -7903,35 +7903,64 @@ namespace TES3MP::Native
         }) || std::ranges::any_of(charges, [&](const auto& change) {
             return change.owner < 2 && changingWerewolfEquipment[change.owner];
         })) throw std::invalid_argument("Werewolf equipment changed during a concurrent item effect");
+        std::vector<uint64_t> neighborTargets(mBinding.mNeighborAi
+            ? mBinding.mNavigatingActor->neighborSnapshots().size() : 0);
+        std::vector<bool> neighborFleeing(neighborTargets.size());
         if (mBinding.mNeighborAi && combat && !dueNeighborRespawn)
         {
             const auto neighbors = mBinding.mNavigatingActor->neighborSnapshots();
-            if (neighbors.empty() || neighbors.size() != combat->actors.size() - 3)
+            if (neighbors.empty() || (mBinding.mNeighborCombat
+                    && neighbors.size() != combat->actors.size() - 3))
                 throw std::logic_error("Bound neighboring NPC body set absent");
             std::vector<ActorMovement> movements(neighbors.size());
             std::vector<std::optional<std::array<float, 3>>> destinations(neighbors.size());
+            std::vector<std::optional<std::array<float, 3>>> fleeEnemies(neighbors.size());
             bool movingNeighbor = false;
             for (size_t i = 0; i < neighbors.size(); ++i)
             {
                 const auto& neighbor = neighbors[i];
+                const size_t index = i + 3;
+                const auto disposition = mBinding.mNeighborCombat
+                    ? committedDisposition(mRuntime.mStore,
+                        mRuntime.ownerPtr(combatOwner(index)).getCellRef().getRefId(),
+                        timedEffects, index) : ActorDisposition{};
                 const CanonicalPlayerEntityState* pursued = nullptr;
                 float nearest = std::numeric_limits<float>::infinity();
                 for (const auto playerId : mBinding.mPlayers)
                 {
                     const auto* player = players.findPlayer(playerId);
                     if (!player || player->transform().cell() != actorCell(neighbor)
+                        || combat->actors[actor(playerId)][8][2] <= 0
                         || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                             return session.playerId() == playerId;
                         })) continue;
-                    if (std::ranges::none_of(combat->players[actor(playerId)].engagements,
-                            [&](const auto& entry) { return entry.witness == neighbor.mActor && entry.fight >= 100; }))
-                        continue;
+                    const bool engaged = std::ranges::any_of(combat->players[actor(playerId)].engagements,
+                        [&](const auto& entry) { return entry.witness == neighbor.mActor && entry.fight >= 100; });
                     const auto& position = player->transform().position();
                     const float dx = float(double(position.x()) / 1024) - neighbor.mPosition[0];
                     const float dy = float(double(position.y()) / 1024) - neighbor.mPosition[1];
                     const float dz = float(double(position.z()) / 1024) - neighbor.mPosition[2];
                     const float distance = dx * dx + dy * dy + dz * dz;
                     if (distance > 2048.f * 2048.f || distance >= nearest) continue;
+                    if (disposition.calm || disposition.commanded) continue;
+                    if (!engaged && !mBinding.mNeighborCombat) continue;
+                    if (!engaged)
+                    {
+                        const auto neighborPtr = mRuntime.ownerPtr(combatOwner(index));
+                        const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                        const float distanceBias = MWMechanics::fightDistanceBias(std::sqrt(distance),
+                            settings.find("iFightDistanceBase")->mValue.getInteger(),
+                            settings.find("fFightDistanceMultiplier")->mValue.getFloat());
+                        const auto* npc = neighborPtr.getType() == ESM::NPC::sRecordId
+                            ? neighborPtr.get<ESM::NPC>() : nullptr;
+                        const float derivedDisposition = npc
+                            ? float(MWMechanics::dispositionWithCharm(
+                                float(npc->mBase->mNpdt.mDisposition), disposition.charm)) : 50.f;
+                        const float dispositionBias = MWMechanics::fightDispositionBias(derivedDisposition,
+                            settings.find("fFightDispMult")->mValue.getFloat());
+                        if (!MWMechanics::aggressiveAtDistance(disposition.fight,
+                                distanceBias, dispositionBias)) continue;
+                    }
                     if (!mBinding.mNavigatingActor->lineOfSight(
                             {neighbor.mPosition[0], neighbor.mPosition[1], neighbor.mPosition[2] + 110.f},
                             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
@@ -7942,16 +7971,75 @@ namespace TES3MP::Native
                 if (pursued)
                 {
                     const auto& position = pursued->transform().position();
-                    destinations[i] = std::array<float, 3>{float(double(position.x()) / 1024),
+                    const std::array<float, 3> enemy{float(double(position.x()) / 1024),
                         float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+                    if (!mBinding.mNeighborCombat)
+                    { destinations[i] = enemy; neighborTargets[i] = pursued->playerId().value(); }
+                    else
+                    {
+                        const auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+                        const auto victim = loadCombatStats(mRuntime.mStore,
+                            combat->actors[actor(pursued->playerId())], timedEffects, actor(pursued->playerId()));
+                        const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                        const float rating = MWMechanics::fleeRating(disposition.flee,
+                            stats.getHealth().getRatio(false),
+                            settings.find("fAIFleeHealthMult")->mValue.getFloat(),
+                            settings.find("fAIFleeFleeMult")->mValue.getFloat(),
+                            MWMechanics::fightDistanceBias(std::sqrt(nearest),
+                                settings.find("iFightDistanceBase")->mValue.getInteger(),
+                                settings.find("fFightDistanceMultiplier")->mValue.getFloat()));
+                        float attackRating = 0.f;
+                        if (const auto held = mRuntime.equippedWeaponCondition(combatOwner(index)))
+                        {
+                            const auto values = mRuntime.installedValues(combatOwner(index));
+                            const auto item = std::ranges::find(values.mObjects, held->mItem,
+                                [](const auto& value) { return value.mRef.mRefNum; });
+                            if (item == values.mObjects.end())
+                                throw std::invalid_argument("Native neighbor flee weapon source missing");
+                            if (const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().search(item->mRef.mRefID))
+                            {
+                                AiMagicContext context{stats, &victim};
+                                context.expandedEffects = mBinding.mExpandedEffects;
+                                const auto scored = rateAiWeapon(context, *weapon, held->mCondition,
+                                    item->mRef.mEnchantmentCharge,
+                                    mBinding.mEnchantedWeaponsAreMagical, mRuntime.mStore);
+                                if (scored) attackRating = *scored;
+                            }
+                        }
+                        neighborFleeing[i] = MWMechanics::fleeOverAttack(rating, attackRating);
+                        if (neighborFleeing[i])
+                        {
+                            fleeEnemies[i] = enemy;
+                            const auto neighborPtr = mRuntime.ownerPtr(combatOwner(index));
+                            const auto points = neighborPtr.getClass().isPureWaterCreature(neighborPtr)
+                                ? std::vector<std::array<float, 3>>{}
+                                : mBinding.mNavigatingActor->neighborFleePathgridDestinations(i);
+                            float nearestEscape = std::numeric_limits<float>::infinity();
+                            const float fromEnemy = std::pow(neighbor.mPosition[0] - enemy[0], 2)
+                                + std::pow(neighbor.mPosition[1] - enemy[1], 2)
+                                + std::pow(neighbor.mPosition[2] - enemy[2], 2);
+                            for (const auto& point : points)
+                            {
+                                const float dx = point[0] - enemy[0], dy = point[1] - enemy[1], dz = point[2] - enemy[2];
+                                if (dx*dx + dy*dy + dz*dz <= fromEnemy) continue;
+                                const float x = point[0] - neighbor.mPosition[0];
+                                const float y = point[1] - neighbor.mPosition[1];
+                                const float z = point[2] - neighbor.mPosition[2];
+                                const float distance = x*x + y*y + z*z;
+                                if (distance < nearestEscape)
+                                { destinations[i] = point; nearestEscape = distance; }
+                            }
+                        }
+                        else { destinations[i] = enemy; neighborTargets[i] = pursued->playerId().value(); }
+                    }
                     movingNeighbor = true;
                 }
                 auto& adjacentMovement = movements[i];
-                const bool traveling = pursued && (!mBinding.mNeighborCombat || !neighborLives[i].respawnTick);
+                const bool traveling = (destinations[i] || fleeEnemies[i])
+                    && (!mBinding.mNeighborCombat || !neighborLives[i].respawnTick);
                 adjacentMovement.walkSpeed = traveling ? mBinding.mNavigationSpeed : 0.f;
-                if (mBinding.mMovementEffects)
+                if (mBinding.mMovementEffects && mBinding.mNeighborCombat)
                 {
-                    const size_t index = i + 3;
                     const auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
                     const auto magnitude = [&](ESM::RefId id) {
                         if (id == ESM::MagicEffect::Levitate && !levitationEnabled) return 0.f;
@@ -8001,7 +8089,7 @@ namespace TES3MP::Native
             {
                 if (!step) step = mBinding.mNavigatingActor->prepareSelectedRestore(
                     mBinding.mNavigatingActor->selectedImage(), doors);
-                mBinding.mNavigatingActor->prepareNeighborNavigation(*step, movements, doors, destinations);
+                mBinding.mNavigatingActor->prepareNeighborNavigation(*step, movements, doors, destinations, fleeEnemies);
             }
         }
         if (mBinding.mNeighborCombat && mBinding.mMovementEffects && combat && step)
@@ -8059,11 +8147,8 @@ namespace TES3MP::Native
                 && !neighborLives[i].respawnTick && combat->actors[index][8][2] > 0
                 && !combat->knockedDown[index] && !hasParalysis(timedEffects, index)
                 && !combat->hitRecoveryTicks[index] && !disposition.calm && !disposition.commanded
+                && !neighborFleeing[i] && neighborTargets[i]
                 && meleeWeapon && (!held || held->mCondition > 0);
-            const auto engaged = [&](PlayerId id) {
-                return std::ranges::any_of(combat->players[actor(id)].engagements,
-                    [&](const auto& entry) { return entry.witness == adjacent->mActor && entry.fight >= 100; });
-            };
             const auto contactAt = [&](uint64_t requested) {
                 return meleeContact(players, *adjacent, requested, reach);
             };
@@ -8072,7 +8157,7 @@ namespace TES3MP::Native
                 && (attack.source != (sourceSlot.isSet() ? wireId(sourceSlot).value() : 0)
                     || attack.weapon != (weapon ? weapon->mId.getRefIdString() : std::string{}));
             if (attack.target && (!able || sourceChanged || !PlayerId::fromValue(attack.target)
-                || !engaged(*PlayerId::fromValue(attack.target))
+                || attack.target != neighborTargets[i]
                 || combat->actors[actor(*PlayerId::fromValue(attack.target))][8][2] <= 0
                 || (!attack.state.mReleased && contactAt(attack.target) != attack.target)))
             {
@@ -8081,9 +8166,9 @@ namespace TES3MP::Native
             }
             if (!attack.target && able && tick.value() / reactionTicks != mActorTick / reactionTicks)
             {
-                const auto selected = contactAt(0);
+                const auto selected = contactAt(neighborTargets[i]);
                 const auto id = PlayerId::fromValue(selected);
-                if (id && engaged(*id) && combat->actors[actor(*id)][8][2] > 0)
+                if (id && selected == neighborTargets[i] && combat->actors[actor(*id)][8][2] > 0)
                 {
                     Misc::Rng::Generator rng{combat->rng};
                     const auto mode = MWMechanics::chooseMeleeAttack(weapon, rng);

@@ -1215,6 +1215,14 @@ namespace TES3MP::Native
         return result;
     }
 
+    std::vector<std::array<float, 3>> InteriorActorScene::neighborFleePathgridDestinations(size_t index) const
+    {
+        const auto* neighbor = mNeighbor.get();
+        while (neighbor && index--) neighbor = neighbor->mNeighbor.get();
+        if (!neighbor) throw std::out_of_range("Neighbor flee pathgrid index outside bound actors");
+        return neighbor->fleePathgridDestinations();
+    }
+
     void InteriorActorScene::travelTo(const std::array<float, 3>& destination, bool retainUnavailable)
     {
         if (retainUnavailable)
@@ -1666,10 +1674,12 @@ namespace TES3MP::Native
 
     void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
         std::span<const ActorSceneDoor> doors,
-        std::span<const std::optional<std::array<float, 3>>> destinations)
+        std::span<const std::optional<std::array<float, 3>>> destinations,
+        std::span<const std::optional<std::array<float, 3>>> fleeEnemies)
     {
         if (!mImpl || prepared.mState->lifetime != mImpl->mLifetime
-            || movements.size() != destinations.size() || movements.size() != neighborSnapshots().size())
+            || movements.size() != destinations.size() || movements.size() != neighborSnapshots().size()
+            || (!fleeEnemies.empty() && fleeEnemies.size() != movements.size()))
             throw std::invalid_argument("Neighbor set navigation binding invalid");
         std::vector<InteriorActorScene*> scenes{this};
         for (auto* next = mNeighbor.get(); next; next = next->mNeighbor.get()) scenes.push_back(next);
@@ -1694,6 +1704,9 @@ namespace TES3MP::Native
             previous->setWorldTransform(candidate);
             mImpl->mWorld.updateSingleAabb(previous);
             parent->mNeighbor = scenes[i + 1]->prepareNavigation(movements[i], doors, destinations[i]);
+            if (!fleeEnemies.empty() && fleeEnemies[i]
+                && (!destinations[i] || parent->mNeighbor->pathUnavailable()))
+                parent->mNeighbor = scenes[i + 1]->prepareBlindRun(movements[i], doors, *fleeEnemies[i]);
             parent = parent->mNeighbor.get();
         }
         std::vector<Prepared*> frames{&prepared};

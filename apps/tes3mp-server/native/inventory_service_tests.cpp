@@ -5555,6 +5555,7 @@ namespace TES3MP::Native::Testing
             || effectFamily == "neighbor-expanded";
         const bool neighborPhysics = effectFamily == "neighbor-physics"
             || effectFamily == "neighbor-pursuit"
+            || effectFamily == "neighbor-disposition"
             || effectFamily == "neighbor-physics-deep"
             || (effectFamily == "movement-effects" && deepMovement && !wetMovement);
         const bool neighborCombat = effectFamily == "neighbor-combat" || neighborPhysics || projectileNeighbors;
@@ -6403,8 +6404,18 @@ namespace TES3MP::Native::Testing
                             ESM::MagicEffect::DemoralizeCreature, ESM::MagicEffect::RallyHumanoid,
                             ESM::MagicEffect::RallyCreature, ESM::MagicEffect::CommandHumanoid,
                             ESM::MagicEffect::CommandCreature, ESM::MagicEffect::TurnUndead})
-                        spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
-                            {effect(id, ESM::RT_Target, 5, 100)});
+                    {
+                        const int magnitude = effectFamily == "neighbor-disposition"
+                            && (id == ESM::MagicEffect::FrenzyHumanoid
+                                || id == ESM::MagicEffect::DemoralizeHumanoid
+                                || id == ESM::MagicEffect::RallyHumanoid) ? 300 : 100;
+                        if (effectFamily == "neighbor-disposition" && id == ESM::MagicEffect::RallyHumanoid)
+                            spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                                {effect(ESM::MagicEffect::DemoralizeHumanoid, ESM::RT_Target, 5, 300),
+                                    effect(id, ESM::RT_Target, 5, magnitude)});
+                        else spell("ai_" + std::to_string(ESM::MagicEffect::refIdToIndex(id)),
+                            {effect(id, ESM::RT_Target, 5, magnitude)});
+                    }
                     spell("ai_calm_stack", {effect(ESM::MagicEffect::CalmHumanoid, ESM::RT_Target, 5, 25)});
                     spell("ai_calm_creature_stack", {effect(ESM::MagicEffect::CalmCreature, ESM::RT_Target, 5, 25)});
                     spell("ai_hurt", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Target, 0, 170)});
@@ -6643,7 +6654,7 @@ namespace TES3MP::Native::Testing
                 if (neighborCombat && !npcRanged)
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
-                if (effectFamily == "neighbor-pursuit")
+                if (effectFamily == "neighbor-pursuit" || effectFamily == "neighbor-disposition")
                     witness.mInventory.mList.push_back({5, ESM::RefId::stringRefId("iron shortsword")});
                 out.startRecord(ESM::NPC::sRecordId, 0); witness.save(out);
                 out.endRecord(ESM::NPC::sRecordId);
@@ -9121,7 +9132,8 @@ namespace TES3MP::Native::Testing
                 std::cout << "concealment invisibility+chameleon=timed rejection=atomic restart=exact expiry=exact\n";
                 return;
             }
-            if (socialLifecycle && (!neighborPhysics || effectFamily == "neighbor-pursuit"))
+            if (socialLifecycle && (!neighborPhysics || effectFamily == "neighbor-pursuit"
+                    || effectFamily == "neighbor-disposition"))
             {
                 using Action = InventoryService::PlayerSocialAction;
                 for (size_t owner = 0; owner < 2; ++owner)
@@ -9375,7 +9387,7 @@ namespace TES3MP::Native::Testing
                     }
                     require(reported && rejected, "Bystander did not report authenticated assault atomically");
                     const auto reportedImage = bytes(service);
-                    if (effectFamily == "neighbor-pursuit")
+                    if (effectFamily == "neighbor-pursuit" || effectFamily == "neighbor-disposition")
                     {
                         require(attackerIndex == 0, "Pursuit movement check must start with the first player");
                         std::vector<CanonicalPlayerEntityState> moved(chase.players().begin(), chase.players().end());
@@ -9383,6 +9395,11 @@ namespace TES3MP::Native::Testing
                             moved[attackerIndex], id<ServerTick>(reportTick + 1),
                             Transform(moved[attackerIndex].transform().cell(), Position3(60*1024, -500*1024, 1024),
                                 moved[attackerIndex].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                        if (effectFamily == "neighbor-disposition")
+                            moved[1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                moved[1], id<ServerTick>(reportTick + 1),
+                                Transform(moved[1].transform().cell(), Position3(60*1024, -250*1024, 1024),
+                                    moved[1].transform().orientation()), LinearVelocity3(0, 0, 0)));
                         const auto pursuit = std::get<CanonicalServerState>(createCanonicalServerState(
                             moved, chase.activeSessions()));
                         const auto world = specialWorld();
@@ -9400,12 +9417,149 @@ namespace TES3MP::Native::Testing
                             return found->position;
                         };
                         const auto tick = [&](InventoryService& runtime, uint64_t at,
-                            std::unique_ptr<PreparedNativeInventory> command = {}) {
-                            auto pending = runtime.prepareNativeTick(pursuit, id<ServerTick>(at), 1.f/30,
+                            std::unique_ptr<PreparedNativeInventory> command = {},
+                            const CanonicalServerState* state = nullptr) {
+                            auto pending = runtime.prepareNativeTick(state ? *state : pursuit, id<ServerTick>(at), 1.f/30,
                                 std::move(command), {}, &world);
                             require(pending && pending->commit(accepted) == CanonicalDurabilityResult::Committed,
                                 "Pursuing neighbor tick failed");
                         };
+                        if (effectFamily == "neighbor-disposition")
+                        {
+                            for (const auto effectId : {ESM::MagicEffect::CalmHumanoid,
+                                    ESM::MagicEffect::FrenzyHumanoid,
+                                    ESM::MagicEffect::DemoralizeHumanoid,
+                                    ESM::MagicEffect::RallyHumanoid})
+                            {
+                                InventoryHost modified(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
+                                auto& current = dynamic_cast<InventoryService&>(modified.service());
+                                current.synchronizeCells(pursuit);
+                                const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(effectId));
+                                const auto view = current.projectInventory(pursuit, castingSession,
+                                    id<ServerTick>(reportTick + 1), id<CanonicalRevision>(reportTick + 1));
+                                require(view && !view->playerInventory.empty(), "Neighbor AI spell inventory absent");
+                                const auto* player = pursuit.findPlayer(castingPlayer);
+                                const ClientMagicUseCommand use{castingSession, SessionGeneration::initial(),
+                                    CommandSequence::initial(), id<CommandId>(reportTick + 1),
+                                    id<CanonicalRevision>(reportTick + 1), MagicUseSourceKind::Spell,
+                                    source("ai_" + std::to_string(index)), MagicUseTargetKind::Actor, target,
+                                    id<ServerTick>(reportTick + 1), CombatRevision::initial(),
+                                    CombatRevision::initial(), view->playerInventory.front().revision};
+                                const ServerCommandProposal cast(castingSession, SessionGeneration::initial(),
+                                    CommandSequence::initial(), id<CommandId>(reportTick + 1),
+                                    id<CanonicalRevision>(reportTick + 1),
+                                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                    MagicUseCommandProposal(use));
+                                auto command = current.prepareMagicUse(pursuit, cast, id<ServerTick>(reportTick + 1));
+                                require(bool(command), "Neighbor AI spell rejected");
+                                uint64_t applied = 0;
+                                for (uint64_t at = reportTick + 1; at <= reportTick + 90; ++at)
+                                {
+                                    auto pending = current.prepareNativeTick(pursuit, id<ServerTick>(at), 1.f/30,
+                                        std::move(command), {}, &world);
+                                    require(bool(pending), "Neighbor AI cast tick absent");
+                                    const auto before = bytes(current);
+                                    require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                            == CanonicalDurabilityResult::Rejected && bytes(current) == before,
+                                        "Rejected neighbor AI write leaked body, effect or attack");
+                                    require(pending->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                        "Neighbor AI cast retry failed");
+                                    const auto state = read(bytes(current));
+                                    if (std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
+                                            return effect.actor == 3 && effect.effectIndex == index
+                                                && effect.sourceKind < 3;
+                                        })) { applied = at; break; }
+                                }
+                                require(applied, "Neighbor AI source never landed");
+                                const auto start = position(current, applied);
+                                const auto saved = bytes(current);
+                                InventoryHost replay(descriptor, testContentManifest(), *registry, *crypto, saved);
+                                auto& resumed = dynamic_cast<InventoryService&>(replay.service());
+                                resumed.synchronizeCells(pursuit);
+                                require(bytes(resumed) == saved, "Neighbor AI effect changed on restart");
+                                std::vector<CanonicalSessionProgress> firstSession(
+                                    pursuit.activeSessions().begin(), pursuit.activeSessions().begin() + 1);
+                                const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(
+                                    pursuit.players(), firstSession));
+                                bool selectedSecond = false;
+                                for (uint64_t at = applied + 1; at <= applied + 25; ++at)
+                                {
+                                    if (at == applied + 10)
+                                    { current.synchronizeCells(disconnected); resumed.synchronizeCells(disconnected); }
+                                    if (at == applied + 11)
+                                    { current.synchronizeCells(pursuit); resumed.synchronizeCells(pursuit); }
+                                    const auto* state = at == applied + 10 ? &disconnected : nullptr;
+                                    tick(current, at, {}, state); tick(resumed, at, {}, state);
+                                    require(bytes(current) == bytes(resumed),
+                                        "Neighbor AI target or flee path diverged after restart");
+                                    if (!selectedSecond
+                                        && read(bytes(current)).combat->neighborAttacks[0].target == 2)
+                                    {
+                                        const auto first = current.projectCombat(pursuit, id<SessionId>(1),
+                                            id<ServerTick>(at), id<CanonicalRevision>(at));
+                                        const auto second = current.projectCombat(pursuit, id<SessionId>(2),
+                                            id<ServerTick>(at), id<CanonicalRevision>(at));
+                                        require(first && second
+                                                && std::ranges::equal(first->presentation(), second->presentation()),
+                                            "Frenzy target action differed between observers");
+                                        selectedSecond = true;
+                                    }
+                                }
+                                const auto changed = position(current, applied + 25);
+                                if (effectId == ESM::MagicEffect::CalmHumanoid)
+                                    require(changed == start && !read(bytes(current)).combat->neighborAttacks[0].target,
+                                        "Calm did not stop neighbor pursuit and attack");
+                                else if (effectId == ESM::MagicEffect::DemoralizeHumanoid)
+                                    require(changed[1] > start[1] + 1.f
+                                            && !read(bytes(current)).combat->neighborAttacks[0].target,
+                                        "Demoralize did not make the neighbor flee");
+                                else if (effectId == ESM::MagicEffect::FrenzyHumanoid)
+                                    require(selectedSecond,
+                                        "Frenzy did not select the closer unengaged player");
+                                else require(changed[1] < start[1] - 1.f,
+                                    "Rally did not counter Demoralize and restore pursuit");
+                                for (uint64_t observer : {1, 2})
+                                {
+                                    const auto snapshot = current.projectInventory(pursuit, id<SessionId>(observer),
+                                        id<ServerTick>(applied + 25), id<CanonicalRevision>(applied + 25));
+                                    require(snapshot && snapshot->equipment
+                                            && std::ranges::any_of(snapshot->equipment->motions, [&](const auto& motion) {
+                                                return motion.placement == target && motion.position == changed;
+                                            }), "Observer lost committed neighbor AI movement");
+                                }
+                                std::array<float, 3> preExpiryPosition{};
+                                for (uint64_t at = applied + 26; at <= applied + 175; ++at)
+                                {
+                                    tick(current, at); tick(resumed, at);
+                                    require(bytes(current) == bytes(resumed),
+                                        "Neighbor AI expiry diverged after restart");
+                                    if (at == applied + 165) preExpiryPosition = position(current, at);
+                                }
+                                require(std::ranges::none_of(read(bytes(current)).timedEffects,
+                                        [&](const auto& effect) {
+                                            return effect.actor == 3 && effect.effectIndex == index
+                                                && effect.sourceKind < 3;
+                                        }), "Neighbor AI spell survived expiry");
+                                if (effectId == ESM::MagicEffect::FrenzyHumanoid)
+                                    require(read(bytes(current)).combat->neighborAttacks[0].target != 2,
+                                        "Frenzy retained the unengaged target after expiry");
+                                if (effectId == ESM::MagicEffect::RallyHumanoid)
+                                    require(std::ranges::none_of(read(bytes(current)).timedEffects,
+                                            [&](const auto& effect) {
+                                                return effect.actor == 3 && effect.sourceKind < 3
+                                                    && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(
+                                                        ESM::MagicEffect::DemoralizeHumanoid));
+                                            }), "Paired Demoralize survived Rally expiry");
+                                if (effectId == ESM::MagicEffect::CalmHumanoid
+                                    || effectId == ESM::MagicEffect::DemoralizeHumanoid)
+                                    require(position(current, applied + 175)[1] < preExpiryPosition[1] - 1.f,
+                                        "Neighbor did not resume pursuit after AI effect expiry");
+                                std::cout << "neighbor disposition effect=" << index << " start="
+                                    << start[0] << ',' << start[1] << " changed=" << changed[0] << ',' << changed[1]
+                                    << " restart=exact expiry=clear observers=2 rejection=atomic\n";
+                            }
+                            return;
+                        }
                         InventoryHost ordinary(descriptor, testContentManifest(), *registry, *crypto, reportedImage);
                         auto& baseline = dynamic_cast<InventoryService&>(ordinary.service());
                         baseline.synchronizeCells(pursuit);
