@@ -5,6 +5,7 @@
 #include "equipmentslots.hpp"
 #include "esmstore.hpp"
 #include <components/esm3/loadench.hpp>
+#include <components/esm3/loadweap.hpp>
 
 namespace MWWorld
 {
@@ -41,18 +42,24 @@ namespace MWWorld
             if constexpr (requires { base.mEnchant; }) result.mEnchant = base.mEnchant;
             return result;
         });
-        if (result.mType == ESM::Weapon::sRecordId && result.mScript.empty() && !result.mEnchant.empty())
+        if (result.mType == ESM::Weapon::sRecordId && !result.mEnchant.empty())
         {
             const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
             result.mStrikeOnly = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes;
         }
-        if (result.mScript.empty() && !result.mEnchant.empty())
+        if (!result.mEnchant.empty())
         {
             const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
             result.mConstant = enchantment && enchantment->mData.mType == ESM::Enchantment::ConstantEffect;
             result.mWhenUsed = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenUsed;
         }
         return result;
+    }
+    inline bool scriptedRangedItem(const InventoryItemRecord& record)
+    {
+        if (record.mType != ESM::Weapon::sRecordId || record.mScript.empty()) return false;
+        const auto type = static_cast<const ESM::Weapon*>(record.mBase)->mData.mType;
+        return type >= ESM::Weapon::MarksmanBow && type <= ESM::Weapon::Bolt;
     }
 
     inline void validateEquipmentItemSlots(const InventoryItemRecord& record, ESM::RefNum identity, int64_t count,
@@ -66,7 +73,10 @@ namespace MWWorld
                     || (!record.mStrikeOnly && !record.mConstant && !record.mWhenUsed && !record.mEnchant.empty()
                         && slot != InventoryStore::Slot_Shirt)
                     || (!record.mScript.empty()
-                        && (slot != InventoryStore::Slot_Shirt || !npcStats)))
+                        && !((slot == InventoryStore::Slot_Shirt && npcStats)
+                            || (scriptedRangedItem(record)
+                                && (slot == InventoryStore::Slot_CarriedRight
+                                    || slot == InventoryStore::Slot_Ammunition)))))
                     throw std::invalid_argument("Invalid equipment slot, count, duplicate item or unavailable effects");
                 found = true;
             }

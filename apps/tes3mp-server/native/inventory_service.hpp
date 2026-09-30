@@ -2,6 +2,8 @@
 #define TES3MP_NATIVE_INVENTORY_SERVICE_HPP
 
 #include "equipment_runtime.hpp"
+#include <apps/openmw/mwscript/compilercontext.hpp>
+#include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include "actor_spawns.hpp"
 #include "actor_scene.hpp"
 #include "actor_campaign.hpp"
@@ -178,6 +180,8 @@ namespace TES3MP::Native
         std::map<ESM::RefId, ItemPrototypeId> mItemIds;
         MWWorld::WorldModel mWorld;
         MWWorld::LocalScripts mScripts;
+        MWScript::CompilerContext mCompilerContext;
+        MWScript::ScriptManager mScriptManager;
         EquipmentRuntime mRuntime;
         EquipmentBytes mImage;
         EquipmentBytes mActorImage;
@@ -225,6 +229,8 @@ namespace TES3MP::Native
         {
             size_t owner;
             ESM::RefId record;
+            size_t sourceOwner;
+            ESM::RefNum source;
         };
         uint64_t mActorTick = 0;
         std::array<float, 3> mActorVelocity{};

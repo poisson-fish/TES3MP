@@ -56,7 +56,8 @@ namespace TES3MP::Native
     // zero-length wind-up uses shared stock random strength, saved with the RNG.
     // Bound shoot-release keys consume one projectile and persist its launch record
     // with fatigue and animation progress. V47/V48 retain their eight frozen launches.
-    // Scripted/enchanted ranged sources reject. Fresh campaign required.
+    // V64 carries scripted and enchanted ranged sources through durable flight;
+    // item scripts remain closed until contextual execution is available.
     // V46 schedules both players' melee intents through participant-bound
     // wind-up, release, KF hit and follow-through. Direction, requested strength,
     // weapon instance/record, target life and interruption persist atomically.

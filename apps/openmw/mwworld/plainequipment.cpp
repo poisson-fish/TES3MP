@@ -202,7 +202,7 @@ namespace MWWorld
                 const auto record = inventoryItemRecord(content, ref.mRefID);
                 const auto* base = &record;
                 validateEquipmentItemSlots(record, ref.mRefNum, ref.mCount, input.mSlots, input.mNpcStats.has_value());
-                if (!base->mScript.empty() && !input.mNpcStats)
+                if (!base->mScript.empty() && !input.mNpcStats && !scriptedRangedItem(record))
                     throw std::invalid_argument("Inventory script services or equipment type unsupported");
                 const auto effect = input.mNpcStats && !base->mWhenUsed && ref.mRefNum == input.mSlots[InventoryStore::Slot_Shirt]
                     ? MWMechanics::constantFortifyLuckMagnitude(content, base->mEnchant) : 0.f;
@@ -227,7 +227,8 @@ namespace MWWorld
                     throw std::invalid_argument("Oversized equipment animation state");
                 for (const auto& animation : object.mAnimationState.mScriptedAnims)
                     textValue(animation.mGroup, true);
-                if (!base->mScript.empty() && (std::abs(static_cast<int64_t>(ref.mCount)) > 1 || base->mEnchant.empty()))
+                if (!base->mScript.empty() && !scriptedRangedItem(record)
+                    && (std::abs(static_cast<int64_t>(ref.mCount)) > 1 || base->mEnchant.empty()))
                     throw std::invalid_argument("Scripted equipment requires single constant shirts");
                 const auto& declarations = equipmentDeclarations(content, base->mScript, scripts);
                 RefData::validateRestore(object, base->mScript, declarations);
@@ -264,34 +265,56 @@ namespace MWWorld
 
     EquipmentScriptLocals::EquipmentScriptLocals(
         const ESMStore& content, ESM::RefId script, MWBase::ScriptManager& scripts)
-        : mRecord(content.get<ESM::Script>().find(script))
-        , mId(script)
-        , mText(mRecord->mScriptText)
-        , mDeclarations(scripts.getLocals(script))
     {
+        const auto* record = content.get<ESM::Script>().find(script);
+        if (record->mScriptText.size() > 256 * 1024)
+            throw std::invalid_argument("Equipment script text bound exceeded");
+        mEntries.emplace(script, Entry{record, record->mScriptText, scripts.getLocals(script)});
+        const auto& bound = declarations(content, script);
+        for (const auto name : { "onpcequip", "pcskipequip" })
+            if (bound.getType(name) != 's' && bound.getType(name) != 'l')
+                throw std::invalid_argument("Equipment script requires integer equip/skip locals");
+    }
+
+    EquipmentScriptLocals::EquipmentScriptLocals(MWBase::ScriptManager& scripts)
+        : mManager(&scripts)
+    {
+    }
+
+    const Compiler::Locals& EquipmentScriptLocals::declarations(const ESMStore& content, ESM::RefId script) const
+    {
+        auto found = mEntries.find(script);
+        if (found == mEntries.end())
+        {
+            if (!mManager || mEntries.size() >= 256 || script.empty())
+                throw std::invalid_argument("Equipment script declaration binding unavailable");
+            const auto* record = content.get<ESM::Script>().search(script);
+            if (!record) throw std::invalid_argument("Equipment script absent from content");
+            if (record->mScriptText.size() > 256 * 1024)
+                throw std::invalid_argument("Equipment script text bound exceeded");
+            found = mEntries.emplace(script, Entry{record, record->mScriptText, mManager->getLocals(script)}).first;
+        }
+        const auto& entry = found->second;
+        if (content.get<ESM::Script>().search(script) != entry.record
+            || entry.record->mScriptText != entry.text)
+            throw std::invalid_argument("Equipment script content/declaration binding changed");
+        const auto& namesByType = entry.declarations;
         size_t total = 0;
         for (char type : { 's', 'l', 'f' })
         {
-            const auto& names = mDeclarations.get(type);
+            const auto& names = namesByType.get(type);
             if (names.size() > MaxVariables - total)
                 throw std::invalid_argument("Equipment script declaration limit exceeded");
             total += names.size();
             for (size_t i = 0; i < names.size(); ++i)
                 if (names[i].empty() || names[i].size() > MaxName || names[i].find('\0') != std::string::npos
-                    || mDeclarations.getType(names[i]) != type || mDeclarations.getIndex(names[i]) != static_cast<int>(i))
+                    || namesByType.getType(names[i]) != type || namesByType.getIndex(names[i]) != static_cast<int>(i))
                     throw std::invalid_argument("Invalid equipment script declaration");
         }
         for (const auto name : { "onpcequip", "pcskipequip" })
-            if (mDeclarations.getType(name) != 's' && mDeclarations.getType(name) != 'l')
-                throw std::invalid_argument("Equipment script requires integer equip/skip locals");
-    }
-
-    const Compiler::Locals& EquipmentScriptLocals::declarations(const ESMStore& content, ESM::RefId script) const
-    {
-        if (script.empty() || script != mId || content.get<ESM::Script>().search(script) != mRecord
-            || mRecord->mScriptText != mText)
-            throw std::invalid_argument("Equipment script content/declaration binding changed");
-        return mDeclarations;
+            if (const char type = namesByType.getType(name); type != ' ' && type != 's' && type != 'l')
+                throw std::invalid_argument("Equipment script equip/skip local must be integer");
+        return namesByType;
     }
 
     void EquipmentScriptLocals::validate(
@@ -601,7 +624,7 @@ namespace MWWorld
             registered(item, context.mWorldModel);
             const auto record = inventoryItemRecord(context.mStore, node.mRef.getRefId());
             if (record.mBase != node.mBase
-                || (!context.mNpcStats && !record.mScript.empty())
+                || (!context.mNpcStats && !record.mScript.empty() && !scriptedRangedItem(record))
                 || node.mData.getLuaScripts() || node.mData.getCustomData()
                 || node.mData.isDeletedByContentFile() || node.mRef.getCount(false) == std::numeric_limits<int>::min()
                 || context.mLocalScripts.prepareRemove(&node.mRef).hasRegistration())
@@ -616,7 +639,8 @@ namespace MWWorld
             {
                 equipmentDeclarations(context.mStore, script, context.mScriptLocals.get());
                 context.mScriptLocals->validate(node.mData.getLocals(), context.mStore, script);
-                if (std::abs(static_cast<int64_t>(node.mRef.getCount(false))) > 1 || record.mEnchant.empty())
+                if (!scriptedRangedItem(record)
+                    && (std::abs(static_cast<int64_t>(node.mRef.getCount(false))) > 1 || record.mEnchant.empty()))
                     throw std::invalid_argument("Scripted equipment requires single constant shirts");
             }
             if (context.mNpcStats && !record.mWhenUsed && record.mSlots.contains(InventoryStore::Slot_Shirt))
@@ -746,7 +770,10 @@ namespace MWWorld
                 || (!record.mStrikeOnly && !record.mWhenUsed && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
                     && slot != InventoryStore::Slot_Shirt)
                 || (!record.mScript.empty()
-                    && (slot != InventoryStore::Slot_Shirt || !mContext.mNpcStats)))
+                    && !((slot == InventoryStore::Slot_Shirt && mContext.mNpcStats)
+                        || (scriptedRangedItem(record)
+                            && (slot == InventoryStore::Slot_CarriedRight
+                                || slot == InventoryStore::Slot_Ammunition)))))
                 throw std::invalid_argument("Equipment type or required effect services unsupported");
             if (equip)
             {
@@ -897,8 +924,9 @@ namespace MWWorld
                     static_cast<const InventoryStore&>(source).mSlots.end(), [&](const auto& slot) {
                         return State::position(static_cast<const InventoryStore&>(source), slot) == expectedIdentity;
                     }))
-            || !item.getClass().getScript(item).empty())
-            throw std::invalid_argument("Transfer requires a current unequipped unscripted item and distinct owners");
+            || (!item.getClass().getScript(item).empty()
+                && !scriptedRangedItem(inventoryItemRecord(contexts[0].mStore, item.getCellRef().getRefId()))))
+            throw std::invalid_argument("Transfer requires a current supported item and distinct owners");
         const auto generated = world.getLastGeneratedRefNum();
         if (expectedRevision >= std::numeric_limits<size_t>::max() - 1
             || generated.mContentFile != -1 || generated.mIndex == std::numeric_limits<uint32_t>::max())
@@ -909,7 +937,9 @@ namespace MWWorld
         if (takeAll)
             for (auto it = source.begin(); it != source.end(); ++it)
             {
-                if (!it->getClass().getScript(*it).empty()
+                if ((!it->getClass().getScript(*it).empty()
+                        && !scriptedRangedItem(inventoryItemRecord(contexts[0].mStore,
+                            it->getCellRef().getRefId())))
                     || (!allowEquippedSource && dynamic_cast<const InventoryStore*>(&source)
                         && std::any_of(static_cast<const InventoryStore&>(source).mSlots.begin(),
                             static_cast<const InventoryStore&>(source).mSlots.end(), [&](const auto& slot) {

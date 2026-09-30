@@ -73,8 +73,7 @@ namespace TES3MP::Native
             const MWWorld::ESMStore& store, const InventoryServiceBinding& binding)
         {
             const auto* type = MWMechanics::getWeaponType(weapon.mData.mType);
-            if (!weapon.mScript.empty() || !ammunition.mScript.empty()
-                || !(type->mWeaponClass == ESM::WeaponType::Thrown ? weapon.mId == ammunition.mId
+            if (!(type->mWeaponClass == ESM::WeaponType::Thrown ? weapon.mId == ammunition.mId
                     : type->mWeaponClass == ESM::WeaponType::Ranged && type->mAmmoType == ammunition.mData.mType))
                 return false;
             if (ammunition.mEnchant.empty()) return true;
@@ -1239,8 +1238,14 @@ namespace TES3MP::Native
     InventoryService::InventoryService(MWWorld::ESMStore& content, ESM::ReadersCache& readers,
         InventoryServiceBinding binding, bool recovering)
         : mBinding(std::move(binding)), mWorld(content, readers, 1), mScripts(content),
+          mCompilerContext(MWScript::CompilerContext::Type_Full),
+          mScriptManager(content, mCompilerContext, 1),
           mRuntime(content, mWorld, mScripts, identity(mBinding, content), mBinding.mContent, mBinding.mActors,
-              {}, nullptr, recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding), mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor, worldCells(mBinding), mBinding.worldDomains().size(), mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64, mBinding.mConstantEffects)
+              std::make_shared<const MWWorld::EquipmentScriptLocals>(mScriptManager), &mScriptManager,
+              recovering ? std::optional<size_t>{ 2 } : std::nullopt, true, containers(mBinding),
+              mBinding.mLootLevel, mBinding.mLootSeed, worldItems(mBinding), mBinding.mDoor,
+              worldCells(mBinding), mBinding.worldDomains().size(),
+              mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64, mBinding.mConstantEffects)
     {
         if (mBinding.mPersistentConditions && !mBinding.mPlayerCastLifecycle)
             throw std::invalid_argument("Persistent conditions require the current actor lifecycle");
@@ -2089,6 +2094,20 @@ namespace TES3MP::Native
         try
         {
             const auto& input = binding->transaction();
+            // A scripted projectile's recoverable locals live on its consumed
+            // source stack until contact. Keep that state frozen while flying.
+            if (mCombat && std::ranges::any_of(mCombat->arrows, [&](const auto& arrow) {
+                    if (arrow.terminal || arrow.casterKind != 1
+                        || arrow.caster != binding->player().value()) return false;
+                    const auto* ammo = mRuntime.mStore.get<ESM::Weapon>().search(
+                        ESM::RefId::stringRefId(arrow.ammoRecord));
+                    return ammo && !ammo->mScript.empty()
+                        && ((input.stackId && input.stackId->value() == arrow.ammunition)
+                            || ((input.kind == InventoryTransactionKind::EquipItem
+                                    || input.kind == InventoryTransactionKind::UnequipItem)
+                                && input.slot && (*input.slot == EquipmentSlot::Ammunition
+                                    || *input.slot == EquipmentSlot::CarriedRight)));
+                })) return {};
             if (input.kind == InventoryTransactionKind::PickupItem || input.kind == InventoryTransactionKind::DropItem)
             {
                 validate(players, *binding);
@@ -2447,7 +2466,7 @@ namespace TES3MP::Native
         const bool bow = mBinding.mBowRelease && rangedWeapon(weapon, mBinding.mRangedRelease);
         if (!targetIndex && !bow) return {};
         if (mBinding.mAuthoritativeAim && (bow != attack.aimPoint.has_value())) return {};
-        if (bow && (!attack.commandId.value() || !weapon->mScript.empty()
+        if (bow && (!attack.commandId.value()
                 || mCombat->arrows.size() >= MaximumActorProjectiles
                 || !equippedAmmunition(mRuntime.installedValues(owner), mRuntime.mStore, *weapon,
                     mBinding))) return {};
@@ -3881,18 +3900,33 @@ namespace TES3MP::Native
                 if (recovery.owner < 2 || recovery.owner >= mRuntime.ownerCount())
                     throw std::invalid_argument("Native projectile recovery victim invalid");
                 const auto* record = mRuntime.mStore.get<ESM::Weapon>().search(recovery.record);
-                if (!record || !record->mScript.empty() || !record->mEnchant.empty())
+                if (!record || !record->mEnchant.empty())
                     throw std::invalid_argument("Native projectile recovery source invalid");
                 auto& recipient = values.mContainers.at(recovery.owner - 2);
                 if (recipient.mObjects.size() >= PlainEquipmentValues::MaxItems)
                     throw std::invalid_argument("Native projectile recovery inventory full");
                 ESM::ObjectState item;
-                item.blank();
-                item.mRef.mRefID = recovery.record;
+                if (record->mScript.empty())
+                {
+                    item.blank();
+                    item.mRef.mRefID = recovery.record;
+                    item.mEnabled = 1;
+                    item.mHasCustomState = false;
+                }
+                else
+                {
+                    if (recovery.sourceOwner >= mRuntime.ownerCount() || !recovery.source.isSet())
+                        throw std::invalid_argument("Native scripted projectile source owner invalid");
+                    const auto& source = recovery.sourceOwner < 2 ? values.mActors[recovery.sourceOwner]
+                        : values.mContainers.at(recovery.sourceOwner - 2);
+                    const auto original = std::ranges::find(source.mObjects, recovery.source,
+                        [](const auto& object) { return object.mRef.mRefNum; });
+                    if (original == source.mObjects.end() || original->mRef.mRefID != recovery.record)
+                        throw std::invalid_argument("Native scripted projectile source changed");
+                    item = *original;
+                }
                 item.mRef.mRefNum = {++counter.mIndex, -1};
                 item.mRef.mCount = 1;
-                item.mEnabled = 1;
-                item.mHasCustomState = false;
                 recipient.mObjects.push_back(std::move(item));
             }
             for (auto& actor : values.mActors) actor.mLastGenerated = counter;
@@ -5989,13 +6023,15 @@ namespace TES3MP::Native
             {
                 const auto record = ESM::RefId::stringRefId(request.projectile->ammoRecord);
                 const auto* ammunition = mRuntime.mStore.get<ESM::Weapon>().find(record);
-                if (ammunition->mEnchant.empty() && ammunition->mScript.empty())
+                if (ammunition->mEnchant.empty())
                 {
                     const float storeChance = gmst.find("fProjectileThrownStoreChance")->mValue.getFloat();
                     if (!std::isfinite(storeChance) || std::abs(storeChance) > 10000.f)
                         throw std::invalid_argument("Native projectile recovery chance invalid");
                     if (Misc::Rng::rollProbability(rng) < storeChance / 100.f)
-                        recoveries.push_back({combatOwner(defender), record});
+                        recoveries.push_back({combatOwner(defender), record, owner,
+                            ESM::RefNum{uint32_t(request.projectile->ammunition),
+                                std::bit_cast<int32_t>(uint32_t(request.projectile->ammunition >> 32))}});
                 }
             }
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
@@ -6882,7 +6918,7 @@ namespace TES3MP::Native
                     const auto* weapon = winningWeapon
                         ? mRuntime.mStore.get<ESM::Weapon>().find(winningWeapon->mRef.mRefID) : nullptr;
                     const bool ranged = rangedWeapon(weapon, mBinding.mRangedRelease);
-                    if (ranged && (!mBinding.mRangedFlight || !weapon->mScript.empty()))
+                    if (ranged && !mBinding.mRangedFlight)
                         throw std::invalid_argument("Native NPC ranged selection has unsupported source");
                     if (winningWeapon && winningWeapon->mRef.mRefNum
                         != values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])

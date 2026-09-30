@@ -6,6 +6,7 @@
 #include "../mwmechanics/npcstats.hpp"
 
 #include <array>
+#include <map>
 #include <optional>
 
 #include <components/compiler/locals.hpp>
@@ -15,19 +16,24 @@ namespace MWWorld
 {
     class InventoryStore;
 
-    // Trusted, immutable declaration binding for one shirt script. Uses the
-    // stock declaration parser; scripts must belong to content, which outlives
-    // this binding. No script instructions or registration run.
+    // Bounded declaration bindings for detached item locals. The connected
+    // runtime can bind additional content scripts on first use; no script
+    // instructions or registration run here.
     class EquipmentScriptLocals
     {
-        const ESM::Script* mRecord;
-        ESM::RefId mId;
-        std::string mText;
-        const Compiler::Locals mDeclarations;
+        struct Entry
+        {
+            const ESM::Script* record;
+            std::string text;
+            Compiler::Locals declarations;
+        };
+        MWBase::ScriptManager* mManager = nullptr;
+        mutable std::map<ESM::RefId, Entry> mEntries;
 
     public:
         static constexpr size_t MaxVariables = 32, MaxName = 64;
         EquipmentScriptLocals(const ESMStore& content, ESM::RefId script, MWBase::ScriptManager& scripts);
+        explicit EquipmentScriptLocals(MWBase::ScriptManager& scripts);
         const Compiler::Locals& declarations(const ESMStore& content, ESM::RefId script) const;
         void validate(const MWScript::Locals& locals, const ESMStore& content, ESM::RefId script) const;
     };

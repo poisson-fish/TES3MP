@@ -218,6 +218,16 @@ namespace TES3MP::Native
         // Bind every owner before loot consumes dynamic IDs, so even base-only
         // diagnostic owners have identical identities during empty recovery.
         Misc::Rng::Generator rng{ lootSeed };
+        const auto bindRangedLocals = [&](ContainerStore& inventory) {
+            inventory.forEachStored([&](auto& ref, auto) {
+                const auto record = inventoryItemRecord(content, ref.mRef.getRefId());
+                if (!scriptedRangedItem(record)) return;
+                if (!mScriptLocals || !declarations)
+                    throw std::invalid_argument("Scripted ranged source requires declaration services");
+                mScriptLocals->declarations(content, record.mScript);
+                ref.mData.setLocals(*content.get<ESM::Script>().find(record.mScript), *declarations);
+            });
+        };
         // All owner identities exist before variable-size character loot. A
         // restart must bind exactly the same owners without generating items.
         for (size_t i = 0; i < actors.size(); ++i)
@@ -226,6 +236,7 @@ namespace TES3MP::Native
                 auto& inventory = mInventories[i];
                 inventory.fill(content.get<ESM::NPC>().find(actors[i].mBase)->mInventory, actors[i].mBase, rng,
                     {content, world, lootLevel});
+                bindRangedLocals(inventory);
                 initializeStartingEquipment(i);
                 if (inventory.begin() != inventory.end()) mItems[i] = *inventory.begin();
             }
@@ -244,6 +255,7 @@ namespace TES3MP::Native
                     : ptr.get<ESM::Container>()->mBase->mInventory;
                 store.fill(items, actorInventory(ptr) ? binding.mBase : ESM::RefId{}, rng,
                     {content, world, lootLevel});
+                bindRangedLocals(store);
                 if (inventoryStorage(i + 2)) initializeStartingEquipment(i + 2);
             }
             ContainerStoreResolution witness(store, ptr);
@@ -339,6 +351,7 @@ namespace TES3MP::Native
                         const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
                         const bool supportedConstant = mConstantEffects && record.mConstant;
                         if (!record.mStrikeOnly && !record.mWhenUsed && !supportedConstant
+                            && !scriptedRangedItem(record)
                             && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
                     }
