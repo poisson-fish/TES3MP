@@ -1,4 +1,5 @@
 #include "creature.hpp"
+#include "npcmovement.hpp"
 
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
@@ -14,6 +15,7 @@
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/aisetting.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/creaturecustomdataresetter.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/difficultyscaling.hpp"
@@ -287,25 +289,7 @@ namespace MWClass
         }
 
         MWWorld::LiveCellRef<ESM::Creature>* ref = ptr.get<ESM::Creature>();
-        int min, max;
-        switch (type)
-        {
-            case 0:
-                min = ref->mBase->mData.mAttack[0];
-                max = ref->mBase->mData.mAttack[1];
-                break;
-            case 1:
-                min = ref->mBase->mData.mAttack[2];
-                max = ref->mBase->mData.mAttack[3];
-                break;
-            case 2:
-            default:
-                min = ref->mBase->mData.mAttack[4];
-                max = ref->mBase->mData.mAttack[5];
-                break;
-        }
-
-        float damage = min + (max - min) * attackStrength;
+        float damage = MWMechanics::creatureAttackDamage(*ref->mBase, type, attackStrength);
         bool healthdmg = true;
         if (!weapon.isEmpty())
         {
@@ -902,9 +886,8 @@ namespace MWClass
         const MWMechanics::CreatureStats& stats = getCreatureStats(ptr);
         const GMST& gmst = getGmst();
 
-        return gmst.fMinWalkSpeedCreature->mValue.getFloat()
-            + 0.01f * stats.getAttribute(ESM::Attribute::Speed).getModified()
-            * (gmst.fMaxWalkSpeedCreature->mValue.getFloat() - gmst.fMinWalkSpeedCreature->mValue.getFloat());
+        return creatureWalkSpeed(stats.getAttribute(ESM::Attribute::Speed).getModified(),
+            gmst.fMinWalkSpeedCreature->mValue.getFloat(), gmst.fMaxWalkSpeedCreature->mValue.getFloat());
     }
 
     float Creature::getRunSpeed(const MWWorld::Ptr& ptr) const

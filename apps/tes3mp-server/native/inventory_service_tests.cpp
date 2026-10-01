@@ -1,3 +1,4 @@
+#include "stock_actor_script.hpp"
 #include <apps/openmw/mwworld/intervention.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwmechanics/objectmagic.hpp>
@@ -5586,7 +5587,14 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool summons = effectFamily == "summons-integrated";
+        const bool summons = effectFamily.starts_with("summons-integrated");
+        const auto summonProfile = effectFamily;
+        const auto summonEffect = summonProfile == "summons-integrated-quadruped" ? ESM::MagicEffect::SummonClannfear
+            : summonProfile == "summons-integrated-flying" ? ESM::MagicEffect::SummonWingedTwilight
+            : summonProfile == "summons-integrated-caster" ? ESM::MagicEffect::SummonStormAtronach
+            : summonProfile == "summons-integrated-disease" ? ESM::MagicEffect::SummonBonewalker
+            : summonProfile == "summons-integrated-ranged" ? ESM::MagicEffect::SummonSkeletalMinion
+            : ESM::MagicEffect::SummonScamp;
         const bool boundLifecycleOnly = effectFamily == "bound-equipment-lifecycle" || summons;
         const bool boundEquipment = effectFamily == "bound-equipment" || boundLifecycleOnly;
         if (boundEquipment) { effectFamily = "player-travel"; participantHits = true; }
@@ -5629,7 +5637,7 @@ namespace TES3MP::Native::Testing
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
             ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
             ESM::MagicEffect::FortifyMagicka, ESM::MagicEffect::FortifyFatigue, ESM::MagicEffect::FortifyMaximumMagicka};
-        writePlacementFixtureModels(scratch);
+        writePlacementFixtureModels(scratch, summons ? 1000.f : 500.f);
         writeDoorFixtureModel(scratch);
         auto actorSettings = settings;
         if (interruptedCasts)
@@ -6421,18 +6429,36 @@ namespace TES3MP::Native::Testing
                     else spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
                     if (!objectSpells) spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
                 }
-                if (summons)
+                if (summons && summonProfile != "summons-integrated-resources")
                 {
-                    spell("summon_lifecycle", {effect(ESM::MagicEffect::SummonScamp, ESM::RT_Self, 20, 0)});
-                    auto creature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("scamp"));
+                    spell("summon_lifecycle", {effect(summonEffect, ESM::RT_Self, 30, 0)});
+                    auto creature = *base.store().get<ESM::Creature>().find(MWMechanics::getSummonedCreature(summonEffect, base.store()));
                     creature.mId = ESM::RefId::stringRefId("summon_lifecycle_body");
-                    creature.mScript = {}; creature.mSpells.mList.clear();
-                    creature.mFlags |= ESM::Creature::Bipedal | ESM::Creature::Weapon;
-                    creature.mInventory.mList = {{1, ESM::RefId::stringRefId("iron shortsword")}};
+                    if (summonProfile != "summons-integrated-disease") creature.mScript = {};
+                    if (summonProfile == "summons-integrated")
+                    {
+                        creature.mSpells.mList.clear();
+                        creature.mFlags |= ESM::Creature::Bipedal | ESM::Creature::Weapon;
+                        creature.mInventory.mList = {{1, ESM::RefId::stringRefId("iron shortsword")}};
+                    }
+                    if (summonProfile == "summons-integrated-flying")
+                    {
+                        // Stock Winged Twilight has walking flags despite its winged
+                        // body. Exercise that same authored body with intrinsic flight.
+                        creature.mFlags |= ESM::Creature::Flies;
+                        creature.mFlags &= ~ESM::Creature::Walks;
+                    }
+                    if (summonProfile == "summons-integrated-ranged")
+                    {
+                        creature.mInventory.mList = {{1, ESM::RefId::stringRefId("long bow")},
+                            {100, ESM::RefId::stringRefId("steel arrow")}};
+                    }
+                    std::cout << "summon stock body=" << creature.mModel << " flags=" << unsigned(creature.mFlags)
+                        << " spells=" << creature.mSpells.mList.size() << " inventory=" << creature.mInventory.mList.size() << '\n';
                     creature.mData.mHealth = 1000; creature.mData.mFatigue = 1000;
                     creature.mData.mCombat = 100; creature.mAiData.mFight = creature.mAiData.mFlee = 0;
                     out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
-                    auto setting = *base.store().get<ESM::GameSetting>().find("sMagicScampID");
+                    auto setting = *base.store().get<ESM::GameSetting>().find(MWMechanics::summonSetting(summonEffect));
                     setting.mValue.setString(creature.mId.getRefIdString());
                     out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out); out.endRecord(ESM::GameSetting::sRecordId);
                 }
@@ -6984,7 +7010,7 @@ namespace TES3MP::Native::Testing
                     }
                 if (boundEquipment)
                 {
-                    female.mNpdt.mHealth = beast.mNpdt.mHealth = 100;
+                    female.mNpdt.mHealth = beast.mNpdt.mHealth = summons ? 30000 : 100;
                     ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("travel_bound_ability");
                     ability.mData.mType = ESM::Spell::ST_Ability;
                     ability.mEffects.populate({{ESM::MagicEffect::BoundBoots, {}, {}, ESM::RT_Self, 4, 1, 0, 0}});
@@ -8559,6 +8585,37 @@ namespace TES3MP::Native::Testing
             const auto door = loadout.ordinaryDoors(cell, 128).at(0).mIdentity;
             InteriorActorScene scene(loadout, "NPC Door Path Test", actor, "meshes/base_anim.nif", "meshes/base_animkna.nif");
             const std::array ids{door}; scene.bindDoors(ids, avoidance); scene.enableNavigation(settings.string());
+            if (summonProfile == "summons-integrated-resources")
+            {
+                std::vector<DynamicActorBody> bodies;
+                for (const auto& [effect, setting] : MWMechanics::summonSettings())
+                {
+                    const auto record = MWMechanics::getSummonedCreature(effect, loadout.store());
+                    if (record.empty()) continue; // Reserved, unconfigured creature slots.
+                    const auto* creature = loadout.store().get<ESM::Creature>().search(record);
+                    if (!creature && (effect == ESM::MagicEffect::SummonCreature04 || effect == ESM::MagicEffect::SummonCreature05))
+                        continue; // Stock reserved selectors name placeholder records.
+                    require(creature, "Configured stock summon creature absent");
+                    require(creature->mScript.empty() || !stockActorSpawnDisease(creature->mScript, loadout.store()).empty(), "Stock summon body requires an unsupported script");
+                    scene.validateActorAnimations(record);
+                    const auto hits = scene.bindHitAnimations(record, true);
+                    require(hits.animations.count && hits.knockout.stop && hits.knockdown.stop,
+                        "Stock summon hit/body resources incomplete");
+                    (void)scene.bindCastAnimations(record);
+                    bodies.push_back({DynamicActorOwnership::IdentityTag | (bodies.size() + 1),
+                        record, {180.f, -400.f, 31.f}, 0.f});
+                    std::cout << "stock resources=" << record << " model=" << creature->mModel
+                        << " flags=" << unsigned(creature->mFlags) << '\n';
+                }
+                require(bodies.size() >= 20, "Stock body resource check requires Morrowind and both expansions");
+                std::vector<uint64_t> neighbors;
+                for (const auto& body : bodies) neighbors.push_back(body.actor);
+                const std::array cells{cell};
+                InteriorActorScene combined(loadout, cells, actor, "meshes/base_anim.nif", "meshes/base_animkna.nif", neighbors, bodies);
+                require(combined.neighborSnapshots().size() == bodies.size(), "Stock body collision binding incomplete");
+                std::cout << "stock summon bodies=" << bodies.size() << " collision/movement/attack/hit/death/cast resources=bound\n";
+                return;
+            }
             if (participantHits)
             {
                 const std::array names{"npc_hit_female", "npc_hit_beast", "npc_door_actor"};
@@ -8971,6 +9028,14 @@ namespace TES3MP::Native::Testing
                 require(actors.bodies.size() == 1 && actors.ownership.entries.size() == 1,
                     "Actual summon cast did not create one owned body");
                 const uint64_t summoned = actors.bodies.front().collision.actor;
+                if (summonProfile == "summons-integrated-disease")
+                {
+                    step({}, {}, true);
+                    const auto initialized = state(run->service());
+                    require(std::ranges::any_of(initialized.combat->conditions, [&](const auto& condition) {
+                        return condition.actor == initialized.combat->actors.size() - 1 && condition.source == hash("brown rot");
+                    }), "Stock Bonewalker disease bootstrap absent");
+                }
                 {
                     auto mismatched = actors;
                     mismatched.ownership.entries.front().source.owner.id = 2;
@@ -8983,7 +9048,7 @@ namespace TES3MP::Native::Testing
                     require(rejected, "Recovery admitted mismatched summon owner/source");
                 }
                 const auto deadline = std::ranges::find_if(created.timedEffects, [&](const auto& effect) {
-                    return effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::SummonScamp));
+                    return effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(summonEffect));
                 })->expiresTick;
                 require(dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies() == collisionBodies + 1,
                     "Summon cast did not install collision membership");
@@ -9004,8 +9069,7 @@ namespace TES3MP::Native::Testing
                 require(std::ranges::any_of(replica.groundItems.front().actorSpawns,
                     [summoned](const auto& spawn) { return spawn.placement == summoned && spawn.record; })
                     && std::ranges::any_of(replica.equipment->actors,
-                        [summoned](const auto& actor) { return actor.actor.value() == summoned
-                            && actor.slots[size_t(EquipmentSlot::CarriedRight)].has_value(); }),
+                        [summoned](const auto& actor) { return actor.actor.value() == summoned; }),
                     "Summon creation/stock inventory did not replicate");
                 const auto position = [&] {
                     const auto snapshot = view();
@@ -9021,15 +9085,17 @@ namespace TES3MP::Native::Testing
                             previous.transform().orientation()), LinearVelocity3(0, 0, 0)));
                     authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
                 };
-                moveOwner(Position3(380 * 1024, -400 * 1024, 1024));
+                moveOwner(Position3(650 * 1024, -400 * 1024, (summonProfile == "summons-integrated-flying" ? 250 : 1) * 1024));
                 const auto start = position();
                 for (size_t i = 0; i < 45; ++i) step({}, {}, true);
                 const auto followed = position();
                 std::cout << "summon follow: start=" << start[0] << ',' << start[1] << ',' << start[2]
                     << " current=" << followed[0] << ',' << followed[1] << ',' << followed[2] << '\n';
-                require(std::pow(followed[0] - 380, 2) + std::pow(followed[1] + 400, 2)
-                    < std::pow(start[0] - 380, 2) + std::pow(start[1] + 400, 2),
+                require(std::pow(followed[0] - 650, 2) + std::pow(followed[1] + 400, 2)
+                    < std::pow(start[0] - 650, 2) + std::pow(start[1] + 400, 2),
                     "Summon did not follow its living cast owner");
+                if (summonProfile == "summons-integrated-flying")
+                    require(followed[2] > start[2] + 10.f, "Intrinsic flying summon did not follow vertically");
                 restart();
                 const auto normal = normalWeapon(1); equip(1, normal, EquipmentSlot::CarriedRight, true);
                 replica = view();
@@ -9051,23 +9117,64 @@ namespace TES3MP::Native::Testing
                 auto attack = run->service().prepareMeleeAttack(authority, request, id<ServerTick>(tick + 1));
                 require(bool(attack), "Summon owner attack was not admitted");
                 step(std::move(attack), {}, true);
-                bool fought = false, restartedAttack = false;
+                bool fought = false, restartedAttack = false, spellReleased = false, rangedReleased = false, meleeReleased = false;
+                bool clearedProjectileAim = false;
                 while (tick + 1 < deadline)
                 {
                     const auto previous = state(run->service());
-                    step({}, {}, true);
-                    const auto current = state(run->service());
-                    const auto& action = current.combat->neighborAttacks.back();
-                    if (action.target && !restartedAttack)
+                    if (summonProfile == "summons-integrated-ranged" && !clearedProjectileAim
+                        && (!previous.combat->swings[0] || previous.combat->swings[0]->state.mHit))
                     {
-                        require(action.target == placement && action.targetKind == 2
-                            && action.targetLife == current.neighborLives.at(victimIndex - 3).generation,
+                        // Once the owner's initiating blow lands, leave the physical arrow sweep clear.
+                        moveOwner(Position3(int64_t((enemy->position[0] + 250) * 1024),
+                            int64_t((enemy->position[1] + 150) * 1024), int64_t(enemy->position[2] * 1024)));
+                        clearedProjectileAim = true;
+                    }
+                    const auto cues = step({}, {}, true);
+                    for (const auto& cue : cues)
+                        if (cue.actorCaster() && cue.casterId() == summoned && cue.castSucceeded) spellReleased = true;
+                    const auto current = state(run->service());
+                    rangedReleased |= std::ranges::any_of(current.combat->arrows,
+                        [&](const auto& arrow) { return arrow.casterKind == 2 && arrow.caster == summoned; });
+                    const auto& action = current.combat->neighborAttacks.back();
+                    const auto dynamic = DynamicActorSet::restore(current.dynamicActors);
+                    if (dynamic.bodies.empty()) throw std::runtime_error("Stock summon disappeared during combat at tick " + std::to_string(tick)
+                        + " previous health=" + std::to_string(previous.combat->actors.back()[8][2])
+                        + " owner health=" + std::to_string(previous.combat->actors[0][8][2]));
+                    const auto body = dynamic.bodies.front();
+                    const bool inCast = body.casting.has_value();
+                    meleeReleased |= action.contact && action.state.mHit;
+                    if ((action.target || inCast) && !restartedAttack
+                        && (summonProfile != "summons-integrated-caster" || inCast))
+                    {
+                        require(inCast ? (body.casting->target == placement && body.casting->targetKind == 2
+                                && body.casting->targetLife == current.neighborLives.at(victimIndex - 3).generation)
+                            : (action.target == placement && action.targetKind == 2
+                                && action.targetLife == current.neighborLives.at(victimIndex - 3).generation),
                             "Summon combat target lost actor/life identity");
+                        if (inCast)
+                        {
+                            for (bool changedResource : {false, true})
+                            {
+                                auto mismatched = dynamic;
+                                if (changedResource) ++mismatched.bodies.front().animationResources[0];
+                                else ++mismatched.bodies.front().casting->targetLife;
+                                auto bad = image(run->service());
+                                const auto encoded = mismatched.image();
+                                std::memcpy(bad.data() + 16, encoded.data(), encoded.size());
+                                bool rejected = false;
+                                try { InventoryHost invalid(descriptor, manifest, *registry, *crypto, bad); }
+                                catch (const std::invalid_argument&) { rejected = true; }
+                                require(rejected, "Recovery admitted changed summon cast life/resources");
+                            }
+                        }
                         restart(); restartedAttack = true;
                     }
-                    if (action.contact && action.state.mHit
-                        && current.combat->actors[victimIndex][8][2] < previous.combat->actors[victimIndex][8][2])
-                        fought = true;
+                    if ((current.combat->actors[victimIndex][8][2] < previous.combat->actors[victimIndex][8][2]
+                            || current.combat->actors[victimIndex][10][2] < previous.combat->actors[victimIndex][10][2])
+                        && body.enemy.id == placement
+                        && (!previous.combat->swings[0] || previous.combat->swings[0]->state.mHit)
+                        && (meleeReleased || spellReleased || rangedReleased)) fought = true;
                 }
                 const auto finalAction = state(run->service()).combat->neighborAttacks.back();
                 const auto finalBody = DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.front();
@@ -9075,6 +9182,9 @@ namespace TES3MP::Native::Testing
                 std::cout << "summon fight: target=" << finalAction.target << " enemy=" << finalBody.enemy.id
                     << " fought=" << fought << " restart=" << restartedAttack << " position="
                     << finalPosition[0] << ',' << finalPosition[1] << ',' << finalPosition[2] << '\n';
+                std::cout << "summon attacks: melee=" << meleeReleased << " ranged=" << rangedReleased << " spell=" << spellReleased << '\n';
+                if (summonProfile == "summons-integrated-caster") require(spellReleased, "Stock caster did not release its known spell");
+                if (summonProfile == "summons-integrated-ranged") require(rangedReleased, "Stock armed body did not release its ranged attack");
                 require(fought && restartedAttack, "Summon did not fight and retain its owner-directed actor target across restart");
                 step({}, {}, true);
                 require(tick == deadline && DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.empty()
@@ -9106,7 +9216,7 @@ namespace TES3MP::Native::Testing
                 require(image(accepted.service()) == durable
                     && DynamicActorSet::restore(state(accepted.service()).dynamicActors).bodies.size() == 1,
                     "Uncertain durable summon state failed coherent recovery");
-                std::cout << "summons cast=create follow=stock combat=actor-life expiry=remove writes=atomic restart=exact\n";
+                std::cout << "summons profile=" << summonProfile << " cast=create follow=stock combat=actor-life expiry=remove writes=atomic restart=exact\n";
                 return;
             }
             if (!boundLifecycleOnly) for (size_t i = 0; i < boundEffects.size(); ++i)

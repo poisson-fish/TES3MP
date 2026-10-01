@@ -127,6 +127,7 @@ namespace TES3MP::Native
         bool mSummons = false;
         DynamicActorSet mDynamicActors;
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
+        std::map<uint64_t, BoundCastAnimations> mDynamicCasts;
         std::function<std::shared_ptr<InteriorActorScene>(std::span<const DynamicActorBody>)> mCreateActorSet;
         bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
         std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;

@@ -1,4 +1,6 @@
 #include "actor_scene.hpp"
+#include "stock_actor_script.hpp"
+#include <components/sceneutil/animationkeys.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <components/esm3/loadweap.hpp>
 #include "actor_inventory.hpp"
@@ -186,6 +188,7 @@ namespace TES3MP::Native
         std::map<uint64_t, btCollisionObject*> mActorObstacles;
         std::unique_ptr<MWPhysics::ActorFrameData> mActor;
         osg::Vec3f mActorOffset;
+        bool mActorRotating = false;
         uint64_t mActorId;
         std::vector<uint64_t> mContacts;
         std::string mFingerprint;
@@ -203,6 +206,7 @@ namespace TES3MP::Native
         bool mAvoidanceEnabled = false;
         bool mSmoothMovement = false;
         bool mWaterNavigation = false;
+        bool mIntrinsicFlying = false;
         bool mDynamicDestination = false;
         bool mEnchantedWeaponsAreMagical = false;
         bool mOnlyAppropriateAmmunitionBypassesResistance = false;
@@ -255,12 +259,13 @@ namespace TES3MP::Native
                 .mMovement = frame.mMovement, .mLastStuckPosition = frame.mLastStuckPosition,
                 .mWaterlevel = water, .mHalfExtentsZ = frame.mHalfExtentsZ,
                 .mOldHeight = frame.mOldHeight, .mStuckFrames = frame.mStuckFrames,
-                .mFlying = movement.levitating, .mWasOnGround = frame.mIsOnGround,
+                .mFlying = movement.levitating || mIntrinsicFlying, .mWasOnGround = frame.mIsOnGround,
                 .mWaterCollision = movement.waterWalking && water > -1e30f};
         }
 
         float movementSpeed(const MWPhysics::ActorFrameData& frame, const ActorMovement& movement) const
         {
+            if (mIntrinsicFlying) return movement.walkSpeed;
             if (movement.levitating) return movement.flySpeed;
             if (frame.mPosition.z() < frame.mSwimLevel) return movement.swimSpeed;
             return movement.walkSpeed;
@@ -405,17 +410,23 @@ namespace TES3MP::Native
                 if (!identities.insert(id).second) throw std::invalid_argument("Duplicate collision placement across cells");
                 const bool npc = ptr.getType() == ESM::NPC::sRecordId;
                 const bool actorBody = npc || ptr.getType() == ESM::Creature::sRecordId;
-                if (actorBody && !npc && (!(ptr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Bipedal)
-                    || (ptr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Flies)))
-                    throw std::invalid_argument("Creature collision currently requires a walking biped");
                 if (ptr.getType() == ESM::CreatureLevList::sRecordId)
                     throw std::invalid_argument("Unresolved leveled actor in interior collision domain");
-                if (id == actor && (!actorBody || initialCorpse(ptr) || !cls.getScript(ptr).empty()))
-                    throw std::invalid_argument("Selected actor must be a living unscripted native NPC");
+                if (id == actor && (!actorBody || initialCorpse(ptr)
+                    || (!cls.getScript(ptr).empty()
+                        && !(std::ranges::any_of(dynamic, [id](const auto& body) { return body.actor == id; })
+                            && !stockActorSpawnDisease(cls.getScript(ptr), mStore).empty()))))
+                    throw std::invalid_argument("Selected actor requires unsupported corpse/script services");
                 if (actorBody && initialCorpse(ptr))
                     throw std::invalid_argument("Corpse collision requires gameplay animation");
                 const auto& position = ptr.getRefData().getPosition();
-                const float scale = ptr.getCellRef().getScale();
+                float scale = ptr.getCellRef().getScale();
+                if (actorBody && !npc)
+                {
+                    osg::Vec3f adjusted(scale, scale, scale);
+                    cls.adjustScale(ptr, adjusted, false);
+                    scale = adjusted.x();
+                }
                 validatePosition(position, scale);
                 auto model = npc
                     ? VFS::Path::Normalized(MWClass::npcModel(*loadout.store().get<ESM::Race>().find(
@@ -456,8 +467,10 @@ namespace TES3MP::Native
                     if (id == actor)
                     {
                         mActorBase = ptr.getCellRef().getRefId();
-                        mActorOffset = offset;
-                        mAgentBounds = {DetourNavigator::CollisionShapeType::Cylinder, extents * scale};
+                        mIntrinsicFlying = !npc && (ptr.get<ESM::Creature>()->mBase->mFlags & ESM::Creature::Flies);
+                        mActorOffset = shape->mCollisionBox.mCenter * scale;
+                        mActorRotating = !hull.mRotationallyInvariant;
+                        mAgentBounds = {hull.mType, extents * scale};
                         mActor = std::make_unique<MWPhysics::ActorFrameData>(MWPhysics::ActorFrameData{
                             .mPosition = position.asVec3(),
                             .mCollisionObject = body->mObject.get(),
@@ -618,6 +631,15 @@ namespace TES3MP::Native
             }
             if (frame.mWaterCollision)
                 frame.mCollisionObject->getBroadphaseHandle()->m_collisionFilterMask |= MWPhysics::CollisionType_Water;
+            struct RestoreActor
+            {
+                btCollisionWorld& world;
+                btCollisionObject* body;
+                btTransform transform;
+                ~RestoreActor() { body->setWorldTransform(transform); world.updateSingleAabb(body); }
+            } restoreActor{mWorld, frame.mCollisionObject, frame.mCollisionObject->getWorldTransform()};
+            frame.mCollisionObject->setWorldTransform(actorTransform(frame));
+            mWorld.updateSingleAabb(frame.mCollisionObject);
             MWPhysics::MovementSolver::unstuck(frame, &mWorld);
             MWPhysics::MovementSolver::move(frame, 1.f/60.f, &mWorld, {}, effects);
             if (!std::isfinite(frame.mPosition.length2()) || frame.mPosition.length2()>3e14f)
@@ -635,10 +657,14 @@ namespace TES3MP::Native
             simulate(frame, contacts, {0, path.isPathConstructed() ? speed : 0,
                 jumpVelocity(frame, movement)});
         }
+        btTransform actorTransform(const MWPhysics::ActorFrameData& frame) const noexcept
+        {
+            const osg::Quat rotation = mActorRotating ? osg::Quat(frame.mRotation.y(), osg::Vec3f(0, 0, -1)) : osg::Quat();
+            return btTransform(Misc::Convert::toBullet(rotation), Misc::Convert::toBullet(frame.mPosition + rotation * mActorOffset));
+        }
         void updateTransform() noexcept
         {
-            auto transform=mActor->mCollisionObject->getWorldTransform();
-            transform.setOrigin(Misc::Convert::toBullet(mActor->mPosition+mActorOffset));
+            auto transform=actorTransform(*mActor);
             mActor->mCollisionObject->setWorldTransform(transform);
             mWorld.updateSingleAabb(mActor->mCollisionObject);
         }
@@ -650,6 +676,26 @@ namespace TES3MP::Native
             std::span<const ActorSceneDoor> doors)
         {
             const float speed = movement.enabled ? movementSpeed(frame, movement) : movement.walkSpeed;
+            if (frame.mFlying && travel.hasDestination)
+            {
+                // Reuse the stock route around floor-level obstructions when
+                // available. Elevated destinations can still fly directly.
+                path.update(frame.mPosition, 8, 8, 0, mAgentBounds, navigationFlags(), *mNavigator);
+                MWPhysics::ActorTracer tracer;
+                const auto offset = Misc::Convert::toOsg(actorTransform(frame).getOrigin()) - frame.mPosition;
+                tracer.doTrace(frame.mCollisionObject, frame.mPosition + offset,
+                    travel.destination + offset, &mWorld);
+                const bool routed = path.isPathConstructed() && tracer.mFraction < 1.f;
+                const auto delta = travel.destination - frame.mPosition;
+                const float horizontal = std::sqrt(delta.x()*delta.x() + delta.y()*delta.y());
+                frame.mRotation.y() = routed ? path.getZAngleToNext(frame.mPosition.x(), frame.mPosition.y())
+                    : std::atan2(delta.x(), delta.y());
+                frame.mRotation.x() = routed ? path.getXAngleToNext(frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z())
+                    : -std::atan2(delta.z(), horizontal);
+                simulate(frame, contacts, {0, delta.length2() > 64.f ? speed : 0.f, 0});
+                updateBreath(frame, travel, movement);
+                return;
+            }
             if (travel.door)
             {
                 const auto door = std::ranges::find(doors, travel.door, &ActorSceneDoor::mId);
@@ -928,7 +974,34 @@ namespace TES3MP::Native
             if (!(*source)->hasGroupStart("spellcast")) continue;
             return {readCastAnimations(**source), identity};
         }
+        if (const auto* creature = mImpl->mStore.get<ESM::Creature>().search(actor);
+            creature && !(creature->mFlags & ESM::Creature::Bipedal))
+            for (auto source = sources.rbegin(); source != sources.rend(); ++source)
+            {
+                SceneUtil::AnimationKeys clip;
+                if (!SceneUtil::findAnimationKeys(**source, "attack1", "start", "stop", clip)) continue;
+                const auto stop = uint32_t(std::ceil((clip.mStop->first - clip.mStart->first) * 30.f));
+                if (stop < 2 || stop > 1800) throw std::invalid_argument("Creature cast duration invalid");
+                // CharacterController casts at start for random attack groups.
+                return {{{CastAnimation{1, stop}, CastAnimation{1, stop}, CastAnimation{1, stop}}}, identity};
+            }
         throw std::invalid_argument("Selected NPC lacks spellcast animation keys");
+    }
+
+    void InteriorActorScene::validateActorAnimations(ESM::RefId actor)
+    {
+        const auto [sources, identity] = bindAnimationSources(actor);
+        for (const auto group : {"idle", "walkforward", "death1"})
+        {
+            const auto source = std::find_if(sources.rbegin(), sources.rend(), [&](const auto& keys) {
+                return keys->hasGroupStart(group);
+            });
+            SceneUtil::AnimationKeys clip;
+            if (source == sources.rend() || !SceneUtil::findAnimationKeys(**source, group, "start", "stop", clip)
+                || clip.mStop->first <= clip.mStart->first || clip.mStop->first - clip.mStart->first > 60)
+                throw std::invalid_argument("Actor movement/death animation absent or invalid: " + std::string(group));
+        }
+        for (const auto mode : {"chop", "slash", "thrust"}) (void)bindWeaponMeleeAnimation(actor, nullptr, mode);
     }
 
     std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
@@ -1035,6 +1108,15 @@ namespace TES3MP::Native
             return nullptr;
         };
         auto* keys = findGroup(group);
+        if (!weapon)
+            if (const auto* creature = mImpl->mStore.get<ESM::Creature>().search(actor);
+                creature && !(creature->mFlags & ESM::Creature::Bipedal))
+            {
+                const auto number = attack == "slash" ? 2 : attack == "thrust" ? 3 : 1;
+                group = "attack" + std::to_string(number);
+                keys = findGroup(group);
+                if (!keys) throw std::invalid_argument("Native creature attack group absent");
+            }
         // CharacterController's real-weapon fallback, using the same layered sources.
         if (!keys && weapon)
         {
@@ -1797,9 +1879,7 @@ namespace TES3MP::Native
         {
             auto* previous = scenes[i]->mImpl->mActor->mCollisionObject;
             restore.bodies.emplace_back(previous, previous->getWorldTransform());
-            auto candidate = previous->getWorldTransform();
-            candidate.setOrigin(Misc::Convert::toBullet(parent->mState->frame->mPosition
-                + scenes[i]->mImpl->mActorOffset));
+            auto candidate = scenes[i]->mImpl->actorTransform(*parent->mState->frame);
             previous->setWorldTransform(candidate);
             mImpl->mWorld.updateSingleAabb(previous);
             parent->mNeighbor = scenes[i + 1]->prepareNavigation(movements[i], doors, destinations[i]);

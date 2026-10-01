@@ -6,6 +6,8 @@
 
 namespace MWClass
 {
+    inline float creatureWalkSpeed(float speed, float minimum, float maximum)
+    { return minimum + 0.01f * speed * (maximum - minimum); }
     // Context-free parts of the stock NPC movement rules. The single-player
     // class and the detached server actor supply their own live stats/settings.
     inline float normalizedEncumbrance(float weight, float capacity)

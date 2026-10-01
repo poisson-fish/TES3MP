@@ -228,7 +228,7 @@ namespace MWRender
 
         TextKeyListener* mTextKeyListener;
         std::string mCommittedMeleeGroup;
-        bool mCommittedCast = false;
+        std::string mCommittedCastGroup;
         std::string mCommittedKnockoutGroup;
         unsigned mCommittedKnockoutState = 0;
         float mCommittedKnockoutFrame = 0;

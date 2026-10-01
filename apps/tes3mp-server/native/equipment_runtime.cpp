@@ -1,3 +1,4 @@
+#include "stock_actor_script.hpp"
 #include "equipment_runtime.hpp"
 #include <source_location>
 #include "actor_inventory.hpp"
@@ -175,7 +176,9 @@ namespace TES3MP::Native
             if (binding.mDynamicActor && !actorInventory(ptr))
                 throw std::invalid_argument("Generated shared owner requires an actor inventory");
             if (!connected || (!actorInventory(ptr) && ptr.getType() != ESM::Container::sRecordId)
-                || !ptr.getClass().getScript(ptr).empty() || (actorInventory(ptr) && !placement))
+                || (!ptr.getClass().getScript(ptr).empty()
+                    && !(binding.mDynamicActor && !stockActorSpawnDisease(ptr.getClass().getScript(ptr), content).empty()))
+                || (actorInventory(ptr) && !placement))
                 throw std::invalid_argument("Shared inventory requires an unscripted container or placed actor");
         }
         // Bind lazy service identity during trusted startup, never during a
@@ -883,7 +886,8 @@ namespace TES3MP::Native
         detached.mPtrRegistry.mLastGenerated = counter;
         ManualRef reference(mStore, record);
         auto actor = reference.getPtr();
-        if (!actor.getClass().isActor() || !actor.getClass().getScript(actor).empty())
+        if (!actor.getClass().isActor() || (!actor.getClass().getScript(actor).empty()
+            && stockActorSpawnDisease(actor.getClass().getScript(actor), mStore).empty()))
             throw std::invalid_argument("Dynamic inventory requires an unscripted actor");
         detached.registerPtr(actor);
         InventoryStore inventory;

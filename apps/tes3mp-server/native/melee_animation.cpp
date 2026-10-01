@@ -26,13 +26,33 @@ namespace TES3MP::Native
         if (mGroup.empty() || mGroup.size() > 64 || !std::isfinite(speed) || speed <= 0 || speed > 100
             || (attack != "chop" && attack != "slash" && attack != "thrust" && !mShoot))
             throw std::invalid_argument("Invalid native melee animation input");
-        // Validate before copying external resource data. This bounded slice
-        // admits complete directional clips only, not random attacks or loops.
+        // Validate before copying external directional or creature resources.
         size_t count = 0;
         for (const auto& [time, key] : keys)
         {
             if (++count > 4096 || !std::isfinite(time) || time < 0 || time > 3600 || key.size() > 256)
                 throw std::invalid_argument("Native melee text-key bounds exceeded");
+        }
+        mCreatureAttack = mGroup == "attack1" || mGroup == "attack2" || mGroup == "attack3"
+            || mGroup == "swimattack1" || mGroup == "swimattack2" || mGroup == "swimattack3";
+        if (mCreatureAttack)
+        {
+            SceneUtil::AnimationKeys clip;
+            if (!SceneUtil::findAnimationKeys(keys, mGroup, "start", "stop", clip)
+                || clip.mStop->first <= clip.mStart->first || clip.mStop->first - clip.mStart->first > 60)
+                throw std::invalid_argument("Incomplete native creature attack clip");
+            float hit = clip.mStart->first;
+            for (auto key = keys.lowerBound(clip.mStart->first); key != keys.end() && key->first <= clip.mStop->first; ++key)
+                if (key->second == mGroup + ": hit") { hit = key->first; break; }
+            // Stock random creature attacks have no variable wind-up/follow keys;
+            // missing hit keys dispatch at start. Keep the same staged clock.
+            mWindUp = {clip.mStart->first, clip.mStart->first};
+            mRelease = {clip.mStart->first, hit};
+            mFollow.fill({hit, clip.mStop->first});
+            mMinimumAttack = mMinimumHit = -1.f;
+            mKeys = std::make_shared<const SceneUtil::TextKeyMap>(keys);
+            mState.mTime = clip.mStart->first;
+            return;
         }
         auto range = [&](const std::string& start, const std::string& stop) {
             SceneUtil::AnimationKeys found;
@@ -149,6 +169,19 @@ namespace TES3MP::Native
         if (!std::isfinite(duration) || duration < 0 || duration > 1.f / 30)
             throw std::invalid_argument("Invalid native melee step duration");
         if (mState.mPhase == Phase::Complete) return {};
+        if (mCreatureAttack)
+        {
+            if (!mState.mReleased) return {};
+            const bool first = mState.mPhase == Phase::WindUp;
+            const float target = std::min(mState.mTime + duration * mSpeed, mFollow[0].mStop);
+            std::optional<int> hit;
+            if (!mState.mHit && (first || mState.mTime <= mRelease.mStop) && target >= mRelease.mStop)
+            { hit = MWMechanics::meleeHitType(mGroup, "hit"); mState.mHit = true; }
+            mState.mTime = target;
+            mState.mPhase = target >= mFollow[0].mStop ? Phase::Complete
+                : mState.mHit ? Phase::Follow : Phase::Release;
+            return hit;
+        }
         const float previousTime = mState.mTime;
         bool includeStart = false;
         if (mState.mPhase == Phase::WindUp && mState.mReleased && mState.mTime >= mMinimumAttack)

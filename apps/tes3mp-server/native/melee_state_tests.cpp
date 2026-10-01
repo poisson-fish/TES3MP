@@ -338,6 +338,12 @@ namespace
             "Nonlooping knockout released an exhausted actor");
         require(readKnockoutAnimation({}).advance(0, true) == 0
             && readKnockoutAnimation({}).advance(0, false) == 1, "Missing knockout fallback invalid");
+        SceneUtil::TextKeyMap held;
+        held.emplace(1.f, "knockout: start"); held.emplace(2.f, "knockout: loop start");
+        held.emplace(2.f, "knockout: loop stop"); held.emplace(3.f, "knockout: stop");
+        const auto frozen = readKnockoutAnimation(std::array<const SceneUtil::TextKeyMap*, 1>{&held});
+        require(frozen.loopStart == 30 && frozen.loopStop == 31 && frozen.advance(30, true) == 30
+            && frozen.advance(30, false) == 31, "Stock creature exhaustion hold lost recovery tail");
         override.emplace(6.f, "knockout: loop stop");
         bool rejected = false;
         try { (void)readKnockoutAnimation(std::array<const SceneUtil::TextKeyMap*, 2>{&base, &override}); }
@@ -656,6 +662,37 @@ namespace
     }
 }
 
+namespace
+{
+    void creatureScheduling()
+    {
+        using TES3MP::Native::MeleeAnimation;
+        for (unsigned direction = 0; direction < 3; ++direction)
+            for (bool hitKey : {false, true})
+            {
+                const auto group = "attack" + std::to_string(direction + 1);
+                SceneUtil::TextKeyMap keys;
+                keys.emplace(1.f, group + ": start"); keys.emplace(2.f, group + ": stop");
+                if (hitKey) keys.emplace(1.4f, group + ": hit");
+                const std::array<std::string, 3> modes{"chop", "slash", "thrust"};
+                MeleeAnimation clip(keys, group, modes[direction], 1.f);
+                require(clip.windUp() == -1.f && clip.release(.5f), "Creature attack lost stock random strength");
+                unsigned hits = 0;
+                for (unsigned frame = 0; frame < 70; ++frame)
+                {
+                    MeleeAnimation restored(keys, group, modes[direction], 1.f);
+                    restored.restore(clip.snapshot());
+                    const auto actual = clip.advance(1.f / 30);
+                    require(restored.advance(1.f / 30) == actual && restored.snapshot() == clip.snapshot(),
+                        "Creature attack restart changed clock or duplicated hit");
+                    if (actual) { ++hits; require(*actual == int(direction), "Creature hit chose the wrong damage range"); }
+                }
+                require(hits == 1 && clip.snapshot().mPhase == MeleeAnimation::Phase::Complete,
+                    "Creature hit key/start fallback did not complete exactly once");
+            }
+    }
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -670,6 +707,7 @@ int main(int argc, char** argv)
         else if (filter == "hit-knockdown") hitKnockdown();
         else if (filter == "attack-modes") attackModes();
         else if (filter == "projectile-mechanics") projectileMechanics();
+        else if (filter == "creature-scheduling") creatureScheduling();
         else throw std::invalid_argument("Unknown melee filter");
         std::cout << "PASS " << filter << " (synthetic content, shared stock primitives, no Environment)\n";
         return 0;

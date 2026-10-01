@@ -35,10 +35,16 @@ namespace TES3MP::Native
         if (SceneUtil::findAnimationKeys(**source, group, "loop start", "loop stop", loop))
         {
             if (loop.mStart->first < start || loop.mStop->first > stop
-                || loop.mStart->first >= loop.mStop->first)
-                throw std::invalid_argument("Native knockout loop invalid");
+                || loop.mStart->first > loop.mStop->first)
+                throw std::invalid_argument("Native knockout loop invalid " + std::string(group) + " clip="
+                    + std::to_string(start) + ":" + std::to_string(stop) + " loop="
+                    + std::to_string(loop.mStart->first) + ":" + std::to_string(loop.mStop->first));
             result.loopStart = unsigned(std::ceil((loop.mStart->first - start) * 30.f));
             result.loopStop = unsigned(std::ceil((loop.mStop->first - start) * 30.f));
+            // Stock creatures author a zero-duration exhaustion loop: hold that
+            // pose until fatigue returns, then continue the same recovery clip.
+            if (result.loopStart == result.loopStop && result.loopStart < result.stop)
+                result.loopStop = result.loopStart + 1;
             if (result.loopStart >= result.loopStop)
                 throw std::invalid_argument("Native knockout loop below tick resolution");
         }

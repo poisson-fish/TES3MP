@@ -61,6 +61,7 @@ namespace TES3MP::Native
         std::string mGroup;
         std::string mIdentity;
         bool mShoot = false;
+        bool mCreatureAttack = false;
         unsigned mDirection = 0;
         float mSpeed, mMinimumAttack, mMinimumHit;
         Range mWindUp, mRelease;

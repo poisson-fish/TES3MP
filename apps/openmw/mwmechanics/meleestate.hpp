@@ -12,7 +12,7 @@
 
 #include "../mwworld/timestamp.hpp"
 
-namespace ESM { struct Weapon; }
+namespace ESM { struct Weapon; struct Creature; }
 namespace MWWorld { class ESMStore; }
 
 namespace MWMechanics
@@ -48,6 +48,7 @@ namespace MWMechanics
         float handToHandSkill, float attackStrength);
     float getUnarmedHealthDamage(const MWWorld::ESMStore& store, const CreatureStats& attacker,
         float handToHandSkill, float attackStrength);
+    float creatureAttackDamage(const ESM::Creature& creature, int type, float strength);
     float applyKnockoutDamageMultiplier(const MWWorld::ESMStore& store,
         const CreatureStats& victim, float damage);
     bool isNormalWeapon(const ESM::Weapon* weapon, bool enchantedWeaponsAreMagical);

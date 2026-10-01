@@ -58,7 +58,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
     inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
     inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
-    inline constexpr uint64_t SummonsActorSetMagic = 0x6250434154335354;
+    inline constexpr uint64_t SummonsActorSetMagic = 0x6350434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
     inline constexpr bool hasObjectTravel(uint64_t magic)
     { return magic == ObjectTravelCampaignMagic || magic == EquipmentFamilyCampaignMagic; }
@@ -1212,7 +1212,8 @@ namespace TES3MP::Native
                     || (!worldShot && (!value.target || !value.targetLife || !targetGeneration
                         || value.targetLife > targetGeneration))
                     || !((value.casterKind == 1 && value.targetKind == 2)
-                        || (value.casterKind == 2 && value.targetKind == 1))
+                        || (value.casterKind == 2 && (value.targetKind == 1
+                            || (dynamicDomain && value.targetKind == 2 && targetIndex != casterIndex))))
                     || (value.casterKind == 1 ? value.casterLife != 1
                         : value.casterKind != 2 || !casterGeneration || value.casterLife > casterGeneration)
                     || !value.releaseTick || value.releaseTick > tick || value.strength < 0 || value.strength > 1

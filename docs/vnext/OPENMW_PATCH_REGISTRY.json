@@ -6,7 +6,7 @@
       "id": "M4-010",
       "slice": "connected authoritative summon lifecycle",
       "owner": "OpenMW mechanics and app-local dynamic actor ownership",
-      "purpose": "Consolidate all 22 explicit-store summon selectors and shared creation/failure, placement and nested removal callbacks. V71 stages bounded dynamic collision bodies, stock-filled/equipped inventories, source/owner/life ownership, follow distance and actor-to-actor combat in the existing durable actor transaction. Creation, state and removal share persistence and replication; rejected writes install nothing. Native desktop presentation accepts dynamic identities without local gameplay. Unscripted walking biped resources remain the bounded body support; desktop acceptance is deferred.",
+      "purpose": "Consolidate all 22 explicit-store summon selectors and shared creation/failure, placement and nested removal callbacks. V71 stages bounded dynamic collision bodies, stock-filled/equipped inventories, source/owner/life ownership, follow distance and actor-to-actor combat in the existing durable actor transaction. Stock hulls, creature speed/damage primitives, random attack keys and native cast clocks support quadrupeds and intrinsic flight alongside bipeds. Known spells and equipped WhenUsed sources compete with melee/ranged weapons through existing ratings, payment, hit, flight, defense and death writers; resource hashes and cast target lives survive recovery. The exact stock Bonewalker disease initializer feeds the existing condition writer; general scripts remain unsupported. Native desktop presentation accepts dynamic identities and creature clips without local gameplay. Resources remain resident and active summons reject wait/rest; desktop acceptance stays grouped.",
       "paths": [
         "apps/openmw/mwmechanics/summoning.cpp",
         "apps/openmw/mwmechanics/summoning.hpp",
@@ -18,7 +18,15 @@
         "tes3mp_native_dynamic_actor_tests ownership",
         "tes3mp_native_dynamic_actor_tests capacity",
         "tes3mp_native_dynamic_actor_tests recovery",
-        "tes3mp_native_loadout_tests summons-integrated"
+        "tes3mp_native_loadout_tests summons-integrated",
+        "tes3mp_native_loadout_tests summons-integrated-resources",
+        "tes3mp_native_loadout_tests summons-integrated-quadruped",
+        "tes3mp_native_loadout_tests summons-integrated-flying",
+        "tes3mp_native_loadout_tests summons-integrated-caster",
+        "tes3mp_native_loadout_tests summons-integrated-ranged",
+        "tes3mp_native_loadout_tests summons-integrated-disease",
+        "tes3mp_native_melee_tests creature-scheduling",
+        "tes3mp_native_melee_tests knockout-timing"
       ],
       "disposition": "shared stock mechanics with authoritative actor-transaction integration",
       "removal_condition": "OpenMW provides equivalent explicit-store summon lifecycle, follow distance and detached actor-membership interfaces"

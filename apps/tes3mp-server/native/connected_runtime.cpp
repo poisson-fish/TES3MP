@@ -1,6 +1,7 @@
 #include <apps/openmw/mwmechanics/objectmagic.hpp>
 #include <components/esm3/loadgmst.hpp>
 #include "equipment_runtime.hpp"
+#include "stock_actor_script.hpp"
 #include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -898,7 +899,8 @@ namespace TES3MP::Native
                 auto shared = std::make_unique<SharedInventory>();
                 shared->mReference = std::make_unique<ManualRef>(mStore, binding.mBase);
                 auto ptr = shared->mReference->getPtr();
-                if (!ptr.getClass().isActor() || !ptr.getClass().getScript(ptr).empty())
+                if (!ptr.getClass().isActor() || (!ptr.getClass().getScript(ptr).empty()
+                    && stockActorSpawnDisease(ptr.getClass().getScript(ptr), mStore).empty()))
                     throw std::invalid_argument("Dynamic inventory actor unsupported");
                 ptr.getCellRef() = CellRef(*binding.mPlacement);
                 ptr.getRefData().setPosition(binding.mPlacement->mPos);

@@ -17,7 +17,7 @@ namespace TES3MP::Native::Testing
         if (!osgDB::writeNodeFile(*door, (scratch / "meshes" / "npc-door.osgt").string()))
             throw std::runtime_error("Could not write synthetic door collision geometry");
     }
-    void writePlacementFixtureModels(const std::filesystem::path& scratch)
+    void writePlacementFixtureModels(const std::filesystem::path& scratch, float floorHalfExtent)
     {
         std::filesystem::create_directories(scratch / "meshes");
         const auto write = [&](osg::Node* node, const char* name) {
@@ -35,7 +35,7 @@ namespace TES3MP::Native::Testing
             mesh->addPrimitiveSet(new osg::DrawArrays(GL_QUADS,0,4));
             return mesh;
         };
-        write(plane(500), "placement-floor.osgt");
+        write(plane(floorHalfExtent), "placement-floor.osgt");
         write(plane(35), "placement-table.osgt");
     }
     DropPlacementView placementTestView(float x, float z, bool miss)

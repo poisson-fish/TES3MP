@@ -150,6 +150,7 @@ namespace TES3MP::Native
         // content binding before a swing can become authoritative.
         BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
         BoundCastAnimations bindCastAnimations(ESM::RefId actor = {});
+        void validateActorAnimations(ESM::RefId actor);
         BoundHitAnimations bindHitAnimations(ESM::RefId actor, bool knockout = false);
         MeleeAnimation bindWeaponMeleeAnimation(ESM::RefId actor, const ESM::Weapon* weapon, const std::string& attack);
         bool loaded() const noexcept { return bool(mImpl); }

@@ -920,8 +920,13 @@ namespace MWRender
         const bool shoot = group == "bowandarrow" || group == "crossbow" || group == "throwweapon";
         const std::string prefix = shoot ? "shoot " : std::string(directions[direction]) + ' ';
         const std::string follow = shoot ? "" : std::string(MWMechanics::attackFollowStrength(strength)) + ' ';
-        const std::string start = prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + "follow start");
-        const std::string stop = prefix + (phase == 1 ? "max attack" : phase == 2 ? (shoot ? "release" : "hit") : follow + "follow stop");
+        const bool creature = group == "attack1" || group == "attack2" || group == "attack3"
+            || group == "swimattack1" || group == "swimattack2" || group == "swimattack3";
+        const bool hasHit = creature && getTextKeyTime(std::string(group) + ": hit") >= 0;
+        const std::string start = creature ? (phase <= 2 || !hasHit ? "start" : "hit")
+            : prefix + (phase == 1 ? "start" : phase == 2 ? "max attack" : follow + "follow start");
+        const std::string stop = creature ? (phase == 1 ? "start" : phase == 2 && hasHit ? "hit" : "stop")
+            : prefix + (phase == 1 ? "max attack" : phase == 2 ? (shoot ? "release" : "hit") : follow + "follow stop");
         if (mCommittedMeleeGroup == group)
             if (const auto found = mStates.find(group); found != mStates.end()
                 && found->second.mStartKey == start && found->second.mStopKey == stop)
@@ -957,16 +962,18 @@ namespace MWRender
         mTextKeyListener = nullptr;
         if (!active)
         {
-            if (mCommittedCast) disable("spellcast");
-            mCommittedCast = false;
+            if (!mCommittedCastGroup.empty()) disable(mCommittedCastGroup);
+            mCommittedCastGroup.clear();
             return true;
         }
         const std::array<std::string, 3> names{"self", "touch", "target"};
-        const std::string start = names[range] + (frame < release ? " start" : " release");
-        const std::string end = names[range] + (frame < release ? " release" : " stop");
-        const float completion = frame < release ? frame / release : (frame - release) / (stop - release);
-        if (mCommittedCast)
-            if (const auto found = mStates.find("spellcast"); found != mStates.end()
+        const std::string group = hasAnimation("spellcast") ? "spellcast" : "attack1";
+        const bool creature = group == "attack1";
+        const std::string start = creature ? "start" : names[range] + (frame < release ? " start" : " release");
+        const std::string end = creature ? "stop" : names[range] + (frame < release ? " release" : " stop");
+        const float completion = creature ? frame / stop : frame < release ? frame / release : (frame - release) / (stop - release);
+        if (mCommittedCastGroup == group)
+            if (const auto found = mStates.find(group); found != mStates.end()
                 && found->second.mStartKey == start && found->second.mStopKey == end)
             {
                 auto& state = found->second;
@@ -974,12 +981,13 @@ namespace MWRender
                 state.mPlaying = state.getTime() < state.mStopTime;
                 return true;
             }
-        disable("spellcast");
-        mCommittedCast = false;
-        play("spellcast", MWMechanics::Priority_Weapon, BlendMask_All, false, 0.f,
+        if (!mCommittedCastGroup.empty()) disable(mCommittedCastGroup);
+        disable(group);
+        mCommittedCastGroup.clear();
+        play(group, MWMechanics::Priority_Weapon, BlendMask_All, false, 0.f,
             start, end, completion, 0, false);
-        if (!getInfo("spellcast")) return false;
-        mCommittedCast = true;
+        if (!getInfo(group)) return false;
+        mCommittedCastGroup = group;
         return true;
     }
 
@@ -2122,7 +2130,7 @@ namespace MWRender
     void Animation::animationEnded(AnimState& state) const
     {
         if (mContext == Context::ReplicatedActor || state.mGroupname == mCommittedMeleeGroup
-            || state.mGroupname == mCommittedKnockoutGroup || (mCommittedCast && state.mGroupname == "spellcast"))
+            || state.mGroupname == mCommittedKnockoutGroup || state.mGroupname == mCommittedCastGroup)
             return;
         MWBase::Environment::get().getLuaManager()->animationEnded(
             mPtr, state.mGroupname, state.getTime(), state.getCompletion(), state.mStartKey, state.mStopKey);

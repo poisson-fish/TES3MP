@@ -1,7 +1,5 @@
 # Durable decisions
 
-CURRENT.md records implementation; script-scoping proposals remain labeled.
-
 ## Product, authority and reuse
 
 **OpenMW gameplay is the foundation.** Reuse engine content, mechanics, world and
@@ -33,7 +31,7 @@ semantic serialization. Never persist pointers, render objects or sessions.
 
 **Runtime ownership.** An app-local OpenMW actor runtime exposes owned commands,
 snapshots, activity and identity. AI, physics, combat and loot share authoritative
-inventories. Preserve stock callers/dependency checks; avoid World/UI wrappers.
+inventories; preserve stock callers and dependency checks.
 
 **Gameplay animation.** Retain CPU movement, hit keys and releases. Bind timing/
 collision resources; null presentation cannot suppress mechanics. V22 persists
@@ -50,10 +48,9 @@ source identity survives movement. Door contact precedes physics. Persist avoida
 death. NPC respawn clears body effects; attribution survives. NPC commands never
 enter client input. Death cancels flights.
 
-V39-V42 select the nearest visible living player every eight ticks, ties by ID.
-Stock ratings reject unsupported plans. Persist source/life/target, payment, RNG,
+Native player selection orders distance then ID; stock ratings reject unsupported
+plans. Persist source/life/target, payment, RNG,
 KF phases and effects together; inactive areas pause, launch revalidates.
-T3C5/capability 23 and T3C2 retain caster life. V46 projects swings without gameplay.
 
 **Equipped passive sources.** Select constants by item and effect ordinal before
 combat. Rolls persist while equipped; replacement and respawn install new sources.
@@ -237,8 +234,8 @@ the NPC's life for drowning; generalization must distinguish environmental cause
 
 **V65 movement rules.** Stock EnableLevitation/DisableLevitation opcodes run through
 a bounded trusted script request. Their world rule and effect removal commit in
-the actor image; recovery validates the rule before installing sources. V65 needs
-a fresh campaign. General script scheduling remains M5 work. Bound neighbors use
+the actor image; recovery validates sources. General script scheduling remains M5.
+Bound neighbors use
 their own movement stats/effects in the shared solver and own drowning damage.
 
 **Object state.** Touch Lock/Open shares the streamed door/actor commit.
@@ -249,13 +246,11 @@ stack revisions. Committed locks gate activation/take/put and observer baselines
 
 **AI decisions (V57).** Persist Flee target/deadline/destination with combat/RNG.
 Bounded passive abilities/constants retain durable rolls. T3D1/capability 29 feeds
-committed Charm into stock dialogue disposition. Prior layouts remain; fresh
-V57 campaigns are required.
+committed Charm into stock dialogue disposition.
 
 **Player AI context (V58).** Persist bounded factions, crime/bounty, draw/werewolf
 state and spell/item selection. Recovery validates content IDs/inventory; only
-trusted updates write them. Share stock aggression with server authority. Prior
-V57 descriptors remain readable; V58 requires a fresh campaign.
+trusted updates write them. Share stock aggression with server authority.
 
 **Social lifecycle (V59–V66).** Commit werewolf equipment, effects, stats, crime
 and witness engagement together. Bind at most 128 unscripted, unleveled
@@ -287,13 +282,18 @@ wear, draw state and counters join the existing actor commit; rejection installs
 nothing. Failed permanent attempts stay dormant until source changes. Recovery
 validates ownership and acyclic actor/slot-consistent links. General scripts remain M5.
 
-**Dynamic actors (V71).** Fresh V70 wrapper binds bounded ownership, native references
+**Dynamic actors (V71).** Fresh campaign wrapper binds bounded ownership, native references
 and collision resources. Namespace 3 separates dynamic actors; native references
 share the inventory counter. Stage actor/collision/inventory membership before
 durability; install/replicate one image. Owner/source/life forms an acyclic forest;
 removal deletes descendants without respawn. Recovery validates selectors,
-sources, lives and native identities. Presentation has no gameplay writer.
-Resources remain resident pending coherent streamed reconstruction.
+sources, lives, native identities and animation hashes. Creature hulls, movement,
+damage and attack keys reuse stock mechanics; melee, ranged and spell choices
+share combat/payment/defense/death writers. Cast source/target life and clocks persist.
+The exact stock Bonewalker initializer acquires Brown Rot through the condition
+writer; script overrides/general execution remain M5. Presentation has no gameplay
+writer. Resources remain resident pending coherent streamed reconstruction;
+wait/rest with active summons remains unsupported. Desktop acceptance stays grouped.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

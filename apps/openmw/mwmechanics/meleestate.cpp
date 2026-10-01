@@ -1,4 +1,5 @@
 #include "meleestate.hpp"
+#include <components/esm3/loadcrea.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,12 @@
 
 namespace MWMechanics
 {
+    float creatureAttackDamage(const ESM::Creature& creature, int type, float strength)
+    {
+        const auto offset = type == 0 ? 0 : type == 1 ? 2 : 4;
+        const auto& attack = creature.mData.mAttack;
+        return attack[offset] + (attack[offset + 1] - attack[offset]) * strength;
+    }
     float magicConcealmentTarget(const CreatureStats& target)
     {
         const auto& effects = target.getMagicEffects();

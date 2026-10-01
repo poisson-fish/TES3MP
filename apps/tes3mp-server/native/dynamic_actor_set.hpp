@@ -15,6 +15,8 @@ namespace TES3MP::Native
             DynamicActorBody collision;
             ESM::RefNum reference;
             ActorCasterIdentity enemy;
+            std::optional<ActorCampaignCast> casting;
+            std::array<uint64_t, 2> animationResources{};
         };
         DynamicActorOwnership ownership;
         std::vector<Body> bodies;
@@ -47,6 +49,18 @@ namespace TES3MP::Native
                 if (body.enemy.id) DynamicActorOwnership::validateIdentity(body.enemy);
                 else if (body.enemy.kind || body.enemy.life)
                     throw std::invalid_argument("Dynamic actor empty combat target invalid");
+                if (body.animationResources == std::array<uint64_t, 2>{})
+                    throw std::invalid_argument("Dynamic actor animation resources absent");
+                if (body.casting)
+                {
+                    const auto& cast = *body.casting;
+                    if (cast.actor != value.actor || cast.life != 1 || !cast.cast || !cast.source
+                        || cast.sourceKind > 1 || cast.range > 2 || cast.elapsed > 1800
+                        || cast.phase < ActorCampaignCast::Selected || cast.phase > ActorCampaignCast::Recovery
+                        || (cast.targetKind != 0 && cast.targetKind != 1 && cast.targetKind != 2)
+                        || (cast.targetKind == 0 ? (cast.target || cast.targetLife) : (!cast.target || !cast.targetLife)))
+                        throw std::invalid_argument("Dynamic actor cast invalid");
+                }
             }
             for (const auto& entry : ownership.entries)
                 if (entry.actor && !actors.contains(entry.actor))
@@ -68,6 +82,15 @@ namespace TES3MP::Native
                 for (float value : body.collision.position) putAreaWord(bytes, std::bit_cast<uint32_t>(value));
                 putAreaWord(bytes, std::bit_cast<uint32_t>(body.collision.yaw));
                 for (auto value : {body.enemy.id, body.enemy.kind, body.enemy.life}) putAreaWord(bytes, value);
+                for (auto word : body.animationResources) putAreaWord(bytes, word);
+                putAreaWord(bytes, body.casting.has_value());
+                if (body.casting)
+                {
+                    const auto& cast = *body.casting;
+                    for (auto value : {cast.actor, cast.life, cast.cast, cast.sourceKind, cast.source,
+                        cast.targetKind, cast.target, cast.range, cast.elapsed, cast.phase, cast.targetLife})
+                        putAreaWord(bytes, value);
+                }
             }
             return bytes;
         }
@@ -81,7 +104,7 @@ namespace TES3MP::Native
             offset += size_t(size);
             for (auto& word : result.collisionResources) word = getAreaWord(bytes, offset);
             const auto count = getAreaWord(bytes, offset);
-            if (count > DynamicActorOwnership::MaximumActors || count > (bytes.size() - offset) / 72)
+            if (count > DynamicActorOwnership::MaximumActors || count > (bytes.size() - offset) / 96)
                 throw std::invalid_argument("Dynamic actor body count invalid");
             for (uint64_t i = 0; i < count; ++i)
             {
@@ -102,6 +125,17 @@ namespace TES3MP::Native
                 for (auto& p : body.collision.position) p = number();
                 body.collision.yaw = number();
                 body.enemy = {getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                for (auto& word : body.animationResources) word = getAreaWord(bytes, offset);
+                const auto casting = getAreaWord(bytes, offset);
+                if (casting > 1) throw std::invalid_argument("Dynamic actor cast flag invalid");
+                if (casting)
+                {
+                    ActorCampaignCast cast;
+                    for (auto* value : {&cast.actor, &cast.life, &cast.cast, &cast.sourceKind, &cast.source,
+                        &cast.targetKind, &cast.target, &cast.range, &cast.elapsed, &cast.phase, &cast.targetLife})
+                        *value = getAreaWord(bytes, offset);
+                    body.casting = cast;
+                }
                 result.bodies.push_back(body);
             }
             if (offset != bytes.size()) throw std::invalid_argument("Dynamic actor image trailing data");

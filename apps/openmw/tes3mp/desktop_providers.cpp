@@ -2545,15 +2545,20 @@ namespace TES3MP::OpenMWAdapter
                         || !animation->setCommittedBody(dead ? 1 : p.bodyState,
                             dead ? 0.f : p.bodyFrame, p.hitGroup)) return false;
                     const auto group = p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
-                        : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup) : casting ? "spellcast" : p.group;
+                        : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup)
+                        : casting ? (animation->hasAnimation("spellcast") ? "spellcast" : "attack1") : p.group;
                     const float clipTime = group.empty() ? -1.f : animation->getCurrentTime(group);
                     std::string startKey = "start";
-                    if (casting)
+                    if (casting && group == "spellcast")
                     {
                         const std::array<std::string, 3> ranges{"self", "touch", "target"};
                         startKey = ranges[p.castRange] + (p.castFrame < p.castRelease ? " start" : " release");
                     }
-                    else if (p.bodyState == 1 && p.phase >= 1 && p.phase <= 3)
+                    else if (!casting && (group.starts_with("attack") || group.starts_with("swimattack")))
+                    {
+                        if (p.phase == 3 && animation->getTextKeyTime(group + ": hit") >= 0.f) startKey = "hit";
+                    }
+                    else if (!casting && p.bodyState == 1 && p.phase >= 1 && p.phase <= 3)
                     {
                         const bool shoot = group == "bowandarrow" || group == "crossbow" || group == "throwweapon";
                         const std::array<std::string, 3> directions{"chop", "slash", "thrust"};

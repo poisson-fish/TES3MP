@@ -6869,7 +6869,7 @@ int main(int argc, char** argv)
         }
         if (argc == 5 && (std::string_view(argv[1]) == "bound-equipment"
                 || std::string_view(argv[1]) == "bound-equipment-lifecycle"
-                || std::string_view(argv[1]) == "summons-integrated"))
+                || std::string_view(argv[1]).starts_with("summons-integrated")))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
