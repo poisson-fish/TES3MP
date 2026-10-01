@@ -198,17 +198,23 @@ namespace TES3MP::OpenMWAdapter
         if (mEvidenceEvents >= MaximumEvidenceEvents) return ProviderResult::PresentationFailed;
         auto world = MWBase::Environment::get().getWorld();
         std::map<uint64_t, float> rendered;
+        std::map<uint64_t, bool> renderedLocks;
         for (auto* cell : MWBase::Environment::get().getWorldScene()->getActiveCells())
             cell->forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
                 const auto id = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), world->getContentFiles());
                 if (id && std::ranges::find(doors, *id, &NativeDoorSnapshot::placement) != doors.end())
+                {
                     rendered.emplace(*id, ptr.getRefData().getPosition().rot[2]);
+                    renderedLocks.emplace(*id, ptr.getCellRef().isLocked());
+                }
                 return true;
             });
         for (const auto& door : doors)
         {
             const auto visual = rendered.find(door.placement);
-            if (visual == rendered.end() || visual->second != door.angle) return ProviderResult::PresentationFailed;
+            const auto locked = renderedLocks.find(door.placement);
+            if (visual == rendered.end() || visual->second != door.angle || locked == renderedLocks.end()
+                || locked->second != (door.lockLevel > 0)) return ProviderResult::PresentationFailed;
         }
         mOutput << "{\"event\":\"native_door_presented\",\"time_ns\":" << receivedAt.nanoseconds()
                 << ",\"revision\":" << groundItems.header.canonicalRevision.value() << ",\"doors\":[";
@@ -220,6 +226,9 @@ namespace TES3MP::OpenMWAdapter
             comma = true;
             mOutput << "{\"id\":" << door.placement << ",\"motion\":" << door.motion
                     << ",\"angle\":" << door.angle << ",\"rendered_angle\":" << visual->second
+                    << ",\"lock\":" << door.lockLevel
+                    << ",\"rendered_locked\":" << (renderedLocks.at(door.placement) ? "true" : "false")
+                    << ",\"contact_revision\":" << door.contactRevision
                     << ",\"direction\":" << unsigned(door.direction)
                     << ",\"blocked\":" << (door.blocked ? "true" : "false") << '}';
         }
@@ -311,6 +320,8 @@ namespace TES3MP::OpenMWAdapter
         if (mTraversalGround->door)
         {
             mOutput << ",\"door_angle\":" << mTraversalGround->door->angle
+                    << ",\"door_lock\":" << mTraversalGround->door->lockLevel
+                    << ",\"door_contact_revision\":" << mTraversalGround->door->contactRevision
                     << ",\"door_direction\":" << unsigned(mTraversalGround->door->direction)
                     << ",\"door_blocked\":" << (mTraversalGround->door->blocked ? "true" : "false");
             const auto ref = MWWorld::localPlacedRef(mTraversalGround->door->placement, world->getContentFiles());
@@ -368,6 +379,7 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
+            || action == "castdoor"
             || action == "dialogue" || action == "dialoguestart")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
@@ -460,7 +472,7 @@ namespace TES3MP::OpenMWAdapter
             if (wm->isGuiMode() || !world->getPlayer().interceptRangedRelease(strength))
                 throw std::runtime_error("Traversal ranged release requires game focus and the desktop input hook");
         }
-        else if (action == "cast" || action == "castactor")
+        else if (action == "cast" || action == "castactor" || action == "castdoor")
         {
             MWWorld::Ptr target;
             if (action == "castactor")
@@ -471,10 +483,18 @@ namespace TES3MP::OpenMWAdapter
                     throw std::runtime_error("Traversal cast has no unique native actor target");
                 target = targets.front();
             }
+            if (action == "castdoor")
+            {
+                target = world->getFocusObject();
+                if (target.isEmpty() || target.getType() != ESM::Door::sRecordId)
+                    throw std::runtime_error("Traversal cast has no focused door");
+                if (!mPresentation.captureMagicUse(ESM::RefId::stringRefId(record), {}, target))
+                    throw std::runtime_error("Traversal focused door has no authoritative magic capture");
+            }
             // Joining/scene presentation may still be installing the normal
             // input hook. Keep this command pending until the desktop can act;
             // the external capture deadline bounds readiness retries.
-            if (action == "castactor" && (wm->isGuiMode()
+            if ((action == "castactor" || action == "castdoor") && (wm->isGuiMode()
                     || !world->getPlayer().interceptMagicCast(true, ESM::RefId::stringRefId(record), {}, target)))
                 return;
             if (action == "cast" && (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(

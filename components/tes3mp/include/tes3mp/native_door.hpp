@@ -21,6 +21,8 @@ namespace TES3MP
         float stepSeconds = .05f;
         uint8_t direction = 0; // stock Idle / Opening / Closing
         bool blocked = false;
+        uint16_t lockLevel = 0;
+        uint64_t contactRevision = 1;
         friend bool operator==(const NativeDoorSnapshot&, const NativeDoorSnapshot&) = default;
     };
 

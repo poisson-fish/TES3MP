@@ -302,7 +302,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeDoor FLATBUFFERS_FINAL_CLASS {
   float step_seconds_;
   uint8_t direction_;
   uint8_t blocked_;
-  int16_t padding0__;  int32_t padding1__;
+  uint16_t lock_level_;
+  int32_t padding0__;
+  uint64_t contact_revision_;
 
  public:
   NativeDoor()
@@ -312,22 +314,22 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeDoor FLATBUFFERS_FINAL_CLASS {
         step_seconds_(0),
         direction_(0),
         blocked_(0),
+        lock_level_(0),
         padding0__(0),
-        padding1__(0) {
+        contact_revision_(0) {
     (void)padding0__;
-    (void)padding1__;
   }
-  NativeDoor(uint64_t _placement, uint64_t _motion, float _angle, float _step_seconds, uint8_t _direction, uint8_t _blocked)
+  NativeDoor(uint64_t _placement, uint64_t _motion, float _angle, float _step_seconds, uint8_t _direction, uint8_t _blocked, uint16_t _lock_level, uint64_t _contact_revision)
       : placement_(::flatbuffers::EndianScalar(_placement)),
         motion_(::flatbuffers::EndianScalar(_motion)),
         angle_(::flatbuffers::EndianScalar(_angle)),
         step_seconds_(::flatbuffers::EndianScalar(_step_seconds)),
         direction_(::flatbuffers::EndianScalar(_direction)),
         blocked_(::flatbuffers::EndianScalar(_blocked)),
+        lock_level_(::flatbuffers::EndianScalar(_lock_level)),
         padding0__(0),
-        padding1__(0) {
+        contact_revision_(::flatbuffers::EndianScalar(_contact_revision)) {
     (void)padding0__;
-    (void)padding1__;
   }
   uint64_t placement() const {
     return ::flatbuffers::EndianScalar(placement_);
@@ -347,8 +349,14 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeDoor FLATBUFFERS_FINAL_CLASS {
   uint8_t blocked() const {
     return ::flatbuffers::EndianScalar(blocked_);
   }
+  uint16_t lock_level() const {
+    return ::flatbuffers::EndianScalar(lock_level_);
+  }
+  uint64_t contact_revision() const {
+    return ::flatbuffers::EndianScalar(contact_revision_);
+  }
 };
-FLATBUFFERS_STRUCT_END(NativeDoor, 32);
+FLATBUFFERS_STRUCT_END(NativeDoor, 40);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorSpawn FLATBUFFERS_FINAL_CLASS {
  private:

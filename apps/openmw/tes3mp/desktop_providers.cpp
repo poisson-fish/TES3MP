@@ -1772,6 +1772,22 @@ namespace TES3MP::OpenMWAdapter
             if (target.isEmpty() || target == MWBase::Environment::get().getWorld()->getPlayerPtr())
                 return result;
 
+            if (target.getType() == ESM::Door::sRecordId)
+            {
+                for (const auto& [placement, door] : nativeDoors)
+                {
+                    const auto ref = MWWorld::localPlacedRef(placement,
+                        MWBase::Environment::get().getWorld()->getContentFiles());
+                    if (!ref || findActiveDoor(ref->mIndex, ref->mContentFile) != target) continue;
+                    if (!door.contactRevision) return std::nullopt;
+                    result.targetKind = MagicUseTargetKind::Door;
+                    result.targetId = placement;
+                    result.expectedTargetRevision = CombatRevision::fromValue(door.contactRevision).value();
+                    return result;
+                }
+                return std::nullopt;
+            }
+
             const auto actor = std::ranges::find_if(actorRemotes,
                 [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == target; });
             std::optional<ActorId> actorId;
@@ -3160,6 +3176,8 @@ namespace TES3MP::OpenMWAdapter
                 // Cancel the stock local scheduler before installing the exact
                 // committed angle. Local collision never chooses a door position.
                 if (!world->applyDoorAngle(ptr, next.angle)) return ProviderResult::PresentationFailed;
+                if (next.lockLevel) ptr.getCellRef().lock(next.lockLevel);
+                else ptr.getCellRef().unlock();
                 auto sounds = MWBase::Environment::get().getSoundManager();
                 const auto* base = ptr.get<ESM::Door>()->mBase;
                 if (sounds && nativeDoor && next.motion != nativeDoor->motion && next.direction)

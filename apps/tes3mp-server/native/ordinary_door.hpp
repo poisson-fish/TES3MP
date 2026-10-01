@@ -5,6 +5,8 @@
 #include <components/esm3/loaddoor.hpp>
 
 #include <functional>
+#include <bit>
+#include <cstdint>
 
 namespace TES3MP::Native
 {
@@ -15,6 +17,15 @@ namespace TES3MP::Native
         ESM::RefId mPlaySound, mFadeSound, mStopSound;
         float mSoundOffset = 0;
     };
+
+    // Exact bounded contact identity for the persisted angle, motion state and
+    // lock. It survives recovery without turning the presentation motion counter
+    // into a second gameplay revision.
+    inline uint64_t doorContactRevision(const ESM::DoorState& state)
+    {
+        return ((uint64_t(std::bit_cast<uint32_t>(state.mPosition.rot[2])) << 12)
+            | (uint64_t(state.mRef.mLockLevel) << 2) | uint64_t(state.mDoorState)) + 1;
+    }
 
     // Preparation only: no live writer, network publication, file or singleton.
     // The canonical transaction commits position + motion together

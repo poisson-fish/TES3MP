@@ -935,9 +935,11 @@ namespace TES3MP::Native
                     ? targetIndex == 2 ? life->generation
                         : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0 : 1;
                 if (!value.actor || value.life != 1 || !value.cast || !value.source || value.sourceKind > 1
-                    || value.targetKind > 2 || ((value.targetKind == 0) != (value.target == 0))
+                    || value.targetKind > 3 || ((value.targetKind == 0) != (value.target == 0))
                     || (value.targetKind == 2 ? (!targetGeneration || !value.targetLife || value.targetLife > targetGeneration
-                        || (value.phase < ActorCampaignCast::Released && value.targetLife != targetGeneration)) : value.targetLife != 1)
+                        || (value.phase < ActorCampaignCast::Released && value.targetLife != targetGeneration))
+                        : value.targetKind == 3 ? !value.targetLife
+                        : value.targetLife != 1)
                     || value.range > 2 || value.elapsed > 1800 || value.phase < 1 || value.phase > 5
                     || (value.phase <= ActorCampaignCast::Prepared && value.elapsed))
                     throw std::invalid_argument("Native player cast state invalid");

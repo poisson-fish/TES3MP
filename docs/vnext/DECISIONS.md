@@ -271,11 +271,13 @@ the actor image; recovery validates the rule before installing sources. V65 need
 a fresh campaign. General script scheduling remains M5 work. Bound neighbors use
 their own movement stats/effects in the shared solver and own drowning damage.
 
-**Initial object magic.** Trusted Lock/Open uses the streamed door image/commit.
-Stock ESM saves FLTV only while locked; Open stores zero because negative
-transient levels have no durable meaning. Recovery accepts bounded FLTV and fixes
-all other authored bytes. Player payment and actor composition must join this
-transaction before client use.
+**Initial object magic.** Trusted and player Touch Lock/Open use the streamed
+ordinary-door image inside the actor commit. Stock ESM saves FLTV only while
+locked; Open stores zero because negative transient levels have no durable
+meaning. Recovery accepts bounded FLTV and fixes all other authored bytes.
+Spell contact uses an exact identity of the durable door angle, motion state
+and lock, independent of the transient presentation motion counter; revalidate
+at release before payment. Baselines project the committed lock to clients.
 
 **AI decisions (V57).** Persist the selected actor's Flee target, deadline and
 navigation destination with combat and RNG. Reconcile bounded AI-only passive

@@ -72,7 +72,7 @@ namespace TES3MP::Native
     std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
         const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
         bool actorLifecycle = false, bool expandedEffects = false, bool specialConditions = false,
-        bool movementEffects = false);
+        bool movementEffects = false, bool objectMagic = false);
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
         const MWWorld::ESMStore& content, bool expandedEffects = false, bool specialConditions = false,
@@ -81,10 +81,11 @@ namespace TES3MP::Native
         const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
-        bool persistentSpecial = false, bool specialConditions = false, bool movementEffects = false);
+        bool persistentSpecial = false, bool specialConditions = false, bool movementEffects = false,
+        bool objectMagic = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
-        bool specialConditions = false, bool movementEffects = false);
+        bool specialConditions = false, bool movementEffects = false, bool objectMagic = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);

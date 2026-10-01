@@ -6847,6 +6847,16 @@ int main(int argc, char** argv)
                 {}, false, false, true, false, true, false, false, false, false, std::string_view(argv[1]) != "interrupted-casts", std::string_view(argv[1]) == "casting-interference");
             std::cout << "PASS " << argv[1] << "\n"; return 0;
         }
+        if (argc == 5 && std::string_view(argv[1]) == "door-spell")
+        {
+            TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
+                std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
+                true, true, true, true, true, true, true, true, false, false, true, false,
+                false, true, false, true, false, false, false, false, false, false, false, false,
+                {}, false, false, true, false, false, false, false, false, false, true, false,
+                "door-magic");
+            std::cout << "PASS door-spell\n"; return 0;
+        }
         if (argc == 5 && std::string_view(argv[1]) == "reconnect-combat")
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),

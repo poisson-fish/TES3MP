@@ -9,6 +9,7 @@ enum MagicUseTargetKind : ubyte {
   Self = 0,
   Player = 1,
   Actor = 2,
+  Door = 3,
 }
 
 table ClientCommandHeader {

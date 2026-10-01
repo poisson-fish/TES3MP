@@ -294,6 +294,8 @@ namespace TES3MP::Native
         const PreparedNativeInventory* areaDoorCommand(const PreparedNativeInventory* candidate) const;
         std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
+        bool stageDoorSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
+            uint64_t placement, ESM::RefId effect, int magnitude);
         void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
             std::span<const char> actor = {},
             const std::function<void(const EquipmentSessionValues&)>& validate = {});
@@ -370,9 +372,8 @@ namespace TES3MP::Native
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
         std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
             const CanonicalServerState& players, const ServerCommandProposal& command, ServerTick tick) override;
-        // Trusted object-effect entry point. The first slice binds a streamed
-        // ordinary door without actor composition; player spell targeting/payment
-        // and actor-tick composition are wired separately.
+        // Trusted object-effect entry point for the streamed ordinary door.
+        // Player Touch casts stage the same change through the actor tick.
         std::unique_ptr<PreparedNativeInventory> prepareObjectMagic(
             uint64_t doorPlacement, ESM::RefId effect, int magnitude);
         bool appendMagicUse(const CanonicalServerState& players, const ServerCommandProposal& command,

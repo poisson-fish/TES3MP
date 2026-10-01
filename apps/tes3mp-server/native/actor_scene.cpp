@@ -759,6 +759,23 @@ namespace TES3MP::Native
         mImpl->mWorld.rayTest(start, end, hit);
         return !hit.hasHit();
     }
+    bool InteriorActorScene::lineOfSightToDoor(const std::array<float, 3>& from,
+        const std::array<float, 3>& to, uint64_t door) const
+    {
+        if (!mImpl) throw std::invalid_argument("Door contact scene is unloaded");
+        const auto found = mImpl->mOrdinaryDoors.find(door);
+        if (found == mImpl->mOrdinaryDoors.end()) return false;
+        for (const auto& point : {from, to}) for (float value : point)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Door contact endpoint invalid");
+        const btVector3 start(from[0], from[1], from[2]), end(to[0], to[1], to[2]);
+        btCollisionWorld::ClosestRayResultCallback hit(start, end);
+        hit.m_collisionFilterGroup = MWPhysics::CollisionType_AnyPhysical;
+        hit.m_collisionFilterMask = MWPhysics::CollisionType_World
+            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Door;
+        mImpl->mWorld.rayTest(start, end, hit);
+        return hit.hasHit() && hit.m_collisionObject == mImpl->mBodies[found->second]->mObject.get();
+    }
     std::optional<ActorProjectileContact> InteriorActorScene::projectileContact(const std::array<float, 3>& from,
         const std::array<float, 3>& to, uint64_t casterActor) const
     {

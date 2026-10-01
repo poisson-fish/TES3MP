@@ -218,6 +218,38 @@ namespace TES3MP::Native
         return result;
     }
 
+    bool InventoryService::stageDoorSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
+        uint64_t placement, ESM::RefId effect, int magnitude)
+    {
+        if (effect != ESM::MagicEffect::Lock && effect != ESM::MagicEffect::Open
+            || magnitude < 1 || magnitude > 1000) return false;
+        const auto found = std::ranges::find(mBinding.mDoors, placement,
+            &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
+        if (found == mBinding.mDoors.end()) return false;
+        const size_t index = size_t(found - mBinding.mDoors.begin());
+        if (!candidate)
+        {
+            auto created = std::make_unique<AreaDoorTransaction>(*this);
+            created->image = sealInventory(mCoreImage, created->states);
+            candidate = std::move(created);
+        }
+        auto* transaction = dynamic_cast<AreaDoorTransaction*>(candidate.get());
+        if (!transaction || !ownsAreaDoorCandidate(candidate.get())) return false;
+        const auto kind = effect == ESM::MagicEffect::Lock ? OrdinaryDoor::LockMagic::Lock
+            : OrdinaryDoor::LockMagic::Open;
+        const auto change = mAreaDoors[index].binding.door().applyLockMagic(
+            *transaction->states[index], kind, magnitude);
+        if (change.mState.mRef.mLockLevel != transaction->states[index]->mRef.mLockLevel
+            || change.mState.mRef.mIsLocked != transaction->states[index]->mRef.mIsLocked)
+        {
+            if (transaction->motions[index] == std::numeric_limits<uint64_t>::max()) return false;
+            transaction->states[index] = std::make_shared<const ESM::DoorState>(change.mState);
+            ++transaction->motions[index];
+            transaction->image = sealInventory(mCoreImage, transaction->states);
+        }
+        return true;
+    }
+
     std::unique_ptr<PreparedNativeInventory> InventoryService::prepareAreaDoor(size_t index, bool activation,
         const CanonicalServerState& players, ServerTick tick, float seconds,
         std::unique_ptr<PreparedNativeInventory> command)
@@ -308,7 +340,8 @@ namespace TES3MP::Native
                 const auto& state = prepared ? *prepared->states[i] : *door.state;
                 result.push_back({mBinding.mDoors[i].mId, prepared ? prepared->motions[i] : door.motion,
                     state.mPosition.rot[2], mDoorStepSeconds, uint8_t(state.mDoorState),
-                    prepared ? prepared->blocked[i] : door.blocked});
+                    prepared ? prepared->blocked[i] : door.blocked, uint16_t(state.mRef.mLockLevel),
+                    doorContactRevision(state)});
             }
         std::ranges::sort(result, {}, &NativeDoorSnapshot::placement);
         return result;

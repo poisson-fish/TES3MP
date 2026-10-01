@@ -331,7 +331,8 @@ namespace TES3MP
                 return error(Code::InvalidCommandShape);
         if (door && (!nativeWorld || !(door->placement >> 63) || !door->motion || !std::isfinite(door->angle)
                 || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
-                || door->direction > 2 || (door->direction == 0 && door->blocked)))
+                || door->direction > 2 || (door->direction == 0 && door->blocked)
+                || door->lockLevel > 1000 || !door->contactRevision))
             return error(Code::InvalidCommandShape);
         if (teleportDoors.size() > 32 || (!teleportDoors.empty() && !nativeWorld))
             return error(Code::InvalidCommandShape);
@@ -346,7 +347,8 @@ namespace TES3MP
             const auto& value = doors[i];
             if (!(value.placement >> 63) || !value.motion || !std::isfinite(value.angle)
                 || !std::isfinite(value.stepSeconds) || value.stepSeconds <= 0 || value.stepSeconds > 1
-                || value.direction > 2 || (!value.direction && value.blocked)
+                || value.direction > 2 || (!value.direction && value.blocked) || value.lockLevel > 1000
+                || !value.contactRevision
                 || (i && doors[i - 1].placement >= value.placement)
                 || std::ranges::binary_search(teleportDoors, value.placement)
                 || std::ranges::binary_search(nativePlacements, value.placement)) return error(Code::InvalidCommandShape);
@@ -500,10 +502,12 @@ namespace TES3MP
             presentation.emplace_back(item.stack.value(), item.rotation[0], item.rotation[1], item.rotation[2], item.scale);
         std::optional<GroundSchema::NativeDoor> door;
         if (input.door) door.emplace(input.door->placement, input.door->motion, input.door->angle,
-            input.door->stepSeconds, input.door->direction, uint8_t(input.door->blocked));
+            input.door->stepSeconds, input.door->direction, uint8_t(input.door->blocked),
+            input.door->lockLevel, input.door->contactRevision);
         std::vector<GroundSchema::NativeDoor> doors;
         for (const auto& value : input.doors) doors.emplace_back(value.placement, value.motion, value.angle,
-            value.stepSeconds, value.direction, uint8_t(value.blocked));
+            value.stepSeconds, value.direction, uint8_t(value.blocked), value.lockLevel,
+            value.contactRevision);
         std::vector<flatbuffers::Offset<GroundSchema::NativeNeighbor>> neighbors;
         if (input.neighbors.size() > 8) throw std::invalid_argument("Native neighborhood exceeds bound");
         for (const auto& neighbor : input.neighbors)
@@ -732,11 +736,13 @@ namespace TES3MP
         {
             if (value->blocked() > 1) return error(Code::InvalidCommandShape);
             door = NativeDoorSnapshot{value->placement(), value->motion(), value->angle(),
-                value->step_seconds(), value->direction(), value->blocked() != 0};
+                value->step_seconds(), value->direction(), value->blocked() != 0,
+                value->lock_level(), value->contact_revision()};
             // Validate this fixed-size extension before allocating any item vectors.
             if (!root->native_world() || !(door->placement >> 63) || !door->motion || !std::isfinite(door->angle)
                 || !std::isfinite(door->stepSeconds) || door->stepSeconds <= 0 || door->stepSeconds > 1
-                || door->direction > 2 || (!door->direction && door->blocked)) return error(Code::InvalidCommandShape);
+                || door->direction > 2 || (!door->direction && door->blocked)
+                || door->lockLevel > 1000 || !door->contactRevision) return error(Code::InvalidCommandShape);
         }
         const auto* encodedDoors = root->doors();
         if (encodedDoors && (encodedDoors->size() > 128 || (encodedDoors->size() && (!root->native_world() || door))))
@@ -747,7 +753,8 @@ namespace TES3MP
             {
                 const auto value = copyStruct(encodedDoors, i);
                 if (value.blocked() > 1) return error(Code::InvalidCommandShape);
-                doors.push_back({value.placement(), value.motion(), value.angle(), value.step_seconds(), value.direction(), value.blocked() != 0});
+                doors.push_back({value.placement(), value.motion(), value.angle(), value.step_seconds(),
+                    value.direction(), value.blocked() != 0, value.lock_level(), value.contact_revision()});
             }
         const auto* encodedTeleports = root->teleport_doors();
         if (encodedTeleports && (encodedTeleports->size() > 32

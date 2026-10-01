@@ -62,6 +62,8 @@ struct NativeDoor {
   step_seconds:float;
   direction:ubyte;
   blocked:ubyte;
+  lock_level:ushort;
+  contact_revision:ulong;
 }
 
 table NativeNeighbor {

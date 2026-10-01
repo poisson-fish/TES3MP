@@ -5604,7 +5604,8 @@ namespace TES3MP::Native::Testing
         const bool aiDisposition = !npcRanged && encounterProfile != "bow-aim-flight"
             && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
-        const bool movementEffects = npcRanged || effectFamily == "movement-effects" || neighborPhysics || aiDisposition
+        const bool movementEffects = npcRanged || effectFamily == "movement-effects"
+            || effectFamily == "door-magic" || neighborPhysics || aiDisposition
             || effectFamily == "ai-creature";
         const std::array familyEffects{ESM::MagicEffect::FireShield, ESM::MagicEffect::LightningShield,
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
@@ -6350,12 +6351,12 @@ namespace TES3MP::Native::Testing
                 npc.mSpells.mList.push_back(drain.mId);
                 out.startRecord(ESM::Spell::sRecordId, 0); drain.save(out); out.endRecord(ESM::Spell::sRecordId);
             }
-            if (expandedEffects && !npcRanged)
+            if ((expandedEffects || effectFamily == "door-magic") && !npcRanged)
             {
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
                     record.mData.mType = ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
-                    record.mData.mCost = movementEffects ? 0 : 5;
+                    record.mData.mCost = movementEffects && effectFamily != "door-magic" ? 0 : 5;
                     record.mEffects.populate(effects);
                     npc.mSpells.mList.push_back(record.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); record.save(out); out.endRecord(ESM::Spell::sRecordId);
@@ -6385,6 +6386,11 @@ namespace TES3MP::Native::Testing
                 spell("expanded_paralyze", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Touch, 1, 0)}, true);
                 spell("expanded_paralyze_self", {effect(ESM::MagicEffect::Paralyze, ESM::RT_Self, 1, 0)});
                 spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
+                if (effectFamily == "door-magic")
+                {
+                    spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
+                    spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
+                }
                 if (effectFamily == "rest-recovery")
                 {
                     spell("rest_stunted", {effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 30, 1)});
@@ -6937,6 +6943,8 @@ namespace TES3MP::Native::Testing
                 }
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Destruction)] = 0;
+                // Keep the door-magic observer from interrupting live player casts.
+                if (effectFamily == "door-magic") npc.mAiData.mFight = 0;
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             }
             if (constantEffects)
@@ -7063,7 +7071,7 @@ namespace TES3MP::Native::Testing
                 earlierOwner.save(out); out.endRecord(ESM::Container::sRecordId);
             }
             ESM::Cell cell; cell.blank(); cell.mName = "NPC Door Contact Test";
-            if (!encounterProfile.empty() || effectFamily == "movement-effects")
+            if (!encounterProfile.empty() || effectFamily == "movement-effects" || effectFamily == "door-magic")
                 cell.mAmbi.mAmbient = cell.mAmbi.mSunlight
                     = encounterProfile.starts_with("vanilla-multi-") ? 0x00181818 : 0x00b0b0b0;
             cell.mData.mFlags = ESM::Cell::Interior | (specialConditions ? ESM::Cell::QuasiEx : 0);
@@ -7087,7 +7095,10 @@ namespace TES3MP::Native::Testing
             for (auto record : {placedActor, floor.mId, door.mId})
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
-                if (record == placedActor) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
+                // Leave the door clear for the two-desktop Touch capture.
+                if (record == placedActor) placed.mPos = effectFamily == "door-magic"
+                    ? ESM::Position{{1000, 1000, 1}, {0, 0, 0}}
+                    : ESM::Position{{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
             }
             if (socialLifecycle)
@@ -8465,7 +8476,9 @@ namespace TES3MP::Native::Testing
             std::vector<CanonicalPlayerEntityState> placed(authority.players().begin(), authority.players().end());
             for (size_t i = 0; i < placed.size(); ++i)
                 placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(1),
-                    Transform(placed[i].transform().cell(), Position3((i ? (castingInterference ? 100 : -160) : 60)*1024, -400*1024, 1024),
+                    Transform(placed[i].transform().cell(), effectFamily == "door-magic"
+                        ? Position3((i ? 100 : 0)*1024, -40*1024, 1024)
+                        : Position3((i ? (castingInterference ? 100 : -160) : 60)*1024, -400*1024, 1024),
                         placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
@@ -8488,6 +8501,248 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (effectFamily == "door-magic")
+        {
+            CanonicalWorldTimeState worldTime;
+            worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            worldTime.millisecondsSinceMidnight = 12 * 3600000;
+            const auto globals = GlobalVariableCatalog::create({}).value();
+            const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+            const auto hash = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char ch : name) value = (value ^ ch) * 1099511628211ull;
+                return value;
+            };
+            const auto doorView = [&](auto& owner, uint64_t session, uint64_t time,
+                const PreparedNativeInventory* pending = nullptr) {
+                const auto projected = owner.projectInventory(authority, id<SessionId>(session),
+                    id<ServerTick>(time), id<CanonicalRevision>(time), pending);
+                require(projected && projected->groundItems.size() == 1
+                    && projected->groundItems[0].doors.size() == 1, "Door spell observer lost the ordinary door");
+                return projected->groundItems[0].doors.front();
+            };
+            const auto initialDoor = doorView(service, 1, 1);
+            const auto* caster = authority.findPlayer(id<PlayerId>(1));
+            const auto proposal = [&](const ClientMagicUseCommand& input) {
+                return ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(),
+                    input.commandSequence, input.commandId, input.observedCanonicalRevision,
+                    EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
+                    MagicUseCommandProposal(input));
+            };
+            ClientMagicUseCommand use{id<SessionId>(1), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(1), id<CanonicalRevision>(1),
+                MagicUseSourceKind::Spell, hash("door_spell_lock"), MagicUseTargetKind::Door,
+                initialDoor.placement, id<ServerTick>(1), CombatRevision::initial(),
+                CombatRevision::fromValue(initialDoor.contactRevision).value(), InventoryRevision::initial()};
+            const auto decodedUse = decodeClientMagicUseCommand(encodeClientMagicUseCommand(use));
+            require(std::holds_alternative<ClientMagicUseCommand>(decodedUse)
+                && std::get<ClientMagicUseCommand>(decodedUse) == use,
+                "Door contact did not survive the authenticated command codec");
+            const auto wireDoor = [&](auto& owner, uint64_t session, uint64_t time, uint16_t level) {
+                const auto projected = owner.projectInventory(authority, id<SessionId>(session),
+                    id<ServerTick>(time), id<CanonicalRevision>(time));
+                require(bool(projected), "Door observer baseline missing");
+                const auto decoded = decodeReliableGroundItemBaseline(
+                    encodeReliableGroundItemBaseline(projected->groundItems[0]));
+                require(std::holds_alternative<ReliableGroundItemBaseline>(decoded)
+                    && std::get<ReliableGroundItemBaseline>(decoded).doors.at(0).lockLevel == level
+                    && std::get<ReliableGroundItemBaseline>(decoded).doors.at(0).contactRevision
+                        == projected->groundItems[0].doors.at(0).contactRevision,
+                    "Door lock level did not survive observer baseline wire");
+            };
+            auto stale = use; stale.expectedTargetRevision = id<CombatRevision>(initialDoor.contactRevision + 1);
+            require(!service.prepareMagicUse(authority, proposal(stale), id<ServerTick>(1)),
+                "Stale door contact entered the actor tick");
+            auto admitted = service.prepareMagicUse(authority, proposal(use), id<ServerTick>(1));
+            require(bool(admitted), "Player Touch Lock was not admitted against the ordinary door");
+            const auto initialImage = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+            const auto initial = readActorCampaign({reinterpret_cast<const char*>(initialImage.data()), initialImage.size()});
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+            bool locked = false;
+            for (uint64_t time = 1; time <= 50; ++time)
+            {
+                auto next = service.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                    time == 1 ? std::move(admitted) : std::unique_ptr<PreparedNativeInventory>{}, &world);
+                require(bool(next), "Door spell actor tick was not prepared");
+                const auto stagedDoor = doorView(service, 1, time, next.get());
+                if (stagedDoor.lockLevel == 50)
+                {
+                    const auto aliceEvent = service.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), next.get());
+                    const auto bobEvent = service.projectCombatEvents(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), next.get());
+                    require(aliceEvent && bobEvent && aliceEvent->magicEvents().size() == 1
+                        && std::ranges::equal(aliceEvent->magicEvents(), bobEvent->magicEvents())
+                        && aliceEvent->magicEvents().front().targetKind == MagicUseTargetKind::Door,
+                        "Door cast event diverged between observers");
+                    const auto before = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                    require(next->commit(rejected) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(before, service.inventoryImage())
+                        && doorView(service, 1, time).lockLevel == 0,
+                        "Rejected cast changed payment or door lock");
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Door Lock retry failed");
+                    const auto after = std::vector(service.inventoryImage().begin(), service.inventoryImage().end());
+                    const auto state = readActorCampaign({reinterpret_cast<const char*>(after.data()), after.size()});
+                    require(state.combat && state.combat->actors[0][9][2] == initial.combat->actors[0][9][2] - 5
+                        && doorView(service, 1, time).lockLevel == 50
+                        && doorView(service, 2, time).lockLevel == 50,
+                        "Lock cost and both observer states did not commit together");
+                    wireDoor(service, 1, time, 50); wireDoor(service, 2, time, 50);
+                    InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, after);
+                    restarted.service().synchronizeCells(authority);
+                    require(doorView(restarted.service(), 1, time).lockLevel == 50
+                        && doorView(restarted.service(), 2, time).lockLevel == 50,
+                        "Restart lost the paid door Lock");
+                    auto& resume = restarted.service();
+                    uint64_t readyTick = time + 1;
+                    for (; readyTick <= time + 60; ++readyTick)
+                    {
+                        const auto saved = std::vector(resume.inventoryImage().begin(), resume.inventoryImage().end());
+                        const auto current = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        if (!current.combat->playerCasts[0]) break;
+                        auto recovery = resume.prepareNativeTick(authority, id<ServerTick>(readyTick), 1.f/30, {}, &world);
+                        require(recovery && recovery->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Restored player cast recovery failed");
+                    }
+                    require(readyTick <= time + 60, "Restored Lock cast never completed recovery");
+                    auto staleOpen = use;
+                    staleOpen.commandId = id<CommandId>(readyTick + 1000);
+                    staleOpen.sourceServerTick = id<ServerTick>(readyTick);
+                    staleOpen.sourceId = hash("door_spell_open");
+                    require(!resume.prepareMagicUse(authority, proposal(staleOpen), id<ServerTick>(readyTick)),
+                        "Pre-restart stale door contact was accepted after Lock");
+                    auto openUse = staleOpen;
+                    openUse.expectedTargetRevision = CombatRevision::fromValue(
+                        doorView(resume, 1, readyTick).contactRevision).value();
+                    auto openIntent = resume.prepareMagicUse(authority, proposal(openUse), id<ServerTick>(readyTick));
+                    require(bool(openIntent), "Player Touch Open was not admitted after restart");
+                    bool opened = false;
+                    for (uint64_t release = readyTick; release <= readyTick + 50; ++release)
+                    {
+                        auto nextOpen = resume.prepareNativeTick(authority, id<ServerTick>(release), 1.f/30,
+                            release == readyTick ? std::move(openIntent) : std::unique_ptr<PreparedNativeInventory>{}, &world);
+                        require(bool(nextOpen), "Open actor tick was not prepared");
+                        if (doorView(resume, 1, release, nextOpen.get()).lockLevel == 0)
+                        {
+                            const auto beforeOpen = std::vector(resume.inventoryImage().begin(), resume.inventoryImage().end());
+                            require(nextOpen->commit(rejected) == CanonicalDurabilityResult::Rejected
+                                && std::ranges::equal(beforeOpen, resume.inventoryImage())
+                                && doorView(resume, 2, release).lockLevel == 50,
+                                "Rejected Open leaked payment or unlock");
+                            require(nextOpen->commit(accepted) == CanonicalDurabilityResult::Committed,
+                                "Open retry failed");
+                            const auto openedBytes = std::vector(resume.inventoryImage().begin(), resume.inventoryImage().end());
+                            const auto openedState = readActorCampaign({reinterpret_cast<const char*>(
+                                openedBytes.data()), openedBytes.size()});
+                            require(openedState.combat->actors[0][9][2] == initial.combat->actors[0][9][2] - 10
+                                && doorView(resume, 1, release).lockLevel == 0
+                                && doorView(resume, 2, release).lockLevel == 0,
+                                "Open cost and both observers did not commit together");
+                            wireDoor(resume, 1, release, 0); wireDoor(resume, 2, release, 0);
+                            InventoryHost openedRestart(descriptor, testContentManifest(), *registry, *crypto, openedBytes);
+                            openedRestart.service().synchronizeCells(authority);
+                            require(doorView(openedRestart.service(), 1, release).lockLevel == 0
+                                && doorView(openedRestart.service(), 2, release).lockLevel == 0,
+                                "Restart lost the paid Open");
+                            opened = true;
+                            break;
+                        }
+                        require(nextOpen->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Open windup failed");
+                    }
+                    require(opened, "Touch Open never reached the door at the release key");
+                    locked = true;
+                    break;
+                }
+                require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Door spell windup failed");
+            }
+            require(locked, "Touch Lock never reached the door at the release key");
+            InventoryHost movedHost(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+            auto& movedService = movedHost.service(); movedService.synchronizeCells(authority);
+            auto movingIntent = movedService.prepareMagicUse(authority, proposal(use), id<ServerTick>(1));
+            require(bool(movingIntent), "Stale contact fixture could not admit a cast");
+            auto selected = movedService.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                std::move(movingIntent), &world);
+            require(selected && selected->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Stale contact fixture could not persist windup");
+            InventoryHost pendingRestart(descriptor, testContentManifest(), *registry, *crypto,
+                movedService.inventoryImage());
+            auto& queued = pendingRestart.service(); queued.synchronizeCells(authority);
+            bool resumedLock = false;
+            for (uint64_t time = 2; time <= 50; ++time)
+            {
+                auto continuation = queued.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, {}, &world);
+                require(continuation && continuation->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Pending door cast restart could not advance");
+                if (doorView(queued, 1, time).lockLevel == 50)
+                {
+                    const auto saved = std::vector(queued.inventoryImage().begin(), queued.inventoryImage().end());
+                    const auto state = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                    require(state.combat->actors[0][9][2] == initial.combat->actors[0][9][2] - 5
+                        && doorView(queued, 2, time).lockLevel == 50,
+                        "Pending cast restart lost its one paid door outcome");
+                    resumedLock = true;
+                    break;
+                }
+            }
+            require(resumedLock, "Pending door cast did not release after restart");
+            std::vector<CanonicalPlayerEntityState> displaced(authority.players().begin(), authority.players().end());
+            displaced[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(displaced[0],
+                id<ServerTick>(2), Transform(displaced[0].transform().cell(),
+                    Position3(0, -400 * 1024, 1024), displaced[0].transform().orientation()),
+                LinearVelocity3(0, 0, 0)));
+            const auto far = std::get<CanonicalServerState>(createCanonicalServerState(displaced, authority.activeSessions()));
+            movedService.synchronizeCells(far);
+            auto staleTick = movedService.prepareNativeTick(far, id<ServerTick>(2), 1.f/30, {}, &world);
+            require(staleTick && staleTick->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Stale contact cancellation tick failed");
+            const auto cancelledBytes = std::vector(movedService.inventoryImage().begin(), movedService.inventoryImage().end());
+            const auto cancelled = readActorCampaign({reinterpret_cast<const char*>(
+                cancelledBytes.data()), cancelledBytes.size()});
+            require(!cancelled.combat->playerCasts[0]
+                && cancelled.combat->actors[0][9][2] == initial.combat->actors[0][9][2]
+                && doorView(movedService, 1, 2).lockLevel == 0,
+                "Lost door contact spent magicka or changed the lock");
+            InventoryHost reversedHost(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+            auto& reversed = reversedHost.service(); reversed.synchronizeCells(authority);
+            auto reverseIntent = reversed.prepareMagicUse(authority, proposal(use), id<ServerTick>(1));
+            require(bool(reverseIntent), "Door revision fixture could not admit a cast");
+            auto reverseStart = reversed.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30,
+                std::move(reverseIntent), &world);
+            require(reverseStart && reverseStart->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Door revision fixture could not persist windup");
+            const auto* bob = authority.findPlayer(id<PlayerId>(2));
+            const auto door = doorView(reversed, 2, 2);
+            const ServerCommandProposal activation(id<SessionId>(2), SessionGeneration::initial(),
+                CommandSequence::initial(), id<CommandId>(2), id<CanonicalRevision>(2),
+                EntityPrecondition(bob->entityId(), bob->entityRevision(), bob->authorityEpoch()),
+                InteractiveObjectCommandProposal(id<InteractiveObjectId>(door.placement),
+                    bob->transform().cell(), bob->transform().position(), id<ObjectRevision>(door.motion),
+                    ObjectInteractionKind::Activate, {}));
+            auto activated = reversed.prepareDoorActivation(authority, activation);
+            require(bool(activated), "Concurrent ordinary door activation rejected");
+            auto reverseStep = reversed.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30,
+                std::move(activated), &world);
+            require(reverseStep && reverseStep->commit(accepted) == CanonicalDurabilityResult::Committed
+                && doorView(reversed, 1, 2).contactRevision != initialDoor.contactRevision,
+                "Concurrent door motion did not invalidate contact");
+            auto staleRelease = reversed.prepareNativeTick(authority, id<ServerTick>(3), 1.f/30, {}, &world);
+            require(staleRelease && staleRelease->commit(accepted) == CanonicalDurabilityResult::Committed,
+                "Door contact invalidation tick failed");
+            const auto revisedBytes = std::vector(reversed.inventoryImage().begin(), reversed.inventoryImage().end());
+            const auto revised = readActorCampaign({reinterpret_cast<const char*>(revisedBytes.data()), revisedBytes.size()});
+            require(!revised.combat->playerCasts[0]
+                && revised.combat->actors[0][9][2] == initial.combat->actors[0][9][2]
+                && doorView(reversed, 2, 3).lockLevel == 0,
+                "Stale door revision paid or wrote after another player's activation");
+            std::cout << "door spell=paid Lock/Open contact=validated write=atomic retry=once restart=two-observers\n";
+            return;
+        }
         if (expandedEffects)
         {
             const auto bytes = [](auto& runtime) { return std::vector(runtime.inventoryImage().begin(), runtime.inventoryImage().end()); };
