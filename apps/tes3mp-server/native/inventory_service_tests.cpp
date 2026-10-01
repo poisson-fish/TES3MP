@@ -5586,7 +5586,7 @@ namespace TES3MP::Native::Testing
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool npcRanged = effectFamily == "npc-ranged";
         const bool neighborCreature = effectFamily == "neighbor-creature";
-        const bool manyNeighbors = effectFamily == "neighbor-many" || neighborCreature;
+        const bool manyNeighbors = effectFamily == "neighbor-many" || effectFamily == "player-travel" || neighborCreature;
         const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded" || manyNeighbors;
@@ -5600,8 +5600,8 @@ namespace TES3MP::Native::Testing
             ? 3u : neighborCombat ? 2u : 1u;
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
-        const bool socialLifecycle = effectFamily == "social-lifecycle" || neighborAi;
-        const bool aiDisposition = !npcRanged && encounterProfile != "bow-aim-flight"
+        const bool socialLifecycle = effectFamily == "social-lifecycle" || effectFamily == "player-travel" || neighborAi;
+        const bool aiDisposition = effectFamily != "player-travel" && !npcRanged && encounterProfile != "bow-aim-flight"
             && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
         const bool movementEffects = npcRanged || effectFamily == "movement-effects"
@@ -6351,7 +6351,7 @@ namespace TES3MP::Native::Testing
                 npc.mSpells.mList.push_back(drain.mId);
                 out.startRecord(ESM::Spell::sRecordId, 0); drain.save(out); out.endRecord(ESM::Spell::sRecordId);
             }
-            if ((expandedEffects || effectFamily == "door-magic") && !npcRanged)
+            if ((expandedEffects || effectFamily == "door-magic" || effectFamily == "player-travel") && !npcRanged)
             {
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
@@ -6390,6 +6390,11 @@ namespace TES3MP::Native::Testing
                 {
                     spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
                     spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
+                }
+                if (effectFamily == "player-travel")
+                {
+                    spell("travel_mark", {effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
+                    spell("travel_recall", {effect(ESM::MagicEffect::Recall, ESM::RT_Self, 0, 0)});
                 }
                 if (effectFamily == "rest-recovery")
                 {
@@ -6707,7 +6712,7 @@ namespace TES3MP::Native::Testing
                 witness.mAiData.mFight = projectileNeighbors || neighborPhysics ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = neighborPhysics ? 200 : 5;
                 witness.mSpells.mList.clear();
-                if (neighborCombat && !npcRanged)
+                if (neighborCombat && !npcRanged && effectFamily != "player-travel")
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
                 if (effectFamily == "neighbor-pursuit" || effectFamily == "neighbor-disposition")
@@ -6906,7 +6911,7 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "elemental-shields" || effectFamily == "fortify-resources"
                 || effectFamily == "persistent-conditions" || effectFamily == "disintegration"
                 || effectFamily == "concealment" || effectFamily == "visibility"
-                || effectFamily == "movement-effects" || neighborPhysics
+                || effectFamily == "movement-effects" || effectFamily == "player-travel" || neighborPhysics
                 || effectFamily == "constant-concealment" || specialConditions)
             {
                 // The melee fixture must not select the unrelated lethal spell/item fixtures.
@@ -6923,6 +6928,10 @@ namespace TES3MP::Native::Testing
                 else if (effectFamily == "movement-effects" || neighborPhysics)
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return !id.getRefIdString().starts_with("movement_");
+                    });
+                else if (effectFamily == "player-travel")
+                    std::erase_if(npc.mSpells.mList, [](auto id) {
+                        return !id.getRefIdString().starts_with("travel_");
                     });
                 else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
@@ -8459,7 +8468,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "player-travel" ? "native-inventory-67\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8518,6 +8527,139 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (effectFamily == "player-travel")
+        {
+            CanonicalWorldTimeState worldTime;
+            worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            worldTime.millisecondsSinceMidnight = 12 * 3600000;
+            const auto globals = GlobalVariableCatalog::create({}).value();
+            const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+            const auto hash = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char ch : name) value = (value ^ ch) * 1099511628211ull;
+                return value;
+            };
+            const auto image = [&](NativeInventoryAuthority& owner) {
+                const auto bytes = owner.inventoryImage();
+                return std::vector<std::byte>(bytes.begin(), bytes.end());
+            };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
+            uint64_t tick = 1;
+            const auto cast = [&](NativeInventoryAuthority& owner, uint64_t player,
+                std::string_view source, bool recall) -> std::optional<Transform> {
+                auto& native = dynamic_cast<InventoryService&>(owner);
+                const auto* caster = authority.findPlayer(id<PlayerId>(player));
+                const auto* session = authority.findActiveSession(id<SessionId>(player));
+                require(session && session->playerId() == caster->playerId(), "Travel session lost player binding");
+                ClientMagicUseCommand use{id<SessionId>(player), session->sessionGeneration(),
+                    id<CommandSequence>(tick), id<CommandId>(tick + player), id<CanonicalRevision>(tick),
+                    MagicUseSourceKind::Spell, hash(source), MagicUseTargetKind::Self, 0,
+                    id<ServerTick>(tick), CombatRevision::initial(), CombatRevision::initial(),
+                    InventoryRevision::initial()};
+                ServerCommandProposal proposal(id<SessionId>(player), session->sessionGeneration(),
+                    use.commandSequence, use.commandId, use.observedCanonicalRevision,
+                    EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
+                    MagicUseCommandProposal(use));
+                auto admitted = owner.prepareMagicUse(authority, proposal, id<ServerTick>(tick));
+                require(bool(admitted), "Player travel spell was not admitted");
+                const auto beforeBytes = image(owner);
+                const auto before = readActorCampaign({reinterpret_cast<const char*>(beforeBytes.data()), beforeBytes.size()});
+                const float magicka = before.combat->actors[player - 1][9][2];
+                bool released = false;
+                std::optional<Transform> relocation;
+                for (uint64_t end = tick + 50; tick <= end; ++tick)
+                {
+                    auto next = native.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30,
+                        std::move(admitted), {}, &world);
+                    require(bool(next), "Player travel tick was not prepared");
+                    const auto projected = native.projectCombatEvents(authority, id<SessionId>(player),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick), next.get());
+                    const bool landed = projected && std::ranges::any_of(projected->magicEvents(),
+                        [&](const auto& event) { return event.sourceId == hash(source) && event.castSucceeded; });
+                    if (landed)
+                    {
+                        const auto saved = image(owner);
+                        require(next->commit(rejected) == CanonicalDurabilityResult::Rejected && image(owner) == saved,
+                            "Rejected travel leaked cost or marker");
+                        require(next->playerRelocations().size() == size_t(recall),
+                            "Recall relocation was not staged with payment");
+                        if (recall)
+                        {
+                            require(next->playerRelocations().front().first == id<PlayerId>(player)
+                                && next->playerRelocations().front().second == *before.combat->players[player - 1].mark,
+                                "Recall selected another player's marker");
+                            relocation = next->playerRelocations().front().second;
+                        }
+                    }
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Player travel tick failed to commit");
+                    if (landed)
+                    {
+                        const auto saved = image(owner);
+                        const auto state = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        require(state.combat->actors[player - 1][9][2] == magicka - 5
+                            && state.combat->players[player - 1].mark
+                            && *state.combat->players[player - 1].mark
+                                == (recall ? *before.combat->players[player - 1].mark
+                                           : authority.findPlayer(id<PlayerId>(player))->transform()),
+                            "Player travel payment or marker invalid");
+                        released = true;
+                        ++tick;
+                        break;
+                    }
+                }
+                require(released, "Player travel release did not complete");
+                return relocation;
+            };
+            const auto aliceMark = authority.findPlayer(id<PlayerId>(1))->transform();
+            const auto bobMark = authority.findPlayer(id<PlayerId>(2))->transform();
+            cast(service, 1, "travel_mark", false);
+            cast(service, 2, "travel_mark", false);
+            for (uint64_t end = tick + 80; tick <= end; ++tick)
+            {
+                const auto saved = image(service);
+                const auto state = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                if (!state.combat->playerCasts[0] && !state.combat->playerCasts[1]) break;
+                auto next = dynamic_cast<InventoryService&>(service).prepareNativeTick(
+                    authority, id<ServerTick>(tick), 1.f/30, {}, {}, &world);
+                require(next && next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Marked player cast recovery failed");
+            }
+            const auto markedBytes = image(service);
+            const auto marked = readActorCampaign({reinterpret_cast<const char*>(markedBytes.data()), markedBytes.size()});
+            require(marked.combat->players[0].mark == aliceMark
+                && marked.combat->players[1].mark == bobMark
+                && aliceMark != bobMark, "Per-player markers crossed identities");
+            InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, markedBytes);
+            auto& restart = resumed.service(); restart.synchronizeCells(authority);
+            require(image(restart) == markedBytes, "Restart changed durable player marks");
+            const auto reconnected = players(id<SessionGeneration>(2), 1, 2);
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(
+                authority.players(), reconnected.activeSessions()));
+            std::vector<CanonicalPlayerEntityState> away(authority.players().begin(), authority.players().end());
+            for (auto& player : away)
+                player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                    id<ServerTick>(tick), Transform(player.transform().cell(),
+                        Position3(player.transform().position().x() + 80 * 1024,
+                            player.transform().position().y(), player.transform().position().z()),
+                        player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(away, authority.activeSessions()));
+            restart.synchronizeCells(authority);
+            require(cast(restart, 1, "travel_recall", true) == aliceMark,
+                "Alice Recall did not use her restored marker");
+            require(cast(restart, 2, "travel_recall", true) == bobMark,
+                "Bob Recall did not use his restored marker");
+            const auto recalledBytes = image(restart);
+            InventoryHost recalled(descriptor, testContentManifest(), *registry, *crypto, recalledBytes);
+            recalled.service().synchronizeCells(authority);
+            require(image(recalled.service()) == recalledBytes,
+                "Restart changed paid Recall state");
+            std::cout << "player travel: two owned Marks, paid Recalls, rejected writes and restart passed\n";
+            return;
+        }
         if (effectFamily == "door-magic")
         {
             CanonicalWorldTimeState worldTime;

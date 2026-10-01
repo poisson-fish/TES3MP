@@ -3,6 +3,7 @@
 #include "actor_spawns.hpp"
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
+#include <tes3mp/spatial_types.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm/attr.hpp>
 #include <components/esm3/loadskil.hpp>
@@ -53,7 +54,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t NpcRangedCampaignMagic = 0x5b50434154335354;
     inline constexpr uint64_t AuthoritativeAimCampaignMagic = 0x5c50434154335354;
     inline constexpr uint64_t MovementRuleCampaignMagic = 0x5d50434154335354;
-    inline constexpr bool hasMovementRules(uint64_t magic) { return magic == MovementRuleCampaignMagic; }
+    inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
+    inline constexpr bool hasPlayerTravel(uint64_t magic) { return magic == PlayerTravelCampaignMagic; }
+    inline constexpr bool hasMovementRules(uint64_t magic)
+    { return magic == MovementRuleCampaignMagic || hasPlayerTravel(magic); }
     inline constexpr bool hasAuthoritativeAim(uint64_t magic)
     { return magic == AuthoritativeAimCampaignMagic || hasMovementRules(magic); }
     inline constexpr bool hasNpcRanged(uint64_t magic)
@@ -198,6 +202,7 @@ namespace TES3MP::Native
             std::vector<CrimeEngagement> engagements;
             ESM::RefId selectedSpell;
             uint64_t selectedEnchantedItem = 0;
+            std::optional<Transform> mark;
             bool operator==(const PlayerAi&) const = default;
         };
         std::array<PlayerAi, 2> players;
@@ -568,6 +573,36 @@ namespace TES3MP::Native
                         std::string_view(bytes.data() + offset, size_t(spellLength)));
                 offset += size_t(spellLength);
                 player.selectedEnchantedItem = getAreaWord(bytes, offset);
+                if (hasPlayerTravel(magic))
+                {
+                    const auto marked = getAreaWord(bytes, offset);
+                    if (marked > 1) throw std::invalid_argument("Native player mark flag invalid");
+                    if (marked)
+                    {
+                        const auto kind = getAreaWord(bytes, offset);
+                        const auto space = getAreaWord(bytes, offset);
+                        const auto gridX = getAreaWord(bytes, offset), gridY = getAreaWord(bytes, offset);
+                        if (kind > 1 || !space || space > 0x7fffffff
+                            || gridX > UINT32_MAX || gridY > UINT32_MAX
+                            || (kind == 0 && (gridX || gridY)))
+                            throw std::invalid_argument("Native player mark cell invalid");
+                        std::array<int64_t, 3> position;
+                        for (auto& axis : position) axis = std::bit_cast<int64_t>(getAreaWord(bytes, offset));
+                        std::array<uint32_t, 3> rotation;
+                        for (auto& axis : rotation)
+                        {
+                            const auto value = getAreaWord(bytes, offset);
+                            if (value > UINT32_MAX) throw std::invalid_argument("Native player mark rotation invalid");
+                            axis = uint32_t(value);
+                        }
+                        const auto cell = kind == 0 ? CellId::interior(*CellSpaceId::fromValue(space))
+                            : CellId::exterior(*CellSpaceId::fromValue(space),
+                                std::bit_cast<int32_t>(uint32_t(gridX)), std::bit_cast<int32_t>(uint32_t(gridY)));
+                        player.mark.emplace(cell, Position3(position[0], position[1], position[2]),
+                            Orientation3(Turn32::fromValue(rotation[0]), Turn32::fromValue(rotation[1]),
+                                Turn32::fromValue(rotation[2])));
+                    }
+                }
                 if (hasSocialLifecycle(magic) && player.werewolf)
                 {
                     auto& skills = player.normalSkills.emplace();

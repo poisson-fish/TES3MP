@@ -650,9 +650,113 @@ namespace
             && liveWorld.questJournal().front().quests.front().stage == id<QuestStage>(10)
             && liveWorld.questJournal().front().journal.front().id == id<JournalEntryId>(1);
     }
+
+    class TravelAuthority final : public NativeInventoryAuthority
+    {
+    public:
+        struct Prepared final : PreparedNativeInventory
+        {
+            explicit Prepared(TravelAuthority& owner) : owner(owner) {}
+            std::span<const std::pair<PlayerId, Transform>> playerRelocations() const override
+            { return owner.relocations; }
+            CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+            {
+                const std::array candidate{std::byte{2}};
+                const auto result = persist(candidate);
+                if (result == CanonicalDurabilityResult::Committed) owner.image = candidate;
+                return result;
+            }
+            TravelAuthority& owner;
+        };
+
+        std::unique_ptr<PreparedNativeInventory> prepareInventory(
+            const CanonicalServerState&, const ServerCommandProposal&) override { return {}; }
+        std::span<const std::byte> inventoryImage() const noexcept override { return image; }
+        std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState&,
+            ServerTick, float, std::unique_ptr<PreparedNativeInventory>, const CanonicalWorldState*) override
+        { return std::make_unique<Prepared>(*this); }
+        std::array<std::byte, 1> image{std::byte{1}};
+        std::vector<std::pair<PlayerId, Transform>> relocations;
+    };
+
+    bool paid_travel_relocation_commits_with_native_image()
+    {
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        const auto start = player(5);
+        const std::array players{start};
+        const std::array sessions{CanonicalSessionProgress(id<SessionId>(1), SessionGeneration::initial(),
+            start.playerId(), start.entityId(), std::nullopt)};
+        const auto state = std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
+        const auto space = id<CellSpaceId>(30);
+        const std::array spaces{CellSpaceDeclaration{space, CellSpaceKind::Interior}};
+        const std::array cells{CellId::interior(space)};
+        const auto manifest = ContentManifest::create(testContentManifestId(), spaces, cells,
+            id<AppearanceId>(20), testContentManifest().movementProfile());
+        if (!manifest) { std::cerr << "travel manifest\n"; return false; }
+        CanonicalCommandReducer reducer(state, observability, *manifest);
+        const auto zero = Turn32::fromValue(0);
+        const Transform destination(cells.front(), Position3(100, 200, 300), Orientation3(zero, zero, zero));
+        TravelAuthority native;
+        native.relocations.emplace_back(start.playerId(), destination);
+        class Durability final : public CanonicalDurabilityPort
+        {
+        public:
+            Durability(const Transform& target, const Transform& origin,
+                CanonicalCommandReducer& canonical, TravelAuthority& authority)
+                : destination(target), start(origin), reducer(&canonical), native(&authority) {}
+            CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+                const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+                const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte> image) noexcept override
+            {
+                observed = candidate && candidate->state().players().front().transform() == destination
+                    && candidate->spatialTicks().size() == 1
+                    && candidate->spatialTicks().front().player.transform() == destination
+                    && image.size() == 1 && image.front() == std::byte{2}
+                    && reducer->state().players().front().transform() == start
+                    && native->inventoryImage().front() == std::byte{1};
+                return result;
+            }
+            const Transform& destination;
+            Transform start;
+            CanonicalCommandReducer* reducer;
+            TravelAuthority* native;
+            CanonicalDurabilityResult result = CanonicalDurabilityResult::Rejected;
+            bool observed = false;
+        } durability(destination, start.transform(), reducer, native);
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &native))
+        { std::cerr << "travel configure\n"; return false; }
+        TestClock clock;
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(2),
+            IngressOrdinal::initial());
+        clock.nanoseconds = 66'666'667;
+        const auto pumped = intake.pump();
+        if (!pumped || pumped.batches().size() != 1) { std::cerr << "travel pump\n"; return false; }
+        auto rejected = reducer.prepareTick(pumped.batches().front());
+        const auto before = reducer.latestPublication();
+        if (!reducer.stageNativeDoorStep(rejected, id<ServerTick>(2), 1.f/30))
+        { std::cerr << "travel stage reject\n"; return false; }
+        if (reducer.commit(std::move(rejected)) || !durability.observed
+            || reducer.state().players().front().transform() != start.transform()
+            || native.image.front() != std::byte{1} || reducer.latestPublication() != before)
+        { std::cerr << "travel reject invariants " << durability.observed << '\n'; return false; }
+        durability.result = CanonicalDurabilityResult::Committed;
+        durability.observed = false;
+        auto accepted = reducer.prepareTick(pumped.batches().front());
+        if (!reducer.stageNativeDoorStep(accepted, id<ServerTick>(2), 1.f/30))
+        { std::cerr << "travel stage accept\n"; return false; }
+        if (!reducer.commit(std::move(accepted)) || !durability.observed)
+        { std::cerr << "travel accept commit " << durability.observed << '\n'; return false; }
+        return reducer.state().players().front().transform() == destination
+            && reducer.state().players().front().authorityEpoch() == id<AuthorityEpoch>(2)
+            && native.image.front() == std::byte{2}
+            && reducer.latestPublication()->spatialTicks().size() == 1;
+    }
 }
 
-int main()
+int main(int argc, char** argv)
 {
     const std::array tests{
         std::pair{ "round_trip_preserves_identity_roots_versions_seeds_and_order",
@@ -673,12 +777,18 @@ int main()
             "actor_simulation_is_durable_before_installation", &actor_simulation_is_durable_before_installation },
         std::pair{ "time_and_global_mutations_are_durable_before_installation",
             &time_and_global_mutations_are_durable_before_installation },
+        std::pair{ "paid_travel_relocation_commits_with_native_image",
+            &paid_travel_relocation_commits_with_native_image },
     };
     for (const auto& [name, test] : tests)
+    {
+        if (argc > 1 && std::string_view(argv[1]) != name) continue;
         if (!test())
         {
             std::cerr << "failed: " << name << '\n';
             return 1;
         }
+        if (argc > 1) std::cout << "PASS " << name << '\n';
+    }
     return 0;
 }

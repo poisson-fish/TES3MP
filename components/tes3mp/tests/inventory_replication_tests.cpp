@@ -93,12 +93,72 @@ namespace
         assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(wrap(encoded, 9))));
         std::cout << "PASS neighborhoods: bounded wire, truncated/nested/foreign/duplicate cells and actor identities\n";
     }
+
+    void groundItems()
+    {
+        const auto cell = CellId::interior(id<CellSpaceId>(7));
+        const CanonicalItemStack stack{ id<ItemStackId>(10), id<ItemPrototypeId>(20), 2, 30, 40,
+            id<ActorPrototypeId>(50) };
+        const GroundItemInterestMember ground{ stack, Position3(4, 5, 6), id<WorldItemRevision>(6) };
+        auto groundBaseline = ReliableGroundItemBaseline::create(header(), cell, std::span(&ground, 1));
+        assert(std::holds_alternative<ReliableGroundItemBaseline>(groundBaseline));
+        const auto groundBytes = encodeReliableGroundItemBaseline(std::get<ReliableGroundItemBaseline>(groundBaseline));
+        assert(decodeReliableGroundItemBaseline(groundBytes) == groundBaseline);
+
+        std::vector<GroundItemInterestMember> items;
+        for (size_t index = 0; index < 64; ++index)
+            items.push_back({{id<ItemStackId>(1000 + index), stack.prototypeId, 1, 30, 40, std::nullopt},
+                Position3(4, 5, 6), id<WorldItemRevision>(6)});
+        auto nativeGround = std::get<ReliableGroundItemBaseline>(
+            ReliableGroundItemBaseline::create(header(), cell, items));
+        nativeGround.nativeWorld = true;
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            nativeGround.nativePlacements.push_back((uint64_t{1} << 63) | (i + 1));
+            nativeGround.presentation.push_back({nativeGround.items[i].stack.stackId, {.1f, .2f, .3f}, 1.25f});
+        }
+        const auto nativeBytes = encodeReliableGroundItemBaseline(nativeGround);
+        assert(nativeBytes.size() <= ReliableOperationMaximumPayloadBytes);
+        assert(decodeReliableGroundItemBaseline(nativeBytes) == GroundItemBaselineDecodeResult(nativeGround));
+        for (size_t i = 0; i < nativeBytes.size(); ++i)
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(
+                decodeReliableGroundItemBaseline(std::span(nativeBytes).first(i))));
+        for (int invalid = 0; invalid < 8; ++invalid)
+        {
+            auto bad = nativeGround;
+            switch (invalid)
+            {
+                case 0: bad.nativePlacements[1] = bad.nativePlacements[0]; break;
+                case 1:
+                    for (size_t i = bad.nativePlacements.size(); i <= MaximumGroundItemBaselineChunkItems; ++i)
+                        bad.nativePlacements.push_back((uint64_t{1} << 63) | (i + 1));
+                    break;
+                case 2: bad.presentation.pop_back(); break;
+                case 3: bad.presentation[0].scale = 0; break;
+                case 4: bad.presentation[0].rotation[0] = std::numeric_limits<float>::infinity(); break;
+                case 5: bad.presentation[0].stack = bad.presentation[1].stack; break;
+                case 6: bad.header.chunkCount = 2; break;
+                case 7: bad.nativeWorld = false; break;
+            }
+            if (!std::holds_alternative<InventoryReplicationDecodeError>(
+                    decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(bad))))
+            {
+                std::cerr << "ground-items malformed case " << invalid << " accepted\n";
+                assert(false);
+            }
+        }
+        nativeGround.items.clear(); nativeGround.presentation.clear();
+        assert(decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(nativeGround))
+            == GroundItemBaselineDecodeResult(nativeGround));
+        std::cout << "PASS ground-items: bounded wire and malformed native placements/presentation\n";
+    }
 }
 
 int main(int argc, char** argv)
 {
     using namespace TES3MP;
     if (argc == 2 && std::string_view(argv[1]) == "neighborhoods") { neighborhoods(); return 0; }
+    if (argc == 2 && std::string_view(argv[1]) == "ground-items") { groundItems(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "container-lock")
     {
         const auto cell = CellId::interior(id<CellSpaceId>(7));
@@ -144,12 +204,6 @@ int main(int argc, char** argv)
         assert(std::holds_alternative<InventoryReplicationDecodeError>(
             decodeReliableContainerInventoryBaseline(encodeReliableContainerInventoryBaseline(actor))));
     }
-
-    const GroundItemInterestMember ground{ stack, Position3(4, 5, 6), id<WorldItemRevision>(6) };
-    auto groundBaseline = ReliableGroundItemBaseline::create(header(), cell, std::span(&ground, 1));
-    assert(std::holds_alternative<ReliableGroundItemBaseline>(groundBaseline));
-    const auto groundBytes = encodeReliableGroundItemBaseline(std::get<ReliableGroundItemBaseline>(groundBaseline));
-    assert(decodeReliableGroundItemBaseline(groundBytes) == groundBaseline);
 
     PublicEquipmentMember member{ .player = id<PlayerId>(1) };
     member.slots[static_cast<std::size_t>(EquipmentSlot::CarriedRight)] = stack.prototypeId;
@@ -209,37 +263,7 @@ int main(int argc, char** argv)
     assert(encodeReliableGroundItemBaseline(std::get<ReliableGroundItemBaseline>(maximumGroundBaseline)).size()
         <= ReliableOperationMaximumPayloadBytes);
 
-    auto nativeGround = std::get<ReliableGroundItemBaseline>(ReliableGroundItemBaseline::create(header(), cell,
-        std::span(maximumGround).first(64)));
-    nativeGround.nativeWorld = true;
-    for (size_t i = 0; i < 64; ++i)
-    {
-        nativeGround.nativePlacements.push_back((uint64_t{1} << 63) | (i + 1));
-        nativeGround.presentation.push_back({nativeGround.items[i].stack.stackId, {.1f, .2f, .3f}, 1.25f});
-    }
-    const auto nativeBytes = encodeReliableGroundItemBaseline(nativeGround);
-    assert(nativeBytes.size() <= ReliableOperationMaximumPayloadBytes);
-    assert(decodeReliableGroundItemBaseline(nativeBytes) == GroundItemBaselineDecodeResult(nativeGround));
-    for (size_t i = 0; i < nativeBytes.size(); ++i)
-        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(std::span(nativeBytes).first(i))));
-    for (int invalid = 0; invalid < 8; ++invalid)
-    {
-        auto bad = nativeGround;
-        switch (invalid)
-        {
-            case 0: bad.nativePlacements[1] = bad.nativePlacements[0]; break;
-            case 1: bad.nativePlacements.push_back(UINT64_MAX); break;
-            case 2: bad.presentation.pop_back(); break;
-            case 3: bad.presentation[0].scale = 0; break;
-            case 4: bad.presentation[0].rotation[0] = std::numeric_limits<float>::infinity(); break;
-            case 5: bad.presentation[0].stack = bad.presentation[1].stack; break;
-            case 6: bad.header.chunkCount = 2; break;
-            case 7: bad.nativeWorld = false; break;
-        }
-        assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(bad))));
-    }
-    nativeGround.items.clear(); nativeGround.presentation.clear();
-    assert(decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(nativeGround)) == GroundItemBaselineDecodeResult(nativeGround));
+    groundItems();
 
     const ClientInventoryTransactionCommand command{ .sessionId = id<SessionId>(1),
         .sessionGeneration = SessionGeneration::initial(),

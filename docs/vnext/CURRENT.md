@@ -26,17 +26,31 @@ both desktops see Lock/Open and stock activation under loss
 (`build/logs/container-spell-live-final-07.log`). Synthetic lit room, vanilla loadout;
 door/container visuals, door audio, Target range and mixed effects remain open.
 
-**Next:** advance travel, creature reactions and mixed combat; then bound
-equipment, summons and actor/life ownership.
+The rebuilt ground-item codec check passes (`build/logs/ground-item-codec-test-03.log`).
+The earlier malformed case used a valid distinct placement ID; the focused check
+now exceeds the 192-entry bound and retains the other malformed cases.
 
-62 M4 effects remain:
+**Mark/Recall (V67):** a successful Self Mark saves one transform per player.
+Recall pays through the native cast and stages that player's destination in the
+same durable candidate as the canonical teleport and authority-epoch change.
+Focused two-player synthetic checks cover distinct marks, rejected writes,
+reconnect generations and restart (`build/logs/player-travel-test-12.log`);
+the reducer durability check covers atomic image/spatial publication
+(`build/logs/travel-reducer-test-05.log`). Live travel, presentation/audio,
+cross-cell behavior and stock restrictions remain unverified.
+
+**Next:** verify Mark/Recall cross-cell and live behavior, then intervention
+travel; continue creature reactions and mixed combat, then bound equipment,
+summons and actor/life ownership.
+
+60 M4 effects remain:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
   Jump, Levitate, SlowFall.
 - AI/disposition (12): Charm, CalmHumanoid, CalmCreature, FrenzyHumanoid,
   FrenzyCreature, DemoralizeHumanoid, DemoralizeCreature, RallyHumanoid,
   RallyCreature, CommandHumanoid, CommandCreature, TurnUndead.
 - Objects (4): Lock, Open, Telekinesis, Soultrap.
-- Travel (4): Mark, Recall, DivineIntervention, AlmsiviIntervention.
+- Travel (2): DivineIntervention, AlmsiviIntervention.
 - Equipment (12): BoundDagger, BoundLongsword, BoundMace, BoundBattleAxe,
   BoundSpear, BoundLongbow, BoundCuirass, BoundHelm, BoundBoots, BoundShield,
   BoundGloves, ExtraSpell (preserve actual stock behavior).
@@ -47,4 +61,4 @@ equipment, summons and actor/life ownership.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-81 + 62 = 143 IDs. Summons/player lives remain unproven.
+83 + 60 = 143 IDs. Summons/player lives remain unproven.

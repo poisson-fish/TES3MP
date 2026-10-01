@@ -21,6 +21,7 @@ namespace TES3MP
         // A door may stage relocation of the authenticated requester. The
         // reducer persists it with the unchanged native image before publication.
         virtual std::optional<Transform> playerDestination() const { return {}; }
+        virtual std::span<const std::pair<PlayerId, Transform>> playerRelocations() const { return {}; }
         virtual bool changesInventory() const noexcept { return true; }
         virtual CanonicalDurabilityResult commit(const NativeInventoryCommit& durability) noexcept = 0;
     };

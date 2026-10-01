@@ -2098,12 +2098,47 @@ namespace TES3MP
         auto door = mNativeInventory->prepareNativeTick(*prepared.mState, tick, seconds,
             std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld);
         if (!door) return true;
+        const auto destinations = door->playerRelocations();
+        if (!destinations.empty())
+        {
+            std::vector<CanonicalPlayerEntityState> players(
+                prepared.mState->players().begin(), prepared.mState->players().end());
+            if (destinations.size() > players.size()) return false;
+            std::vector<CanonicalSpatialTickRecord> relocations;
+            auto version = prepared.mStateVersion;
+            for (const auto& [id, destination] : destinations)
+            {
+                if (std::ranges::any_of(relocations,
+                        [id](const auto& previous) { return previous.player.playerId() == id; })) return false;
+                const auto found = std::ranges::find(players, id, &CanonicalPlayerEntityState::playerId);
+                if (found == players.end() || !mContentManifest.contains(destination.cell())) return false;
+                const auto epoch = found->authorityEpoch().next();
+                const auto nextVersion = version.next();
+                const auto advanced = advanceCanonicalSpatialState(*found, tick, destination,
+                    LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                const auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced);
+                if (!epoch || !nextVersion || !value) return false;
+                *found = CanonicalPlayerEntityState(value->playerId(), value->entityId(),
+                    value->appearanceId(), value->transform(), value->linearVelocity(),
+                    value->entityRevision(), *epoch, tick, value->locomotionMode());
+                version = *nextVersion;
+                relocations.push_back({version, tick, *found});
+            }
+            auto candidate = createCanonicalServerState(players, prepared.mState->activeSessions());
+            const auto* state = std::get_if<CanonicalServerState>(&candidate);
+            if (!state) return false;
+            prepared.mState = std::make_shared<CanonicalServerState>(*state);
+            prepared.mStateVersion = version;
+            prepared.mPublication->mSpatialTicks.insert(prepared.mPublication->mSpatialTicks.end(),
+                relocations.begin(), relocations.end());
+        }
         if (hadCommand)
         {
             prepared.mNativeInventory = std::move(door);
             return true;
         }
-        const auto version = prepared.mStateVersion.next();
+        const auto version = destinations.empty()
+            ? prepared.mStateVersion.next() : std::optional(prepared.mStateVersion);
         const auto revision = prepared.mCanonicalRevision.next();
         if (!version || !revision) return false;
         prepared.mNativeInventory = std::move(door);

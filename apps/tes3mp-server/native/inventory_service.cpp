@@ -896,6 +896,10 @@ namespace TES3MP::Native
                     && !MWMechanics::validAiEffectTarget(effect.mEffectID,
                         actorKinds[recipient].first, recipient < 2, actorKinds[recipient].second,
                         author < states.size())) return;
+                // Travel changes the owned player marker or canonical transform at
+                // the cast release, not the actor's timed magic overlay.
+                if (effect.mEffectID == ESM::MagicEffect::Mark
+                    || effect.mEffectID == ESM::MagicEffect::Recall) return;
                 const auto* magic = content.get<ESM::MagicEffect>().find(effect.mEffectID);
                 if (protections && recipient != author)
                 {
@@ -2417,10 +2421,20 @@ namespace TES3MP::Native
                 return effect.mEffectID == ESM::MagicEffect::Lock
                     || effect.mEffectID == ESM::MagicEffect::Open;
             };
+            const auto travelEffect = [](const ESM::ENAMstruct& effect) {
+                return effect.mEffectID == ESM::MagicEffect::Mark
+                    || effect.mEffectID == ESM::MagicEffect::Recall;
+            };
             if (use.targetKind == MagicUseTargetKind::Door || use.targetKind == MagicUseTargetKind::Container)
                 return effects.effects.size() == 1 && objectEffect(effects.effects.front())
                     && effects.effects.front().mRange == ESM::RT_Touch
                     && effects.effects.front().mArea == 0 && effects.effects.front().mDuration == 0;
+            if (std::ranges::any_of(effects.effects, travelEffect))
+                return mBinding.mPlayerTravel && use.targetKind == MagicUseTargetKind::Self
+                    && effects.effects.size() == 1 && effects.effects.front().mRange == ESM::RT_Self
+                    && effects.effects.front().mArea == 0 && effects.effects.front().mDuration == 0
+                    && (effects.effects.front().mEffectID != ESM::MagicEffect::Recall
+                        || combat.players[actor(player)].mark.has_value());
             return std::ranges::none_of(effects.effects, objectEffect);
         };
         if (use.sourceKind == MagicUseSourceKind::EnchantedItem)
@@ -2444,7 +2458,7 @@ namespace TES3MP::Native
             auto prepared = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge,
                 mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
                 mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                objectTarget);
+                objectTarget, mBinding.mPlayerTravel);
             if (!prepared || !prepared->affordable || !acceptsObjectTarget(prepared->effects)) return {};
             const auto& effects = prepared->effects;
             if (std::ranges::any_of(effects.effects,
@@ -2474,7 +2488,7 @@ namespace TES3MP::Native
         if (!selected) return {};
         auto prepared = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle,
             mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
-            objectTarget);
+            objectTarget, mBinding.mPlayerTravel);
         if (!prepared || !acceptsObjectTarget(prepared->effects)
             || std::ranges::any_of(prepared->effects.effects,
                 [&](const auto& effect) { return (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty()))
@@ -2693,6 +2707,7 @@ namespace TES3MP::Native
                 || mBinding.mRangedFlight != hasRangedFlight(magic)
                 || mBinding.mAuthoritativeAim != hasAuthoritativeAim(magic)
                 || mBinding.mScriptedMovementRules != hasMovementRules(magic)
+                || mBinding.mPlayerTravel != hasPlayerTravel(magic)
                 || mBinding.mKnockoutAnimation != hasKnockoutAnimation(magic)
                 || mBinding.mExpandedEffects != hasExpandedEffects(magic)
                 || mBinding.mActorPresentation != hasActorPresentation(magic)
@@ -2944,7 +2959,9 @@ namespace TES3MP::Native
                             && (id == ESM::MagicEffect::FortifyAttribute || id == ESM::MagicEffect::FortifySkill))
                         && !(mBinding.mNpcCastLifecycle && (id == ESM::MagicEffect::DrainAttribute
                             || id == ESM::MagicEffect::DrainSkill)))
-                        throw std::invalid_argument("Native saved actor effect unsupported");
+                        throw std::invalid_argument("Native saved actor effect unsupported: "
+                            + std::string(id.getRefIdString()) + " source=" + std::to_string(effect.sourceKind)
+                            + " duration=" + std::to_string(effect.durationTicks));
                     const bool casterKnown = mBinding.mDurableCasters
                         ? knownCaster({effect.caster, effect.casterKind, effect.casterLife})
                         : effect.caster == mBinding.mNavigatingActor->actorId()
@@ -3106,6 +3123,9 @@ namespace TES3MP::Native
                                     && mRuntime.mStore.get<ESM::Enchantment>().search(record.mEnchant);
                             }))
                             throw std::invalid_argument("Saved player selected item differs from inventory");
+                        if (mBinding.mPlayerTravel && social.mark
+                            && !worldDomain(social.mark->cell()))
+                            throw std::invalid_argument("Saved player mark outside bound world");
                         if (mBinding.mSocialLifecycle)
                         {
                             if (social.werewolf != social.normalSkills.has_value()
@@ -3330,7 +3350,8 @@ namespace TES3MP::Native
                                         mBinding.mExpandedEffects, mBinding.mSpecialConditions,
                                         mBinding.mMovementEffects,
                                         cast.targetKind == uint64_t(MagicUseTargetKind::Door)
-                                            || cast.targetKind == uint64_t(MagicUseTargetKind::Container)) : std::nullopt;
+                                            || cast.targetKind == uint64_t(MagicUseTargetKind::Container),
+                                        mBinding.mPlayerTravel) : std::nullopt;
                                     if (plan) effects = plan->effects;
                                 }
                         }
@@ -3348,7 +3369,8 @@ namespace TES3MP::Native
                                             mBinding.mExpandedEffects, false, mBinding.mSpecialConditions,
                                             mBinding.mMovementEffects,
                                             cast.targetKind == uint64_t(MagicUseTargetKind::Door)
-                                                || cast.targetKind == uint64_t(MagicUseTargetKind::Container));
+                                                || cast.targetKind == uint64_t(MagicUseTargetKind::Container),
+                                            mBinding.mPlayerTravel);
                                 }
                         }
                         else continue; // Released items may have been consumed or transferred.
@@ -3473,6 +3495,7 @@ namespace TES3MP::Native
                 if (player.factions.size() > 256 || player.bounty < 0 || player.drawState > 2)
                     throw std::invalid_argument("Native player AI state exceeds bounds");
                 playerAiSize += 8 + 7 * 8 + player.selectedSpell.serializeText().size();
+                if (mBinding.mPlayerTravel) playerAiSize += player.mark ? 11 * 8 : 8;
                 if (mBinding.mSocialLifecycle && player.werewolf)
                     playerAiSize += (ESM::Skill::Length + ESM::Attribute::Length) * 8;
                 if (mBinding.mSocialLifecycle)
@@ -3540,7 +3563,8 @@ namespace TES3MP::Native
             || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - neighborAttackSize - projectileSize - timedSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mScriptedMovementRules ? MovementRuleCampaignMagic
+        putAreaWord(result, mBinding.mPlayerTravel ? PlayerTravelCampaignMagic
+            : mBinding.mScriptedMovementRules ? MovementRuleCampaignMagic
             : mBinding.mAuthoritativeAim ? AuthoritativeAimCampaignMagic
             : mBinding.mNeighborCombat ? NpcRangedCampaignMagic
             : mBinding.mPlacementCombat ? PlacementCombatCampaignMagic
@@ -3656,6 +3680,26 @@ namespace TES3MP::Native
                 putAreaWord(result, player.werewolf); putAreaWord(result, player.knownWerewolf);
                 putAreaWord(result, spell.size()); result.insert(result.end(), spell.begin(), spell.end());
                 putAreaWord(result, player.selectedEnchantedItem);
+                if (mBinding.mPlayerTravel)
+                {
+                    putAreaWord(result, bool(player.mark));
+                    if (player.mark)
+                    {
+                        const auto& value = *player.mark;
+                        putAreaWord(result, uint64_t(value.cell().kind()));
+                        putAreaWord(result, value.cell().asInterior()
+                            ? value.cell().asInterior()->cellSpace().value()
+                            : value.cell().asExterior()->worldspace().value());
+                        putAreaWord(result, value.cell().asExterior()
+                            ? uint32_t(value.cell().asExterior()->gridX()) : 0);
+                        putAreaWord(result, value.cell().asExterior()
+                            ? uint32_t(value.cell().asExterior()->gridY()) : 0);
+                        for (const auto axis : {value.position().x(), value.position().y(), value.position().z()})
+                            putAreaWord(result, std::bit_cast<uint64_t>(axis));
+                        for (const auto axis : {value.orientation().x(), value.orientation().y(), value.orientation().z()})
+                            putAreaWord(result, axis.value());
+                    }
+                }
                 if (mBinding.mSocialLifecycle && player.werewolf)
                 {
                     if (!player.normalSkills || !player.normalAttributes)
@@ -4172,6 +4216,7 @@ namespace TES3MP::Native
         std::vector<MagicImpactCue> magicImpactCues;
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
+        std::vector<std::pair<PlayerId, Transform>> relocations;
         EquipmentBytes wornCore, wornInventory, respawnCore;
         uint64_t target;
         bool contact;
@@ -4195,6 +4240,7 @@ namespace TES3MP::Native
             std::vector<MagicUseCombatEvent> stagedSpellCasts,
             std::vector<MagicImpactCue> stagedMagicImpactCues,
             std::vector<WeaponWear> stagedWear, std::vector<ItemCharge> stagedCharges, EquipmentBytes core,
+            std::vector<std::pair<PlayerId, Transform>> stagedRelocations,
             uint64_t time, std::array<float,3> motion,
             ServerApp::NativeTravelDiagnostics report)
             : service(owner), command(std::move(input)), actor(std::move(step)), melee(std::move(swing)),
@@ -4206,11 +4252,14 @@ namespace TES3MP::Native
               actorHits(std::move(stagedActorHits)), spellCasts(std::move(stagedSpellCasts)),
               magicImpactCues(std::move(stagedMagicImpactCues)),
               wear(std::move(stagedWear)), charges(std::move(stagedCharges)),
+              relocations(std::move(stagedRelocations)),
               wornCore(std::move(core)), target(selected), contact(contacted), before(owner.mActorImage),
               tick(time), velocity(motion), diagnostics(report)
         { if (respawn) respawnCore.assign(respawn->image().begin(), respawn->image().end()); }
         bool changesInventory() const noexcept override
         { return bool(command) || !wear.empty() || !charges.empty() || bool(respawn) || bool(loot); }
+        std::span<const std::pair<PlayerId, Transform>> playerRelocations() const override
+        { return relocations; }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
             if (consumed || service.inventoryImage().empty() || before != service.mActorImage
@@ -4647,6 +4696,7 @@ namespace TES3MP::Native
                 if (found == mBinding.mPlayers.end()) return {};
                 const size_t index = size_t(found - mBinding.mPlayers.begin());
                 if (seen[index] || !validPlayerAiState(index, update.state, command.get())
+                    || (mBinding.mPlayerTravel && update.state.mark != combat->players[index].mark)
                     || (mBinding.mSocialLifecycle
                         && (update.state.werewolf != combat->players[index].werewolf
                             || update.state.normalSkills != combat->players[index].normalSkills
@@ -4769,6 +4819,7 @@ namespace TES3MP::Native
         std::vector<WeaponWear> wear;
         std::vector<ItemCharge> charges;
         std::vector<ProjectileRecovery> recoveries;
+        std::vector<std::pair<PlayerId, Transform>> relocations;
         const auto stageDisintegrate = [&](size_t recipient, ESM::RefId effect, float magnitude) {
             if (recipient < 2 && changingWerewolfEquipment[recipient]) return;
             if (!std::isfinite(magnitude) || magnitude < 0.f || magnitude > 100000.f)
@@ -7424,6 +7475,20 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native door spell target changed during launch");
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
+            if (launch.succeeded && owner < 2 && mBinding.mPlayerTravel
+                && spellRecord.effects.effects.size() == 1)
+            {
+                const auto effect = spellRecord.effects.effects.front().mEffectID;
+                if (effect == ESM::MagicEffect::Mark || effect == ESM::MagicEffect::Recall)
+                {
+                    const auto* traveler = players.findPlayer(mBinding.mPlayers[owner]);
+                    if (!traveler) throw std::invalid_argument("Player travel caster disappeared");
+                    if (effect == ESM::MagicEffect::Mark)
+                        combat->players[owner].mark = traveler->transform();
+                    else if (combat->players[owner].mark)
+                        relocations.emplace_back(mBinding.mPlayers[owner], *combat->players[owner].mark);
+                }
+            }
             if (launch.succeeded && cast.targetKind != MagicUseTargetKind::Door
                 && cast.targetKind != MagicUseTargetKind::Container
                 && mBinding.mNpcCastLifecycle && caster.getHealth().getCurrent() > 0)
@@ -8536,7 +8601,7 @@ namespace TES3MP::Native
             std::move(projectiles), std::move(timedEffects), casting, std::move(respawn), std::move(loot),
             std::move(playerHits), std::move(actorHits), std::move(spellCasts),
             std::move(magicImpactCues),
-            std::move(wear), std::move(charges), std::move(wornCore),
+            std::move(wear), std::move(charges), std::move(wornCore), std::move(relocations),
             tick.value(), velocity, report);
     }
     catch (const std::exception& error)

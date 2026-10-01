@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 66; ++candidate)
+            for (unsigned candidate = 3; candidate <= 67; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -292,6 +292,7 @@ namespace TES3MP::Native
                 binding.mMovementEffects = descriptorVersion >= 56;
                 binding.mLevitationEnabled = levitationEnabled;
                 binding.mScriptedMovementRules = descriptorVersion >= 65;
+                binding.mPlayerTravel = descriptorVersion >= 67;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
