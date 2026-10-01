@@ -295,11 +295,12 @@ combat/lives; V63 gives three placement/life-bound spells/projectiles; V66 gives
 four with shared social targeting. Player Command follows an available, living
 caster; older caps persist.
 
-**Player travel (V67).** Persist one Mark transform under each player identity
-in the native actor campaign. A successful Recall stages a canonical spatial
-replacement and authority-epoch advance with the same durability callback as
-native cast payment; rejected commits install neither. Require a fresh V67
-campaign and a destination in the bound content manifest.
+**Player travel (V67/V68).** Each player owns one durable Mark. Recall commits
+payment, bound destination and authority epoch together. Rejection permits retry;
+storage failure closes the runtime until coherent restart. V68 persists stock
+Enable/DisableTeleporting through bounded opcodes. Disabled spells and unmarked
+Recall retain payment without teleporting. Each version requires a fresh campaign;
+V67's layout remains unchanged.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

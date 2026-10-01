@@ -76,7 +76,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 67; ++candidate)
+            for (unsigned candidate = 3; candidate <= 68; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -267,7 +267,7 @@ namespace TES3MP::Native
                 {{{actorA, shirt, countA, false, baseInventory}, {actorB, shirt, countB, false, baseInventory}}}, {}, {}};
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
-            binding.mTravelerNeighborhood = neighborhood;
+            binding.mTravelerNeighborhood = neighborhood && cells->front().asExterior() != nullptr;
             binding.mMeleeContact = version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
             binding.mCombatState = version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
             binding.mCombatResolution = version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
@@ -293,6 +293,7 @@ namespace TES3MP::Native
                 binding.mLevitationEnabled = levitationEnabled;
                 binding.mScriptedMovementRules = descriptorVersion >= 65;
                 binding.mPlayerTravel = descriptorVersion >= 67;
+                binding.mScriptedTravelRules = descriptorVersion >= 68;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
@@ -643,7 +644,9 @@ namespace TES3MP::Native
                 const auto& owner = *std::ranges::find_if(start.binding.mContainers, matching);
                 std::ranges::sort(start.binding.mDoors, {}, &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
                 std::vector<uint64_t> doors;
-                for (const auto& door : start.binding.mDoors) doors.push_back(door.mId);
+                for (const auto& door : start.binding.mDoors)
+                    if (start.binding.mTravelerNeighborhood || door.mCell == start.wireCell)
+                        doors.push_back(door.mId);
                 std::ranges::sort(doors);
                 if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
                     throw std::invalid_argument("V17-V19 require at least one ordinary door");
@@ -656,10 +659,11 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native neighbor witness has no inventory owner");
                 std::vector<uint64_t> neighborIds;
                 for (const auto& adjacent : neighborOwners) neighborIds.push_back(adjacent.mId.value());
-                const auto createScene = [&loadout, names, neighborhood = start.binding.mTravelerNeighborhood,
+                const auto actorCells = start.binding.mTravelerNeighborhood ? names : std::vector{start.cell};
+                const auto createScene = [&loadout, actorCells, neighborhood = start.binding.mTravelerNeighborhood,
                     movementEffects = start.binding.mMovementEffects,
                     id = owner.mId.value(), neighborIds, navigation = *start.navigation, doors] {
-                    auto scene = std::make_shared<InteriorActorScene>(loadout, names, id,
+                    auto scene = std::make_shared<InteriorActorScene>(loadout, actorCells, id,
                         "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborIds);
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     if (movementEffects) scene->enableMovementEffects();

@@ -6395,6 +6395,16 @@ namespace TES3MP::Native::Testing
                 {
                     spell("travel_mark", {effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                     spell("travel_recall", {effect(ESM::MagicEffect::Recall, ESM::RT_Self, 0, 0)});
+                    for (const auto [id, body] : {
+                            std::pair{"travel_disable", "DisableTeleporting\n"},
+                            {"travel_enable", "EnableTeleporting\n"},
+                            {"travel_invalid", "DisableTeleporting\nModHealth 10\n"}})
+                    {
+                        ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(id);
+                        script.mScriptText = "Begin " + std::string(id) + "\n" + body + "End " + id + "\n";
+                        out.startRecord(ESM::Script::sRecordId, 0); script.save(out);
+                        out.endRecord(ESM::Script::sRecordId);
+                    }
                 }
                 if (effectFamily == "rest-recovery")
                 {
@@ -7185,7 +7195,19 @@ namespace TES3MP::Native::Testing
                 if (record == placedActor) placed.mPos = {{0, -220, 1}, {0, 0, 0}};
                 placed.save(out);
             }
-            out.endRecord(ESM::Cell::sRecordId); out.close();
+            out.endRecord(ESM::Cell::sRecordId);
+            if (effectFamily == "player-travel")
+            {
+                cell.mName = "NPC Door Recall Test"; cell.updateId();
+                out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                for (auto record : {floor.mId, door.mId})
+                {
+                    ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                    placed.save(out);
+                }
+                out.endRecord(ESM::Cell::sRecordId);
+            }
+            out.close();
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
             cfg << "\ndata=" << std::quoted(scratch.generic_string()) << "\ncontent=NpcDoors.esp\n";
         }
@@ -8468,7 +8490,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "player-travel" ? "native-inventory-67\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8487,7 +8509,9 @@ namespace TES3MP::Native::Testing
             out << "\nconfig \"openmw\"\nplayers 1 2\nactors "
                 << (participantHits ? "\"npc_hit_female\" \"npc_hit_beast\"" : "\"npc_door_actor\" \"npc_door_actor\"")
                 << "\nloot 1 0\n"
-                << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 1\n"
+                << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\n"
+                << (effectFamily == "player-travel"
+                    ? "areas 2\ninterior \"NPC Door Recall Test\"\ncell interior:8\n" : "areas 1\n")
                 << "npc " << std::quoted(effectFamily == "ai-creature" ? "timeline_creature" : "npc_door_actor")
                 << ' ' << std::quoted(actorSettings.string())
                 << (melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
@@ -8524,7 +8548,16 @@ namespace TES3MP::Native::Testing
             authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
         }
         if (weaponExecution) return;
-        InventoryHost host(descriptor, testContentManifest(), *registry, *crypto, {});
+        auto manifest = testContentManifest();
+        if (effectFamily == "player-travel")
+        {
+            const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+                CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
+            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+            manifest = ContentManifest::create(testContentManifestId(), spaces, cells,
+                id<AppearanceId>(1), testMovementProfile()).value();
+        }
+        InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
         if (effectFamily == "player-travel")
@@ -8535,7 +8568,7 @@ namespace TES3MP::Native::Testing
             const auto globals = GlobalVariableCatalog::create({}).value();
             const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
             const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
-            const auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+            auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
             const auto hash = [](std::string_view name) {
                 uint64_t value = 14695981039346656037ull;
                 for (unsigned char ch : name) value = (value ^ ch) * 1099511628211ull;
@@ -8548,8 +8581,23 @@ namespace TES3MP::Native::Testing
             const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
             const auto rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
             uint64_t tick = 1;
+            const auto recoverCast = [&](NativeInventoryAuthority& owner) {
+                for (uint64_t end = tick + 80; tick <= end; ++tick)
+                {
+                    const auto saved = image(owner);
+                    const auto state = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                    if (!state.combat->playerCasts[0] && !state.combat->playerCasts[1]) return;
+                    auto next = dynamic_cast<InventoryService&>(owner).prepareNativeTick(
+                        authority, id<ServerTick>(tick), 1.f/30, {}, {}, &world);
+                    require(next && next->playerRelocations().empty()
+                        && next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Travel cast recovery failed");
+                }
+                throw std::runtime_error("Travel cast recovery exceeded bound");
+            };
             const auto cast = [&](NativeInventoryAuthority& owner, uint64_t player,
                 std::string_view source, bool recall) -> std::optional<Transform> {
+                recoverCast(owner);
                 auto& native = dynamic_cast<InventoryService&>(owner);
                 const auto* caster = authority.findPlayer(id<PlayerId>(player));
                 const auto* session = authority.findActiveSession(id<SessionId>(player));
@@ -8568,6 +8616,9 @@ namespace TES3MP::Native::Testing
                 const auto beforeBytes = image(owner);
                 const auto before = readActorCampaign({reinterpret_cast<const char*>(beforeBytes.data()), beforeBytes.size()});
                 const float magicka = before.combat->actors[player - 1][9][2];
+                const auto expectedMark = !recall && before.combat->teleportingEnabled
+                    ? std::optional(caster->transform()) : before.combat->players[player - 1].mark;
+                const bool teleports = recall && before.combat->teleportingEnabled && expectedMark.has_value();
                 bool released = false;
                 std::optional<Transform> relocation;
                 for (uint64_t end = tick + 50; tick <= end; ++tick)
@@ -8584,9 +8635,9 @@ namespace TES3MP::Native::Testing
                         const auto saved = image(owner);
                         require(next->commit(rejected) == CanonicalDurabilityResult::Rejected && image(owner) == saved,
                             "Rejected travel leaked cost or marker");
-                        require(next->playerRelocations().size() == size_t(recall),
+                        require(next->playerRelocations().size() == size_t(teleports),
                             "Recall relocation was not staged with payment");
-                        if (recall)
+                        if (teleports)
                         {
                             require(next->playerRelocations().front().first == id<PlayerId>(player)
                                 && next->playerRelocations().front().second == *before.combat->players[player - 1].mark,
@@ -8601,10 +8652,8 @@ namespace TES3MP::Native::Testing
                         const auto saved = image(owner);
                         const auto state = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
                         require(state.combat->actors[player - 1][9][2] == magicka - 5
-                            && state.combat->players[player - 1].mark
-                            && *state.combat->players[player - 1].mark
-                                == (recall ? *before.combat->players[player - 1].mark
-                                           : authority.findPlayer(id<PlayerId>(player))->transform()),
+                            && state.combat->players[player - 1].mark == expectedMark
+                            && state.combat->players[2 - player].mark == before.combat->players[2 - player].mark,
                             "Player travel payment or marker invalid");
                         released = true;
                         ++tick;
@@ -8616,6 +8665,29 @@ namespace TES3MP::Native::Testing
             };
             const auto aliceMark = authority.findPlayer(id<PlayerId>(1))->transform();
             const auto bobMark = authority.findPlayer(id<PlayerId>(2))->transform();
+            require(!cast(service, 1, "travel_recall", true), "Recall without Mark teleported");
+            const auto rule = [&](NativeInventoryAuthority& owner, const char* script) {
+                auto next = dynamic_cast<InventoryService&>(owner).prepareNativeTick(
+                    authority, id<ServerTick>(tick++), 1.f/30, {}, {}, &world, {}, {}, {},
+                    InventoryService::MovementRuleScriptRequest{ESM::RefId::stringRefId(script)});
+                const auto before = image(owner);
+                require(next && next->commit(rejected) == CanonicalDurabilityResult::Rejected
+                    && image(owner) == before, "Rejected teleport rule leaked state");
+                require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Teleport rule failed to commit");
+            };
+            rule(service, "travel_disable");
+            require(!cast(service, 1, "travel_mark", false), "Disabled Mark relocated");
+            require(!cast(service, 2, "travel_recall", true), "Disabled unmarked Recall relocated");
+            const auto disabledBytes = image(service);
+            require(!readActorCampaign({reinterpret_cast<const char*>(disabledBytes.data()), disabledBytes.size()})
+                .combat->teleportingEnabled, "Disabled teleport rule was not saved");
+            InventoryHost disabled(descriptor, manifest, *registry, *crypto, disabledBytes);
+            require(image(disabled.service()) == disabledBytes, "Restart changed disabled teleport rule");
+            bool invalidRule = false;
+            try { rule(service, "travel_invalid"); } catch (const std::exception&) { invalidRule = true; }
+            require(invalidRule && image(service) == disabledBytes, "Unsupported teleport script leaked state");
+            rule(service, "travel_enable");
             cast(service, 1, "travel_mark", false);
             cast(service, 2, "travel_mark", false);
             for (uint64_t end = tick + 80; tick <= end; ++tick)
@@ -8633,7 +8705,7 @@ namespace TES3MP::Native::Testing
             require(marked.combat->players[0].mark == aliceMark
                 && marked.combat->players[1].mark == bobMark
                 && aliceMark != bobMark, "Per-player markers crossed identities");
-            InventoryHost resumed(descriptor, testContentManifest(), *registry, *crypto, markedBytes);
+            InventoryHost resumed(descriptor, manifest, *registry, *crypto, markedBytes);
             auto& restart = resumed.service(); restart.synchronizeCells(authority);
             require(image(restart) == markedBytes, "Restart changed durable player marks");
             const auto reconnected = players(id<SessionGeneration>(2), 1, 2);
@@ -8648,16 +8720,223 @@ namespace TES3MP::Native::Testing
                         player.transform().orientation()), LinearVelocity3(0, 0, 0)));
             authority = std::get<CanonicalServerState>(createCanonicalServerState(away, authority.activeSessions()));
             restart.synchronizeCells(authority);
+            rule(restart, "travel_disable");
+            require(!cast(restart, 1, "travel_mark", false), "Disabled Mark replaced an existing mark");
+            require(!cast(restart, 2, "travel_recall", true), "Disabled marked Recall relocated");
+            rule(restart, "travel_enable");
             require(cast(restart, 1, "travel_recall", true) == aliceMark,
                 "Alice Recall did not use her restored marker");
             require(cast(restart, 2, "travel_recall", true) == bobMark,
                 "Bob Recall did not use his restored marker");
             const auto recalledBytes = image(restart);
-            InventoryHost recalled(descriptor, testContentManifest(), *registry, *crypto, recalledBytes);
+            InventoryHost recalled(descriptor, manifest, *registry, *crypto, recalledBytes);
             recalled.service().synchronizeCells(authority);
             require(image(recalled.service()) == recalledBytes,
                 "Restart changed paid Recall state");
-            std::cout << "player travel: two owned Marks, paid Recalls, rejected writes and restart passed\n";
+            recoverCast(restart);
+            const auto departureCell = CellId::interior(id<CellSpaceId>(8));
+            away.assign(authority.players().begin(), authority.players().end());
+            for (auto& player : away)
+                player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                    id<ServerTick>(tick), Transform(departureCell, player.transform().position(),
+                        player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(away, authority.activeSessions()));
+            restart.synchronizeCells(authority);
+            require(dynamic_cast<InventoryService&>(restart).activeCells() == std::array{false, true},
+                "Recall destination did not unload before the cast");
+
+            NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+            CanonicalCommandReducer reducer(authority, observability, manifest);
+            const auto catalog = ServerScriptStateCatalog::create({}).value();
+            auto scripts = CanonicalScriptState::initial(catalog).value();
+            std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{68};
+            const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+                ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+            const auto path = scratch / "recall.bin";
+            auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            struct Port final : CanonicalDurabilityPort
+            {
+                ServerApp::CanonicalPersistenceFile& file;
+                CanonicalCommandReducer& reducer;
+                CanonicalDurabilityResult result = CanonicalDurabilityResult::Committed;
+                Port(ServerApp::CanonicalPersistenceFile& f, CanonicalCommandReducer& r) : file(f), reducer(r) {}
+                CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                    CanonicalRevision revision, std::span<const DurableCommandOrder> commands,
+                    const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat,
+                    const CanonicalInteractiveObjectWorld* objects, const CanonicalActorWorld* actors,
+                    const CanonicalWorldState* world, const CanonicalScriptState* scripts,
+                    std::span<const std::byte> image) noexcept override
+                {
+                    if (candidate == reducer.latestPublication() || image.empty()) return CanonicalDurabilityResult::Failed;
+                    if (result != CanonicalDurabilityResult::Committed) return result;
+                    return file.commit(candidate, revision, commands, inventory, combat, objects, actors, world, scripts, image);
+                }
+            } port(*file, reducer);
+            require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, &world, &scripts, &restart),
+                "Recall reducer durability configuration failed");
+            Clock clock; Delivery delivery(clock, id<SessionGeneration>(2));
+            auto& native = dynamic_cast<InventoryService&>(restart);
+            const auto prepare = [&](const ServerCommandProposal* command = nullptr) {
+                ServerCommandIntakeCoordinator intake(clock, observability, clock.now(),
+                    id<ServerTick>(++tick), IngressOrdinal::initial());
+                if (command) require(intake.submit(*command) == CommandSubmissionResult::Accepted,
+                    "Recall command intake failed");
+                clock.value += tick * 33'333'334;
+                auto batches = intake.pump();
+                require(batches && batches.batches().size() == 1, "Recall tick intake failed");
+                auto pending = reducer.prepareTick(batches.batches().front());
+                require(pending.result() && reducer.stageNativeDoorStep(pending, id<ServerTick>(tick), 1.f/30),
+                    "Recall native tick composition failed");
+                return pending;
+            };
+            const auto commit = [&](auto& pending) {
+                require(reducer.commit(std::move(pending)), "Recall composed commit failed");
+                native.synchronizeCells(reducer.state());
+                publish(native, reducer.state(), delivery, tick);
+            };
+            auto checkpoint = prepare(); commit(checkpoint);
+            const auto proposal = [&](uint64_t player, auto payload, AuthorityEpoch epoch) {
+                const auto* session = reducer.state().findActiveSession(id<SessionId>(player));
+                const auto* caster = reducer.state().findPlayer(session->playerId());
+                const auto sequence = session->highestContiguousFinalizedCommand()
+                    ? *session->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+                return ServerCommandProposal(session->sessionId(), session->sessionGeneration(), sequence,
+                    id<CommandId>(tick + player + 1000), reducer.canonicalRevision(),
+                    EntityPrecondition(caster->entityId(), caster->entityRevision(), epoch), std::move(payload));
+            };
+            for (uint64_t player : {1, 2})
+            {
+                const auto origin = *reducer.state().findPlayer(id<PlayerId>(player));
+                const auto peer = *reducer.state().findPlayer(id<PlayerId>(3 - player));
+                const auto bytes = image(restart);
+                const auto before = readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                const auto destination = *before.combat->players[player - 1].mark;
+                const auto* session = reducer.state().findActiveSession(id<SessionId>(player));
+                const auto sequence = session->highestContiguousFinalizedCommand()
+                    ? *session->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+                ClientMagicUseCommand use{session->sessionId(), session->sessionGeneration(), sequence,
+                    id<CommandId>(tick + player + 1000), reducer.canonicalRevision(), MagicUseSourceKind::Spell,
+                    hash("travel_recall"), MagicUseTargetKind::Self, 0, id<ServerTick>(tick),
+                    CombatRevision::initial(), CombatRevision::initial(), InventoryRevision::initial()};
+                const auto request = proposal(player, MagicUseCommandProposal(use), origin.authorityEpoch());
+                auto admitted = prepare(&request);
+                require(admitted.result().dispositions()[0].disposition() == CommandDisposition::Applied,
+                    "Recall outside selected NPC cell was rejected");
+                commit(admitted);
+                bool landed = false;
+                for (uint64_t end = tick + 80; tick < end;)
+                {
+                    auto pending = prepare();
+                    if (pending.candidateState().findPlayer(origin.playerId())->transform() != destination)
+                    { commit(pending); continue; }
+                    const auto publication = reducer.latestPublication();
+                    const auto priorBytes = image(restart);
+                    const auto cells = native.activeCells();
+                    const auto sent = delivery.sent;
+                    const auto staged = native.projectInventory(pending.candidateState(), id<SessionId>(player),
+                        id<ServerTick>(tick), pending.candidateRevision(), pending.candidateNativeInventory());
+                    require(staged && staged->groundItems[0].cell == destination.cell()
+                        && !staged->groundItems[0].doors.empty(), "Recall destination baseline could not be staged");
+                    // A storage failure closes the runtime; only rejection permits
+                    // in-process retry. Exercise failure on a detached restart.
+                    {
+                        InventoryHost failedHost(descriptor, manifest, *registry, *crypto, priorBytes);
+                        auto& failedNative = dynamic_cast<InventoryService&>(failedHost.service());
+                        failedNative.synchronizeCells(reducer.state());
+                        auto failedWorld = world;
+                        auto failedScripts = scripts;
+                        CanonicalCommandReducer failedReducer(reducer.state(), observability, manifest);
+                        Port failedPort(*file, failedReducer); failedPort.result = CanonicalDurabilityResult::Failed;
+                        require(failedReducer.configureDurability(failedPort, nullptr, nullptr, nullptr, nullptr,
+                            &failedWorld, &failedScripts, &failedNative), "Failed Recall recovery configuration failed");
+                        Clock failedClock;
+                        ServerCommandIntakeCoordinator intake(failedClock, observability, failedClock.now(),
+                            id<ServerTick>(tick), IngressOrdinal::initial());
+                        failedClock.value = tick * 33'333'334;
+                        auto batches = intake.pump();
+                        require(batches && batches.batches().size() == 1, "Failed Recall tick intake failed");
+                        auto failure = failedReducer.prepareTick(batches.batches().front());
+                        const auto previous = failedReducer.latestPublication();
+                        require(failure.result() && failedReducer.stageNativeDoorStep(failure, id<ServerTick>(tick), 1.f/30)
+                            && failure.candidateState().findPlayer(origin.playerId())->transform() == destination,
+                            "Failed Recall did not stage relocation");
+                        require(!failedReducer.commit(std::move(failure)) && failedNative.inventoryImage().empty()
+                            && failedReducer.latestPublication() == previous
+                            && failedNative.activeCells() == cells
+                            && failedReducer.state().findPlayer(origin.playerId())->transform() == origin.transform()
+                            && failedReducer.state().findPlayer(origin.playerId())->authorityEpoch() == origin.authorityEpoch(),
+                            "Failed storage write installed Recall or left the runtime open");
+                    }
+                    for (const auto failure : {CanonicalDurabilityResult::Rejected})
+                    {
+                        port.result = failure;
+                        require(!reducer.commit(std::move(pending)), "Failed Recall reported success");
+                        require(image(restart) == priorBytes, "Failed Recall leaked native payment or mark");
+                        require(reducer.latestPublication() == publication, "Failed Recall leaked publication");
+                        require(native.activeCells() == cells && delivery.sent == sent, "Failed Recall leaked streaming");
+                        require(reducer.state().findPlayer(origin.playerId())->transform() == origin.transform(),
+                            "Failed Recall leaked canonical transform");
+                        require(reducer.state().findPlayer(origin.playerId())->authorityEpoch() == origin.authorityEpoch(),
+                            "Failed Recall leaked authority epoch");
+                        auto disk = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                            ServerApp::CanonicalPersistenceFile::open(path, identity));
+                        require(disk->restoredState()->findPlayer(origin.playerId())->transform() == origin.transform()
+                            && std::ranges::equal(disk->prefix().latest()->nativeInventory(), priorBytes),
+                            "Failed Recall changed the restart image");
+                        InventoryHost failedRestart(descriptor, manifest, *registry, *crypto, priorBytes);
+                        failedRestart.service().synchronizeCells(*disk->restoredState());
+                        require(image(failedRestart.service()) == priorBytes, "Failed Recall restart changed cost or marks");
+                    }
+                    port.result = CanonicalDurabilityResult::Committed;
+                    commit(pending);
+                    const auto paid = image(restart);
+                    const auto after = readActorCampaign({reinterpret_cast<const char*>(paid.data()), paid.size()});
+                    require(reducer.state().findPlayer(origin.playerId())->transform() == destination
+                        && reducer.state().findPlayer(origin.playerId())->authorityEpoch() == *origin.authorityEpoch().next()
+                        && reducer.state().findPlayer(peer.playerId())->transform() == peer.transform()
+                        && after.combat->actors[player - 1][9][2] == before.combat->actors[player - 1][9][2] - 5
+                        && after.combat->players == before.combat->players
+                        && delivery.clients[player - 1]->confirmedGroundItemBaseline()->cell == destination.cell()
+                        && delivery.clients[2 - player]->confirmedGroundItemBaseline()->cell == peer.transform().cell()
+                        && native.activeCells() == (player == 1 ? std::array{true, true} : std::array{true, false}),
+                        "Recall payment, independent mark, split baseline or streaming state invalid");
+                    const auto stale = proposal(player, PlayerMotionCommandProposal(LinearVelocity3(100, 0, 0)),
+                        origin.authorityEpoch());
+                    auto movement = prepare(&stale);
+                    require(movement.result().dispositions()[0].disposition() == CommandDisposition::AuthorityEpochMismatch,
+                        "Old-epoch movement overwrote Recall");
+                    commit(movement);
+                    landed = true; break;
+                }
+                require(landed, "Cross-cell Recall never released");
+            }
+            auto disk = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            const auto saved = image(restart);
+            require(std::ranges::equal(disk->prefix().latest()->nativeInventory(), saved)
+                && disk->restoredState()->players()[0].transform() == aliceMark
+                && disk->restoredState()->players()[1].transform() == bobMark,
+                "Paid Recall restart split native and canonical state");
+            InventoryHost recovered(descriptor, manifest, *registry, *crypto, saved);
+            recovered.service().synchronizeCells(*disk->restoredState());
+            require(image(recovered.service()) == saved, "Paid Recall restart changed payment or marks");
+            for (uint64_t player : {1, 2})
+                require(disk->restoredState()->findPlayer(id<PlayerId>(player))->authorityEpoch()
+                    == reducer.state().findPlayer(id<PlayerId>(player))->authorityEpoch(),
+                    "Recall restart lost the authority epoch");
+            authority = reducer.state();
+            recovered.service().synchronizeCells(authority);
+            ++tick;
+            recoverCast(recovered.service());
+            const auto settledBytes = image(recovered.service());
+            const auto paid = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+            const auto settled = readActorCampaign({reinterpret_cast<const char*>(settledBytes.data()), settledBytes.size()});
+            require(settled.combat->players == paid.combat->players
+                && settled.combat->actors[0][9][2] == paid.combat->actors[0][9][2]
+                && settled.combat->actors[1][9][2] == paid.combat->actors[1][9][2],
+                "Restart repeated Recall payment or changed Marks during recovery");
+            std::cout << "player travel: stock paid no-ops and teleport rules; unloaded-cell Recall, split wire baselines, old epochs, independent Marks, failed writes/retry and disk restart passed\n";
             return;
         }
         if (effectFamily == "door-magic")

@@ -7,6 +7,9 @@
 
 namespace TES3MP::Native
 {
+    // V68 persists stock Enable/DisableTeleporting through the bounded world-rule
+    // script seam. Mark/Recall still pay when disabled or Recall has no Mark.
+    // V67 stores independent player Marks and atomically stages paid Recall.
     // V66 binds four neighbors after shared placement/life-aware AI targeting.
     // V63 binds three neighboring NPCs to the collision scene and composed
     // actor/inventory tick. Player spells and physical projectiles resolve by

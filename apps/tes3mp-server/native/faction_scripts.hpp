@@ -14,8 +14,13 @@ namespace TES3MP::Native
         const ESM::RefId& script, const MWWorld::Ptr& actor, const MWWorld::Ptr& player,
         const ActorCampaignCombat::PlayerAi& before);
     // Compile stock world-rule opcodes against a bounded detached result.
-    bool runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& script,
-        const MWWorld::Ptr& actor, bool before);
+    struct MovementRuleState
+    {
+        bool levitationEnabled = true;
+        bool teleportingEnabled = true;
+    };
+    MovementRuleState runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& script,
+        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules);
 }
 
 #endif

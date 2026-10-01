@@ -44,12 +44,12 @@ namespace TES3MP::Native
             extensions.registerInstruction("pcexpell", "/S", opcodePcExpell);
             extensions.registerInstruction("pcclearexpelled", "/S", opcodePcClearExpelled);
         }
-        class SetLevitation final : public Interpreter::Opcode0
+        class SetWorldRule final : public Interpreter::Opcode0
         {
             bool& mEnabled;
             bool mValue;
         public:
-            SetLevitation(bool& enabled, bool value) : mEnabled(enabled), mValue(value) {}
+            SetWorldRule(bool& enabled, bool value) : mEnabled(enabled), mValue(value) {}
             void execute(Interpreter::Runtime&) override { mEnabled = mValue; }
         };
     }
@@ -114,8 +114,8 @@ namespace TES3MP::Native
         return result;
     }
 
-    bool runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& scriptId,
-        const MWWorld::Ptr& actor, bool before)
+    MovementRuleState runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& scriptId,
+        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules)
     {
         if (scriptId.empty() || scriptId.serializeText().size() > 256 || actor.isEmpty())
             throw std::invalid_argument("Movement rule script context incomplete");
@@ -125,6 +125,11 @@ namespace TES3MP::Native
         Compiler::Extensions extensions;
         extensions.registerInstruction("disablelevitation", "", Compiler::Misc::opcodeDisableLevitation);
         extensions.registerInstruction("enablelevitation", "", Compiler::Misc::opcodeEnableLevitation);
+        if (allowTravelRules)
+        {
+            extensions.registerInstruction("disableteleporting", "", Compiler::Misc::opcodeDisableTeleporting);
+            extensions.registerInstruction("enableteleporting", "", Compiler::Misc::opcodeEnableTeleporting);
+        }
         FactionCompilerContext compilerContext;
         compilerContext.setExtensions(&extensions);
         Compiler::StreamErrorHandler errors;
@@ -136,12 +141,17 @@ namespace TES3MP::Native
         auto program = parser.getProgram();
         if (program.mInstructions.empty() || program.mInstructions.size() > 256)
             throw std::invalid_argument("Movement rule script instruction count invalid");
-        bool result = before;
+        auto result = before;
         MWScript::InterpreterContext context(nullptr, actor, actor, content);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
-        interpreter.installSegment5<SetLevitation>(Compiler::Misc::opcodeDisableLevitation, result, false);
-        interpreter.installSegment5<SetLevitation>(Compiler::Misc::opcodeEnableLevitation, result, true);
+        interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeDisableLevitation, result.levitationEnabled, false);
+        interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeEnableLevitation, result.levitationEnabled, true);
+        if (allowTravelRules)
+        {
+            interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeDisableTeleporting, result.teleportingEnabled, false);
+            interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeEnableTeleporting, result.teleportingEnabled, true);
+        }
         interpreter.run(program, context, 256);
         return result;
     }

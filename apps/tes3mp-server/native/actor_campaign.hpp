@@ -55,7 +55,10 @@ namespace TES3MP::Native
     inline constexpr uint64_t AuthoritativeAimCampaignMagic = 0x5c50434154335354;
     inline constexpr uint64_t MovementRuleCampaignMagic = 0x5d50434154335354;
     inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
-    inline constexpr bool hasPlayerTravel(uint64_t magic) { return magic == PlayerTravelCampaignMagic; }
+    inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
+    inline constexpr bool hasTravelRules(uint64_t magic) { return magic == TravelRuleCampaignMagic; }
+    inline constexpr bool hasPlayerTravel(uint64_t magic)
+    { return magic == PlayerTravelCampaignMagic || hasTravelRules(magic); }
     inline constexpr bool hasMovementRules(uint64_t magic)
     { return magic == MovementRuleCampaignMagic || hasPlayerTravel(magic); }
     inline constexpr bool hasAuthoritativeAim(uint64_t magic)
@@ -223,6 +226,7 @@ namespace TES3MP::Native
         std::vector<Stats> actors = std::vector<Stats>(3);
         uint32_t rng = 1;
         bool levitationEnabled = true;
+        bool teleportingEnabled = true;
         std::vector<bool> knockedDown = std::vector<bool>(3);
         std::vector<uint32_t> knockoutFrame = std::vector<uint32_t>(3);
         std::vector<bool> hitKnockdown = std::vector<bool>(3);
@@ -393,6 +397,12 @@ namespace TES3MP::Native
                 const auto enabled = getAreaWord(bytes, offset);
                 if (enabled > 1) throw std::invalid_argument("Native Levitate world rule invalid");
                 state.levitationEnabled = enabled != 0;
+            }
+            if (hasTravelRules(magic))
+            {
+                const auto enabled = getAreaWord(bytes, offset);
+                if (enabled > 1) throw std::invalid_argument("Native teleport world rule invalid");
+                state.teleportingEnabled = enabled != 0;
             }
             if (hasPlacementCombat(magic))
             {
