@@ -7130,6 +7130,14 @@ namespace TES3MP::Native::Testing
                     : ESM::Position{{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
             }
+            if (effectFamily == "player-travel")
+            {
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                placed.mRefID = door.mId; placed.mPos = {{60, -300, 0}, {0, 0, 0}};
+                placed.mTeleport = true; placed.mDestCell = "NPC Door Recall Test";
+                placed.mDoorDest = {{60, -250, 1}, {0, 0, 0}};
+                placed.save(out);
+            }
             if (effectFamily == "door-magic")
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
@@ -8581,6 +8589,34 @@ namespace TES3MP::Native::Testing
             const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
             const auto rejected = [](auto) { return CanonicalDurabilityResult::Rejected; };
             uint64_t tick = 1;
+            {
+                const auto baseline = service.projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(tick), CanonicalRevision::initial());
+                require(baseline && baseline->groundItems[0].teleportDoors.size() == 1,
+                    "V68 navigation campaign did not bind its stock teleport door");
+                const auto* player = authority.findPlayer(id<PlayerId>(1));
+                const auto* session = authority.findActiveSession(id<SessionId>(1));
+                ServerCommandProposal proposal(session->sessionId(), session->sessionGeneration(),
+                    id<CommandSequence>(tick), id<CommandId>(tick), CanonicalRevision::initial(),
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                    InteractiveObjectCommandProposal(id<InteractiveObjectId>(baseline->groundItems[0].teleportDoors[0]),
+                        player->transform().cell(), player->transform().position(), ObjectRevision::initial(),
+                        ObjectInteractionKind::Activate, {}));
+                auto door = service.prepareDoorActivation(authority, proposal);
+                require(door && door->playerDestination()
+                    && door->playerDestination()->cell() == CellId::interior(id<CellSpaceId>(8)),
+                    "V68 stock teleport activation lost its destination");
+                const auto before = image(service);
+                auto composed = dynamic_cast<InventoryService&>(service).prepareNativeTick(authority, id<ServerTick>(tick++), 1.f/30,
+                    std::move(door), {}, &world);
+                require(composed && composed->commit(rejected) == CanonicalDurabilityResult::Rejected
+                    && image(service) == before, "Rejected navigation teleport leaked its actor image");
+                require(composed->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Navigation teleport nested an actor image instead of composing inventory");
+                const auto saved = image(service);
+                InventoryHost restored(descriptor, manifest, *registry, *crypto, saved);
+                require(image(restored.service()) == saved, "Navigation teleport image did not recover coherently");
+            }
             const auto recoverCast = [&](NativeInventoryAuthority& owner) {
                 for (uint64_t end = tick + 80; tick <= end; ++tick)
                 {
@@ -8632,6 +8668,23 @@ namespace TES3MP::Native::Testing
                         [&](const auto& event) { return event.sourceId == hash(source) && event.castSucceeded; });
                     if (landed)
                     {
+                        // Event interest follows the player independently of
+                        // the retained NPC simulation cell.
+                        std::vector<CanonicalPlayerEntityState> far(authority.players().begin(), authority.players().end());
+                        for (auto& entity : far) if (entity.playerId() == id<PlayerId>(player))
+                            entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity,
+                                id<ServerTick>(tick), Transform(CellId::interior(id<CellSpaceId>(8)),
+                                    entity.transform().position(), entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                        const auto separated = std::get<CanonicalServerState>(createCanonicalServerState(far, authority.activeSessions()));
+                        const auto own = native.projectCombatEvents(separated, id<SessionId>(player),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick), next.get());
+                        require(own && own->magicEvents().size() == 1 && own->magicEvents()[0].sourceId == hash(source),
+                            "Travel result disappeared outside the NPC simulation cell");
+                        const auto peer = native.projectCombatEvents(separated, id<SessionId>(3 - player),
+                            id<ServerTick>(tick), id<CanonicalRevision>(tick), next.get());
+                        require(!peer || std::ranges::none_of(peer->magicEvents(), [&](const auto& event) {
+                            return event.casterId() == player && !event.actorCaster(); }),
+                            "Travel result leaked into another player's unrelated cell");
                         const auto saved = image(owner);
                         require(next->commit(rejected) == CanonicalDurabilityResult::Rejected && image(owner) == saved,
                             "Rejected travel leaked cost or marker");

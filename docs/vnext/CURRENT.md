@@ -26,22 +26,25 @@ both desktops see Lock/Open and stock activation under loss
 (`build/logs/container-spell-live-final-07.log`). Synthetic lit room, vanilla loadout;
 door/container visuals, door audio, Target range and mixed effects remain open.
 
-The ground-item codec check passes, including the corrected 192-entry overflow
-case (`build/logs/ground-item-codec-test-03.log`).
+Ground-item codec/192-entry overflow passes (`build/logs/ground-item-codec-test-03.log`).
 
-**Mark/Recall (V68):** each player owns one Mark. Unmarked Recall pays without
-teleporting. Bounded stock Enable/DisableTeleporting scripts persist the rule;
-disabled Mark/Recall pay without changing Marks or position. Fresh campaign required.
-Self travel follows online players across bound cells; interior NPC processing
-stays separate from streaming. Synthetic checks prove unloaded-interior Recall,
-split wire baselines, old-epoch rejection, independent Marks, rejected-write retry,
-failed-write closure and coherent restart/recovery without repeated payment or
-teleport (`build/logs/player-travel-test-20.log`). Levitation regression passes
-(`build/logs/travel-movement-regression-01.log`). Live travel/presentation/audio remain unverified.
+**Mark/Recall (V68):** one durable Mark/player. Unmarked Recall and disabled spells
+pay without teleporting or changing Marks. Stock teleport-rule scripts persist.
+Fresh campaign required; player/NPC cell domains are separate. Atomic-failure, old-epoch,
+independent-Mark and restart checks pass (`build/logs/player-travel-test-20.log`);
+Levitation regression passes (`build/logs/travel-movement-regression-01.log`).
+Two-desktop capture passes: distinct unloaded-interior Marks, 100 ms
+delay/jitter and 10% loss: scenes/baselines converge, locations stay stable,
+each cast pays once, Bob resumes location/resources without replayed wire casts/impact
+cues, and reunited replicas agree (`build/logs/player-travel-desktop-live-14.log`,
+`build/player-travel-desktop-live-14/result.json`). Screenshots show destination
+geometry, casting hands and reunited players. Synthetic interiors, vanilla assets;
+teleport visuals/audio unverified. Door persistence, cross-cell results and resync pass
+(`build/logs/player-travel-door-regression-04.log`,
+`build/logs/player-travel-discontinuity-resync-final.log`).
 
-**Next:** capture two desktops exercising the complete Mark/Recall travel path
-under loss with a fresh V68 campaign, then intervention travel; continue creature
-reactions and mixed combat, then bound equipment, summons and actor/life ownership.
+**Next:** intervention travel, creature reactions/mixed combat, bound equipment,
+summons and actor/life ownership.
 
 60 M4 effects remain:
 - Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,

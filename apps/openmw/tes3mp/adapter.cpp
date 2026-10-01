@@ -448,6 +448,22 @@ namespace TES3MP::OpenMWAdapter
                             mMinimumActorBaselineRevision = snapshot->header().canonicalRevision();
                             mMinimumObjectBaselineRevision = snapshot->header().canonicalRevision();
                             mMinimumInventoryRevision = snapshot->header().canonicalRevision();
+                            // A delayed spatial snapshot can be newer than the
+                            // destination's one-shot inventory baseline. Request
+                            // a coherent current image instead of waiting forever
+                            // behind that snapshot's revision floor.
+                            if (inventoryNegotiated(*mRuntime) && !mAwaitingResync)
+                            {
+                                if (mRuntime->requestResync(ResyncReason::EntityRevisionMismatch)
+                                    != ClientRuntimeResult::Accepted)
+                                {
+                                    closeTerminal(ConnectionStatus::TransportFailed);
+                                    return;
+                                }
+                                mAwaitingResync = true;
+                                mResyncPlayerBaseline = mResyncActorBaseline = mResyncObjectBaseline = false;
+                                mResyncInventory = mResyncCombat = mResyncWeather = mResyncWorldTime = false;
+                            }
                         }
                     }
                 }
@@ -647,7 +663,7 @@ namespace TES3MP::OpenMWAdapter
                     && (!worldTimeNegotiated(*mRuntime) || mResyncWorldTime))
                 {
                     mAwaitingResync = false;
-                    mControl->resyncCompleted();
+                    if (mControl) mControl->resyncCompleted();
                 }
                 if (mPendingDialogueChoice)
                 {

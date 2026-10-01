@@ -323,7 +323,8 @@ namespace TES3MP::Native
             if (movingActor || version == "native-inventory-15") binding.mActorSelections.emplace();
             binding.mLootLevel = lootLevel;
             binding.mLootSeed = uint32_t(lootSeed);
-            if (version == "native-inventory-11" || version == "native-inventory-12" || exteriorCells) binding.mTeleportDoors.emplace();
+            if (version == "native-inventory-11" || version == "native-inventory-12" || exteriorCells
+                || binding.mPlayerTravel) binding.mTeleportDoors.emplace();
             // Hash semantic bindings, never local configuration paths or
             // descriptor whitespace, so moving the same loadout preserves saves.
             std::ostringstream semantic;
@@ -568,7 +569,7 @@ namespace TES3MP::Native
                 // Bind even an empty second cell's engine identity.
                 if (start.secondWireCell)
                     placement << "\narea:" << cellIndex << ':' << std::quoted(cell.serializeText());
-                if (start.binding.mTeleportDoors && !start.navigation)
+                if (start.binding.mTeleportDoors && (!start.navigation || start.binding.mPlayerTravel))
                 {
                     const auto angle = [](float radians) {
                         double turns = -double(radians) / (2 * std::numbers::pi);

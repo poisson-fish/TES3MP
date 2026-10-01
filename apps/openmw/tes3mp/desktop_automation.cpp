@@ -320,7 +320,24 @@ namespace TES3MP::OpenMWAdapter
                 const auto& position = self->transform().position();
                 mOutput << "{\"event\":\"native_player_sample\",\"self\":" << self->playerId().value()
                     << ",\"revision\":" << snapshot.header().canonicalRevision().value()
-                    << ",\"position\":[" << position.x() << ',' << position.y() << ',' << position.z() << "]}\n";
+                    << ",\"cell\":" << (self->transform().cell().asInterior()
+                        ? self->transform().cell().asInterior()->cellSpace().value() : 0)
+                    << ",\"epoch\":" << self->authorityEpoch().value()
+                    << ",\"position\":[" << position.x() << ',' << position.y() << ',' << position.z() << "]"
+                    << ",\"players\":[";
+                bool comma = false;
+                for (const auto& entry : snapshot.view().entries())
+                {
+                    if (comma) mOutput << ',';
+                    comma = true;
+                    const auto& p = entry.transform().position();
+                    mOutput << "{\"id\":" << entry.playerId().value()
+                        << ",\"cell\":" << (entry.transform().cell().asInterior()
+                            ? entry.transform().cell().asInterior()->cellSpace().value() : 0)
+                        << ",\"epoch\":" << entry.authorityEpoch().value()
+                        << ",\"position\":[" << p.x() << ',' << p.y() << ',' << p.z() << "]}";
+                }
+                mOutput << "]}\n";
                 mOutput.flush();
                 ++mEvidenceEvents;
             }

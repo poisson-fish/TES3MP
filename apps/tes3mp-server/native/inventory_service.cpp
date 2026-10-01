@@ -1983,7 +1983,10 @@ namespace TES3MP::Native
                 return CanonicalDurabilityResult::Rejected;
             try
             {
-                const auto result = persist(service.inventoryImage());
+                // ActorTransaction composes this inventory image with the staged
+                // simulation image. Passing inventoryImage() would nest an actor
+                // campaign inside another actor campaign in navigation runtimes.
+                const auto result = persist(std::as_bytes(std::span(service.mImage)));
                 if (result != CanonicalDurabilityResult::Rejected) mConsumed = true;
                 if (result == CanonicalDurabilityResult::Failed) service.mRuntime.mFailedClosed = true;
                 return result;
@@ -9060,11 +9063,32 @@ namespace TES3MP::Native
                 && staged->magicImpactCues.empty())) return {};
         const auto* observer = players.findPlayer(session->playerId());
         const auto scene = staged->actor ? staged->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
-        if (!observer || observer->transform().cell() != actorCell(scene)) return {};
-        const auto& actorEvents = staged->actorHits;
-        const auto& magicEvents = staged->spellCasts;
+        if (!observer) return {};
+        const bool actorVisible = observer->transform().cell() == actorCell(scene);
+        if (!actorVisible && !mBinding.mPlayerTravel) return {};
+        const auto playerVisible = [&](uint64_t id) {
+            const auto player = PlayerId::fromValue(id);
+            const auto* caster = player ? players.findPlayer(*player) : nullptr;
+            return caster && (caster->playerId() == observer->playerId()
+                || caster->transform().cell() == observer->transform().cell());
+        };
+        auto actorEvents = staged->actorHits;
+        auto playerHits = staged->playerHits;
+        auto magicEvents = staged->spellCasts;
+        auto cues = staged->magicImpactCues;
+        if (mBinding.mPlayerTravel)
+        {
+            if (!actorVisible) { actorEvents.clear(); playerHits.clear(); }
+            std::erase_if(magicEvents, [&](const auto& event) {
+                return event.actorCaster() ? !actorVisible : !playerVisible(event.casterId());
+            });
+            std::erase_if(cues, [&](const auto& cue) {
+                return cue.casterKind == 2 ? !actorVisible : !playerVisible(cue.caster);
+            });
+        }
+        if (playerHits.empty() && actorEvents.empty() && magicEvents.empty() && cues.empty()) return {};
         auto created = ReliableCombatEventBatch::create(target, session->sessionGeneration(), tick,
-            revision, staged->playerHits, actorEvents, magicEvents, {}, staged->magicImpactCues);
+            revision, playerHits, actorEvents, magicEvents, {}, cues);
         auto* value = std::get_if<ReliableCombatEventBatch>(&created);
         return value ? std::optional<ReliableCombatEventBatch>(std::move(*value)) : std::nullopt;
     }

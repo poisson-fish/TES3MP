@@ -724,7 +724,7 @@ namespace
 
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
-void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false)
+void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -755,13 +755,13 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false)
         encodeAuthenticationAccepted(accepted(std::byte{7})), TransportChannel::ReliableOrdered);
     const auto generation = SessionGeneration::initial();
     const auto first = CellId::interior(value<CellSpaceId>(7)), second = CellId::interior(value<CellSpaceId>(8));
-    const auto sendSpatial = [&](uint64_t revision, CellId cell) {
+    const auto sendSpatial = [&](uint64_t revision, CellId cell, uint64_t epoch = 0) {
         wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
             encodeReliableInterestBaseline(selfBaseline(generation, false, revision, revision)), TransportChannel::ReliableOrdered);
         const auto original = selfSnapshot(generation, false, revision, revision);
         const auto& self = original.view().entries()[0];
         const std::array entries{SpatialEntitySnapshot(self.serverTick(), self.playerId(), self.entityId(), self.appearanceId(),
-            value<EntityRevision>(revision), value<AuthorityEpoch>(pickupBarrier ? 1 : revision), Transform(cell, Position3(32 * 1024, 0, 0),
+            value<EntityRevision>(revision), value<AuthorityEpoch>(epoch ? epoch : pickupBarrier ? 1 : revision), Transform(cell, Position3(32 * 1024, 0, 0),
                 self.transform().orientation()), LinearVelocity3(0,0,0))};
         wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
             encodeLatestWinsSnapshot(LatestWinsSnapshot(original.header(), std::get<SpatialWorldView>(SpatialWorldView::create(entries)))),
@@ -846,6 +846,25 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false)
         }
         require(pickups == 1);
         std::cout << "PASS inventory-pickup-barrier: partial updates defer one revision-bound pickup\n";
+        return;
+    }
+    if (delayedSnapshot)
+    {
+        sendInventory(2, second); coordinator->frame(.01f);
+        require(presentation.inventories == 1);
+        const auto sent = wire->sentFrames.size();
+        sendSpatial(3, second); coordinator->frame(.01f);
+        require(presentation.inventories == 1 && input.clearCalls == 1);
+        unsigned resyncs = 0;
+        for (size_t i = sent; i < wire->sentFrames.size(); ++i)
+            if (std::get<DecodedFrame>(decodeProtocolFrame(wire->sentFrames[i])).messageKind()
+                == MessageKind::SessionResyncRequest) ++resyncs;
+        require(resyncs == 1);
+        sendSpatial(4, second, 3); sendInventory(4, second); coordinator->frame(.01f);
+        require(presentation.inventories == 2 && presentation.lastGroundCell == second && input.clearCalls == 1);
+        coordinator->frame(.01f);
+        require(status.last != ConnectionStatus::TransportFailed);
+        std::cout << "PASS travel-discontinuity-resync: newer spatial revision recovers destination baseline\n";
         return;
     }
     // Spatial correction wins the race. The previous cell's complete inventory
@@ -1129,10 +1148,12 @@ int main(int argc, char** argv)
     }
     if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
         || std::string_view(argv[1]) == "inventory-pickup-barrier"
-        || std::string_view(argv[1]) == "native-door-presentation"))
+        || std::string_view(argv[1]) == "native-door-presentation"
+        || std::string_view(argv[1]) == "travel-discontinuity-resync"))
     {
         teleportPresentation(std::string_view(argv[1]) == "inventory-pickup-barrier",
-            std::string_view(argv[1]) == "native-door-presentation");
+            std::string_view(argv[1]) == "native-door-presentation",
+            std::string_view(argv[1]) == "travel-discontinuity-resync");
         return 0;
     }
 

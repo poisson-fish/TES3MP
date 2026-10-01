@@ -324,6 +324,15 @@ namespace TES3MP::OpenMWAdapter
             mOutput << "{\"item\":" << id << ",\"count\":" << count << '}';
         }
         mOutput << "],\"teleports\":" << mTraversalGround->teleportDoors.size();
+        mOutput << ",\"active_cells\":[";
+        comma = false;
+        for (const auto* active : MWBase::Environment::get().getWorldScene()->getActiveCells())
+        {
+            if (comma) mOutput << ',';
+            comma = true;
+            mOutput << std::quoted(active->getCell()->getId().toString());
+        }
+        mOutput << ']';
         if (mTraversalGround->door)
         {
             mOutput << ",\"door_angle\":" << mTraversalGround->door->angle

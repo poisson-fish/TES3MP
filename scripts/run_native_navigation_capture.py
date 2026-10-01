@@ -722,9 +722,12 @@ def run(args):
     output.mkdir(parents=True, exist_ok=False)  # Never overwrite a campaign.
     binary = args.build.resolve()
     config = args.content_config.resolve()
+    if args.player_travel:
+        from native_player_travel_capture import prepare_fixture
+        config = prepare_fixture(config, output / "content")
     settings = root / "files/settings-default.cfg"
     movement_capture = args.movement or args.movement_deep
-    spell_capture = args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or args.object_magic or args.container_magic or movement_capture
+    spell_capture = args.player_travel or args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or args.object_magic or args.container_magic or movement_capture
     encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.magic_visual or args.player_swings or args.physical_knockdown or args.creature or args.custom_body else {}
     if args.custom_body and "custom" not in encounter:
         raise ValueError("Custom body capture requires an authored custom NPC fixture")
@@ -733,6 +736,7 @@ def run(args):
     if args.knockout: spell_name = "expanded_knockout_touch" if args.knockout_target == "npc" else "expanded_knockout"
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
     version = "56c" if args.container_magic else 66 if args.neighbor_many else 64 if args.ranged else 57 if args.ai_charm else 56 if args.object_magic or movement_capture else 55 if args.visibility else 53 if args.npc_casting or args.magic_visual else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
+    if args.player_travel: version = 68
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     if args.creature or args.custom_body: npc = encounter["actor"]
     player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature or args.custom_body else npc if args.life_encounter or spell_capture else "player"
@@ -751,14 +755,18 @@ def run(args):
     port, relay_port = free_port(), free_port()
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
-        f'actors "{player_actors[0]}" "{player_actors[1]}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\nareas 1\n'
-        f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
+        f'actors "{player_actors[0]}" "{player_actors[1]}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\n'
+        + ('areas 3\ninterior "NPC Door Recall Test"\ncell interior:2\ninterior "NPC Door Path Test"\ncell interior:3\n' if args.player_travel else 'areas 1\n')
+        + f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + (f'melee "{encounter.get("melee", "weapononehand")}" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect or spell_capture else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
+    if args.player_travel:
+        common.update(cell_spaces="interior:1;interior:2;interior:3",
+                      allowed_cells="interior:1;interior:2;interior:3", default_appearance_id="4")
     if args.traveler:
         common["spawn_positions"] = "-563200:71680:394240"
     if args.life_encounter or args.unarmed_effect:
@@ -783,7 +791,7 @@ def run(args):
         credential = secrets.token_bytes(32)
         output.joinpath(role + ".credential").write_bytes(credential)
         tokens = template.copy()
-        tokens[0:5] = [str(index + 1), str(index * 2 + 1), "2", manifest, hashlib.sha256(credential).hexdigest()]
+        tokens[0:5] = [str(index + 1), str(index * 2 + 1), common["default_appearance_id"], manifest, hashlib.sha256(credential).hexdigest()]
         tokens[6:16] = ["0", "1", "0", "0", str((-750 + 80 * index) * 1024), "-409600", "394240", "0", "0", "0"]
         if args.doors:
             tokens[10:13] = [str((-80 - 80 * index) * 1024), "-204800", "-128000"]
@@ -793,16 +801,16 @@ def run(args):
             tokens[10:13] = [str((-563 + 25 * index) * 1024), "-307200", "394240"]
         if spell_capture:
             tokens[10:13] = [str((60 + 25 * index) * 1024), "-32768", "1024"]
-        if args.object_magic or args.container_magic:
+        if args.object_magic or args.container_magic or args.player_travel:
             tokens[10:13] = [str(-180 * index * 1024), str((-40 if index == 0 else 100) * 1024), "1024"]
         if args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or movement_capture:
             tokens[10:13] = [str((60 - 220 * index) * 1024), "-409600", "1024"]
         if args.ranged:
             tokens[10:13] = [str((60 - 220 * index) * 1024), "-491520", "1024"]
-        if args.object_magic or args.container_magic:
+        if args.object_magic or args.container_magic or args.player_travel:
             count = int(tokens[71])
             spell_ids = set(map(int, tokens[72:72 + count]))
-            for spell_name in ("door_spell_lock", "door_spell_open"):
+            for spell_name in (("travel_mark", "travel_recall") if args.player_travel else ("door_spell_lock", "door_spell_open")):
                 spell_id = 14695981039346656037
                 for byte in spell_name.encode("ascii"):
                     spell_id = ((spell_id ^ byte) * 1099511628211) & 0xffffffffffffffff
@@ -816,7 +824,7 @@ def run(args):
         shutil.copyfile(config / "openmw.cfg", user / "openmw.cfg")
         user.joinpath("settings.cfg").write_text(
             "[Video]\nresolution x = 1000\nresolution y = 700\nwindow mode = 2\nwindow border = true\n"
-            "minimize on focus loss = false\nframerate limit = 120\n"
+            + f"minimize on focus loss = false\nframerate limit = {30 if args.player_travel else 120}\n"
             + ("[Camera]\nfield of view = 85\n" if args.physical_knockdown and args.knockout_target == "players" else "")
             + ("[Shaders]\nclassic falloff = false\nminimum interior brightness = 0.7\n" if args.knockout else ""),
             encoding="utf-8")
@@ -856,14 +864,17 @@ def run(args):
                        f"--tes3mp-password-file={password}", f"--tes3mp-player-credential-file={output / (role + '.credential')}",
                        f"--config={user}", "--replace=config", f"--user-data={user}", f"--resources={binary / 'resources'}",
                        f"--start={cell}", "--skip-menu=1", "--new-game=0", "--no-grab=1",
-                       f"--no-sound={0 if args.magic_visual else 1}",
+                       f"--no-sound={0 if args.magic_visual or args.player_travel else 1}",
                        "--script-console=1", f"--script-run={startup}", "--tes3mp-automation-role=native-traversal",
                        f"--tes3mp-automation-output={evidence[role]}", f"--tes3mp-content-manifest-id={manifest}",
-                       "--tes3mp-content-cell-spaces=interior:1", "--tes3mp-content-allowed-cells=interior:1",
-                       f"--tes3mp-content-cell-space-map=1={cell}", "--tes3mp-content-appearance-id=2",
+                       f"--tes3mp-content-cell-spaces={common['cell_spaces']}", f"--tes3mp-content-allowed-cells={common['allowed_cells']}",
+                       f"--tes3mp-content-cell-space-map=1={cell}", f"--tes3mp-content-appearance-id={common['default_appearance_id']}",
                        "--tes3mp-content-appearance-record=player"]
+            if args.player_travel:
+                command.extend(("--tes3mp-content-cell-space-map=2=NPC Door Recall Test",
+                                "--tes3mp-content-cell-space-map=3=NPC Door Path Test"))
             if spell_capture and not args.player_swings and not args.ranged and not args.physical_knockdown:
-                spell_names = ["door_spell_lock", "door_spell_open"] if args.object_magic or args.container_magic else (
+                spell_names = ["travel_mark", "travel_recall"] if args.player_travel else ["door_spell_lock", "door_spell_open"] if args.object_magic or args.container_magic else (
                     [f"movement_{index}" for index in range(12) if index < 3 or index >= 7]
                     + [f"movement_npc_{index}" for index in range(12) if index < 3 or index >= 7]) if movement_capture else (
                     ["visibility_invisibility"] + [f"visibility_{index}" for index in (41, 43, 64, 65, 66)]) if args.visibility else ["ai_charm_dialogue"] if args.ai_charm else [spell_name]
@@ -874,6 +885,12 @@ def run(args):
                     command.append(f"--tes3mp-content-spell-map={spell_id}={mapped}")
             start(role, command)
             client_commands[role] = command
+        if args.player_travel:
+            from native_player_travel_capture import verify_player_travel_capture
+            verify_player_travel_capture(output, evidence, processes, relay, manifest,
+                {name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
+                 for name in ("openmw.exe", "tes3mp_server.exe")})
+            return
         if args.knockout:
             from native_knockout_encounter import verify_knockout_encounter
             verify_knockout_encounter(output, evidence, processes, relay, manifest,
@@ -1066,6 +1083,7 @@ if __name__ == "__main__":
     parser.add_argument("--ai-charm", action="store_true", help="V57 stock dialogue disposition before, during and after committed Charm")
     parser.add_argument("--object-magic", action="store_true", help="Two-desktop Touch Lock/Open on a streamed door under loss")
     parser.add_argument("--container-magic", action="store_true", help="Two-desktop Touch Lock/Open on one ordinary container under loss")
+    parser.add_argument("--player-travel", action="store_true", help="Fresh V68 two-desktop cross-cell Mark/Recall and reconnect")
     parser.add_argument("--movement", action="store_true", help="V56 movement sources, NPC motion and stock desktop movement on two clients")
     parser.add_argument("--movement-deep", action="store_true", help="V56 deep-water drowning, WaterBreathing expiry and process restart")
     parser.add_argument("--actor-effects-restart", action="store_true",
@@ -1101,7 +1119,7 @@ if __name__ == "__main__":
     if args.retarget_getup and (not args.physical_knockdown or args.knockout_target != "players"):
         parser.error("--retarget-getup requires --physical-knockdown with player subjects")
     if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
-            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.magic_visual, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.object_magic, args.container_magic, args.movement, args.movement_deep)) > 1:
+            args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.magic_visual, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.object_magic, args.container_magic, args.player_travel, args.movement, args.movement_deep)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
         parser.error("--immediate-reconnect requires --combat")
@@ -1109,6 +1127,6 @@ if __name__ == "__main__":
         parser.error("--neighbor-many requires --ranged")
     if args.neighbor_creature_damage and not args.neighbor_many:
         parser.error("--neighbor-creature-damage requires --ranged --neighbor-many")
-    if not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
+    if not args.player_travel and not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)
