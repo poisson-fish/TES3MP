@@ -59,6 +59,13 @@ namespace TES3MP::Native
         bool unconscious = false;
         bool jumpRequested = false;
     };
+    struct DynamicActorBody
+    {
+        uint64_t actor = 0;
+        ESM::RefId record;
+        std::array<float, 3> position{};
+        float yaw = 0;
+    };
     struct BoundMeleeAnimation
     {
         MeleeAnimation mAnimation;
@@ -80,7 +87,8 @@ namespace TES3MP::Native
         std::unique_ptr<InteriorActorScene> mNeighbor;
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
-            std::span<const uint64_t> neighbors, Impl* sharedParent);
+            std::span<const uint64_t> neighbors, Impl* sharedParent,
+            std::span<const DynamicActorBody> dynamic = {});
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor);
     public:
@@ -93,6 +101,12 @@ namespace TES3MP::Native
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors);
+        InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+            const std::string& baseAnimation, const std::string& beastAnimation,
+            std::span<const uint64_t> neighbors, std::span<const DynamicActorBody> dynamic);
+        // Both scenes are detached from the host during preparation. Commit can
+        // install the complete collision membership without allocating.
+        void installActorSet(InteriorActorScene& candidate) noexcept;
         bool contains(const std::array<float, 3>& position) const;
         bool pathUnavailable() const;
         ~InteriorActorScene();
@@ -124,6 +138,7 @@ namespace TES3MP::Native
         // The same resource hulls used by stock physics, for AiCombat's
         // distance-minus-half-extents flee gate.
         float selectedActorHalfExtentY() const;
+        float actorHalfExtentY(uint64_t actor) const;
         float npcHalfExtentY(ESM::RefId race, float scale) const;
         const std::string& fingerprint() const;
         bool enchantedWeaponsAreMagical() const;
@@ -173,6 +188,8 @@ namespace TES3MP::Native
             std::optional<ActorSceneSnapshot> neighborSnapshot() const;
             std::vector<ActorSceneSnapshot> neighborSnapshots() const;
             std::span<const char> image() const;
+            std::span<const char> selectedImage() const;
+            std::span<const char> neighborImage(size_t index) const;
             bool pathUnavailable() const;
             bool pathCompleted() const;
         };
@@ -198,13 +215,14 @@ namespace TES3MP::Native
         std::vector<char> neighborImage() const;
         std::vector<char> neighborImage(size_t index) const;
         void restore(std::span<const char> bytes);
-        std::unique_ptr<Prepared> prepareRestore(std::span<const char> bytes, std::span<const ActorSceneDoor> doors = {});
+        std::unique_ptr<Prepared> prepareRestore(std::span<const char> bytes, std::span<const ActorSceneDoor> doors = {},
+            std::span<const uint64_t> removed = {});
         std::unique_ptr<Prepared> prepareSelectedRestore(std::span<const char> bytes,
-            std::span<const ActorSceneDoor> doors = {});
+            std::span<const ActorSceneDoor> doors = {}, std::span<const uint64_t> removed = {});
         std::unique_ptr<Prepared> prepareNeighborRestore(std::span<const char> bytes,
             std::span<const ActorSceneDoor> doors = {});
         std::unique_ptr<Prepared> prepareNeighborRestore(size_t index, std::span<const char> bytes,
-            std::span<const ActorSceneDoor> doors = {});
+            std::span<const ActorSceneDoor> doors = {}, std::span<const uint64_t> removed = {});
     };
 }
 

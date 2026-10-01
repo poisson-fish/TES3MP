@@ -3,6 +3,27 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-010",
+      "slice": "connected authoritative summon lifecycle",
+      "owner": "OpenMW mechanics and app-local dynamic actor ownership",
+      "purpose": "Consolidate all 22 explicit-store summon selectors and shared creation/failure, placement and nested removal callbacks. V71 stages bounded dynamic collision bodies, stock-filled/equipped inventories, source/owner/life ownership, follow distance and actor-to-actor combat in the existing durable actor transaction. Creation, state and removal share persistence and replication; rejected writes install nothing. Native desktop presentation accepts dynamic identities without local gameplay. Unscripted walking biped resources remain the bounded body support; desktop acceptance is deferred.",
+      "paths": [
+        "apps/openmw/mwmechanics/summoning.cpp",
+        "apps/openmw/mwmechanics/summoning.hpp",
+        "apps/openmw/mwmechanics/aifollow.cpp",
+        "apps/openmw/mwmechanics/aifollow.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_dynamic_actor_tests stock-seams",
+        "tes3mp_native_dynamic_actor_tests ownership",
+        "tes3mp_native_dynamic_actor_tests capacity",
+        "tes3mp_native_dynamic_actor_tests recovery",
+        "tes3mp_native_loadout_tests summons-integrated"
+      ],
+      "disposition": "shared stock mechanics with authoritative actor-transaction integration",
+      "removal_condition": "OpenMW provides equivalent explicit-store summon lifecycle, follow distance and detached actor-membership interfaces"
+    },
+    {
       "id": "M4-009",
       "slice": "explicit actor bound-equipment lifecycle",
       "owner": "OpenMW mechanics/world and authoritative native actor transaction",
@@ -146,7 +167,7 @@
       "id": "M4-003",
       "slice": "native interior navigation and durable actor motion",
       "owner": "OpenMW navigation, app-local native authority and desktop adapter",
-      "purpose": "Allow stock PathFinder updates to receive an explicit Navigator; stock callers still resolve the same World navigator. The detached native scene reuses DetourNavigator and shared settings conversion, stages two stock physics steps per tick, and installs its path/frame with the existing inventory owner only after durability. V16 binds one NPC and freezes background interaction; inherited player movement is unchanged. Shared NPC movement arithmetic, wait/rest recovery and breath timing serve the committed actor scene and stock callers.",
+      "purpose": "Allow stock PathFinder updates to receive an explicit Navigator; stock callers still resolve the same World navigator. The detached native scene reuses DetourNavigator and shared settings conversion, stages two stock physics steps per tick, and installs its path/frame with the existing inventory owner only after durability. V16 binds one NPC and freezes background interaction; inherited player movement is unchanged. Shared NPC movement arithmetic, wait/rest recovery and breath timing serve the committed actor scene and stock callers. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership.",
       "paths": [
         "apps/openmw/mwclass/npcmovement.hpp",
         "apps/openmw/mwmechanics/actors.cpp",
@@ -158,7 +179,8 @@
         "tes3mp_native_loadout_tests native-navigation",
         "tes3mp_headless_client_tests early-native-snapshot",
         "scripts/run_native_navigation_capture.py",
-        "tes3mp_native_actor_tests movement-rules"
+        "tes3mp_native_actor_tests movement-rules",
+        "tes3mp_native_dynamic_actor_tests stock-seams"
       ],
       "disposition": "shared engine navigation context; composed native tick and interpolated desktop presentation",
       "removal_condition": "OpenMW supplies an equivalent explicit navigation context for detached authoritative actor simulation"
@@ -406,7 +428,7 @@
       "id": "M2-001",
       "slice": "explicit actor constant-effect shirt mechanics",
       "owner": "OpenMW server runtime",
-      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface. M4-002 also shares NPC race/model selection with the detached collision caller. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers. V38 allows the shared dynamic-stat effect helper to take an explicit death-time context for lethal detached magic; stock callers retain World-clock lookup. V37 shares stock magnitude rolls, FortifySkill mutation and an explicit FortifyAttribute magicka multiplier with the composed equipment-effect owner; attribute/skill arguments and rolled instances remain outside the legacy fixed-Luck service. Shared attribute/skill damage and restoration mutations now support durable timed Drain Attribute/Skill overlays, keeping prior damage separate and recomputing derived resources on expiry. V51 shares per-effect Reflect/Spell Absorption rolls, per-spell Dispel rolls and dynamic absorb mutation with stock callers; native orchestration binds benefits to caster lives and commits expiry/respawn atomically. The V52 creature slice shares stock creature base-stat initialization with explicit detached magicka context; authored dynamic resources replace temporary derived values exactly as in the stock caller. Shared capped Damage/Restore Attribute/Skill primitives and dynamic-stat mutations support family-based permanent stat damage and reversible resource fortification. Effect-specific cure mapping is shared with stock execution; native poison/paralysis removal preserves source siblings and commits controls, payment and effects atomically. V54 shares whole-source disease/curse cure membership with Spells; bounded persistent sources use the same native effect resolver and preserve membership after selective removal. Shared stock AI target rules and Fight/Flee deltas now feed the committed bounded actor consumer. V70 stock bound/ExtraSpell callers delegate equipment selection, restoration and stripping to M4-009 with explicit actor context.",
+      "purpose": "Allow the validated scripted shirt to share the same constant-effect membership; script-local ownership remains with the equipment caller. Share stock equipment-effect discovery, membership removal and FortifyAttribute mutation with a bounded explicit-actor Fortify Luck service. Share explicit NPDT stat initialization with stock Npc::ensureCustomData; construct NpcStats from explicit content and supply the magicka multiplier to stock attribute recalculation. Actor-bound equipment contexts stage fresh stock stats and derived effects, preserving all eight attributes and three dynamic values without Environment or presentation services. Share stock auto-NPDT attribute/skill initialization and ordered NPC spell autocalculation through explicit content/settings, preserving stock wrappers and explicit NPDT initialization. Equipment contexts retain bounded immutable known/generated/race-power membership through preparation and restart. Stock passive discovery and active-spell insertion are shared with one fixed self Fortify Luck race ability, whose base-stat contribution stays separate from the shirt modifier. NPC equipment format 5 explicitly records the applied ability magnitude alongside initialized spell IDs and rejects incomplete formats 2/3/4. Other passive effects, death, full NPC services and general effect execution remain outside this interface. M4-002 also shares NPC race/model selection with the detached collision caller. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers. V38 allows the shared dynamic-stat effect helper to take an explicit death-time context for lethal detached magic; stock callers retain World-clock lookup. V37 shares stock magnitude rolls, FortifySkill mutation and an explicit FortifyAttribute magicka multiplier with the composed equipment-effect owner; attribute/skill arguments and rolled instances remain outside the legacy fixed-Luck service. Shared attribute/skill damage and restoration mutations now support durable timed Drain Attribute/Skill overlays, keeping prior damage separate and recomputing derived resources on expiry. V51 shares per-effect Reflect/Spell Absorption rolls, per-spell Dispel rolls and dynamic absorb mutation with stock callers; native orchestration binds benefits to caster lives and commits expiry/respawn atomically. The V52 creature slice shares stock creature base-stat initialization with explicit detached magicka context; authored dynamic resources replace temporary derived values exactly as in the stock caller. Shared capped Damage/Restore Attribute/Skill primitives and dynamic-stat mutations support family-based permanent stat damage and reversible resource fortification. Effect-specific cure mapping is shared with stock execution; native poison/paralysis removal preserves source siblings and commits controls, payment and effects atomically. V54 shares whole-source disease/curse cure membership with Spells; bounded persistent sources use the same native effect resolver and preserve membership after selective removal. Shared stock AI target rules and Fight/Flee deltas now feed the committed bounded actor consumer. V70 stock bound/ExtraSpell callers delegate equipment selection, restoration and stripping to M4-009 with explicit actor context. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership.",
       "paths": [
         "apps/openmw/mwclass/npc.cpp",
         "apps/openmw/mwclass/npc.hpp",
@@ -443,7 +465,8 @@
         "tes3mp_native_ai_magic_tests ai-disposition-rules",
         "tes3mp_native_loadout_tests ai-disposition",
         "tes3mp_native_loadout_tests ai-creature",
-        "tes3mp_native_loadout_tests bound-equipment"
+        "tes3mp_native_loadout_tests bound-equipment",
+        "tes3mp_native_dynamic_actor_tests stock-seams"
       ],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent actor-context equipment-effect preparation interfaces"
@@ -818,7 +841,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the committed calendar/time-scale and optional engine elapsed days directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe. Native v12 derives regional/weather identities from loaded records and uses shared engine selection/transition helpers for stock single-player. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the committed calendar/time-scale and optional engine elapsed days directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe. Native v12 derives regional/weather identities from loaded records and uses shared engine selection/transition helpers for stock single-player. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -837,7 +860,8 @@
         "tes3mp_native_loadout_tests leveled-actor-persistence",
         "tes3mp_native_loadout_tests player-area-discovery",
         "tes3mp_inventory_replication_tests neighborhoods",
-        "openmw-m3-v15.exe RelWithDebInfo link"
+        "openmw-m3-v15.exe RelWithDebInfo link",
+        "tes3mp_native_dynamic_actor_tests stock-seams"
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"

@@ -287,6 +287,14 @@ wear, draw state and counters join the existing actor commit; rejection installs
 nothing. Failed permanent attempts stay dormant until source changes. Recovery
 validates ownership and acyclic actor/slot-consistent links. General scripts remain M5.
 
+**Dynamic actors (V71).** Fresh V70 wrapper binds bounded ownership, native references
+and collision resources. Namespace 3 separates dynamic actors; native references
+share the inventory counter. Stage actor/collision/inventory membership before
+durability; install/replicate one image. Owner/source/life forms an acyclic forest;
+removal deletes descendants without respawn. Recovery validates selectors,
+sources, lives and native identities. Presentation has no gameplay writer.
+Resources remain resident pending coherent streamed reconstruction.
+
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,
 identities, stale/retry rejection, bounded traffic and secret-free evidence.

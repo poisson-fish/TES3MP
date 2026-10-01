@@ -33,6 +33,7 @@ namespace TES3MP::Native
         // Shared storage: container, NPC or creature. Actors require a placement.
         ESM::RefId mBase;
         std::optional<ESM::CellRef> mPlacement;
+        bool mDynamicActor = false;
     };
 
     class EquipmentRuntime
@@ -178,9 +179,12 @@ namespace TES3MP::Native
         size_t registryBound() const { return ownerCount() * (PlainEquipmentValues::MaxItems + 1); }
         PersistenceResult persistSession(EquipmentSessionValues values, EquipmentFileSink& file,
             EquipmentBytes& bytes, FileFaults& faults) const;
-        void encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const;
+        void encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes,
+            std::span<const EquipmentContainerBinding> membership = {}) const;
         void bindEffects(size_t actor);
         void initializeStartingEquipment(size_t actor);
+        void initializeStartingEquipment(const Ptr& actor, InventoryStore& inventory,
+            WorldModel& world, ActorEffects& effects) const;
         void validateCaller(size_t actor, const Ptr& caller) const;
         RestartBindings restartBindings(ESM::RefNum savedCounter) const;
         static bool sameReference(const ConstPtr& a, const ConstPtr& b);
@@ -267,8 +271,12 @@ namespace TES3MP::Native
             PlainEquipmentValues values(size_t owner) const;
         };
         std::unique_ptr<PreparedProjectileLoot> prepareProjectileLoot(
-            const EquipmentSessionValues& values, std::span<const size_t> owners);
+            const EquipmentSessionValues& values, std::span<const size_t> owners,
+            std::optional<size_t> staticContainers = {},
+            std::span<const EquipmentContainerBinding> dynamic = {});
         void installProjectileLoot(PreparedProjectileLoot& prepared) noexcept;
+        PlainEquipmentValues stageActorInventory(ESM::RefId record, ESM::RefNum counter,
+            uint32_t& rng) const;
         std::function<bool(ESM::RefNum)> mPreserveIdentity;
         bool stageEquipmentMagic(EquipmentSessionValues& values, size_t owner, ESM::RefId effect,
             std::array<MWMechanics::BoundEquipmentItem, 2>& items, bool removing,

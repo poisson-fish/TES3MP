@@ -1773,26 +1773,33 @@ namespace MWMechanics
 
     void Actors::cleanupSummonedCreature(ESM::RefNum creature) const
     {
-        const MWWorld::Ptr ptr = MWBase::Environment::get().getWorldModel()->getPtr(creature);
-        if (!ptr.isEmpty())
-        {
+        // Retain reference witnesses through deletion and descendant cleanup. The
+        // shared handler snapshots children before a parent is removed and
+        // finishes source purging only after its descendants are gone.
+        std::map<ESM::RefNum, MWWorld::Ptr> references;
+        removeSummonTree(creature, [&](ESM::RefNum identity) {
+            const auto ptr = MWBase::Environment::get().getWorldModel()->getPtr(identity);
+            references.emplace(identity, ptr);
+            std::vector<ESM::RefNum> children;
+            if (!ptr.isEmpty())
+                for (const auto& [_, child] : ptr.getClass().getCreatureStats(ptr).getSummonedCreatureMap())
+                    children.push_back(child);
+            return children;
+        }, [&](ESM::RefNum identity) {
+            const auto& ptr = references.at(identity);
+            if (ptr.isEmpty()) return;
             MWBase::Environment::get().getWorld()->deleteObject(ptr);
-
             const ESM::Static* fx = MWBase::Environment::get().getESMStore()->get<ESM::Static>().search(
                 ESM::RefId::stringRefId("VFX_Summon_End"));
             if (fx)
                 MWBase::Environment::get().getWorld()->spawnEffect(
                     Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(fx->mModel)), "",
                     ptr.getRefData().getPosition().asVec3());
-
-            // Remove the summoned creature's summoned creatures as well
-            auto& creatureMap = ptr.getClass().getCreatureStats(ptr).getSummonedCreatureMap();
-            for (const auto& [_, refNum] : creatureMap)
-                cleanupSummonedCreature(refNum);
-            creatureMap.clear();
-        }
-
-        purgeSpellEffects(creature);
+        }, [&](ESM::RefNum identity) {
+            const auto& ptr = references.at(identity);
+            if (!ptr.isEmpty()) ptr.getClass().getCreatureStats(ptr).getSummonedCreatureMap().clear();
+            purgeSpellEffects(identity);
+        });
     }
 
     void Actors::purgeSpellEffects(ESM::RefNum creature) const

@@ -7,6 +7,7 @@
 #include "actor_spawns.hpp"
 #include "actor_scene.hpp"
 #include "actor_campaign.hpp"
+#include "dynamic_actor_set.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -123,6 +124,10 @@ namespace TES3MP::Native
         bool mScriptedMovementRules = false; // V65 persists stock Enable/DisableLevitation results.
         bool mPlayerTravel = false; // V67 persists one Mark per player and paid Recall relocation.
         bool mEquipmentFamily = false; // V70 effect-owned bound equipment and stock ExtraSpell.
+        bool mSummons = false;
+        DynamicActorSet mDynamicActors;
+        size_t mStaticContainers = 0, mStaticNeighbors = 0;
+        std::function<std::shared_ptr<InteriorActorScene>(std::span<const DynamicActorBody>)> mCreateActorSet;
         bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
         std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;
         bool mScriptedTravelRules = false; // V68 persists stock Enable/DisableTeleporting results.
@@ -179,12 +184,16 @@ namespace TES3MP::Native
         }
     };
 
+    // Derive transient lookup/resource bindings from the durable owned body set.
+    // The caller installs this binding only with its actor/inventory transaction.
+    void bindDynamicActorSet(InventoryServiceBinding& binding, const DynamicActorSet& actors);
+
     // One long-lived engine service group for all shared inventories. Loaded
     // content/readers outlive this object; registry/scripts precede the runtime
     // and die after it. There is no CanonicalInventoryWorld or shadow writer.
     class InventoryService final : public ServerApp::NativeInventoryService
     {
-        const InventoryServiceBinding mBinding;
+        InventoryServiceBinding mBinding;
         std::map<ESM::RefId, ItemPrototypeId> mItemIds;
         MWWorld::WorldModel mWorld;
         MWWorld::LocalScripts mScripts;
@@ -266,7 +275,8 @@ namespace TES3MP::Native
             std::span<const ActorCampaignLife> neighborLives,
             std::span<const ActorCampaignProjectile> projectiles,
             std::span<const ActorCampaignTimedEffect> timedEffects,
-            const std::optional<ActorCampaignCast>& casting = {}) const;
+            const std::optional<ActorCampaignCast>& casting = {},
+            const DynamicActorSet* dynamicActors = nullptr) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         float meleeReach() const;
@@ -305,7 +315,7 @@ namespace TES3MP::Native
             const CanonicalServerState& players, ServerTick tick, float seconds,
             std::unique_ptr<PreparedNativeInventory> command = {});
         std::vector<NativeDoorSnapshot> areaDoorSnapshots(CellId cell, const PreparedNativeInventory* candidate) const;
-        ContainerLock areaContainerLock(size_t index, const PreparedNativeInventory* candidate) const;
+        ContainerLock areaContainerLock(size_t index, const PreparedNativeInventory* candidate = nullptr) const;
         const PreparedNativeInventory* areaDoorCommand(const PreparedNativeInventory* candidate) const;
         std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
@@ -498,7 +508,8 @@ namespace TES3MP::Native
             std::span<const ItemCharge> charges = {},
             const ActorCampaignCombat* stagedCombat = nullptr,
             const EquipmentRuntime::PreparedRespawn* respawn = nullptr,
-            const EquipmentRuntime::PreparedProjectileLoot* loot = nullptr) const;
+            const EquipmentRuntime::PreparedProjectileLoot* loot = nullptr,
+            const InventoryServiceBinding* stagedBinding = nullptr) const;
     };
 }
 #endif

@@ -74,6 +74,14 @@ target_link_libraries(tes3mp_native_actor_probe PRIVATE tes3mp_native_actor_runt
 tes3mp_verify_target_dependencies(tes3mp_native_actor_probe ALLOWED tes3mp_native_actor_runtime tes3mp_native_loadout)
 
 # Standalone, filtered synthetic checks, not the upstream openmw-tests target.
+add_executable(tes3mp_native_dynamic_actor_tests dynamic_actor_tests.cpp dynamic_actor_ownership.hpp)
+target_compile_features(tes3mp_native_dynamic_actor_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_dynamic_actor_tests PRIVATE openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_dynamic_actor_tests ALLOWED openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_dynamic_actor_tests
+    FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+set_target_properties(tes3mp_native_dynamic_actor_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
+
 add_executable(tes3mp_native_ai_magic_tests ai_magic_tests.cpp)
 target_compile_features(tes3mp_native_ai_magic_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_native_ai_magic_tests PRIVATE tes3mp_native_actor_runtime tes3mp_native_loadout openmw-lib)

@@ -8,6 +8,7 @@
 namespace TES3MP::Native
 {
     // V70 owns bound-item instances and restoration links per actor/effect source.
+    // V71 composes owned summon bodies, collision, inventories and actor/life targets.
     // Equipment, effect lifecycle, derived constants and generated IDs share the
     // existing actor/inventory commit; prior descriptors retain their layouts.
     // Fresh campaign; desktop acceptance remains separate from headless checks.

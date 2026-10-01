@@ -54,7 +54,7 @@ namespace TES3MP::Native
             {
                 const auto plan = prepareEnchantmentCast(*enchantment, context.caster,
                     weaponClass == ESM::WeaponType::Thrown || weaponClass == ESM::WeaponType::Ammo ? -1.f : charge,
-                    content, true, context.expandedEffects, false, false, false, false, context.equipmentEffects);
+                    content, true, context.expandedEffects, false, false, false, false, context.equipmentEffects, context.summonEffects);
                 if (!plan) return std::nullopt;
                 if (plan->affordable) for (const auto& effect : plan->effects.effects)
                 {
@@ -129,7 +129,7 @@ namespace TES3MP::Native
             // Validate effects before autocalc; unsupported sources cannot be
             // made usable by restoring magicka in this bounded runtime.
             if (const auto prepared = prepareInstantSpell(*source.record, content, true,
-                    context.expandedEffects, context.specialConditions, false, false, false, context.equipmentEffects))
+                    context.expandedEffects, context.specialConditions, false, false, false, context.equipmentEffects, context.summonEffects))
             {
                 const int cost = prepared->cost;
                 if (cost > context.caster.getMagicka().getCurrent()
@@ -173,7 +173,7 @@ namespace TES3MP::Native
             const auto* enchantment = content.get<ESM::Enchantment>().search(item.enchantment);
             if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenUsed) continue;
             auto prepared = prepareEnchantmentCast(*enchantment, context.caster, item.charge, content, true,
-                context.expandedEffects, false, false, false, false, context.equipmentEffects);
+                context.expandedEffects, false, false, false, false, context.equipmentEffects, context.summonEffects);
             if (!prepared || !prepared->affordable) continue;
             const int cost = MWMechanics::getEffectiveEnchantmentCastCost(
                 MWMechanics::getEnchantmentCastCost(*enchantment, content),
@@ -190,7 +190,7 @@ namespace TES3MP::Native
         for (const auto& source : spells)
         {
             auto prepared = prepareInstantSpell(*source.record, content, true,
-                context.expandedEffects, context.specialConditions, false, false, false, context.equipmentEffects);
+                context.expandedEffects, context.specialConditions, false, false, false, context.equipmentEffects, context.summonEffects);
             if (!prepared) continue;
             const float multiplier = MWMechanics::spellRatingMultiplier(*source.record,
                 MWMechanics::getSpellSuccessChance(*source.record, context.caster, content),

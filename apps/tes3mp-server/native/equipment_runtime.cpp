@@ -1,4 +1,5 @@
 #include "equipment_runtime.hpp"
+#include <source_location>
 #include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
 #include <components/esm3/loadweap.hpp>
@@ -163,12 +164,16 @@ namespace TES3MP::Native
         for (const auto& binding : containers)
         {
             const auto& placement = binding.mPlacement;
-            if (placement && (!placement->mRefNum.hasContentFile() || placement->mRefID != binding.mBase
+            if (placement && ((!placement->mRefNum.hasContentFile()
+                    && !(binding.mDynamicActor && restartActor && placement->mRefNum.isSet()
+                        && placement->mRefNum.mContentFile == -1)) || placement->mRefID != binding.mBase
                 || !placement->mTrap.empty()
                 || !placements.insert(placement->mRefNum).second))
                 throw std::invalid_argument("Placed container runtime binding invalid or duplicate");
             ManualRef reference(content, binding.mBase);
             const auto ptr = reference.getPtr();
+            if (binding.mDynamicActor && !actorInventory(ptr))
+                throw std::invalid_argument("Generated shared owner requires an actor inventory");
             if (!connected || (!actorInventory(ptr) && ptr.getType() != ESM::Container::sRecordId)
                 || !ptr.getClass().getScript(ptr).empty() || (actorInventory(ptr) && !placement))
                 throw std::invalid_argument("Shared inventory requires an unscripted container or placed actor");
@@ -215,6 +220,17 @@ namespace TES3MP::Native
                 ? std::make_unique<InventoryStore>() : std::make_unique<ContainerStore>();
             shared.mStore->setPtr(ptr, world);
         }
+        // Recovery's generated owners already have identities. Include them
+        // in the fresh registry counter before checking its lifetime witness;
+        // the decoded session must subsequently cover this entire domain.
+        if (restartActor)
+            for (const auto& binding : containers)
+                if (binding.mDynamicActor && binding.mPlacement)
+                {
+                    auto counter = world.getLastGeneratedRefNum();
+                    if (binding.mPlacement->mRefNum.mIndex > counter.mIndex)
+                        world.setLastGeneratedRefNum(binding.mPlacement->mRefNum);
+                }
         // Bind every owner before loot consumes dynamic IDs, so even base-only
         // diagnostic owners have identical identities during empty recovery.
         Misc::Rng::Generator rng{ lootSeed };
@@ -299,12 +315,16 @@ namespace TES3MP::Native
 
     void EquipmentRuntime::initializeStartingEquipment(size_t index)
     {
+        initializeStartingEquipment(ownerPtr(index), *inventoryStorage(index), mWorld, effects(index));
+    }
+
+    void EquipmentRuntime::initializeStartingEquipment(const Ptr& actor, InventoryStore& inventory,
+        WorldModel& world, ActorEffects& actorEffects) const
+    {
         // Constructor-only unpublished storage: failure rejects the whole host.
         // Stock NPC startup selects against NPDT skills before spell activation.
         // This temporary stat context is not a second gameplay-state writer.
-        const auto actor = ownerPtr(index);
         const bool isNpc = actor.getType() == ESM::NPC::sRecordId;
-        auto& inventory = *inventoryStorage(index);
         MWMechanics::NpcStats stats(mStore);
         if (isNpc)
         {
@@ -317,7 +337,7 @@ namespace TES3MP::Native
                 : static_cast<const MWClass::Creature&>(actor.getClass()).getSkill(actor, id, mStore);
         };
         const ContainerStoreStackContext split{mStore,
-            [&](const Ptr& item) { mWorld.registerPtr(item); },
+            [&](const Ptr& item) { world.registerPtr(item); },
             [&](const Ptr& item, int count) {
                 const auto removal = ContainerStore::prepareRemoveCount(item.getCellRef(), count);
                 if (removal.mFullRemoval) throw std::logic_error("Starting equipment split removed its source");
@@ -355,7 +375,7 @@ namespace TES3MP::Native
                             && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");
                     }
-                effects(index).mListener.equipmentChanged();
+                actorEffects.mListener.equipmentChanged();
             }});
     }
 
@@ -489,9 +509,10 @@ namespace TES3MP::Native
     void EquipmentRuntime::validateRestart(size_t actor, const Ptr& caller, const EquipmentBindings& bindings,
         const RestartBindings& fresh) const
     {
-        const auto valid = [](bool value) {
+        const auto valid = [](bool value, std::source_location location = std::source_location::current()) {
             if (!value)
-                throw std::invalid_argument("Equipment fresh restart binding, lifetime or registry changed");
+                throw std::invalid_argument("Equipment fresh restart binding, lifetime or registry changed at "
+                    + std::to_string(location.line()));
         };
         valid(!mFailedClosed && mRestartActor && (mConnected ? *mRestartActor == 2 : *mRestartActor == actor) && fresh.mOwner == this
             && fresh.mScriptLocals == mScriptLocals && bindings.mScriptLocals == mScriptLocals);
@@ -853,6 +874,41 @@ namespace TES3MP::Native
         };
         install();
         return PersistenceResult::Accepted;
+    }
+
+    PlainEquipmentValues EquipmentRuntime::stageActorInventory(ESM::RefId record, ESM::RefNum counter,
+        uint32_t& random) const
+    {
+        WorldModel detached(mWorld.mStore, mWorld.mReaders, 1);
+        detached.mPtrRegistry.mLastGenerated = counter;
+        ManualRef reference(mStore, record);
+        auto actor = reference.getPtr();
+        if (!actor.getClass().isActor() || !actor.getClass().getScript(actor).empty())
+            throw std::invalid_argument("Dynamic inventory requires an unscripted actor");
+        detached.registerPtr(actor);
+        InventoryStore inventory;
+        inventory.setPtr(actor, detached);
+        const auto& items = actor.getType() == ESM::NPC::sRecordId
+            ? actor.get<ESM::NPC>()->mBase->mInventory : actor.get<ESM::Creature>()->mBase->mInventory;
+        Misc::Rng::Generator rng{random};
+        inventory.fill(items, record, rng, {mStore, detached, 1});
+        ActorEffects actorEffects;
+        initializeStartingEquipment(actor, inventory, detached, actorEffects);
+        PlainEquipmentValues result;
+        result.mActor = actor.getCellRef().getRefNum();
+        result.mLastGenerated = detached.getLastGeneratedRefNum();
+        inventory.forEachStored([&](const auto& ref, auto position) {
+            for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                if (position == inventory.mSlots[slot]) result.mSlots[slot] = ref.mRef.getRefNum();
+            auto& object = result.mObjects.emplace_back();
+            object.blank();
+            ref.mRef.writeState(object);
+            ref.mData.write(object, equipmentDeclarations(mStore, ref.mBase->mScript, mScriptLocals.get()));
+            object.mHasCustomState = false;
+        });
+        result.validate(mStore, result.mActor, mScriptLocals.get());
+        random = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+        return result;
     }
 
     PlainEquipmentValues EquipmentRuntime::installedValues(size_t actor) const

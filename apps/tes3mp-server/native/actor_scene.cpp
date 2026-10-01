@@ -4,6 +4,7 @@
 #include "actor_inventory.hpp"
 #include "loadout.hpp"
 #include "actor_spawns.hpp"
+#include <apps/openmw/mwworld/manualref.hpp>
 #include <bit>
 
 #include <apps/openmw/mwclass/classes.hpp>
@@ -361,7 +362,8 @@ namespace TES3MP::Native
         }
 
         Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
-            const std::string& baseAnimation, const std::string& beastAnimation, Impl* sharedParent = nullptr)
+            const std::string& baseAnimation, const std::string& beastAnimation, Impl* sharedParent = nullptr,
+            std::span<const DynamicActorBody> dynamic = {})
             : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
@@ -395,23 +397,11 @@ namespace TES3MP::Native
             std::set<std::string> meshes;
             std::set<uint64_t> identities;
             size_t references = 0;
-            for (auto cellId : cells)
-            {
-            auto& cell = mReferences.getCell(cellId);
-            if (!cell.isExterior() && cell.getCell()->hasWater())
-            {
-                const float level = cell.getWaterLevel();
-                if (!std::isfinite(level)) throw std::invalid_argument("Actor water level outside bounds");
-                mInteriorWater = level;
-            }
-            cell.forEach([&](const MWWorld::Ptr& ptr) {
+            const auto addBody = [&](const MWWorld::Ptr& ptr, uint64_t id) {
                 if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
                 if (++references > MaxBodies) throw std::length_error("Interior collision reference budget exceeded");
                 const auto& cls = ptr.getClass();
-                const auto resolvedId = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), loadout.options().mContent);
-                if (!resolvedId) throw std::invalid_argument("Collision reference identity invalid");
-                const auto id = *resolvedId;
                 if (!identities.insert(id).second) throw std::invalid_argument("Duplicate collision placement across cells");
                 const bool npc = ptr.getType() == ESM::NPC::sRecordId;
                 const bool actorBody = npc || ptr.getType() == ESM::Creature::sRecordId;
@@ -496,6 +486,20 @@ namespace TES3MP::Native
                     mWorld.addCollisionObject(object, actorBody ? MWPhysics::CollisionType_Actor : MWPhysics::CollisionType_World,
                         actorBody ? (MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Actor) : MWPhysics::CollisionType_Actor);
                 return true;
+            };
+            for (auto cellId : cells)
+            {
+            auto& cell = mReferences.getCell(cellId);
+            if (!cell.isExterior() && cell.getCell()->hasWater())
+            {
+                const float level = cell.getWaterLevel();
+                if (!std::isfinite(level)) throw std::invalid_argument("Actor water level outside bounds");
+                mInteriorWater = level;
+            }
+            cell.forEach([&](const MWWorld::Ptr& ptr) {
+                const auto id = MWWorld::placedRefId(ptr.getCellRef().getRefNum(), loadout.options().mContent);
+                if (!id) throw std::invalid_argument("Collision reference identity invalid");
+                return addBody(ptr, *id);
             });
             if (const auto* exterior = cellId.getIf<ESM::ESM3ExteriorCellRefId>())
             {
@@ -529,6 +533,17 @@ namespace TES3MP::Native
                     mWorld.addCollisionObject(terrain->object.get(), MWPhysics::CollisionType_HeightMap, MWPhysics::CollisionType_Actor);
                 mTerrain.push_back(std::move(terrain));
             }
+            }
+            if (dynamic.size() > 32) throw std::invalid_argument("Dynamic collision capacity exceeded");
+            for (const auto& value : dynamic)
+            {
+                MWWorld::ManualRef reference(mStore, value.record);
+                auto ptr = reference.getPtr();
+                ESM::Position position{};
+                std::copy(value.position.begin(), value.position.end(), position.pos);
+                position.rot[2] = value.yaw;
+                ptr.getRefData().setPosition(position);
+                addBody(ptr, value.actor);
             }
             if (!mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
             if (mSharedParent)
@@ -689,21 +704,32 @@ namespace TES3MP::Native
         : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation,
-        std::span<const uint64_t> neighbors, Impl* sharedParent)
-        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent))
+        std::span<const uint64_t> neighbors, Impl* sharedParent, std::span<const DynamicActorBody> dynamic)
+        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent, dynamic))
     {
         if (!contains(snapshot().mPosition))
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
         if (!neighbors.empty())
         {
-            if (neighbors.size() > 4 || !neighbors.front()
+            if (neighbors.size() > 36 || !neighbors.front()
                 || std::ranges::find(neighbors, actor) != neighbors.end()
                 || std::ranges::find(neighbors.begin() + 1, neighbors.end(), neighbors.front()) != neighbors.end())
                 throw std::invalid_argument("Neighbor actor placements invalid");
             mNeighbor.reset(new InteriorActorScene(loadout, cells, neighbors.front(),
-                baseAnimation, beastAnimation, neighbors.subspan(1), sharedParent ? sharedParent : mImpl.get()));
+                baseAnimation, beastAnimation, neighbors.subspan(1), sharedParent ? sharedParent : mImpl.get(), dynamic));
             mNeighbor->mImpl->mDynamicDestination = true;
         }
+    }
+    InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
+        const std::string& baseAnimation, const std::string& beastAnimation,
+        std::span<const uint64_t> neighbors, std::span<const DynamicActorBody> dynamic)
+        : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr, dynamic) {}
+
+    void InteriorActorScene::installActorSet(InteriorActorScene& candidate) noexcept
+    {
+        mImpl.swap(candidate.mImpl);
+        mNeighbor.swap(candidate.mNeighbor);
+        mDormant.swap(candidate.mDormant);
     }
     InteriorActorScene::~InteriorActorScene() = default;
     ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl ? mImpl->snapshot() : mDormant->snapshot; }
@@ -723,6 +749,13 @@ namespace TES3MP::Native
         return {frame.mPosition.x(),frame.mPosition.y(),frame.mPosition.z(),frame.mRotation.y()};
     }
     uint64_t InteriorActorScene::actorId() const noexcept { return mImpl ? mImpl->mActorId : mDormant->snapshot.mActor; }
+    float InteriorActorScene::actorHalfExtentY(uint64_t actor) const
+    {
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->actorId() == actor && scene->mImpl) return scene->mImpl->mAgentBounds.mHalfExtents.y();
+        throw std::invalid_argument("Actor hull identity absent");
+    }
+
     float InteriorActorScene::selectedActorHalfExtentY() const
     {
         if (!mImpl) throw std::invalid_argument("Flee hull scene is unloaded");
@@ -1423,6 +1456,18 @@ namespace TES3MP::Native
             result.push_back(adjacent->snapshot());
         return result;
     }
+    std::span<const char> InteriorActorScene::Prepared::selectedImage() const
+    {
+        return mNeighbor ? splitActorImages(mState->bytes).first : std::span<const char>(mState->bytes);
+    }
+    std::span<const char> InteriorActorScene::Prepared::neighborImage(size_t index) const
+    {
+        auto* next = mNeighbor.get();
+        while (next && index--) next = next->mNeighbor.get();
+        if (!next) throw std::invalid_argument("Prepared actor index absent");
+        return next->selectedImage();
+    }
+
     void InteriorActorScene::setFacing(Prepared& prepared, float yaw) const
     {
         if (!std::isfinite(yaw) || !mImpl || prepared.mState->lifetime != mImpl->mLifetime)
@@ -1459,11 +1504,11 @@ namespace TES3MP::Native
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareSelectedRestore(
-        std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
+        std::span<const char> bytes, std::span<const ActorSceneDoor> doors, std::span<const uint64_t> removed)
     {
-        if (!mNeighbor) return prepareRestore(bytes, doors);
+        if (!mNeighbor) return prepareRestore(bytes, doors, removed);
         const auto combined = joinActorImages(bytes, mNeighbor->image());
-        return prepareRestore(combined, doors);
+        return prepareRestore(combined, doors, removed);
     }
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNeighborRestore(
         std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
@@ -1472,7 +1517,7 @@ namespace TES3MP::Native
         return prepareRestore(joinActorImages(selectedImage(), bytes), doors);
     }
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNeighborRestore(
-        size_t index, std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
+        size_t index, std::span<const char> bytes, std::span<const ActorSceneDoor> doors, std::span<const uint64_t> removed)
     {
         const auto count = neighborSnapshots().size();
         if (index >= count) throw std::invalid_argument("Neighbor restore index outside bound scene");
@@ -1481,7 +1526,7 @@ namespace TES3MP::Native
         images[index].assign(bytes.begin(), bytes.end());
         auto combined = std::move(images.back());
         for (size_t i = count - 1; i-- > 0; ) combined = joinActorImages(images[i], combined);
-        return prepareRestore(joinActorImages(selectedImage(), combined), doors);
+        return prepareRestore(joinActorImages(selectedImage(), combined), doors, removed);
     }
 
     std::vector<char> InteriorActorScene::Impl::encode(const MWPhysics::ActorFrameData& frame,
@@ -1520,14 +1565,14 @@ namespace TES3MP::Native
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareRestore(
-        std::span<const char> bytes, std::span<const ActorSceneDoor> doors)
+        std::span<const char> bytes, std::span<const ActorSceneDoor> doors, std::span<const uint64_t> removed)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         std::unique_ptr<Prepared> neighbor;
         if (mNeighbor)
         {
             const auto [primary, adjacent] = splitActorImages(bytes);
-            neighbor = mNeighbor->prepareRestore(adjacent, doors);
+            neighbor = mNeighbor->prepareRestore(adjacent, doors, removed);
             bytes = primary;
         }
         mImpl->validateDoors(doors);
@@ -1556,7 +1601,8 @@ namespace TES3MP::Native
         if (stuck > UINT32_MAX) throw std::invalid_argument("Actor stuck counter outside bounds");
         frame->mStuckFrames = unsigned(stuck); frame->mIsOnGround = boolean(); frame->mIsOnSlope = boolean();
         const auto standing = word(); frame->mStandingOn = nullptr;
-        if (standing)
+        if (standing && std::ranges::find(removed, standing) != removed.end()) frame->mIsOnGround = false;
+        else if (standing)
         {
             if (standing == UINT64_MAX && mImpl->mWaterNavigation)
                 frame->mStandingOn = mImpl->mWaterObject.get();
@@ -1583,6 +1629,7 @@ namespace TES3MP::Native
         for (size_t i=0; i<contacts; ++i)
         {
             const auto id=word();
+            if (std::ranges::find(removed, id) != removed.end()) continue;
             if (!std::ranges::any_of(mImpl->mIdentities, [id](const auto& pair) { return pair.second == id; })
                 || std::ranges::find(ids, id) != ids.end()) throw std::invalid_argument("Actor contact outside scene");
             ids.push_back(id);
@@ -1615,8 +1662,10 @@ namespace TES3MP::Native
             travel.drowning = false;
         }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
+        auto retained = removed.empty() ? std::vector<char>(bytes.begin(), bytes.end())
+            : mImpl->encode(*frame, path, ids, travel);
         auto prepared = std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
-            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(ids), {bytes.begin(), bytes.end()},
+            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(ids), std::move(retained),
             {doors.begin(), doors.end()}, std::move(travel)})));
         if (neighbor)
         {

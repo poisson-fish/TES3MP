@@ -18,6 +18,12 @@ namespace ESM::AiSequence
 
 namespace MWMechanics
 {
+    inline short followDistance(float targetHalfExtent, float actorHalfExtent,
+        float largestFollowerHalfExtent = 0, bool subsequentFollower = false)
+    {
+        return static_cast<short>((subsequentFollower ? largestFollowerHalfExtent + 128 : 0)
+            + targetHalfExtent + 64 + actorHalfExtent * 2);
+    }
     struct AiFollowStorage : AiTemporaryBase
     {
         float mTimer;

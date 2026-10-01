@@ -77,7 +77,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 70; ++candidate)
+            for (unsigned candidate = 3; candidate <= 71; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -297,6 +297,7 @@ namespace TES3MP::Native
                 binding.mScriptedTravelRules = descriptorVersion >= 68;
                 binding.mObjectTravelFamily = descriptorVersion >= 69;
                 binding.mEquipmentFamily = descriptorVersion >= 70;
+                binding.mSummons = descriptorVersion >= 71;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
@@ -704,9 +705,11 @@ namespace TES3MP::Native
                 const auto actorCells = start.binding.mTravelerNeighborhood ? names : std::vector{start.cell};
                 const auto createScene = [&loadout, actorCells, neighborhood = start.binding.mTravelerNeighborhood,
                     movementEffects = start.binding.mMovementEffects,
-                    id = owner.mId.value(), neighborIds, navigation = *start.navigation, doors] {
+                    id = owner.mId.value(), neighborIds, navigation = *start.navigation, doors](std::span<const DynamicActorBody> dynamic = {}) {
+                    auto actors = neighborIds;
+                    for (const auto& body : dynamic) actors.push_back(body.actor);
                     auto scene = std::make_shared<InteriorActorScene>(loadout, actorCells, id,
-                        "meshes/base_anim.nif", "meshes/base_animkna.nif", neighborIds);
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif", actors, dynamic);
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     if (movementEffects) scene->enableMovementEffects();
                     scene->enableNavigation(navigation.settings);
@@ -714,6 +717,7 @@ namespace TES3MP::Native
                     return scene;
                 };
                 auto scene = createScene();
+                if (start.binding.mSummons) start.binding.mCreateActorSet = createScene;
                 start.binding.mTravelDestination = start.navigation->destination;
                 start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
                 start.binding.mOnlyAppropriateAmmunitionBypassesResistance
@@ -808,7 +812,7 @@ namespace TES3MP::Native
                             return cache.emplace(key, scene->bindWeaponMeleeAnimation(actor, weapon, key.second)).first->second;
                         };
                     }
-                if (start.binding.mRetainTraveler)
+                if (start.binding.mRetainTraveler && !start.binding.mSummons)
                 {
                     const auto meleeIdentity = start.binding.mBoundMelee
                         ? start.binding.mBoundMelee->mResourceIdentity : std::string{};
@@ -857,6 +861,25 @@ namespace TES3MP::Native
                 throw std::runtime_error("Native content binding digest unavailable");
             for (size_t i = 0; i < digest.bytes.size(); ++i)
                 start.binding.mContent[i] = std::to_integer<unsigned char>(digest.bytes[i]);
+            if (start.binding.mSummons)
+            {
+                start.binding.mStaticContainers = start.binding.mContainers.size();
+                start.binding.mStaticNeighbors = start.binding.mNeighborMeleeSet.size();
+                start.binding.mNeighborLimit = 36;
+                if (!restored.empty())
+                {
+                    const auto campaign = readActorCampaign({reinterpret_cast<const char*>(restored.data()), restored.size()});
+                    if (campaign.dynamicActors.empty()) throw std::invalid_argument("Summon campaign version differs from descriptor");
+                    auto actors = DynamicActorSet::restore(campaign.dynamicActors);
+                    std::vector<DynamicActorBody> bodies;
+                    for (const auto& body : actors.bodies) bodies.push_back(body.collision);
+                    auto fresh = start.binding.mCreateActorSet(bodies);
+                    if (!actors.bodies.empty() && DynamicActorSet::resources(*fresh) != actors.collisionResources)
+                        throw std::invalid_argument("Summon collision resources changed on recovery");
+                    start.binding.mNavigatingActor->installActorSet(*fresh);
+                    bindDynamicActorSet(start.binding, actors);
+                }
+            }
             return start.binding;
         }
         Impl(Startup start, ContentManifestId manifest, CredentialCrypto& crypto, std::span<const std::byte> restored)

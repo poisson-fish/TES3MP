@@ -5586,7 +5586,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool boundLifecycleOnly = effectFamily == "bound-equipment-lifecycle";
+        const bool summons = effectFamily == "summons-integrated";
+        const bool boundLifecycleOnly = effectFamily == "bound-equipment-lifecycle" || summons;
         const bool boundEquipment = effectFamily == "bound-equipment" || boundLifecycleOnly;
         if (boundEquipment) { effectFamily = "player-travel"; participantHits = true; }
         const std::array boundEffects{ESM::MagicEffect::BoundDagger, ESM::MagicEffect::BoundLongsword,
@@ -6420,6 +6421,21 @@ namespace TES3MP::Native::Testing
                     else spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
                     if (!objectSpells) spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
                 }
+                if (summons)
+                {
+                    spell("summon_lifecycle", {effect(ESM::MagicEffect::SummonScamp, ESM::RT_Self, 20, 0)});
+                    auto creature = *base.store().get<ESM::Creature>().find(ESM::RefId::stringRefId("scamp"));
+                    creature.mId = ESM::RefId::stringRefId("summon_lifecycle_body");
+                    creature.mScript = {}; creature.mSpells.mList.clear();
+                    creature.mFlags |= ESM::Creature::Bipedal | ESM::Creature::Weapon;
+                    creature.mInventory.mList = {{1, ESM::RefId::stringRefId("iron shortsword")}};
+                    creature.mData.mHealth = 1000; creature.mData.mFatigue = 1000;
+                    creature.mData.mCombat = 100; creature.mAiData.mFight = creature.mAiData.mFlee = 0;
+                    out.startRecord(ESM::Creature::sRecordId, 0); creature.save(out); out.endRecord(ESM::Creature::sRecordId);
+                    auto setting = *base.store().get<ESM::GameSetting>().find("sMagicScampID");
+                    setting.mValue.setString(creature.mId.getRefIdString());
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+                }
                 if (boundEquipment)
                 {
                     for (size_t i = 0; i < boundEffects.size(); ++i)
@@ -6770,6 +6786,7 @@ namespace TES3MP::Native::Testing
                 require(extraInventory.getSlot(InventoryStore::Slot_CarriedLeft) == light,
                     "Stock ExtraSpell removed a non-armor carried-left torch");
                 npc.mAiData.mFight = 0;
+                if (summons) npc.mNpdt.mHealth = 1000;
                 npc.mInventory.mList = {{2, ESM::RefId::stringRefId("iron shortsword")},
                     {1, ESM::RefId::stringRefId("iron dagger")},
                     {1, ESM::RefId::stringRefId("common_shirt_01")},
@@ -6836,7 +6853,7 @@ namespace TES3MP::Native::Testing
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
                 witness.mAiData.mFight = boundEquipment || objectSpells || projectileNeighbors || neighborPhysics ? 0 : 100;
-                if (neighborCombat) witness.mNpdt.mHealth = neighborPhysics ? 200 : 5;
+                if (neighborCombat) witness.mNpdt.mHealth = summons ? 1000 : neighborPhysics ? 200 : 5;
                 witness.mSpells.mList.clear();
                 if (neighborCombat && !objectSpells && !npcRanged && effectFamily != "player-travel")
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
@@ -8683,7 +8700,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8792,17 +8809,63 @@ namespace TES3MP::Native::Testing
                 std::optional<ActorMagicCast> npc = {}, bool rollback = false) {
                 auto& native = dynamic_cast<InventoryService&>(run->service());
                 const auto before = image(native);
+                const auto bodies = native.activeActorCollisionBodies();
                 auto pending = native.prepareNativeTick(authority, id<ServerTick>(++tick), 1.f/30,
                     std::move(input), npc, &world);
                 require(bool(pending), "Equipment lifecycle tick rejected");
+                require(image(native) == before && native.activeActorCollisionBodies() == bodies,
+                    "Actor lifecycle preparation changed live membership");
                 if (rollback)
-                    require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
-                        == CanonicalDurabilityResult::Rejected && image(native) == before,
+                    require(pending->commit([&](auto bytes) {
+                        if (summons)
+                        {
+                            const auto saved = readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                            const auto staged = DynamicActorSet::restore(saved.dynamicActors);
+                            const auto replica = native.projectInventory(authority, id<SessionId>(1),
+                                id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                            require(replica && replica->equipment, "Staged summon replication missing");
+                            for (const auto& body : staged.bodies)
+                                require(std::ranges::any_of(replica->groundItems.front().actorSpawns,
+                                        [&](const auto& spawn) { return spawn.placement == body.collision.actor; })
+                                    && std::ranges::any_of(replica->equipment->actors,
+                                        [&](const auto& value) { return value.actor.value() == body.collision.actor; }),
+                                    "Durable summon membership differs from pending replication");
+                            require(native.activeActorCollisionBodies() == bodies,
+                                "Summon collision installed before durability");
+                        }
+                        return CanonicalDurabilityResult::Rejected;
+                    })
+                        == CanonicalDurabilityResult::Rejected && image(native) == before
+                        && native.activeActorCollisionBodies() == bodies,
                         "Rejected equipment lifecycle leaked inventory, effects, resources or RNG");
                 std::vector<MagicUseCombatEvent> cues;
                 if (const auto events = native.projectCombatEvents(authority, id<SessionId>(1),
                         id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get()))
+                {
+                    if (summons)
+                    {
+                        const auto wire = decodeReliableCombatEventBatch(encodeReliableCombatEventBatch(*events));
+                        require(std::holds_alternative<ReliableCombatEventBatch>(wire)
+                            && std::get<ReliableCombatEventBatch>(wire) == *events,
+                            "Summon combat events changed across wire encoding");
+                    }
                     cues.assign(events->magicEvents().begin(), events->magicEvents().end());
+                }
+                if (summons)
+                {
+                    const auto snapshot = native.projectCombat(authority, id<SessionId>(1),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                    require(bool(snapshot), "Staged summon combat replication missing");
+                    const auto wire = decodeLatestWinsCombatSnapshot(encodeLatestWinsCombatSnapshot(*snapshot));
+                    require(std::holds_alternative<LatestWinsCombatSnapshot>(wire)
+                        && std::get<LatestWinsCombatSnapshot>(wire) == *snapshot,
+                        "Summon combat state changed across wire encoding");
+                    if (std::ranges::any_of(snapshot->actors(), [](const auto& value) {
+                            return DynamicActorOwnership::dynamic(value.actorId.value()); }))
+                        require(!native.stageWaitRestRecovery(*pending, authority, world, 1, WaitRestMode::Wait)
+                            && image(native) == before,
+                            "Time skip expired a summon source without composing membership removal");
+                }
                 require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                     == CanonicalDurabilityResult::Committed, "Equipment lifecycle commit failed");
                 return cues;
@@ -8898,6 +8961,154 @@ namespace TES3MP::Native::Testing
                     if (effect.actor == actor && effect.source == source && effect.equipmentApplied) return effect;
                 return {};
             };
+            if (summons)
+            {
+                fresh();
+                const auto collisionBodies = dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies();
+                cast(1, "summon_lifecycle");
+                const auto created = state(run->service());
+                auto actors = DynamicActorSet::restore(created.dynamicActors);
+                require(actors.bodies.size() == 1 && actors.ownership.entries.size() == 1,
+                    "Actual summon cast did not create one owned body");
+                const uint64_t summoned = actors.bodies.front().collision.actor;
+                {
+                    auto mismatched = actors;
+                    mismatched.ownership.entries.front().source.owner.id = 2;
+                    auto bad = image(run->service());
+                    const auto encoded = mismatched.image();
+                    std::memcpy(bad.data() + 16, encoded.data(), encoded.size());
+                    bool rejected = false;
+                    try { InventoryHost invalid(descriptor, manifest, *registry, *crypto, bad); }
+                    catch (const std::invalid_argument&) { rejected = true; }
+                    require(rejected, "Recovery admitted mismatched summon owner/source");
+                }
+                const auto deadline = std::ranges::find_if(created.timedEffects, [&](const auto& effect) {
+                    return effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::SummonScamp));
+                })->expiresTick;
+                require(dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies() == collisionBodies + 1,
+                    "Summon cast did not install collision membership");
+                const auto view = [&] {
+                    auto result = run->service().projectInventory(authority, id<SessionId>(1),
+                        id<ServerTick>(std::max<uint64_t>(1, tick)), id<CanonicalRevision>(std::max<uint64_t>(1, tick)));
+                    require(result && result->equipment, "Summon lifecycle replication missing");
+                    const auto ground = decodeReliableGroundItemBaseline(encodeReliableGroundItemBaseline(result->groundItems.front()));
+                    const auto equipment = decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(*result->equipment));
+                    require(std::holds_alternative<ReliableGroundItemBaseline>(ground)
+                        && std::get<ReliableGroundItemBaseline>(ground) == result->groundItems.front()
+                        && std::holds_alternative<LatestWinsEquipmentSnapshot>(equipment)
+                        && std::get<LatestWinsEquipmentSnapshot>(equipment) == *result->equipment,
+                        "Summon creation/state/removal changed across replication wire encoding");
+                    return *result;
+                };
+                auto replica = view();
+                require(std::ranges::any_of(replica.groundItems.front().actorSpawns,
+                    [summoned](const auto& spawn) { return spawn.placement == summoned && spawn.record; })
+                    && std::ranges::any_of(replica.equipment->actors,
+                        [summoned](const auto& actor) { return actor.actor.value() == summoned
+                            && actor.slots[size_t(EquipmentSlot::CarriedRight)].has_value(); }),
+                    "Summon creation/stock inventory did not replicate");
+                const auto position = [&] {
+                    const auto snapshot = view();
+                    const auto motion = std::ranges::find(snapshot.equipment->motions, summoned, &NativeActorMotion::placement);
+                    require(motion != snapshot.equipment->motions.end(), "Summon body motion absent");
+                    return motion->position;
+                };
+                const auto moveOwner = [&](Position3 destination) {
+                    auto entities = std::vector(authority.players().begin(), authority.players().end());
+                    const auto previous = entities[0];
+                    entities[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(previous,
+                        id<ServerTick>(tick + 1), Transform(previous.transform().cell(), destination,
+                            previous.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(entities, authority.activeSessions()));
+                };
+                moveOwner(Position3(380 * 1024, -400 * 1024, 1024));
+                const auto start = position();
+                for (size_t i = 0; i < 45; ++i) step({}, {}, true);
+                const auto followed = position();
+                std::cout << "summon follow: start=" << start[0] << ',' << start[1] << ',' << start[2]
+                    << " current=" << followed[0] << ',' << followed[1] << ',' << followed[2] << '\n';
+                require(std::pow(followed[0] - 380, 2) + std::pow(followed[1] + 400, 2)
+                    < std::pow(start[0] - 380, 2) + std::pow(start[1] + 400, 2),
+                    "Summon did not follow its living cast owner");
+                restart();
+                const auto normal = normalWeapon(1); equip(1, normal, EquipmentSlot::CarriedRight, true);
+                replica = view();
+                const size_t victimIndex = 3;
+                const auto placement = state(run->service()).combat->npcPlacements.at(victimIndex - 2);
+                const auto enemy = std::ranges::find(replica.equipment->motions, placement, &NativeActorMotion::placement);
+                require(enemy != replica.equipment->motions.end(), "Summon combat enemy motion absent");
+                moveOwner(Position3(int64_t((enemy->position[0] + 30) * 1024),
+                    int64_t(enemy->position[1] * 1024), int64_t(enemy->position[2] * 1024)));
+                const auto* player = authority.findPlayer(id<PlayerId>(1));
+                const ClientMeleeAttackCommand input{id<SessionId>(1), SessionGeneration::initial(),
+                    id<CommandSequence>(tick + 1), id<CommandId>(tick + 3000), id<CanonicalRevision>(tick + 1),
+                    id<ActorId>(placement), id<ServerTick>(tick + 1), CombatRevision::initial(),
+                    CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
+                    input.commandSequence, input.commandId, input.observedCanonicalRevision,
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                    MeleeAttackCommandProposal(input)};
+                auto attack = run->service().prepareMeleeAttack(authority, request, id<ServerTick>(tick + 1));
+                require(bool(attack), "Summon owner attack was not admitted");
+                step(std::move(attack), {}, true);
+                bool fought = false, restartedAttack = false;
+                while (tick + 1 < deadline)
+                {
+                    const auto previous = state(run->service());
+                    step({}, {}, true);
+                    const auto current = state(run->service());
+                    const auto& action = current.combat->neighborAttacks.back();
+                    if (action.target && !restartedAttack)
+                    {
+                        require(action.target == placement && action.targetKind == 2
+                            && action.targetLife == current.neighborLives.at(victimIndex - 3).generation,
+                            "Summon combat target lost actor/life identity");
+                        restart(); restartedAttack = true;
+                    }
+                    if (action.contact && action.state.mHit
+                        && current.combat->actors[victimIndex][8][2] < previous.combat->actors[victimIndex][8][2])
+                        fought = true;
+                }
+                const auto finalAction = state(run->service()).combat->neighborAttacks.back();
+                const auto finalBody = DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.front();
+                const auto finalPosition = position();
+                std::cout << "summon fight: target=" << finalAction.target << " enemy=" << finalBody.enemy.id
+                    << " fought=" << fought << " restart=" << restartedAttack << " position="
+                    << finalPosition[0] << ',' << finalPosition[1] << ',' << finalPosition[2] << '\n';
+                require(fought && restartedAttack, "Summon did not fight and retain its owner-directed actor target across restart");
+                step({}, {}, true);
+                require(tick == deadline && DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.empty()
+                    && dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies() == collisionBodies,
+                    "Summon expiry did not remove ownership and collision in its commit");
+                replica = view();
+                require(std::ranges::none_of(replica.groundItems.front().actorSpawns,
+                    [summoned](const auto& spawn) { return spawn.placement == summoned; })
+                    && std::ranges::none_of(replica.equipment->actors,
+                        [summoned](const auto& actor) { return actor.actor.value() == summoned; }),
+                    "Summon removal did not replicate");
+                restart();
+                require(DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.empty(),
+                    "Restart resurrected an expired summon");
+                cast(1, "summon_lifecycle");
+                const auto beforeFailure = image(run->service());
+                auto& native = dynamic_cast<InventoryService&>(run->service());
+                const auto beforeBodies = native.activeActorCollisionBodies();
+                auto uncertain = native.prepareNativeTick(authority, id<ServerTick>(++tick), 1.f/30, {}, {}, &world);
+                std::vector<std::byte> durable;
+                require(uncertain && uncertain->commit([&](auto bytes) {
+                    durable.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Failed;
+                }) == CanonicalDurabilityResult::Failed && native.inventoryImage().empty()
+                    && native.activeActorCollisionBodies() == beforeBodies,
+                    "Uncertain summon write mutated collision or did not fail closed");
+                InventoryHost previous(descriptor, manifest, *registry, *crypto, beforeFailure);
+                require(image(previous.service()) == beforeFailure, "Previous durable summon state failed recovery");
+                InventoryHost accepted(descriptor, manifest, *registry, *crypto, durable);
+                require(image(accepted.service()) == durable
+                    && DynamicActorSet::restore(state(accepted.service()).dynamicActors).bodies.size() == 1,
+                    "Uncertain durable summon state failed coherent recovery");
+                std::cout << "summons cast=create follow=stock combat=actor-life expiry=remove writes=atomic restart=exact\n";
+                return;
+            }
             if (!boundLifecycleOnly) for (size_t i = 0; i < boundEffects.size(); ++i)
                 for (uint64_t player : {1, 2})
                 {

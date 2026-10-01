@@ -6868,7 +6868,8 @@ int main(int argc, char** argv)
             std::cout << "PASS door-spell\n"; return 0;
         }
         if (argc == 5 && (std::string_view(argv[1]) == "bound-equipment"
-                || std::string_view(argv[1]) == "bound-equipment-lifecycle"))
+                || std::string_view(argv[1]) == "bound-equipment-lifecycle"
+                || std::string_view(argv[1]) == "summons-integrated"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
@@ -6876,7 +6877,7 @@ int main(int argc, char** argv)
                 false, true, false, true, false, false, false, false, false, false, false, false,
                 {}, false, false, true, false, false, false, false, false, false, true, false,
                 argv[1]);
-            std::cout << "PASS bound-equipment\n"; return 0;
+            std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
         if (argc == 5 && std::string_view(argv[1]) == "object-soul")
         {

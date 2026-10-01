@@ -1284,6 +1284,61 @@ namespace TES3MP::OpenMWAdapter
                 if (nativeActorRecords.empty()) nativeActorRecords = MWWorld::actorRecords(*MWBase::Environment::get().getESMStore());
                 for (const auto& spawn : area->actorSpawns)
                 {
+                    // Dynamic actors have no content placement or local gameplay
+                    // instance. The reliable spawn domain owns their existence;
+                    // the ordinary native actor stream owns motion and combat.
+                    if ((spawn.placement >> 62) == 3)
+                    {
+                        const auto record = nativeActorRecords.find(spawn.record);
+                        if (record == nativeActorRecords.end()) return ProviderResult::ContentMappingFailed;
+                        const auto equipment = std::ranges::find(snapshot.actors, spawn.placement,
+                            [](const auto& member) { return member.actor.value(); });
+                        const auto motion = std::ranges::find(snapshot.motions, spawn.placement, &NativeActorMotion::placement);
+                        // Reliable membership and latest-wins state can arrive in
+                        // either order. Wait for a complete presentation baseline.
+                        if (equipment == snapshot.actors.end() || motion == snapshot.motions.end()) continue;
+                        if (nativeItemRecords.empty()) nativeItemRecords = MWWorld::inventoryRecords(*MWBase::Environment::get().getESMStore());
+                        std::vector<ESM::RefId> appearance;
+                        for (size_t slot = 0; slot < equipment->slots.size(); ++slot)
+                            if (equipment->slots[slot] && slot != static_cast<size_t>(EquipmentSlot::Ammunition))
+                            {
+                                const auto item = nativeItemRecords.find(equipment->slots[slot]->value());
+                                if (item == nativeItemRecords.end()) return ProviderResult::ContentMappingFailed;
+                                appearance.push_back(item->second);
+                            }
+                        auto remote = nativeRemotes.find(spawn.placement);
+                        if (remote != nativeRemotes.end() && (remote->second.cell != cell
+                            || remote->second.actor->ptr().getCellRef().getRefId() != record->second
+                            || remote->second.equipment != appearance
+                            || !remote->second.actor->ptr().getRefData().getBaseNode()))
+                        { nativeRemotes.erase(remote); remote = nativeRemotes.end(); }
+                        if (remote == nativeRemotes.end())
+                        {
+                            ESM::Position position{};
+                            std::copy(motion->position.begin(), motion->position.end(), position.pos);
+                            position.rot[2] = motion->yaw;
+                            auto [created, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
+                                *MWBase::Environment::get().getESMStore(), record->second, *cell,
+                                position, std::span<const ESM::RefId>(appearance));
+                            if (!MWRender::replicatedActorResultAccepted(created) || !actor) return mapReplicatedActorResult(created);
+                            remote = nativeRemotes.try_emplace(spawn.placement, cell, std::move(actor), metrics).first;
+                            remote->second.equipment = std::move(appearance);
+                            if (combatSnapshot)
+                            {
+                                const auto combat = std::ranges::find_if(combatSnapshot->actors(),
+                                    [&](const auto& state) { return state.actorId.value() == spawn.placement; });
+                                if (combat != combatSnapshot->actors().end()
+                                    && applyNativeActorCombat(*remote->second.actor, *combat) != ProviderResult::Accepted)
+                                    return ProviderResult::PresentationFailed;
+                            }
+                        }
+                        if (motion->tick > remote->second.tick)
+                        {
+                            if (!remote->second.motion.observe(*motion, area->cell, receivedAt)) return ProviderResult::PresentationFailed;
+                            remote->second.tick = motion->tick;
+                        }
+                        continue;
+                    }
                     const auto marker = markers.find(spawn.placement);
                     if (marker == markers.end()) return ProviderResult::ContentMappingFailed;
                     static_cast<const MWClass::CreatureLevList&>(marker->second.getClass()).suppressLocalSpawn(marker->second);
@@ -1315,16 +1370,17 @@ namespace TES3MP::OpenMWAdapter
             }
             for (auto it=nativeRemotes.begin(); it!=nativeRemotes.end();)
             {
-                if (std::ranges::none_of(snapshot.motions, [&](const auto& motion) { return motion.placement == it->first; }))
+                if (((it->first >> 62) == 3 && !desiredSpawns.contains(it->first))
+                    || std::ranges::none_of(snapshot.motions, [&](const auto& motion) { return motion.placement == it->first; }))
                 {
-                    world->enable(it->second.source);
+                    if (!it->second.source.isEmpty()) world->enable(it->second.source);
                     it=nativeRemotes.erase(it);
                 }
                 else ++it;
             }
             for (const auto& member : snapshot.actors)
             {
-                if (desiredSpawns.contains(member.actor.value())) continue;
+                if (desiredSpawns.contains(member.actor.value()) || (member.actor.value() >> 62) == 3) continue;
                 const auto ref = MWWorld::localPlacedRef(member.actor.value(), world->getContentFiles());
                 if (!ref) return ProviderResult::ContentMappingFailed;
                 auto ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
@@ -3103,7 +3159,7 @@ namespace TES3MP::OpenMWAdapter
                 if (desiredContainers.contains(id)) continue;
                 const auto remote = nativeRemotes.find(id.value());
                 if (remote == nativeRemotes.end()) continue;
-                world->enable(remote->second.source);
+                if (!remote->second.source.isEmpty()) world->enable(remote->second.source);
                 nativeRemotes.erase(remote);
             }
             std::erase_if(observedContainerRevisions,

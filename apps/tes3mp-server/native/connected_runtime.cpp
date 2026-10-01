@@ -105,13 +105,19 @@ namespace TES3MP::Native
         return result;
     }
 
-    void EquipmentRuntime::encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes) const
+    void EquipmentRuntime::encodeSession(EquipmentSessionValues values, EquipmentBytes& bytes,
+        std::span<const EquipmentContainerBinding> membership) const
     {
         // Equipment may generate one split in either actor. The other actor's
         // image keeps its own fields and shares the resulting registry counter.
+        const size_t count = membership.empty() ? ownerCount() : membership.size() + 2;
+        const auto reference = [&](size_t owner) {
+            return owner < 2 || membership.empty() ? ownerPtr(owner).getCellRef().getRefNum()
+                : membership[owner - 2].mPlacement->mRefNum;
+        };
         if (values.mContainers.empty())
-            for (size_t i = 2; i < ownerCount(); ++i) values.mContainers.push_back(installedValues(i));
-        if (values.mContainers.size() != mContainers.size())
+            for (size_t i = 2; i < count; ++i) values.mContainers.push_back(installedValues(i));
+        if (values.mContainers.size() != count - 2)
             throw std::invalid_argument("Session container count changed");
         if (!values.mWorldItems) values.mWorldItems = mWorldItems;
         if (!values.mWorldCells) values.mWorldCells = mWorldCells;
@@ -127,11 +133,11 @@ namespace TES3MP::Native
                 || (shared.mContentFile == counter.mContentFile && shared.mIndex > counter.mIndex)) counter = shared;
         }
         std::vector<ESM::RefId> ids;
-        for (size_t i = 0; i < ownerCount(); ++i)
+        for (size_t i = 0; i < count; ++i)
         {
             auto& actor = i >= 2 ? values.mContainers[i - 2] : values.mActors[i];
             actor.mLastGenerated = counter;
-            actor.validate(mStore, ownerPtr(i).getCellRef().getRefNum(), mScriptLocals.get());
+            actor.validate(mStore, reference(i), mScriptLocals.get());
             if (actor.mNpcStats)
             {
                 ids.push_back(actor.mNpcStats->mBase);
@@ -155,11 +161,12 @@ namespace TES3MP::Native
         const std::array<EquipmentBindings, 2> bindings{{
             { envelopes[0], mStore, ids, mScriptLocals }, { envelopes[1], mStore, ids, mScriptLocals } }};
         std::vector<EquipmentEnvelope> containerEnvelopes;
-        for (size_t i = 2; i < ownerCount(); ++i)
-            containerEnvelopes.push_back(expectedEnvelope(ownerPtr(i).getCellRef().getRefNum()));
+        for (size_t i = 2; i < count; ++i)
+            containerEnvelopes.push_back(expectedEnvelope(reference(i)));
         std::vector<EquipmentBindings> containerBindings;
         for (size_t i = 0; i < containerEnvelopes.size(); ++i)
-            containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, inventoryStorage(i + 2) != nullptr});
+            containerBindings.push_back({containerEnvelopes[i], mStore, ids, mScriptLocals, membership.empty() ? inventoryStorage(i + 2) != nullptr
+                : mStore.find(membership[i].mBase) != ESM::Container::sRecordId});
         auto worldBinding = bindings[0]; worldBinding.mMaximumItems = mWorldCapacity;
         encodeEquipmentSession(values, bindings, bytes, containerBindings, mWorldItems ? &worldBinding : nullptr,
             mDoorBinding ? &*mDoorBinding : nullptr, mWorldCells.has_value(), mCellCount);
@@ -828,6 +835,10 @@ namespace TES3MP::Native
         ESM::RefNum counter;
         PtrRegistry::Index registry;
         std::vector<Replacement> replacements;
+        std::optional<size_t> staticContainers;
+        std::unique_ptr<WorldModel> dynamicWorld;
+        std::vector<std::unique_ptr<SharedInventory>> dynamic;
+        std::vector<std::unique_ptr<SharedInventory>> installed;
         State(EquipmentRuntime& value, const EquipmentSessionValues& values)
             : runtime(&value), beforeRevision(value.mWorld.getPtrRegistryRevision()),
               revision(values.mRevision), counter(values.mActors[0].mLastGenerated),
@@ -856,29 +867,76 @@ namespace TES3MP::Native
     }
 
     std::unique_ptr<EquipmentRuntime::PreparedProjectileLoot> EquipmentRuntime::prepareProjectileLoot(
-        const EquipmentSessionValues& values, std::span<const size_t> owners)
+        const EquipmentSessionValues& values, std::span<const size_t> owners,
+        std::optional<size_t> staticContainers, std::span<const EquipmentContainerBinding> dynamic)
     {
+        const size_t count = staticContainers ? 2 + *staticContainers + dynamic.size() : ownerCount();
+        if (staticContainers && (*staticContainers > mContainers.size() || dynamic.size() > 32))
+            throw std::invalid_argument("Dynamic inventory membership capacity invalid");
         if (!mConnected || mRestartActor || mFailedClosed || owners.empty()
-            || owners.size() > ownerCount() || values.mRevision <= mWorld.getPtrRegistryRevision()
-            || values.mContainers.size() != ownerCount() - 2)
+            || owners.size() > count || values.mRevision <= mWorld.getPtrRegistryRevision()
+            || values.mContainers.size() != count - 2)
             throw std::invalid_argument("Projectile loot replacement boundary invalid");
         auto staged = std::make_unique<PreparedProjectileLoot::State>(*this, values);
         staged->replacements.reserve(owners.size());
+        staged->staticContainers = staticContainers;
+        if (staticContainers)
+        {
+            staged->installed.resize(*staticContainers + dynamic.size());
+            staged->dynamicWorld = std::make_unique<WorldModel>(mWorld.mStore, mWorld.mReaders, 1);
+            staged->dynamicWorld->setLastGeneratedRefNum(staged->counter);
+            for (size_t at = *staticContainers; at < mContainers.size(); ++at)
+            {
+                const auto& old = *mContainers[at];
+                staged->registry.erase(old.mReference->getPtr().getCellRef().getRefNum());
+                old.mStore->forEachStored([&](const auto& item, auto) { staged->registry.erase(item.mRef.getRefNum()); });
+            }
+            for (const auto& binding : dynamic)
+            {
+                if (!binding.mPlacement || binding.mPlacement->mRefID != binding.mBase)
+                    throw std::invalid_argument("Dynamic inventory reference invalid");
+                auto shared = std::make_unique<SharedInventory>();
+                shared->mReference = std::make_unique<ManualRef>(mStore, binding.mBase);
+                auto ptr = shared->mReference->getPtr();
+                if (!ptr.getClass().isActor() || !ptr.getClass().getScript(ptr).empty())
+                    throw std::invalid_argument("Dynamic inventory actor unsupported");
+                ptr.getCellRef() = CellRef(*binding.mPlacement);
+                ptr.getRefData().setPosition(binding.mPlacement->mPos);
+                shared->mStore = std::make_unique<InventoryStore>();
+                staged->dynamicWorld->registerPtr(ptr);
+                shared->mStore->setPtr(ptr, *staged->dynamicWorld);
+                Misc::Rng::Generator unused{0};
+                shared->mStore->fill({}, {}, unused);
+                shared->mStore->setContListener(&shared->mEffects.mListener);
+                static_cast<InventoryStore&>(*shared->mStore).setInvListener(&shared->mEffects.mListener);
+                if (!staged->registry.emplace(ptr.getCellRef().getRefNum(), ptr).second)
+                    throw std::invalid_argument("Dynamic inventory actor identity collision");
+                staged->dynamic.push_back(std::move(shared));
+            }
+        }
+        const auto target = [&](size_t owner) -> ContainerStore& {
+            return staticContainers && owner >= 2 + *staticContainers
+                ? *staged->dynamic.at(owner - 2 - *staticContainers)->mStore : storage(owner);
+        };
+        const auto reference = [&](size_t owner) {
+            return staticContainers && owner >= 2 + *staticContainers
+                ? staged->dynamic.at(owner - 2 - *staticContainers)->mReference->getPtr() : ownerPtr(owner);
+        };
         for (size_t owner : owners)
         {
-            if (owner >= ownerCount() || std::ranges::any_of(staged->replacements,
+            if (owner >= count || std::ranges::any_of(staged->replacements,
                     [owner](const auto& entry) { return entry.owner == owner; }))
                 throw std::invalid_argument("Projectile loot replacement owner invalid");
-            auto& live = storage(owner);
+            auto& live = target(owner);
             const auto& replacement = owner < 2 ? values.mActors[owner] : values.mContainers[owner - 2];
-            replacement.validate(mStore, ownerPtr(owner).getCellRef().getRefNum(), mScriptLocals.get());
+            replacement.validate(mStore, reference(owner).getCellRef().getRefNum(), mScriptLocals.get());
             live.forEachStored([&](const auto& item, auto) { staged->registry.erase(item.mRef.getRefNum()); });
             staged->replacements.emplace_back(owner, live);
             auto& entry = staged->replacements.back();
             entry.restored = std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
-                replacement, mStore, ownerPtr(owner).getCellRef().getRefNum(), mScriptLocals));
+                replacement, mStore, reference(owner).getCellRef().getRefNum(), mScriptLocals));
             auto& candidate = entry.restored->installationStorage(mStore,
-                ownerPtr(owner).getCellRef().getRefNum(), staged->counter);
+                reference(owner).getCellRef().getRefNum(), staged->counter);
             entry.candidate = &candidate;
             const auto playerItem = owner < 2 && !mItems[owner].isEmpty()
                 ? mItems[owner].getCellRef().getRefNum() : ESM::RefNum{};
@@ -895,7 +953,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Projectile loot identity collision");
             });
         }
-        if (staged->registry.size() > registryBound())
+        if (staged->registry.size() > count * (PlainEquipmentValues::MaxItems + 1))
             throw std::invalid_argument("Projectile loot registry capacity exceeded");
         return std::unique_ptr<PreparedProjectileLoot>(new PreparedProjectileLoot(std::move(staged)));
     }
@@ -1108,6 +1166,17 @@ namespace TES3MP::Native
     {
         auto& staged = *prepared.mState;
         assert(staged.runtime == this);
+        if (staged.staticContainers)
+        {
+            for (size_t i = 0; i < *staged.staticContainers; ++i)
+                staged.installed[i] = std::move(mContainers[i]);
+            for (size_t i = 0; i < staged.dynamic.size(); ++i)
+            {
+                staged.dynamic[i]->mReference->getPtr().mRef->mWorldModel = &mWorld;
+                staged.installed[*staged.staticContainers + i] = std::move(staged.dynamic[i]);
+            }
+            mContainers.swap(staged.installed);
+        }
         for (auto& entry : staged.replacements)
         {
             auto& live = storage(entry.owner);

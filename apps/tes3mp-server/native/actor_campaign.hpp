@@ -58,6 +58,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
     inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
     inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
+    inline constexpr uint64_t SummonsActorSetMagic = 0x6250434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
     inline constexpr bool hasObjectTravel(uint64_t magic)
     { return magic == ObjectTravelCampaignMagic || magic == EquipmentFamilyCampaignMagic; }
@@ -185,6 +186,7 @@ namespace TES3MP::Native
             MeleeAnimation::Snapshot state;
             uint64_t target = 0, action = 0, source = 0, direction = 0;
             bool contact = false;
+            uint64_t targetKind = 0, targetLife = 0;
             bool operator==(const NeighborAttack&) const = default;
         };
         struct PlayerAi
@@ -322,11 +324,27 @@ namespace TES3MP::Native
         std::vector<ActorCampaignTimedEffect> timedEffects;
         std::string castResource;
         std::optional<ActorCampaignCast> casting;
+        std::span<const char> dynamicActors;
     };
-    inline ActorCampaign readActorCampaign(std::span<const char> bytes)
+    inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == SummonsActorSetMagic)
+        {
+            if (dynamicDomain) throw std::invalid_argument("Nested dynamic actor envelope");
+            const auto size = getAreaWord(bytes, offset);
+            if (size > 256 * 1024 || size > bytes.size() - offset)
+                throw std::invalid_argument("Dynamic actor envelope length invalid");
+            const auto actors = bytes.subspan(offset, size_t(size));
+            offset += size_t(size);
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != EquipmentFamilyCampaignMagic)
+                throw std::invalid_argument("Dynamic actors require equipment campaign");
+            auto result = readActorCampaign(bytes.subspan(offset), true);
+            result.dynamicActors = actors;
+            return result;
+        }
         if (magic != ActorCampaignMagic && magic != MeleeActorCampaignMagic
             && magic != ContactActorCampaignMagic && magic != CombatActorCampaignMagic
             && magic != LifeActorCampaignMagic && magic != ProjectileActorCampaignMagic
@@ -415,7 +433,7 @@ namespace TES3MP::Native
             if (hasPlacementCombat(magic))
             {
                 const auto count = getAreaWord(bytes, offset);
-                if (count < 1 || count > 8 || count > (bytes.size() - offset) / 8)
+                if (count < 1 || count > (dynamicDomain ? 37u : 8u) || count > (bytes.size() - offset) / 8)
                     throw std::invalid_argument("Native NPC placement count invalid");
                 state.npcPlacements.reserve(size_t(count));
                 for (uint64_t i = 0; i < count; ++i)
@@ -521,6 +539,14 @@ namespace TES3MP::Native
                     attack.action = getAreaWord(bytes, offset);
                     attack.source = getAreaWord(bytes, offset);
                     attack.direction = getAreaWord(bytes, offset);
+                    if (dynamicDomain)
+                    {
+                        attack.targetKind = getAreaWord(bytes, offset);
+                        attack.targetLife = getAreaWord(bytes, offset);
+                        if (attack.target ? (attack.targetKind < 1 || attack.targetKind > 2 || !attack.targetLife)
+                            : (attack.targetKind || attack.targetLife))
+                            throw std::invalid_argument("Dynamic actor attack target life invalid");
+                    }
                     if (phase > uint64_t(MeleeAnimation::Phase::Complete) || time > UINT32_MAX
                         || strength > UINT32_MAX || released > 1 || hit > 1 || contact > 1
                         || attack.action > tick || attack.direction > 2

@@ -133,11 +133,9 @@ namespace MWMechanics
                 if (halfExtent > floatingDistance)
                     floatingDistance = halfExtent;
             }
-            floatingDistance += 128;
         }
-        floatingDistance += getHalfExtents(target) + 64;
-        floatingDistance += getHalfExtents(actor) * 2;
-        short followDistance = static_cast<short>(floatingDistance);
+        short followDistance = MWMechanics::followDistance(getHalfExtents(target), getHalfExtents(actor),
+            floatingDistance, followers.size() >= 2 && followers.cbegin()->first != mFollowIndex);
 
         // AiFollow requires the target to be in range and within sight for the initial activation
         if (!mActive)

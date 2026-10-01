@@ -652,27 +652,7 @@ namespace MWMechanics
                         MWSound::PlayMode::LoopNoEnv);
                 }
             }
-            else if (effect.mEffectId == ESM::MagicEffect::SummonScamp
-                || effect.mEffectId == ESM::MagicEffect::SummonClannfear
-                || effect.mEffectId == ESM::MagicEffect::SummonDaedroth
-                || effect.mEffectId == ESM::MagicEffect::SummonDremora
-                || effect.mEffectId == ESM::MagicEffect::SummonAncestralGhost
-                || effect.mEffectId == ESM::MagicEffect::SummonSkeletalMinion
-                || effect.mEffectId == ESM::MagicEffect::SummonBonewalker
-                || effect.mEffectId == ESM::MagicEffect::SummonGreaterBonewalker
-                || effect.mEffectId == ESM::MagicEffect::SummonBonelord
-                || effect.mEffectId == ESM::MagicEffect::SummonWingedTwilight
-                || effect.mEffectId == ESM::MagicEffect::SummonHunger
-                || effect.mEffectId == ESM::MagicEffect::SummonGoldenSaint
-                || effect.mEffectId == ESM::MagicEffect::SummonFlameAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonFrostAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonStormAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonCenturionSphere
-                || effect.mEffectId == ESM::MagicEffect::SummonFabricant
-                || effect.mEffectId == ESM::MagicEffect::SummonWolf || effect.mEffectId == ESM::MagicEffect::SummonBear
-                || effect.mEffectId == ESM::MagicEffect::SummonBonewolf
-                || effect.mEffectId == ESM::MagicEffect::SummonCreature04
-                || effect.mEffectId == ESM::MagicEffect::SummonCreature05)
+            else if (isSummoningEffect(effect.mEffectId))
             {
                 if (!target.isInCell())
                     return ESM::ActiveEffect::Flag_Invalid;
@@ -1068,27 +1048,7 @@ namespace MWMechanics
                     MWBase::Environment::get().getSoundManager()->stopSound3D(
                         target, ESM::RefId::stringRefId("magic sound"));
             }
-            else if (effect.mEffectId == ESM::MagicEffect::SummonScamp
-                || effect.mEffectId == ESM::MagicEffect::SummonClannfear
-                || effect.mEffectId == ESM::MagicEffect::SummonDaedroth
-                || effect.mEffectId == ESM::MagicEffect::SummonDremora
-                || effect.mEffectId == ESM::MagicEffect::SummonAncestralGhost
-                || effect.mEffectId == ESM::MagicEffect::SummonSkeletalMinion
-                || effect.mEffectId == ESM::MagicEffect::SummonBonewalker
-                || effect.mEffectId == ESM::MagicEffect::SummonGreaterBonewalker
-                || effect.mEffectId == ESM::MagicEffect::SummonBonelord
-                || effect.mEffectId == ESM::MagicEffect::SummonWingedTwilight
-                || effect.mEffectId == ESM::MagicEffect::SummonHunger
-                || effect.mEffectId == ESM::MagicEffect::SummonGoldenSaint
-                || effect.mEffectId == ESM::MagicEffect::SummonFlameAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonFrostAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonStormAtronach
-                || effect.mEffectId == ESM::MagicEffect::SummonCenturionSphere
-                || effect.mEffectId == ESM::MagicEffect::SummonFabricant
-                || effect.mEffectId == ESM::MagicEffect::SummonWolf || effect.mEffectId == ESM::MagicEffect::SummonBear
-                || effect.mEffectId == ESM::MagicEffect::SummonBonewolf
-                || effect.mEffectId == ESM::MagicEffect::SummonCreature04
-                || effect.mEffectId == ESM::MagicEffect::SummonCreature05)
+            else if (isSummoningEffect(effect.mEffectId))
             {
                 ESM::RefNum actor = effect.getActor();
                 if (actor.isSet())

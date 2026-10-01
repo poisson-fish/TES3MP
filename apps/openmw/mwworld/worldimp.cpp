@@ -1292,40 +1292,11 @@ namespace MWWorld
         MWWorld::CellStore* referenceCell, int direction, float distance)
     {
         ESM::Position ipos = referenceObject.getRefData().getPosition();
-        osg::Vec3f pos(ipos.asVec3());
-        osg::Quat orientation(ipos.rot[2], osg::Vec3f(0, 0, -1));
-
-        int fallbackDirections[4] = { direction, (direction + 3) % 4, (direction + 2) % 4, (direction + 1) % 4 };
-
-        osg::Vec3f spawnPoint = pos;
-
-        for (int i = 0; i < 4; ++i)
-        {
-            direction = fallbackDirections[i];
-            if (direction == 0)
-                spawnPoint = pos + (orientation * osg::Vec3f(0, 1, 0)) * distance;
-            else if (direction == 1)
-                spawnPoint = pos - (orientation * osg::Vec3f(0, 1, 0)) * distance;
-            else if (direction == 2)
-                spawnPoint = pos - (orientation * osg::Vec3f(1, 0, 0)) * distance;
-            else if (direction == 3)
-                spawnPoint = pos + (orientation * osg::Vec3f(1, 0, 0)) * distance;
-
-            if (!ptr.getClass().isActor())
-                break;
-
-            // check if spawn point is safe, fall back to another direction if not
-            spawnPoint.z() += 30; // move up a little to account for slopes, will snap down later
-
-            if (!mPhysics
-                    ->castRay(spawnPoint, osg::Vec3f(pos.x(), pos.y(), pos.z() + 20),
-                        MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door)
-                    .mHit)
-            {
-                // safe
-                break;
-            }
-        }
+        const auto spawnPoint = MWMechanics::summonSpawnPoint(ipos.asVec3(), ipos.rot[2], direction,
+            distance, ptr.getClass().isActor(), [&](const osg::Vec3f& point, const osg::Vec3f& origin) {
+                return !mPhysics->castRay(point, origin,
+                    MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door).mHit;
+            });
         ipos.pos[0] = spawnPoint.x();
         ipos.pos[1] = spawnPoint.y();
         ipos.pos[2] = spawnPoint.z();

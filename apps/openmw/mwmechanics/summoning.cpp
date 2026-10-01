@@ -23,127 +23,45 @@
 namespace MWMechanics
 {
 
-    bool isSummoningEffect(ESM::RefId effectId)
+    ESM::RefId getSummonedCreature(ESM::RefId effectId, const MWWorld::ESMStore& store)
     {
-        if (effectId.empty())
-            return false;
-        static const std::array<ESM::RefId, 22> summonEffects{
-            ESM::MagicEffect::SummonAncestralGhost,
-            ESM::MagicEffect::SummonBonelord,
-            ESM::MagicEffect::SummonBonewalker,
-            ESM::MagicEffect::SummonCenturionSphere,
-            ESM::MagicEffect::SummonClannfear,
-            ESM::MagicEffect::SummonDaedroth,
-            ESM::MagicEffect::SummonDremora,
-            ESM::MagicEffect::SummonFabricant,
-            ESM::MagicEffect::SummonFlameAtronach,
-            ESM::MagicEffect::SummonFrostAtronach,
-            ESM::MagicEffect::SummonGoldenSaint,
-            ESM::MagicEffect::SummonGreaterBonewalker,
-            ESM::MagicEffect::SummonHunger,
-            ESM::MagicEffect::SummonScamp,
-            ESM::MagicEffect::SummonSkeletalMinion,
-            ESM::MagicEffect::SummonStormAtronach,
-            ESM::MagicEffect::SummonWingedTwilight,
-            ESM::MagicEffect::SummonWolf,
-            ESM::MagicEffect::SummonBear,
-            ESM::MagicEffect::SummonBonewolf,
-            ESM::MagicEffect::SummonCreature04,
-            ESM::MagicEffect::SummonCreature05,
-        };
-        return (std::find(summonEffects.begin(), summonEffects.end(), effectId) != summonEffects.end());
-    }
-
-    static const std::map<ESM::RefId, ESM::RefId>& getSummonMap()
-    {
-        static std::map<ESM::RefId, ESM::RefId> summonMap;
-
-        if (summonMap.size() > 0)
-            return summonMap;
-
-        const std::map<ESM::RefId, std::string_view> summonMapToGameSetting{
-            { ESM::MagicEffect::SummonAncestralGhost, "sMagicAncestralGhostID" },
-            { ESM::MagicEffect::SummonBonelord, "sMagicBonelordID" },
-            { ESM::MagicEffect::SummonBonewalker, "sMagicLeastBonewalkerID" },
-            { ESM::MagicEffect::SummonCenturionSphere, "sMagicCenturionSphereID" },
-            { ESM::MagicEffect::SummonClannfear, "sMagicClannfearID" },
-            { ESM::MagicEffect::SummonDaedroth, "sMagicDaedrothID" },
-            { ESM::MagicEffect::SummonDremora, "sMagicDremoraID" },
-            { ESM::MagicEffect::SummonFabricant, "sMagicFabricantID" },
-            { ESM::MagicEffect::SummonFlameAtronach, "sMagicFlameAtronachID" },
-            { ESM::MagicEffect::SummonFrostAtronach, "sMagicFrostAtronachID" },
-            { ESM::MagicEffect::SummonGoldenSaint, "sMagicGoldenSaintID" },
-            { ESM::MagicEffect::SummonGreaterBonewalker, "sMagicGreaterBonewalkerID" },
-            { ESM::MagicEffect::SummonHunger, "sMagicHungerID" },
-            { ESM::MagicEffect::SummonScamp, "sMagicScampID" },
-            { ESM::MagicEffect::SummonSkeletalMinion, "sMagicSkeletalMinionID" },
-            { ESM::MagicEffect::SummonStormAtronach, "sMagicStormAtronachID" },
-            { ESM::MagicEffect::SummonWingedTwilight, "sMagicWingedTwilightID" },
-            { ESM::MagicEffect::SummonWolf, "sMagicCreature01ID" },
-            { ESM::MagicEffect::SummonBear, "sMagicCreature02ID" },
-            { ESM::MagicEffect::SummonBonewolf, "sMagicCreature03ID" },
-            { ESM::MagicEffect::SummonCreature04, "sMagicCreature04ID" },
-            { ESM::MagicEffect::SummonCreature05, "sMagicCreature05ID" },
-        };
-
-        for (const auto& it : summonMapToGameSetting)
-        {
-            summonMap[it.first] = ESM::RefId::stringRefId(
-                MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>().find(it.second)->mValue.getString());
-        }
-        return summonMap;
+        return selectSummonedCreature(effectId, [&](std::string_view setting) {
+            return store.get<ESM::GameSetting>().find(setting)->mValue.getString();
+        });
     }
 
     ESM::RefId getSummonedCreature(ESM::RefId effectId)
     {
-        const auto& summonMap = getSummonMap();
-        auto it = summonMap.find(effectId);
-        if (it != summonMap.end())
-        {
-            return it->second;
-        }
-        return ESM::RefId();
+        return getSummonedCreature(effectId, *MWBase::Environment::get().getESMStore());
     }
 
     ESM::RefNum summonCreature(ESM::RefId effectId, const MWWorld::Ptr& summoner)
     {
-        const ESM::RefId& creatureID = getSummonedCreature(effectId);
-        ESM::RefNum creature;
-        if (!creatureID.empty())
-        {
-            try
+        auto world = MWBase::Environment::get().getWorld();
+        const auto record = getSummonedCreature(effectId, world->getStore());
+        MWWorld::Ptr placed;
+        return createSummon<ESM::RefNum>(record, [&](ESM::RefId selected, ESM::RefNum& identity) {
+            MWWorld::ManualRef ref(world->getStore(), selected, 1);
+            placed = world->safePlaceObject(ref.getPtr(), summoner, summoner.getCell(), 0, 120.f);
+            MWBase::Environment::get().getWorldModel()->registerPtr(placed);
+            identity = placed.getCellRef().getRefNum();
+        }, [&](ESM::RefNum) {
+            AiFollow package(summoner);
+            placed.getClass().getCreatureStats(placed).getAiSequence().stack(package, placed);
+            MWRender::Animation* anim = world->getAnimation(placed);
+            if (anim)
             {
-                auto world = MWBase::Environment::get().getWorld();
-                MWWorld::ManualRef ref(world->getStore(), creatureID, 1);
-                MWWorld::Ptr placed = world->safePlaceObject(ref.getPtr(), summoner, summoner.getCell(), 0, 120.f);
-                MWBase::Environment::get().getWorldModel()->registerPtr(placed);
-                creature = placed.getCellRef().getRefNum();
-
-                // Make the summoned creature follow its master and help in fights
-                AiFollow package(summoner);
-                placed.getClass().getCreatureStats(placed).getAiSequence().stack(package, placed);
-
-                MWRender::Animation* anim = world->getAnimation(placed);
-                if (anim)
-                {
-                    const ESM::Static* fx
-                        = world->getStore().get<ESM::Static>().search(ESM::RefId::stringRefId("VFX_Summon_Start"));
-                    if (fx)
-                        anim->addEffect(
-                            Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(fx->mModel)).value(), "",
-                            false);
-                }
+                const ESM::Static* fx = world->getStore().get<ESM::Static>().search(
+                    ESM::RefId::stringRefId("VFX_Summon_Start"));
+                if (fx)
+                    anim->addEffect(Misc::ResourceHelpers::correctMeshPath(
+                        VFS::Path::Normalized(fx->mModel)).value(), "", false);
             }
-            catch (std::exception& e)
-            {
-                Log(Debug::Error) << "Failed to spawn summoned creature: " << e.what();
-                // still insert into creatureMap so we don't try to spawn again every frame, that would spam the warning
-                // log
-            }
-
-            summoner.getClass().getCreatureStats(summoner).getSummonedCreatureMap().emplace(effectId, creature);
-        }
-        return creature;
+        }, [&](ESM::RefNum identity) {
+            summoner.getClass().getCreatureStats(summoner).getSummonedCreatureMap().emplace(effectId, identity);
+        }, [](const std::exception& error) {
+            Log(Debug::Error) << "Failed to spawn summoned creature: " << error.what();
+        });
     }
 
     void updateSummons(const MWWorld::Ptr& summoner, bool cleanup)

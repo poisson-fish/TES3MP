@@ -42,6 +42,7 @@ namespace TES3MP::Native
         }
         for (const auto& container : mBinding.mContainers)
         {
+            if (mBinding.mSummons && DynamicActorOwnership::dynamic(container.mId.value())) break;
             const auto* placed = container.mPlacement ? &*container.mPlacement : nullptr;
             if (placed && (placed->mLockLevel < 0 || placed->mLockLevel > 1000
                     || placed->mIsLocked != (placed->mLockLevel > 0)))
@@ -424,6 +425,8 @@ namespace TES3MP::Native
         size_t index, const PreparedNativeInventory* candidate) const
     {
         const auto* prepared = dynamic_cast<const AreaDoorTransaction*>(candidate);
+        if (mBinding.mSummons && index >= mBinding.mStaticContainers && index < mBinding.mContainers.size())
+            return {0, 1};
         if (index >= mContainerLocks.size() || (prepared && !ownsAreaDoorCandidate(candidate)))
             throw std::invalid_argument("Stale container lock projection");
         return prepared ? prepared->locks[index] : mContainerLocks[index];
