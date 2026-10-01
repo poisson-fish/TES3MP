@@ -1,4 +1,5 @@
 #include "actors.hpp"
+#include "objectmagic.hpp"
 #include "breathing.hpp"
 
 #include <array>
@@ -187,32 +188,8 @@ namespace
 
                 // Use the smallest soulgem that is large enough to hold the soul
                 MWWorld::ContainerStore& container = caster.getClass().getContainerStore(caster);
-                MWWorld::ContainerStoreIterator gem = container.end();
-                float gemCapacity = std::numeric_limits<float>::max();
-                for (auto it = container.begin(MWWorld::ContainerStore::Type_Miscellaneous); it != container.end();
-                     ++it)
-                {
-                    if (it->getClass().isSoulGem(*it))
-                    {
-                        float thisGemCapacity = it->get<ESM::Miscellaneous>()->mBase->mData.mValue * fSoulgemMult;
-                        if (thisGemCapacity >= creatureSoulValue && thisGemCapacity < gemCapacity
-                            && it->getCellRef().getSoul().empty())
-                        {
-                            gem = it;
-                            gemCapacity = thisGemCapacity;
-                        }
-                    }
-                }
-
-                if (gem == container.end())
-                    continue;
-
-                // Set the soul on just one of the gems, not the whole stack
-                gem->getContainerStore()->unstack(*gem);
-                gem->getCellRef().setSoul(creature.getCellRef().getRefId());
-
-                // Restack the gem with other gems with the same soul
-                gem->getContainerStore()->restack(*gem);
+                if (!MWMechanics::captureSoul(container, creature.getCellRef().getRefId(),
+                        creatureSoulValue, fSoulgemMult)) continue;
 
                 if (caster == MWMechanics::getPlayer())
                     MWBase::Environment::get().getWindowManager()->messageBox("#{sSoultrapSuccess}");

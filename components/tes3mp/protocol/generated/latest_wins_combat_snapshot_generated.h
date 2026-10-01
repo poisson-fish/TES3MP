@@ -841,7 +841,8 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
     VT_VISIBILITY = 52,
     VT_MOVEMENT = 54,
     VT_MOVEMENT_OWNED = 56,
-    VT_VISUAL_EFFECTS = 58
+    VT_VISUAL_EFFECTS = 58,
+    VT_TELEKINESIS = 60
   };
   uint64_t id() const {
     return GetField<uint64_t>(VT_ID, 0);
@@ -927,6 +928,9 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   const ::flatbuffers::Vector<uint16_t> *visual_effects() const {
     return GetPointer<const ::flatbuffers::Vector<uint16_t> *>(VT_VISUAL_EFFECTS);
   }
+  float telekinesis() const {
+    return GetField<float>(VT_TELEKINESIS, 0.0f);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -962,6 +966,7 @@ struct ActorPresentationSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
            VerifyField<uint8_t>(verifier, VT_MOVEMENT_OWNED, 1) &&
            VerifyOffset(verifier, VT_VISUAL_EFFECTS) &&
            verifier.VerifyVector(visual_effects()) &&
+           VerifyField<float>(verifier, VT_TELEKINESIS, 4) &&
            verifier.EndTable();
   }
 };
@@ -1054,6 +1059,9 @@ struct ActorPresentationSnapshotBuilder {
   void add_visual_effects(::flatbuffers::Offset<::flatbuffers::Vector<uint16_t>> visual_effects) {
     fbb_.AddOffset(ActorPresentationSnapshot::VT_VISUAL_EFFECTS, visual_effects);
   }
+  void add_telekinesis(float telekinesis) {
+    fbb_.AddElement<float>(ActorPresentationSnapshot::VT_TELEKINESIS, telekinesis, 0.0f);
+  }
   explicit ActorPresentationSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1094,13 +1102,15 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     ::flatbuffers::Offset<::flatbuffers::Vector<float>> visibility = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<float>> movement = 0,
     bool movement_owned = false,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint16_t>> visual_effects = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint16_t>> visual_effects = 0,
+    float telekinesis = 0.0f) {
   ActorPresentationSnapshotBuilder builder_(_fbb);
   builder_.add_cast(cast);
   builder_.add_body_action(body_action);
   builder_.add_action(action);
   builder_.add_life(life);
   builder_.add_id(id);
+  builder_.add_telekinesis(telekinesis);
   builder_.add_visual_effects(visual_effects);
   builder_.add_movement(movement);
   builder_.add_visibility(visibility);
@@ -1156,7 +1166,8 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
     const std::vector<float> *visibility = nullptr,
     const std::vector<float> *movement = nullptr,
     bool movement_owned = false,
-    const std::vector<uint16_t> *visual_effects = nullptr) {
+    const std::vector<uint16_t> *visual_effects = nullptr,
+    float telekinesis = 0.0f) {
   auto group__ = group ? _fbb.CreateString(group) : 0;
   auto visibility__ = visibility ? _fbb.CreateVector<float>(*visibility) : 0;
   auto movement__ = movement ? _fbb.CreateVector<float>(*movement) : 0;
@@ -1190,7 +1201,8 @@ inline ::flatbuffers::Offset<ActorPresentationSnapshot> CreateActorPresentationS
       visibility__,
       movement__,
       movement_owned,
-      visual_effects__);
+      visual_effects__,
+      telekinesis);
 }
 
 struct PhysicalProjectileSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -1749,7 +1761,7 @@ inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot 
 }
 
 inline const char *LatestWinsCombatSnapshotIdentifier() {
-  return "T3D1";
+  return "T3D2";
 }
 
 inline bool LatestWinsCombatSnapshotBufferHasIdentifier(const void *buf) {

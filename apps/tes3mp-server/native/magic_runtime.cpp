@@ -138,9 +138,12 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DamageFatigue
                 || effect.mEffectID == ESM::MagicEffect::ResistMagicka;
             return prior || (actorLifecycle && ((objectMagic && (effect.mEffectID == ESM::MagicEffect::Lock
-                || effect.mEffectID == ESM::MagicEffect::Open))
+                || effect.mEffectID == ESM::MagicEffect::Open
+                || effect.mEffectID == ESM::MagicEffect::Telekinesis || effect.mEffectID == ESM::MagicEffect::Soultrap))
                 || (playerTravel && (effect.mEffectID == ESM::MagicEffect::Mark
-                    || effect.mEffectID == ESM::MagicEffect::Recall))
+                    || effect.mEffectID == ESM::MagicEffect::Recall
+                    || effect.mEffectID == ESM::MagicEffect::DivineIntervention
+                    || effect.mEffectID == ESM::MagicEffect::AlmsiviIntervention))
                 || (expandedEffects && expandedCombatEffect(effect.mEffectID))
                 || (movementEffects && movementEffect(effect.mEffectID))
                 || (movementEffects && aiDispositionEffect(effect.mEffectID))
@@ -220,7 +223,7 @@ namespace TES3MP::Native
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId id,
         const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects,
-        bool aiEffects)
+        bool aiEffects, bool objectEffects)
     {
         const auto* enchantment = content.get<ESM::Enchantment>().search(id);
         if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
@@ -256,6 +259,7 @@ namespace TES3MP::Native
                 || effect.mEffectID == ESM::MagicEffect::DetectAnimal
                 || effect.mEffectID == ESM::MagicEffect::DetectEnchantment
                 || effect.mEffectID == ESM::MagicEffect::DetectKey
+                || (objectEffects && effect.mEffectID == ESM::MagicEffect::Telekinesis)
                 || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
                 || (movementEffects && movementEffect(effect.mEffectID))));
             const bool ai = aiEffects && aiDispositionEffect(effect.mEffectID);
@@ -277,7 +281,7 @@ namespace TES3MP::Native
     }
 
     std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects)
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects)
     {
         if (spell.mData.mType != ESM::Spell::ST_Ability || spell.mEffects.mList.empty()
             || spell.mEffects.mList.size() > 8) return std::nullopt;
@@ -287,7 +291,8 @@ namespace TES3MP::Native
             const auto& effect = entry.mData;
             const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
             if (!(aiEffects && aiDispositionEffect(effect.mEffectID))
-                && !(movementEffects && movementEffect(effect.mEffectID))) return std::nullopt;
+                && !(movementEffects && movementEffect(effect.mEffectID))
+                && !(objectEffects && effect.mEffectID == ESM::MagicEffect::Telekinesis)) return std::nullopt;
             if (!magic
                 || effect.mRange != ESM::RT_Self || effect.mArea || effect.mDuration
                 || !effect.mAttribute.empty() || !effect.mSkill.empty()
@@ -337,7 +342,9 @@ namespace TES3MP::Native
                 || ((magic->mData.mFlags & ESM::MagicEffect::NoDuration) && !(objectMagic
                     && (effect.mEffectID == ESM::MagicEffect::Lock || effect.mEffectID == ESM::MagicEffect::Open)
                     || playerTravel && (effect.mEffectID == ESM::MagicEffect::Mark
-                        || effect.mEffectID == ESM::MagicEffect::Recall)
+                        || effect.mEffectID == ESM::MagicEffect::Recall
+                    || effect.mEffectID == ESM::MagicEffect::DivineIntervention
+                    || effect.mEffectID == ESM::MagicEffect::AlmsiviIntervention)
                     || expandedEffects && (effect.mEffectID == ESM::MagicEffect::Dispel
                     || wholeSourceCure(effect.mEffectID) || !MWMechanics::curedEffect(effect.mEffectID).empty())
                     || (persistentSpecial && (effect.mEffectID == ESM::MagicEffect::Corprus

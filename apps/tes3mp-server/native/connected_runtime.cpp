@@ -1,3 +1,5 @@
+#include <apps/openmw/mwmechanics/objectmagic.hpp>
+#include <components/esm3/loadgmst.hpp>
 #include "equipment_runtime.hpp"
 #include "actor_inventory.hpp"
 #include "runtime_phases.hpp"
@@ -831,6 +833,17 @@ namespace TES3MP::Native
     uint64_t EquipmentRuntime::PreparedProjectileLoot::beforeRevision() const noexcept
     { return mState->beforeRevision; }
 
+    uint64_t EquipmentRuntime::PreparedProjectileLoot::revision() const noexcept { return mState->revision; }
+    PlainEquipmentValues EquipmentRuntime::PreparedProjectileLoot::values(size_t owner) const
+    {
+        const auto found = std::ranges::find(mState->replacements, owner, &State::Replacement::owner);
+        if (found == mState->replacements.end()) throw std::invalid_argument("Inventory replacement owner missing");
+        PlainEquipmentValues result;
+        found->restored->exportValues(result);
+        result.mLastGenerated = mState->counter;
+        return result;
+    }
+
     std::unique_ptr<EquipmentRuntime::PreparedProjectileLoot> EquipmentRuntime::prepareProjectileLoot(
         const EquipmentSessionValues& values, std::span<const size_t> owners)
     {
@@ -874,6 +887,33 @@ namespace TES3MP::Native
         if (staged->registry.size() > registryBound())
             throw std::invalid_argument("Projectile loot registry capacity exceeded");
         return std::unique_ptr<PreparedProjectileLoot>(new PreparedProjectileLoot(std::move(staged)));
+    }
+
+    bool EquipmentRuntime::stageSoulCapture(EquipmentSessionValues& values, size_t owner, ESM::RefId soul, int value)
+    {
+        if (owner >= ownerCount() || value <= 0) return false;
+        auto& inventory = owner < 2 ? values.mActors[owner] : values.mContainers.at(owner - 2);
+        auto counter = values.mActors[0].mLastGenerated;
+        auto restored = RestoredPlainEquipment::restore(inventory, mStore, inventory.mActor, mScriptLocals,
+            !inventoryStorage(owner));
+        auto& candidate = restored.installationStorage(mStore, inventory.mActor, counter);
+        const float multiplier = mStore.get<ESM::GameSetting>().find("fSoulgemMult")->mValue.getFloat();
+        const auto gem = MWMechanics::soulGem(candidate, value, multiplier);
+        if (gem == candidate.end()) return false;
+        if (gem->getCellRef().getCount() > 1
+            && (inventory.mObjects.size() >= PlainEquipmentValues::MaxItems || counter.mIndex == UINT32_MAX))
+            throw std::invalid_argument("Soul capture inventory budget exhausted");
+        const ContainerStoreStackContext context{mStore,
+            [&](const Ptr& item) { item.getCellRef().setRefNum({++counter.mIndex, -1}); },
+            [](const Ptr& item, int count) { item.getCellRef().setCount(item.getCellRef().getCount() - count); },
+            [](const Ptr& item) { item.getCellRef().setCount(0); }};
+        if (!MWMechanics::captureSoul(candidate, soul, value,
+                multiplier, &context)) return false;
+        restored.exportValues(inventory);
+        for (auto& actor : values.mActors) actor.mLastGenerated = counter;
+        for (auto& container : values.mContainers) container.mLastGenerated = counter;
+        if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
+        return true;
     }
 
     void EquipmentRuntime::installProjectileLoot(PreparedProjectileLoot& prepared) noexcept

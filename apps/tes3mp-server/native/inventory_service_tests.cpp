@@ -1,3 +1,6 @@
+#include <apps/openmw/mwworld/intervention.hpp>
+#include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwmechanics/objectmagic.hpp>
 #include "placement_tests.hpp"
 #include "environment.hpp"
 #include "environment_tests.hpp"
@@ -5583,10 +5586,16 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
+        const bool objectTravel = effectFamily == "object-travel";
+        const bool objectSpells = effectFamily == "object-spells";
+        const bool objectSoul = effectFamily == "object-soul";
+        if (objectSoul) effectFamily = "player-travel";
+        if (objectTravel) effectFamily = "player-travel";
+        if (objectSpells) effectFamily = "door-magic";
         require(std::filesystem::create_directory(scratch), "NPC door scratch already exists");
         const bool npcRanged = effectFamily == "npc-ranged";
-        const bool neighborCreature = effectFamily == "neighbor-creature";
-        const bool manyNeighbors = effectFamily == "neighbor-many" || effectFamily == "player-travel" || neighborCreature;
+        const bool neighborCreature = effectFamily == "neighbor-creature" || objectSoul;
+        const bool manyNeighbors = objectSpells || effectFamily == "neighbor-many" || effectFamily == "player-travel" || neighborCreature;
         const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded" || manyNeighbors;
@@ -5600,8 +5609,8 @@ namespace TES3MP::Native::Testing
             ? 3u : neighborCombat ? 2u : 1u;
         const bool placementActors = effectFamily == "placement-actors" || neighborCombat;
         const bool neighborAi = effectFamily == "neighbor-ai" || placementActors;
-        const bool socialLifecycle = effectFamily == "social-lifecycle" || effectFamily == "player-travel" || neighborAi;
-        const bool aiDisposition = effectFamily != "player-travel" && !npcRanged && encounterProfile != "bow-aim-flight"
+        const bool socialLifecycle = objectSpells || effectFamily == "social-lifecycle" || effectFamily == "player-travel" || neighborAi;
+        const bool aiDisposition = !objectSpells && effectFamily != "player-travel" && !npcRanged && encounterProfile != "bow-aim-flight"
             && (effectFamily == "ai-disposition" || socialLifecycle);
         const bool specialConditions = effectFamily == "special-conditions";
         const bool movementEffects = npcRanged || effectFamily == "movement-effects"
@@ -6388,11 +6397,33 @@ namespace TES3MP::Native::Testing
                 spell("expanded_ward", {effect(ESM::MagicEffect::ResistParalysis, ESM::RT_Self, 2, 100)});
                 if (effectFamily == "door-magic")
                 {
-                    spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
-                    spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
+                    if (objectSpells)
+                    {
+                        spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 50),
+                            effect(ESM::MagicEffect::Telekinesis, ESM::RT_Self, 10, 20)});
+                        spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Target, 0, 50),
+                            effect(ESM::MagicEffect::RestoreHealth, ESM::RT_Self, 0, 1)});
+                        spell("door_spell_unsupported_travel", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 50),
+                            effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
+                        spell("door_spell_area", {{ESM::MagicEffect::Lock, {}, {}, ESM::RT_Target, 8, 0, 20, 20},
+                            {ESM::MagicEffect::Open, {}, {}, ESM::RT_Target, 8, 0, 10, 10},
+                            effect(ESM::MagicEffect::RestoreHealth, ESM::RT_Self, 0, 1)});
+                    }
+                    else spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
+                    if (!objectSpells) spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
                 }
                 if (effectFamily == "player-travel")
                 {
+                    if (objectTravel)
+                    {
+                        spell("travel_divine", {effect(ESM::MagicEffect::DivineIntervention, ESM::RT_Self, 0, 0)});
+                        spell("travel_almsivi", {effect(ESM::MagicEffect::AlmsiviIntervention, ESM::RT_Self, 0, 0)});
+                    }
+                    if (objectSoul)
+                    {
+                        spell("travel_soul_kill", {effect(ESM::MagicEffect::Soultrap, ESM::RT_Touch, 30, 0),
+                            effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 20)});
+                    }
                     spell("travel_mark", {effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                     spell("travel_recall", {effect(ESM::MagicEffect::Recall, ESM::RT_Self, 0, 0)});
                     for (const auto [id, body] : {
@@ -6719,10 +6750,10 @@ namespace TES3MP::Native::Testing
                 auto witness = npc;
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
-                witness.mAiData.mFight = projectileNeighbors || neighborPhysics ? 0 : 100;
+                witness.mAiData.mFight = objectSpells || projectileNeighbors || neighborPhysics ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = neighborPhysics ? 200 : 5;
                 witness.mSpells.mList.clear();
-                if (neighborCombat && !npcRanged && effectFamily != "player-travel")
+                if (neighborCombat && !objectSpells && !npcRanged && effectFamily != "player-travel")
                     witness.mSpells.mList.push_back(ESM::RefId::stringRefId("ai_passive_rally"));
                 witness.mInventory.mList.clear();
                 if (effectFamily == "neighbor-pursuit" || effectFamily == "neighbor-disposition")
@@ -6737,6 +6768,7 @@ namespace TES3MP::Native::Testing
                     creature.mId = ESM::RefId::stringRefId("neighbor_test_creature");
                     creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
                     creature.mData.mHealth = 5; creature.mData.mMana = 100; creature.mData.mFatigue = 100;
+                    if (objectSoul) creature.mData.mSoul = 10;
                     creature.mData.mLevel = 1; creature.mAiData.mFight = 0;
                     creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
                     creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)] = 0;
@@ -6945,6 +6977,12 @@ namespace TES3MP::Native::Testing
                     });
                 else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
                 npc.mInventory.mList.clear();
+                if (objectSoul)
+                {
+                    npc.mInventory.mList.push_back({3, ESM::RefId::stringRefId("misc_soulgem_petty")});
+                    npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("misc_soulgem_common")});
+                }
+
                 if (effectFamily == "concealment")
                     npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 if (effectFamily == "disintegration")
@@ -7125,7 +7163,7 @@ namespace TES3MP::Native::Testing
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                 // Leave the door clear for the two-desktop Touch capture.
-                if (record == placedActor) placed.mPos = effectFamily == "door-magic"
+                if (record == placedActor) placed.mPos = effectFamily == "door-magic" && !objectSpells
                     ? ESM::Position{{1000, 1000, 1}, {0, 0, 0}}
                     : ESM::Position{{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
@@ -7133,6 +7171,12 @@ namespace TES3MP::Native::Testing
             if (effectFamily == "player-travel")
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                if (objectTravel)
+                {
+                    placed.mRefID = ESM::RefId::stringRefId("divinemarker");
+                    placed.mPos = {{-100, -120, 1}, {0, 0, 0}}; placed.save(out);
+                    placed.mRefNum = {++index, 0};
+                }
                 placed.mRefID = door.mId; placed.mPos = {{60, -300, 0}, {0, 0, 0}};
                 placed.mTeleport = true; placed.mDestCell = "NPC Door Recall Test";
                 placed.mDoorDest = {{60, -250, 1}, {0, 0, 0}};
@@ -7213,7 +7257,28 @@ namespace TES3MP::Native::Testing
                     ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                     placed.save(out);
                 }
+                if (objectTravel)
+                {
+                    ESM::CellRef marker; marker.blank(); marker.mRefNum = {++index, 0};
+                    marker.mRefID = ESM::RefId::stringRefId("templemarker");
+                    marker.mPos = {{100, -100, 1}, {0, 0, 0}}; marker.save(out);
+                }
                 out.endRecord(ESM::Cell::sRecordId);
+            }
+            if (objectTravel)
+            {
+                auto marker = *base.store().get<ESM::Static>().find(ESM::RefId::stringRefId("divinemarker"));
+                marker.mId = ESM::RefId::stringRefId("family_test_marker");
+                out.startRecord(ESM::Static::sRecordId, 0); marker.save(out); out.endRecord(ESM::Static::sRecordId);
+                for (const auto [x, y] : {std::pair{79, 79}, std::pair{81, 80}})
+                {
+                    ESM::Cell exterior; exterior.blank(); exterior.mData.mFlags = 0;
+                    exterior.mData.mX = x; exterior.mData.mY = y; exterior.updateId();
+                    out.startRecord(ESM::Cell::sRecordId, 0); exterior.save(out);
+                    ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = marker.mId;
+                    placed.mPos = {{float(x * 8192 + 10), float(y * 8192 + 10), 1}, {0, 0, 0}}; placed.save(out);
+                    out.endRecord(ESM::Cell::sRecordId);
+                }
             }
             out.close();
             std::ofstream cfg(scratch / "openmw" / "openmw.cfg", std::ios::app);
@@ -7226,6 +7291,31 @@ namespace TES3MP::Native::Testing
             const auto directory = (scratch / "openmw").string();
             const char* arguments[]{"npc-door-path", "--config", directory.c_str()};
             Loadout loadout(readLoadoutOptions(3, arguments));
+            if (objectTravel)
+            {
+                MWClass::registerClasses();
+                MWWorld::WorldModel model(loadout.store(), loadout.readers(), 1);
+                const auto id = ESM::RefId::stringRefId("family_test_marker");
+                const auto sw = MWWorld::closestExteriorMarker(model, {80 * 8192.f + 10, 80 * 8192.f + 10, 1}, id);
+                const auto east = MWWorld::closestExteriorMarker(model, {81 * 8192.f + 10, 80 * 8192.f + 10, 1}, id);
+                require(!sw.isEmpty() && !east.isEmpty()
+                    && sw.getRefData().getPosition().pos[0] == 79 * 8192.f + 10
+                    && east.getRefData().getPosition().pos[0] == 81 * 8192.f + 10,
+                    "Explicit exterior contexts did not preserve stock SW-first grid selection");
+                require(MWWorld::closestInterventionMarker(model, ESM::RefId::stringRefId("NPC Door Contact Test"),
+                        {}, id, 256).isEmpty(), "Isolated interior invented an intervention destination");
+                struct Gem { float capacity; bool empty; };
+                const std::array gems{Gem{5, true}, Gem{100, false}, Gem{80, true}, Gem{20, true}, Gem{20, true}};
+                const auto select = [&](int value) { return MWMechanics::smallestSoulGem(gems.begin(), gems.end(), value,
+                    [](const auto& gem) { return gem.capacity; }, [](const auto& gem) { return gem.empty; }); };
+                require(select(10) == gems.begin() + 3 && select(30) == gems.begin() + 2
+                    && select(100) == gems.end() && select(0) == gems.end(),
+                    "Stock soul-gem selection lost smallest, empty, tie or zero-soul rules");
+                require(MWMechanics::activationReach(180, 20, true) == 620
+                    && MWMechanics::activationReach(180, 20, false) == 180,
+                    "Stock feet conversion or Telekinesis target restriction changed");
+                std::cout << "object seams: explicit exterior marker ordering, isolated interior, gem eligibility/ties and reach rules passed\n";
+            }
             if (aiDisposition)
             {
                 const auto combatRoom = ESM::RefId::stringRefId("NPC Door Contact Test");
@@ -8498,7 +8588,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8652,9 +8742,15 @@ namespace TES3MP::Native::Testing
                 const auto beforeBytes = image(owner);
                 const auto before = readActorCampaign({reinterpret_cast<const char*>(beforeBytes.data()), beforeBytes.size()});
                 const float magicka = before.combat->actors[player - 1][9][2];
-                const auto expectedMark = !recall && before.combat->teleportingEnabled
+                const bool intervention = source == "travel_divine" || source == "travel_almsivi";
+                const auto expectedMark = source == "travel_mark" && before.combat->teleportingEnabled
                     ? std::optional(caster->transform()) : before.combat->players[player - 1].mark;
-                const bool teleports = recall && before.combat->teleportingEnabled && expectedMark.has_value();
+                const bool teleports = before.combat->teleportingEnabled && (intervention || recall && expectedMark.has_value());
+                const auto destination = intervention
+                    ? std::optional(Transform(CellId::interior(id<CellSpaceId>(source == "travel_divine" ? 7 : 8)),
+                        source == "travel_divine" ? Position3(-100 * 1024, -120 * 1024, 1024)
+                            : Position3(100 * 1024, -100 * 1024, 1024), Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))))
+                    : before.combat->players[player - 1].mark;
                 bool released = false;
                 std::optional<Transform> relocation;
                 for (uint64_t end = tick + 50; tick <= end; ++tick)
@@ -8693,7 +8789,7 @@ namespace TES3MP::Native::Testing
                         if (teleports)
                         {
                             require(next->playerRelocations().front().first == id<PlayerId>(player)
-                                && next->playerRelocations().front().second == *before.combat->players[player - 1].mark,
+                                && next->playerRelocations().front().second == *destination,
                                 "Recall selected another player's marker");
                             relocation = next->playerRelocations().front().second;
                         }
@@ -8716,6 +8812,13 @@ namespace TES3MP::Native::Testing
                 require(released, "Player travel release did not complete");
                 return relocation;
             };
+            if (objectTravel)
+            {
+                require(cast(service, 1, "travel_divine", false)->position() == Position3(-100 * 1024, -120 * 1024, 1024),
+                    "Divine Intervention did not use stock local marker");
+                require(cast(service, 2, "travel_almsivi", false)->cell() == CellId::interior(id<CellSpaceId>(8)),
+                    "Almsivi Intervention did not traverse the stock teleport door graph");
+            }
             const auto aliceMark = authority.findPlayer(id<PlayerId>(1))->transform();
             const auto bobMark = authority.findPlayer(id<PlayerId>(2))->transform();
             require(!cast(service, 1, "travel_recall", true), "Recall without Mark teleported");
@@ -8730,6 +8833,11 @@ namespace TES3MP::Native::Testing
                     "Teleport rule failed to commit");
             };
             rule(service, "travel_disable");
+            if (objectTravel)
+            {
+                require(!cast(service, 1, "travel_divine", false) && !cast(service, 2, "travel_almsivi", false),
+                    "Disabled intervention relocated a player");
+            }
             require(!cast(service, 1, "travel_mark", false), "Disabled Mark relocated");
             require(!cast(service, 2, "travel_recall", true), "Disabled unmarked Recall relocated");
             const auto disabledBytes = image(service);
@@ -8989,6 +9097,83 @@ namespace TES3MP::Native::Testing
                 && settled.combat->actors[0][9][2] == paid.combat->actors[0][9][2]
                 && settled.combat->actors[1][9][2] == paid.combat->actors[1][9][2],
                 "Restart repeated Recall payment or changed Marks during recovery");
+            if (objectSoul)
+            {
+                auto& capture = dynamic_cast<InventoryService&>(recovered.service());
+                const auto stateBytes = image(capture);
+                const auto state = readActorCampaign({reinterpret_cast<const char*>(stateBytes.data()), stateBytes.size()});
+                const auto creature = state.combat->npcPlacements.back();
+                auto nearby = std::vector(authority.players().begin(), authority.players().end());
+                nearby[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[0], id<ServerTick>(tick),
+                    Transform(CellId::interior(id<CellSpaceId>(7)), Position3(325 * 1024, -200 * 1024, 1024),
+                        nearby[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+                capture.synchronizeCells(authority);
+                const auto souls = [&](NativeInventoryAuthority& owner, const PreparedNativeInventory* candidate = nullptr) {
+                    const auto baseline = dynamic_cast<InventoryService&>(owner).projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick), candidate);
+                    require(baseline && baseline->playerInventory.size() == 1, "Soul capture player inventory absent");
+                    uint32_t filled = 0, empty = 0;
+                    for (const auto& item : baseline->playerInventory.front().stacks)
+                        if (item.soulPrototype)
+                        {
+                            require(item.prototypeId == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("misc_soulgem_petty")))
+                                && item.soulPrototype == id<ActorPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("neighbor_test_creature"))),
+                                "Soul capture skipped the smallest eligible gem or stored the wrong creature");
+                            filled += item.count;
+                        }
+                        else empty += item.count;
+                    return std::pair{filled, empty};
+                };
+                const auto beforeSouls = souls(capture);
+                const auto* caster = authority.findPlayer(id<PlayerId>(1));
+                const auto* session = authority.findActiveSession(id<SessionId>(1));
+                ClientMagicUseCommand use{session->sessionId(), session->sessionGeneration(), id<CommandSequence>(tick),
+                    id<CommandId>(tick + 1), id<CanonicalRevision>(tick), MagicUseSourceKind::Spell,
+                    hash("travel_soul_kill"), MagicUseTargetKind::Actor, creature, id<ServerTick>(tick),
+                    id<CombatRevision>(tick), id<CombatRevision>(tick), InventoryRevision::initial()};
+                const auto proposal = [&](const ClientMagicUseCommand& input) {
+                    return ServerCommandProposal(session->sessionId(), session->sessionGeneration(), input.commandSequence,
+                        input.commandId, input.observedCanonicalRevision,
+                        EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()), MagicUseCommandProposal(input));
+                };
+                auto admitted = capture.prepareMagicUse(authority, proposal(use), id<ServerTick>(tick));
+                require(bool(admitted), "Mixed Soultrap/death spell was not admitted");
+                bool filled = false;
+                for (uint64_t end = tick + 50; tick <= end; ++tick)
+                {
+                    auto next = capture.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(admitted), {}, &world);
+                    require(bool(next), "Soul capture actor tick failed");
+                    const auto projectedSouls = souls(capture, next.get());
+                    if (projectedSouls.first == beforeSouls.first + 1)
+                    {
+                        const auto prior = image(capture);
+                        require(next->commit(rejected) == CanonicalDurabilityResult::Rejected && image(capture) == prior
+                            && souls(capture) == beforeSouls, "Rejected death leaked a captured soul or inventory split");
+                        require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                            "Soul capture retry failed");
+                        const auto saved = image(capture);
+                        const auto dead = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        require(dead.neighborLives.back().respawnTick && dead.combat->actors.back()[8][2] <= 0,
+                            "Soul was filled without committing the creature's death");
+                        require(souls(capture) == std::pair{beforeSouls.first + 1, beforeSouls.second - 1},
+                            "Soul capture filled more than one gem from its stack");
+                        require(!capture.prepareMagicUse(authority, proposal(use), id<ServerTick>(tick)),
+                            "Duplicate capture intent reached the dead creature life");
+                        InventoryHost restart(descriptor, manifest, *registry, *crypto, saved);
+                        restart.service().synchronizeCells(authority);
+                        require(image(restart.service()) == saved && souls(restart.service()) == souls(capture),
+                            "Restart changed the captured soul or death image");
+                        auto continued = dynamic_cast<InventoryService&>(restart.service()).prepareNativeTick(
+                            authority, id<ServerTick>(tick + 1), 1.f/30, {}, {}, &world);
+                        require(continued && continued->commit(accepted) == CanonicalDurabilityResult::Committed
+                            && souls(restart.service()) == souls(capture), "Restart repeated soul capture on the same dead life");
+                        filled = true; break;
+                    }
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed, "Soul capture windup failed");
+                }
+                require(filled, "Soultrap did not capture the dying creature into a gem");
+                std::cout << "soul capture: mixed death, one stack member, rollback/retry, duplicate rejection and restart passed\n";
+            }
             std::cout << "player travel: stock paid no-ops and teleport rules; unloaded-cell Recall, split wire baselines, old epochs, independent Marks, failed writes/retry and disk restart passed\n";
             return;
         }
@@ -9027,6 +9212,12 @@ namespace TES3MP::Native::Testing
                 MagicUseSourceKind::Spell, hash("door_spell_lock"), MagicUseTargetKind::Door,
                 initialDoor.placement, id<ServerTick>(1), CombatRevision::initial(),
                 CombatRevision::fromValue(initialDoor.contactRevision).value(), InventoryRevision::initial()};
+            if (objectSpells)
+            {
+                auto mixedTravel = use; mixedTravel.sourceId = hash("door_spell_unsupported_travel");
+                require(!service.prepareMagicUse(authority, proposal(mixedTravel), id<ServerTick>(1)),
+                    "Unsupported travel/object combination silently dropped part of its plan");
+            }
             const auto decodedUse = decodeClientMagicUseCommand(encodeClientMagicUseCommand(use));
             require(std::holds_alternative<ClientMagicUseCommand>(decodedUse)
                 && std::get<ClientMagicUseCommand>(decodedUse) == use,
@@ -9185,7 +9376,7 @@ namespace TES3MP::Native::Testing
             std::vector<CanonicalPlayerEntityState> displaced(authority.players().begin(), authority.players().end());
             displaced[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(displaced[0],
                 id<ServerTick>(2), Transform(displaced[0].transform().cell(),
-                    Position3(0, -400 * 1024, 1024), displaced[0].transform().orientation()),
+                    Position3(0, (objectSpells ? -4000 : -400) * 1024, 1024), displaced[0].transform().orientation()),
                 LinearVelocity3(0, 0, 0)));
             const auto far = std::get<CanonicalServerState>(createCanonicalServerState(displaced, authority.activeSessions()));
             movedService.synchronizeCells(far);
@@ -9384,6 +9575,47 @@ namespace TES3MP::Native::Testing
                     containerWire(openRestart.service(), 2, time, 0);
                     auto taken = openRestart.service().prepareInventory(authority,
                         bind(authority, transfer(openRestart.service(), false, time)).proposal());
+                    if (objectSpells)
+                    {
+                        auto farPlayers = std::vector(authority.players().begin(), authority.players().end());
+                        farPlayers[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(farPlayers[0],
+                            id<ServerTick>(time), Transform(farPlayers[0].transform().cell(), Position3(0, -500 * 1024, 1024),
+                                farPlayers[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                        const auto farAuthority = std::get<CanonicalServerState>(createCanonicalServerState(farPlayers, authority.activeSessions()));
+                        auto distantTake = transfer(openRestart.service(), false, time);
+                        distantTake.interactionOrigin = farPlayers[0].transform().position();
+                        require(bool(openRestart.service().prepareInventory(farAuthority, bind(farAuthority, distantTake).proposal())),
+                            "Committed Telekinesis did not extend authoritative container reach");
+                        for (const int y : {-900, 100})
+                        {
+                            auto invalidPlayers = farPlayers;
+                            invalidPlayers[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(invalidPlayers[0],
+                                id<ServerTick>(time), Transform(invalidPlayers[0].transform().cell(), Position3(0, y * 1024, 1024),
+                                    invalidPlayers[0].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                            const auto invalidAuthority = std::get<CanonicalServerState>(createCanonicalServerState(invalidPlayers, authority.activeSessions()));
+                            auto invalidTake = distantTake; invalidTake.interactionOrigin = invalidPlayers[0].transform().position();
+                            require(!openRestart.service().prepareInventory(invalidAuthority, bind(invalidAuthority, invalidTake).proposal()),
+                                "Telekinesis bypassed its maximum reach or intervening door geometry");
+                        }
+                        auto farHost = InventoryHost(descriptor, testContentManifest(), *registry, *crypto, after);
+                        farHost.service().synchronizeCells(farAuthority);
+                        uint64_t expiry = time + 1;
+                        for (; expiry <= time + 350; ++expiry)
+                        {
+                            const auto bytes = std::vector(farHost.service().inventoryImage().begin(), farHost.service().inventoryImage().end());
+                            const auto state = readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                            if (std::ranges::none_of(state.timedEffects, [](const auto& effect) {
+                                    return effect.actor == 0 && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Telekinesis));
+                                })) break;
+                            auto next = dynamic_cast<InventoryService&>(farHost.service()).prepareNativeTick(
+                                farAuthority, id<ServerTick>(expiry), 1.f/30, {}, {}, &world);
+                            require(next && next->commit(accepted) == CanonicalDurabilityResult::Committed, "Telekinesis expiry tick failed");
+                        }
+                        require(expiry <= time + 350 && !farHost.service().prepareInventory(farAuthority,
+                                bind(farAuthority, distantTake).proposal()),
+                            "Expired Telekinesis retained interaction reach");
+                        std::cout << "object seams: Target mixed Lock/Open collided; Telekinesis reach extends, restarts and expires\n";
+                    }
                     require(bool(taken),
                         "Open did not restore direct take access");
                     require(taken->commit(accepted) == CanonicalDurabilityResult::Committed,
@@ -9402,6 +9634,38 @@ namespace TES3MP::Native::Testing
                     "Container Open windup failed");
             }
             require(containerOpened, "Container Open never reached its release key");
+            if (objectSpells)
+            {
+                InventoryHost areaHost(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+                auto& areaOwner = areaHost.service(); areaOwner.synchronizeCells(authority);
+                auto areaUse = use; areaUse.sourceId = hash("door_spell_area");
+                auto intent = areaOwner.prepareMagicUse(authority, proposal(areaUse), id<ServerTick>(1));
+                require(bool(intent), "Ordered mixed area Lock/Open was not admitted");
+                bool applied = false;
+                for (uint64_t time = 1; time <= 50; ++time)
+                {
+                    auto next = areaOwner.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30, std::move(intent), &world);
+                    require(bool(next), "Mixed object area tick failed");
+                    if (doorView(areaOwner, 1, time, next.get()).lockLevel == 20)
+                    {
+                        require(containerView(areaOwner, 1, time, next.get()).containers.front().lockLevel == 20,
+                            "Ordered mixed area effects did not reach both door and container");
+                        const auto prior = std::vector(areaOwner.inventoryImage().begin(), areaOwner.inventoryImage().end());
+                        require(next->commit(rejected) == CanonicalDurabilityResult::Rejected
+                            && std::ranges::equal(prior, areaOwner.inventoryImage()), "Rejected area spell changed an object");
+                        require(next->commit(accepted) == CanonicalDurabilityResult::Committed, "Mixed object area retry failed");
+                        const auto saved = std::vector(areaOwner.inventoryImage().begin(), areaOwner.inventoryImage().end());
+                        InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                        restart.service().synchronizeCells(authority);
+                        require(doorView(restart.service(), 1, time).lockLevel == 20
+                            && containerView(restart.service(), 1, time).containers.front().lockLevel == 20,
+                            "Mixed area restart lost an object effect");
+                        applied = true; break;
+                    }
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed, "Mixed area windup failed");
+                }
+                require(applied, "Mixed area object spell never collided");
+            }
             std::cout << "container spell=paid Lock/Open transfer=denied-then-allowed write=atomic retry=once restart=two-observers\n";
             std::cout << "door spell=paid Lock/Open contact=validated write=atomic retry=once restart=two-observers\n";
             return;

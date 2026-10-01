@@ -224,7 +224,8 @@ namespace TES3MP
                     || p.castElapsed >= p.castStop || (p.castPhase <= 2 && p.castElapsed)
                     || (p.castPhase < 4 ? p.castElapsed >= p.castRelease : p.castElapsed < p.castRelease)))
                 return error(Code::InvalidFloat, 0, 0, i);
-            if ((!p.movementOwned && std::ranges::any_of(p.movement, [](float magnitude) { return magnitude != 0.f; }))
+            if (!std::isfinite(p.telekinesis) || p.telekinesis < 0.f || p.telekinesis > 512000.f
+                || (!p.movementOwned && std::ranges::any_of(p.movement, [](float magnitude) { return magnitude != 0.f; }))
                 || std::ranges::any_of(p.visibility, [](float magnitude) {
                     return !std::isfinite(magnitude) || magnitude < 0.f || magnitude > 512000.f;
                 }) || std::ranges::any_of(p.movement, [](float magnitude) {
@@ -433,7 +434,7 @@ namespace TES3MP
                 p.cast, p.castPhase, p.castRange, p.castElapsed, p.castRelease, p.castStop,
                 builder.CreateVector(p.visibility.data(), p.visibility.size()),
                 builder.CreateVector(p.movement.data(), p.movement.size()), p.movementOwned,
-                builder.CreateVector(p.visualEffects)));
+                builder.CreateVector(p.visualEffects), p.telekinesis));
         std::vector<flatbuffers::Offset<Snapshot::PhysicalProjectileSnapshot>> projectiles;
         for (const auto& p : input.projectiles())
             projectiles.push_back(Snapshot::CreatePhysicalProjectileSnapshot(builder, p.casterKind, p.terminal,
@@ -705,6 +706,7 @@ namespace TES3MP
             std::copy(p->visibility()->begin(), p->visibility()->end(), presentation.back().visibility.begin());
             std::copy(p->movement()->begin(), p->movement()->end(), presentation.back().movement.begin());
             presentation.back().movementOwned = p->movement_owned();
+            presentation.back().telekinesis = p->telekinesis();
             if (p->visual_effects())
                 presentation.back().visualEffects.assign(p->visual_effects()->begin(), p->visual_effects()->end());
         }

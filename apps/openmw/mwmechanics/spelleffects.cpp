@@ -1,4 +1,5 @@
 #include "spelleffects.hpp"
+#include "objectmagic.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1366,8 +1367,7 @@ namespace MWMechanics
                 if (animation)
                     animation->addSpellCastGlow(magicEffect->getColor());
                 int magnitude = static_cast<int>(roll(effect));
-                if (target.getCellRef().getLockLevel()
-                    < magnitude) // If the door is not already locked to a higher value, lock it to spell magnitude
+                if (MWMechanics::lockRaisesLevel(target.getCellRef().getLockLevel(), magnitude)) // If the door is not already locked to a higher value, lock it to spell magnitude
                 {
                     MWBase::Environment::get().getSoundManager()->playSound3D(
                         target, ESM::RefId::stringRefId("Open Lock"), 1.f, 1.f);
@@ -1391,7 +1391,7 @@ namespace MWMechanics
                 if (animation)
                     animation->addSpellCastGlow(magicEffect->getColor());
                 int magnitude = static_cast<int>(roll(effect));
-                if (target.getCellRef().getLockLevel() <= magnitude)
+                if (MWMechanics::openReachesLevel(target.getCellRef().getLockLevel(), magnitude))
                 {
                     if (target.getCellRef().isLocked())
                     {

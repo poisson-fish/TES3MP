@@ -34,6 +34,7 @@ namespace TES3MP::Native
     {
         uint64_t actor = 0; // Zero is world geometry.
         std::array<float, 3> position{};
+        uint64_t object = 0; // Actual world reference hit, independent of actor identity.
     };
     struct ActorSceneSnapshot
     {
@@ -110,6 +111,9 @@ namespace TES3MP::Native
         // Stock LOS collision mask. Player eye positions use the server proxy
         // until native player hulls are bound.
         bool lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const;
+        std::optional<std::array<float, 3>> objectCenter(uint64_t object) const;
+        bool lineOfSightToObject(const std::array<float, 3>& from,
+            const std::array<float, 3>& to, uint64_t object) const;
         bool lineOfSightToDoor(const std::array<float, 3>& from,
             const std::array<float, 3>& to, uint64_t door) const;
         // Stock underwater cast gate against the selected or bound neighbor hull.

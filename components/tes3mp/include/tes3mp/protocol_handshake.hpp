@@ -44,7 +44,7 @@ namespace TES3MP
     inline constexpr std::uint32_t KnockoutPresentationCapabilityValue = 23;
     inline constexpr std::uint32_t ExpandedCombatEffectsCapabilityValue = 24;
 
-    inline constexpr std::uint32_t ActorPresentationCapabilityValue = 29;
+    inline constexpr std::uint32_t ActorPresentationCapabilityValue = 30;
     inline constexpr std::uint32_t MagicVisualReplicationCapabilityValue = 30;
     inline constexpr std::uint32_t MagicEffectVisualLoopsCapabilityValue = 31;
 

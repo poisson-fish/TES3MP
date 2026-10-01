@@ -1145,7 +1145,7 @@ namespace TES3MP::OpenMWAdapter
                         for (const auto id : {ESM::MagicEffect::Invisibility, ESM::MagicEffect::Chameleon,
                                 ESM::MagicEffect::Light, ESM::MagicEffect::NightEye,
                                 ESM::MagicEffect::DetectAnimal, ESM::MagicEffect::DetectEnchantment,
-                                ESM::MagicEffect::DetectKey})
+                                ESM::MagicEffect::DetectKey, ESM::MagicEffect::Telekinesis})
                             magic.add(MWMechanics::EffectKey(id),
                                 MWMechanics::EffectParam(-magic.getOrDefault(id).getModifier()));
                         animation->setLightEffect(0.f);
@@ -2544,6 +2544,9 @@ namespace TES3MP::OpenMWAdapter
                         magic.add(MWMechanics::EffectKey(effects[i]),
                             MWMechanics::EffectParam(pose.visibility[i] - actual));
                     }
+                    const auto telekinesis = magic.getOrDefault(ESM::MagicEffect::Telekinesis);
+                    magic.add(MWMechanics::EffectKey(ESM::MagicEffect::Telekinesis),
+                        MWMechanics::EffectParam(pose.telekinesis - telekinesis.getMagnitude()));
                     if (pose.movementOwned)
                         for (size_t i = 0; i < movementEffects.size(); ++i)
                         {

@@ -759,6 +759,35 @@ namespace TES3MP::Native
         mImpl->mWorld.rayTest(start, end, hit);
         return !hit.hasHit();
     }
+    std::optional<std::array<float, 3>> InteriorActorScene::objectCenter(uint64_t id) const
+    {
+        if (!mImpl) throw std::invalid_argument("Object contact scene is unloaded");
+        for (const auto& [object, identity] : mImpl->mIdentities)
+            if (identity == id)
+            {
+                btVector3 low, high;
+                object->getCollisionShape()->getAabb(object->getWorldTransform(), low, high);
+                const auto center = (low + high) * .5f;
+                return std::array<float, 3>{float(center.x()), float(center.y()), float(center.z())};
+            }
+        return {};
+    }
+    bool InteriorActorScene::lineOfSightToObject(const std::array<float, 3>& from,
+        const std::array<float, 3>& to, uint64_t id) const
+    {
+        if (!mImpl) throw std::invalid_argument("Object contact scene is unloaded");
+        for (const auto& point : {from, to}) for (float value : point)
+            if (!std::isfinite(value) || std::abs(value) > 1e7f)
+                throw std::invalid_argument("Object contact endpoint invalid");
+        const btVector3 start(from[0], from[1], from[2]), end(to[0], to[1], to[2]);
+        btCollisionWorld::ClosestRayResultCallback hit(start, end);
+        hit.m_collisionFilterGroup = MWPhysics::CollisionType_AnyPhysical;
+        hit.m_collisionFilterMask = MWPhysics::CollisionType_World
+            | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_Door;
+        mImpl->mWorld.rayTest(start, end, hit);
+        return !hit.hasHit() || (mImpl->mIdentities.contains(hit.m_collisionObject)
+            && mImpl->mIdentities.at(hit.m_collisionObject) == id);
+    }
     bool InteriorActorScene::lineOfSightToDoor(const std::array<float, 3>& from,
         const std::array<float, 3>& to, uint64_t door) const
     {
@@ -816,7 +845,9 @@ namespace TES3MP::Native
         for (auto* scene = this; scene; scene = scene->mNeighbor.get())
             if (hit.m_hitCollisionObject == scene->mImpl->mActor->mCollisionObject)
             { actor = scene->mImpl->mActorId; break; }
-        return ActorProjectileContact{actor, {float(point.x()), float(point.y()), float(point.z())}};
+        return ActorProjectileContact{actor, {float(point.x()), float(point.y()), float(point.z())},
+            mImpl->mIdentities.contains(hit.m_hitCollisionObject) && (mImpl->mIdentities.at(hit.m_hitCollisionObject) >> 63)
+                ? mImpl->mIdentities.at(hit.m_hitCollisionObject) : 0};
     }
     const std::string& InteriorActorScene::fingerprint() const { return mImpl ? mImpl->mFingerprint : mDormant->fingerprint; }
     bool InteriorActorScene::enchantedWeaponsAreMagical() const

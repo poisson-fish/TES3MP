@@ -83,7 +83,7 @@ add_openmw_dir (mwworld
     store esmstore fallback actionrepair actionsoulgem livecellref actiondoor
     contentloader esmloader actiontrap cellreflist cellref weather projectilemanager
     cellpreloader datetimemanager calendar regionalweather groundcoverstore magiceffects cell ptrregistry
-    positioncellgrid
+    positioncellgrid intervention
     )
 
 add_openmw_dir (mwphysics
@@ -104,7 +104,7 @@ add_openmw_dir (mwmechanics
     aicast aiescort aiface aiactivate aicombat recharge repair enchanting pathfinding pathgrid security spellcasting spellresistance
     disease pickpocket levelledlist combat meleestate steering obstacle autocalcspell difficultyscaling aicombataction summoning
     character actors objects aistate weaponpriority spellpriority weapontype spellutil
-    spelleffects
+    spelleffects objectmagic
     )
 
 add_openmw_dir (mwstate

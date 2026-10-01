@@ -43,6 +43,8 @@ namespace TES3MP
         bool movementOwned = false;
         // Distinct stock MGEF indices with active ContinuousVfx on this life.
         std::vector<std::uint16_t> visualEffects;
+        // Committed aggregate for stock object focus; clients never extend server reach.
+        float telekinesis = 0.f;
         friend bool operator==(const ActorPresentationSnapshot&, const ActorPresentationSnapshot&) = default;
     };
     inline constexpr std::size_t MaximumCombatSnapshotActors = 248;

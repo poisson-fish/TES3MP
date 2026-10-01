@@ -1,3 +1,4 @@
+#include <apps/openmw/mwworld/intervention.hpp>
 #include "inventory_host.hpp"
 #include "placement_scene.hpp"
 #include "inventory_service.hpp"
@@ -76,7 +77,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 68; ++candidate)
+            for (unsigned candidate = 3; candidate <= 69; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -294,6 +295,7 @@ namespace TES3MP::Native
                 binding.mScriptedMovementRules = descriptorVersion >= 65;
                 binding.mPlayerTravel = descriptorVersion >= 67;
                 binding.mScriptedTravelRules = descriptorVersion >= 68;
+                binding.mObjectTravelFamily = descriptorVersion >= 69;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
@@ -301,7 +303,7 @@ namespace TES3MP::Native
                 binding.mPlacementCombat = descriptorVersion >= 61;
                 binding.mNeighborCombat = descriptorVersion >= 62;
                 binding.mAuthoritativeAim = descriptorVersion >= 64;
-                binding.mContainerMagic = version == "native-inventory-56c";
+                binding.mContainerMagic = version == "native-inventory-56c" || binding.mObjectTravelFamily;
                 binding.mNeighborLimit = descriptorVersion >= 66 ? 4
                     : descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
@@ -375,6 +377,36 @@ namespace TES3MP::Native
             for (size_t i = 0; i < names.size(); ++i)
                 if (!uniqueNames.insert(names[i]).second || !uniqueWire.insert(wireCells[i]).second)
                     throw std::invalid_argument("Duplicate native area mapping");
+            if (start.binding.mObjectTravelFamily)
+            {
+                auto model = std::make_shared<MWWorld::WorldModel>(loadout.store(), loadout.readers(), 1);
+                start.binding.mIntervention = [model, names, wireCells](const Transform& player, ESM::RefId effect)
+                    -> std::optional<Transform> {
+                    const auto origin = std::ranges::find(wireCells, player.cell());
+                    if (origin == wireCells.end()) throw std::invalid_argument("Intervention player outside bound cells");
+                    const auto& p = player.position();
+                    const auto marker = MWWorld::closestInterventionMarker(*model,
+                        names[size_t(origin - wireCells.begin())],
+                        {float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)},
+                        ESM::RefId::stringRefId(effect == ESM::MagicEffect::DivineIntervention ? "divinemarker" : "templemarker"), 256);
+                    if (marker.isEmpty()) return {};
+                    const auto destination = std::ranges::find(names, marker.getCell()->getCell()->getId());
+                    if (destination == names.end()) throw std::invalid_argument("Intervention destination outside bound cells");
+                    const auto& position = marker.getRefData().getPosition();
+                    for (size_t axis = 0; axis < 3; ++axis)
+                        if (!std::isfinite(position.pos[axis]) || std::abs(position.pos[axis]) > 1e7f
+                            || !std::isfinite(position.rot[axis]))
+                            throw std::invalid_argument("Intervention marker transform outside bounds");
+                    const auto angle = [](float radians) {
+                        double turns = -double(radians) / (2 * std::numbers::pi); turns -= std::floor(turns);
+                        return Turn32::fromValue(uint32_t(uint64_t(std::llround(turns * 4294967296.0))));
+                    };
+                    return Transform(wireCells[size_t(destination - names.begin())],
+                        Position3(std::llround(double(position.pos[0]) * 1024), std::llround(double(position.pos[1]) * 1024),
+                            std::llround(double(position.pos[2]) * 1024)),
+                        Orientation3(angle(position.rot[0]), angle(position.rot[1]), angle(position.rot[2])));
+                };
+            }
             scenes.resize(names.size());
             start.binding.mAdditionalWorldItems.reserve(start.additionalCells.size());
             if (start.secondWireCell && start.cell == start.secondCell)
@@ -465,13 +497,19 @@ namespace TES3MP::Native
                             throw std::invalid_argument("Native navigating actor must be one unscripted placement");
                     }
                     actorCounts[cellIndex]=references.size();
-                    if (start.binding.mContainerMagic && cellIndex == 0)
+                    if (start.binding.mContainerMagic && (cellIndex == 0 || start.binding.mObjectTravelFamily))
                     {
                         auto placed = loadout.placedContainers(cell);
-                        if (placed.size() != 1 || placed.front().mScripted || !placed.front().mRef.mTrap.empty()
-                            || !placed.front().mRef.mKey.empty())
-                            throw std::invalid_argument("V56c requires one ordinary untrapped unkeyed placed container");
-                        references.push_back(placed.front());
+                        if (!start.binding.mObjectTravelFamily && placed.size() != 1)
+                            throw std::invalid_argument("V56c requires one ordinary placed container");
+                        for (const auto& container : placed)
+                        {
+                            if (container.mScripted || !container.mRef.mTrap.empty() || !container.mRef.mKey.empty())
+                                throw std::invalid_argument("Object magic requires an ordinary untrapped unkeyed container");
+                            if (references.size() + start.binding.mContainers.size() >= MaxEquipmentContainers)
+                                throw std::invalid_argument("Object magic inventory owner budget exhausted");
+                            references.push_back(container);
+                        }
                     }
                 }
                 else if (start.worldActors)
@@ -654,7 +692,9 @@ namespace TES3MP::Native
                 std::vector<InventoryContainerBinding> neighborOwners;
                 for (const auto& value : start.binding.mContainers)
                     if (start.binding.mNeighborAi && value.mCell == start.wireCell
-                        && value.mId != owner.mId) neighborOwners.push_back(value);
+                        && value.mId != owner.mId
+                        && (loadout.store().get<ESM::NPC>().search(value.mBase)
+                            || loadout.store().get<ESM::Creature>().search(value.mBase))) neighborOwners.push_back(value);
                 std::ranges::sort(neighborOwners, {}, [](const auto& value) { return value.mId.value(); });
                 if (start.binding.mNeighborAi && neighborOwners.empty())
                     throw std::invalid_argument("Native neighbor witness has no inventory owner");

@@ -1,13 +1,11 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-steps NPCs/doors at 60 Hz, commits at 30 Hz and binds four neighbors. Vanilla/TR
-checks cover core combat and AI; sneak, AI jumps and mixed passives remain.
+steps NPCs/doors at 60 Hz, commits at 30 Hz and binds four neighbors. Sneak, AI
+jumps and mixed passives remain.
 
 Ranged combat and V64 aim pass under loss (`build/logs/desktop-ranged-aim-live-01.log`).
 Enchanted ammo, scripts and bodies remain open.
-
-Eight movement IDs pass cast/expiry/restart; Levitation scripts and water use stock rules.
 
 Four-neighbor combat and attributed creature kills pass under loss and reconnect
 (`build/logs/desktop-neighbor-creature-damage-live-04.log`). Body reactions remain unverified.
@@ -15,43 +13,42 @@ Four-neighbor combat and attributed creature kills pass under loss and reconnect
 Magic bolts, loops and reconnect pass under loss (`build/logs/magic-loop-live-02.log`).
 Audio remains unverified.
 
-**Objects/travel started:** trusted and player Touch Lock/Open use one streamed
-unowned door. Contact, range and sight are checked at admission and release;
-cost/RNG and lock commit atomically. Restart and two desktops under 10% loss
-pass (`build/logs/object-spell-test-06.log`, `build/logs/object-magic-live-18.log`).
-An unkeyed container shares this path: locks block activation and take/put;
-Open restores both. Failed writes, retry, payment, restart and observers pass
-(`build/logs/container-lock-test-final-15.log`);
-both desktops see Lock/Open and stock activation under loss
-(`build/logs/container-spell-live-final-07.log`). Synthetic lit room, vanilla loadout;
-door/container visuals, door audio, Target range and mixed effects remain open.
+**Object/travel family (V69):** shared stock Divine/Almsivi marker search takes
+explicit player context; destinations must belong to the bound campaign.
+Telekinesis extends authoritative object reach using stock settings/feet conversion,
+with actor/teleport-door restrictions, sight checks, expiry and restart. T3D2 /
+capability 30 carries committed magnitude into stock desktop focus.
+Target and ordered mixed Lock/Open effects use collision identity and the existing
+door/container writer; area effects can reach both in one commit. Soultrap chooses
+the smallest eligible empty gem, splits one item and commits its soul with creature
+death, inventory revision and payment. Caster/dead-life checks prevent stale or duplicate capture.
 
-Ground-item codec/192-entry overflow passes (`build/logs/ground-item-codec-test-03.log`).
+Synthetic vanilla fixtures pass marker ordering/search and reused relocation rollback/restart
+(`build/logs/object-travel-test-08.log`), mixed Target/area effects and Telekinesis
+reach/occlusion/expiry (`build/logs/object-spells-test-10.log`), and smallest-gem
+capture, rejected-write retry, death and restart deduplication
+(`build/logs/object-soul-test-02.log`). Telekinesis codec bounds/round-trip pass
+(`build/logs/object-reach-codec-test-final.log`); touched stock callers and desktop
+focus provider compile. V69 requires a fresh campaign and capability-30 clients. Scripted/keyed/trapped
+containers, unbound destinations and changing frozen NPC collision remain unsupported.
+Travel remains single-effect Self.
 
-**Mark/Recall (V68):** one durable Mark/player. Unmarked Recall and disabled spells
-pay without teleporting or changing Marks. Stock teleport-rule scripts persist.
-Fresh campaign required; player/NPC cell domains are separate. Atomic-failure, old-epoch,
-independent-Mark and restart checks pass (`build/logs/player-travel-test-20.log`);
-Levitation regression passes (`build/logs/travel-movement-regression-01.log`).
-Two-desktop capture passes: distinct unloaded-interior Marks, 100 ms
-delay/jitter and 10% loss: scenes/baselines converge, locations stay stable,
-each cast pays once, Bob resumes location/resources without replayed wire casts/impact
-cues, and reunited replicas agree (`build/logs/player-travel-desktop-live-14.log`,
-`build/player-travel-desktop-live-14/result.json`). Screenshots show destination
-geometry, casting hands and reunited players. Synthetic interiors, vanilla assets;
-teleport visuals/audio unverified. Door persistence, cross-cell results and resync pass
-(`build/logs/player-travel-door-regression-04.log`,
+Inherited Touch Lock/Open desktop captures cover their original behavior (`build/logs/object-magic-live-18.log`,
+`build/logs/container-spell-live-final-07.log`). V69 desktop visuals/audio, focus,
+soul-gem UI and destination presentation await grouped acceptance.
+
+**Mark/Recall (V68):** independent Marks and teleport rules; disabled/unmarked
+casts pay without moving. Desktops converge under 100 ms jitter and 10% loss (`build/logs/player-travel-desktop-live-14.log`). Rollback/restart, epochs and cross-cell resync pass
+(`build/logs/player-travel-test-20.log`,
 `build/logs/player-travel-discontinuity-resync-final.log`).
 
-**Next:** intervention travel, creature reactions/mixed combat, bound equipment,
-summons and actor/life ownership.
+**Next:** grouped V69 two-desktop acceptance for both interventions, Telekinesis
+focus, soul-gem/death state and mixed Target/area effects under loss/reconnect.
+Then creature reactions/mixed combat, bound equipment, summons and actor/life ownership.
 
-60 M4 effects remain:
-- Movement (8): WaterBreathing, SwiftSwim, WaterWalking, Burden, Feather,
-  Jump, Levitate, SlowFall.
-- AI/disposition (12): Charm, CalmHumanoid, CalmCreature, FrenzyHumanoid,
-  FrenzyCreature, DemoralizeHumanoid, DemoralizeCreature, RallyHumanoid,
-  RallyCreature, CommandHumanoid, CommandCreature, TurnUndead.
+60 M4 IDs still require milestone acceptance or implementation, including the
+headless object/travel family above:
+- Movement (8) and AI/disposition (12): implemented headlessly; acceptance remains.
 - Objects (4): Lock, Open, Telekinesis, Soultrap.
 - Travel (2): DivineIntervention, AlmsiviIntervention.
 - Equipment (12): BoundDagger, BoundLongsword, BoundMace, BoundBattleAxe,
@@ -64,4 +61,4 @@ summons and actor/life ownership.
   SummonCenturionSphere, SummonFabricant, SummonWolf, SummonBear, SummonBonewolf,
   SummonCreature04, SummonCreature05.
 
-83 + 60 = 143 IDs. Summons/player lives remain unproven.
+Summons/player lives remain unproven.

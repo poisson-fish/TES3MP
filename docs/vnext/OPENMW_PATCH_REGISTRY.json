@@ -3,6 +3,24 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-008",
+      "slice": "shared object magic and explicit intervention context",
+      "owner": "OpenMW mechanics/world and authoritative native actor transaction",
+      "purpose": "Share stock intervention cell search and exterior grid ordering with an explicit initiating position, stock activation reach and Lock/Open thresholds, and ordered smallest-eligible-gem soul capture. V69 composes bound destination relocation, mixed Touch/Target object effects, Telekinesis reach and one capture per dying creature life with existing actor, inventory and teleport commits. Existing caller paths remain covered by their registered patches; T3D2/capability 30 carries committed Telekinesis into desktop stock focus.",
+      "paths": [
+        "apps/openmw/mwmechanics/objectmagic.hpp",
+        "apps/openmw/mwworld/intervention.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_loadout_tests object-travel",
+        "tes3mp_native_loadout_tests object-spells",
+        "tes3mp_native_loadout_tests object-soul",
+        "tes3mp_combat_replication_tests object-reach"
+      ],
+      "disposition": "shared stock rules; bounded authoritative object/travel family; desktop acceptance pending",
+      "removal_condition": "OpenMW supplies equivalent explicit intervention and detached object/inventory magic interfaces"
+    },
+    {
       "id": "M4-007",
       "slice": "explicit AI magic ratings and bounded source preparation",
       "owner": "OpenMW mechanics and native actor runtime",
@@ -185,7 +203,9 @@
       "paths": [
         "apps/openmw/mwclass/creaturelevlist.cpp",
         "apps/openmw/mwclass/creaturelevlist.hpp",
-        "apps/openmw/mwmechanics/mechanicsmanagerimp.cpp"
+        "apps/openmw/mwmechanics/mechanicsmanagerimp.cpp",
+        "apps/openmw/mwmechanics/crimeresult.hpp",
+        "apps/openmw/mwmechanics/werewolfstats.hpp"
       ],
       "tests": [
         "tes3mp_native_loadout_tests leveled-actors",
@@ -442,7 +462,10 @@
         "apps/openmw/mwworld/localscripts.cpp",
         "apps/openmw/mwworld/localscripts.hpp",
         "apps/openmw/mwworld/refdata.cpp",
-        "apps/openmw/mwworld/refdata.hpp"
+        "apps/openmw/mwworld/refdata.hpp",
+        "apps/openmw/mwscript/interpretercontext.cpp",
+        "apps/openmw/mwscript/interpretercontext.hpp",
+        "apps/openmw/mwscript/statsextensions.cpp"
       ],
       "tests": [
         "tes3mp_native_loadout_tests inventory-transfer-restart-scripts",
@@ -605,7 +628,9 @@
         "apps/openmw/mwrender/replicatedactor.hpp",
         "apps/openmw/mwrender/vismask.hpp",
         "apps/openmw/mwrender/water.cpp",
-        "apps/openmw/mwworld/scene.cpp"
+        "apps/openmw/mwworld/scene.cpp",
+        "apps/openmw/mwrender/effectmanager.cpp",
+        "apps/openmw/mwrender/effectmanager.hpp"
       ],
       "tests": [
         "scripts/tests/test_openmw_patch_registry.py",

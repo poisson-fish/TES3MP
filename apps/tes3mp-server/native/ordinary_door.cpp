@@ -1,3 +1,4 @@
+#include <apps/openmw/mwmechanics/objectmagic.hpp>
 #include "ordinary_door.hpp"
 
 #include <apps/openmw/mwworld/doormotion.hpp>
@@ -130,7 +131,7 @@ namespace TES3MP::Native
         PreparedDoorChange result{state};
         if (effect == LockMagic::Lock)
         {
-            if (state.mRef.mLockLevel < magnitude)
+            if (MWMechanics::lockRaisesLevel(state.mRef.mLockLevel, magnitude))
             {
                 result.mState.mRef.mLockLevel = magnitude;
                 result.mState.mRef.mIsLocked = true;
@@ -138,7 +139,7 @@ namespace TES3MP::Native
         }
         else if (effect == LockMagic::Open)
         {
-            if (state.mRef.mLockLevel <= magnitude && state.mRef.mIsLocked)
+            if (MWMechanics::openReachesLevel(state.mRef.mLockLevel, magnitude) && state.mRef.mIsLocked)
             {
                 result.mState.mRef.mLockLevel = 0;
                 result.mState.mRef.mIsLocked = false;

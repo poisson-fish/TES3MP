@@ -258,18 +258,11 @@ the actor image; recovery validates the rule before installing sources. V65 need
 a fresh campaign. General script scheduling remains M5 work. Bound neighbors use
 their own movement stats/effects in the shared solver and own drowning damage.
 
-**Initial object magic.** Trusted and player Touch Lock/Open use the streamed
-ordinary-door image inside the actor commit. Stock ESM saves FLTV only while
-locked; Open stores zero because negative transient levels have no durable
-meaning. Recovery accepts bounded FLTV and fixes all other authored bytes.
-Spell contact uses an exact identity of the durable door angle, motion state
-and lock, independent of the transient presentation motion counter; revalidate
-at release before payment. Baselines project the committed lock to clients.
-V56c binds one ordinary unkeyed container. Its bounded lock level and contact
-revision persist in the area image beside doors; inventory stack revision stays
-separate. A direct take/put checks the committed lock, while Touch casting
-revalidates contact before cost. Container baselines carry both lock fields
-through chunk assembly so stock activation follows the server state.
+**Object state.** Touch Lock/Open shares the streamed door/actor commit.
+Normalize unlocked durable FLTV to zero; retain other authored bytes. Door contact
+identifies durable angle, motion and lock independently of presentation counters;
+revalidate before payment. Container lock/contact revisions remain separate from
+stack revisions. Committed locks gate activation/take/put and observer baselines.
 
 **AI decisions (V57).** Persist the selected actor's Flee target, deadline and
 navigation destination with combat and RNG. Reconcile bounded AI-only passive
@@ -301,6 +294,13 @@ storage failure closes the runtime until coherent restart. V68 persists stock
 Enable/DisableTeleporting through bounded opcodes. Disabled spells and unmarked
 Recall retain payment without teleporting. Each version requires a fresh campaign;
 V67's layout remains unchanged.
+
+**Object/travel family (V69).** Fresh discriminator retains V68 fields and prior descriptors. Stock intervention search takes explicit player context, caps interior
+search at 256 cells and rejects unbound destinations. Shared stock reach and
+Lock/Open thresholds serve engine/server callers; actual collision identity and
+ordered mixed effects join the existing commit. Stock gem selection and detached unstack/restack capture only on new creature
+death with matching caster life. Gem, death, revision and payment persist together. T3D2/capability 30
+projects Telekinesis into stock focus; server reach/restrictions/visibility remain authoritative.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

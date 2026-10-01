@@ -76,9 +76,9 @@ namespace TES3MP::Native
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
         const MWWorld::ESMStore& content, bool expandedEffects = false, bool specialConditions = false,
-        bool movementEffects = false, bool aiEffects = false);
+        bool movementEffects = false, bool aiEffects = false, bool objectEffects = false);
     std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects);
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects = false);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
         bool persistentSpecial = false, bool specialConditions = false, bool movementEffects = false,

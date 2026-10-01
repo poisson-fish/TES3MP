@@ -399,6 +399,30 @@ namespace
         return true;
     }
 
+    bool object_reach_round_trip_and_bounds()
+    {
+        TES3MP::ActorPresentationSnapshot pose;
+        pose.id = 1; pose.kind = 1; pose.telekinesis = 20;
+        const auto create = [&] { return TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40), value<TES3MP::CanonicalRevision>(40),
+            value<TES3MP::PlayerId>(1), value<TES3MP::CombatRevision>(40), 100, 100, 100, 100, 100, 100, false,
+            {}, skills(), {}, {}, {}, {}, std::span(&pose, 1)); };
+        const auto made = create();
+        if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(made)) return false;
+        const auto& snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(made);
+        const auto wire = TES3MP::encodeLatestWinsCombatSnapshot(snapshot);
+        const auto decoded = TES3MP::decodeLatestWinsCombatSnapshot(wire);
+        if (!std::holds_alternative<TES3MP::LatestWinsCombatSnapshot>(decoded)
+            || std::get<TES3MP::LatestWinsCombatSnapshot>(decoded) != snapshot) return false;
+        for (const float magnitude : {-1.f, 512001.f, std::numeric_limits<float>::infinity(),
+                std::numeric_limits<float>::quiet_NaN()})
+        {
+            pose.telekinesis = magnitude;
+            if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(create())) return false;
+        }
+        return true;
+    }
+
     bool physical_projectiles_round_trip_and_reject_invalid_values()
     {
         std::vector<TES3MP::PhysicalProjectileSnapshot> flights{
@@ -491,13 +515,15 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "object-reach")
+        return object_reach_round_trip_and_bounds() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "player-casts")
         return player_cast_timeline_rejects_invalid_values() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "projectiles")
         return physical_projectiles_round_trip_and_reject_invalid_values()
             && magic_visuals_round_trip_and_reject_invalid_values() ? 0 : 1;
     return command_round_trips_and_is_bounded() && magic_command_round_trips_and_is_bounded()
-            && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
+            && object_reach_round_trip_and_bounds() && snapshots_and_events_round_trip() && semantic_validation_rejects_nonfinite_and_unsorted()
             && actor_casts_reject_malformed_wire_identity() && cast_stages_round_trip_and_reject_invalid_timing()
             && swing_states_round_trip_and_reject_invalid_values()
             && player_cast_timeline_rejects_invalid_values() && knockout_states_round_trip_and_reject_invalid_values() && frame_classes_are_pinned()

@@ -261,10 +261,13 @@ namespace TES3MP::Native
             ~PreparedProjectileLoot();
             bool replaces(size_t owner) const noexcept;
             uint64_t beforeRevision() const noexcept;
+            uint64_t revision() const noexcept;
+            PlainEquipmentValues values(size_t owner) const;
         };
         std::unique_ptr<PreparedProjectileLoot> prepareProjectileLoot(
             const EquipmentSessionValues& values, std::span<const size_t> owners);
         void installProjectileLoot(PreparedProjectileLoot& prepared) noexcept;
+        bool stageSoulCapture(EquipmentSessionValues& values, size_t owner, ESM::RefId soul, int value);
         class PreparedDoor
         {
             friend class EquipmentRuntime;

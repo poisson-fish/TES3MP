@@ -1,3 +1,4 @@
+#include <apps/openmw/mwmechanics/objectmagic.hpp>
 #include "inventory_service.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadmgef.hpp>
@@ -307,8 +308,8 @@ namespace TES3MP::Native
         if (!transaction || !ownsAreaDoorCandidate(candidate.get())) return false;
         auto& lock = transaction->locks[size_t(found - mBinding.mContainers.begin())];
         const auto next = effect == ESM::MagicEffect::Lock
-            ? std::max(lock.level, uint16_t(magnitude))
-            : (lock.level <= magnitude ? uint16_t(0) : lock.level);
+            ? (MWMechanics::lockRaisesLevel(lock.level, magnitude) ? uint16_t(magnitude) : lock.level)
+            : (MWMechanics::openReachesLevel(lock.level, magnitude) ? uint16_t(0) : lock.level);
         if (next != lock.level)
         {
             if (lock.revision >= UINT64_MAX - 1) return false;

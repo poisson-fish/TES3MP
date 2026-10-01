@@ -127,6 +127,7 @@ table ActorPresentationSnapshot {
   movement:[float];
   movement_owned:bool;
   visual_effects:[ushort];
+  telekinesis:float;
 }
 
 table PhysicalProjectileSnapshot {
@@ -173,5 +174,5 @@ table LatestWinsCombatSnapshot {
 }
 
 root_type LatestWinsCombatSnapshot;
-file_identifier "T3D1";
+file_identifier "T3D2";
 file_extension "t3cs";

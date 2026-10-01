@@ -56,7 +56,9 @@ namespace TES3MP::Native
     inline constexpr uint64_t MovementRuleCampaignMagic = 0x5d50434154335354;
     inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
     inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
-    inline constexpr bool hasTravelRules(uint64_t magic) { return magic == TravelRuleCampaignMagic; }
+    inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
+    inline constexpr bool hasTravelRules(uint64_t magic)
+    { return magic == TravelRuleCampaignMagic || magic == ObjectTravelCampaignMagic; }
     inline constexpr bool hasPlayerTravel(uint64_t magic)
     { return magic == PlayerTravelCampaignMagic || hasTravelRules(magic); }
     inline constexpr bool hasMovementRules(uint64_t magic)
@@ -805,7 +807,8 @@ namespace TES3MP::Native
                     || hasKnockoutState(magic))
                 {
                     value.targetKind = getAreaWord(bytes, offset);
-                    if (value.targetKind != 1 && value.targetKind != 2)
+                    if (value.targetKind != 1 && value.targetKind != 2
+                        && !(magic == ObjectTravelCampaignMagic && (value.targetKind == 3 || value.targetKind == 4)))
                         throw std::invalid_argument("Native projectile target kind invalid");
                 }
                 if (magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic))

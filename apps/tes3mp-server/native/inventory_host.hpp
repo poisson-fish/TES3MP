@@ -7,6 +7,10 @@
 
 namespace TES3MP::Native
 {
+    // V69 uses stock intervention selection with explicit player context and bound
+    // destinations, stock object reach, Target/mixed Lock/Open and death-owned
+    // soul capture. It retains V68 fields with a new discriminator; fresh campaign.
+    // T3D2/capability 30 projects Telekinesis into stock client focus selection.
     // V68 persists stock Enable/DisableTeleporting through the bounded world-rule
     // script seam. Mark/Recall still pay when disabled or Recall has no Mark.
     // V67 stores independent player Marks and atomically stages paid Recall.

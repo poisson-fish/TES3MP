@@ -122,6 +122,8 @@ namespace TES3MP::Native
         bool mLevitationEnabled = true; // Trusted world rule; a disabled world removes Levitate effects.
         bool mScriptedMovementRules = false; // V65 persists stock Enable/DisableLevitation results.
         bool mPlayerTravel = false; // V67 persists one Mark per player and paid Recall relocation.
+        bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
+        std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;
         bool mScriptedTravelRules = false; // V68 persists stock Enable/DisableTeleporting results.
         bool mAiDecisions = false; // V57 stock Fight/Flee selection and durable flee movement.
         bool mPlayerAi = false; // V58 content-bound player aggression and selected reach state.
@@ -324,6 +326,8 @@ namespace TES3MP::Native
         bool doorBlocked(const CanonicalServerState& players, ServerTick tick) const;
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
+        uint32_t interactionReach(PlayerId player, bool telekinesisAllowed) const;
+        bool interactionVisible(const Transform& player, uint64_t object) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
         void retireCommittedEffects() noexcept;
 
@@ -492,7 +496,8 @@ namespace TES3MP::Native
             const ActorSceneSnapshot* moving = nullptr, std::span<const WeaponWear> wear = {},
             std::span<const ItemCharge> charges = {},
             const ActorCampaignCombat* stagedCombat = nullptr,
-            const EquipmentRuntime::PreparedRespawn* respawn = nullptr) const;
+            const EquipmentRuntime::PreparedRespawn* respawn = nullptr,
+            const EquipmentRuntime::PreparedProjectileLoot* loot = nullptr) const;
     };
 }
 #endif
