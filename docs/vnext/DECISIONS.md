@@ -278,6 +278,11 @@ meaning. Recovery accepts bounded FLTV and fixes all other authored bytes.
 Spell contact uses an exact identity of the durable door angle, motion state
 and lock, independent of the transient presentation motion counter; revalidate
 at release before payment. Baselines project the committed lock to clients.
+V56c binds one ordinary unkeyed container. Its bounded lock level and contact
+revision persist in the area image beside doors; inventory stack revision stays
+separate. A direct take/put checks the committed lock, while Touch casting
+revalidates contact before cost. Container baselines carry both lock fields
+through chunk assembly so stock activation follows the server state.
 
 **AI decisions (V57).** Persist the selected actor's Flee target, deadline and
 navigation destination with combat and RNG. Reconcile bounded AI-only passive

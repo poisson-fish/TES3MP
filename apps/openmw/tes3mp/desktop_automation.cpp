@@ -737,12 +737,15 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto previousPlayerCount = mNativePlayerCount;
             const auto previousContainerCount = mNativeContainerCount;
+            const auto previousContainerContact = mNativeContainerContact;
             if (mRole == DesktopAutomationRole::NativeTraversal)
             {
                 mTraversalGround = groundItems;
                 mNativeContainerCount.reset();
                 mNativeContainerId.reset();
                 mNativeContainerStacks.clear();
+                mNativeContainerLock = 0;
+                mNativeContainerContact = 1;
             }
             const auto count = [](const auto& stacks) {
                 std::uint32_t total = 0;
@@ -757,6 +760,8 @@ namespace TES3MP::OpenMWAdapter
                 mNativeContainerCount = count(containers.front().stacks);
                 mNativeContainerStacks = containers.front().stacks;
                 mNativeContainerId = containers.front().container;
+                mNativeContainerLock = containers.front().lockLevel;
+                mNativeContainerContact = containers.front().contactRevision;
             }
             mNativeRevision = player.revision.value();
             // Resume baselines can be presented before the final readiness lane
@@ -764,7 +769,8 @@ namespace TES3MP::OpenMWAdapter
             if (player.header.targetSessionGeneration > SessionGeneration::initial())
                 mNativeInventoryAfterResume = true;
             if (mRole == DesktopAutomationRole::NativeTraversal
-                && (mNativePlayerCount != previousPlayerCount || mNativeContainerCount != previousContainerCount))
+                && (mNativePlayerCount != previousPlayerCount || mNativeContainerCount != previousContainerCount
+                    || mNativeContainerContact != previousContainerContact))
                 writeNativeInventory("traversal_inventory");
             return applied;
         }
@@ -1280,6 +1286,8 @@ namespace TES3MP::OpenMWAdapter
         mNativePlayerCount.reset();
         mNativeContainerCount.reset();
         mNativeContainerId.reset();
+        mNativeContainerLock = 0;
+        mNativeContainerContact = 1;
         mNativeInventoryAfterResume = false;
     }
 

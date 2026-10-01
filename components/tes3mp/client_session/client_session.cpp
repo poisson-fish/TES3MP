@@ -564,7 +564,9 @@ namespace TES3MP
                 && chunks.header.canonicalRevision == baseline.header.canonicalRevision
                 && chunks.header.chunkCount == baseline.header.chunkCount && chunks.container == baseline.container
                 && chunks.cell == baseline.cell && chunks.position == baseline.position
-                && chunks.revision == baseline.revision && chunks.capacityWeight == baseline.capacityWeight;
+                && chunks.revision == baseline.revision && chunks.capacityWeight == baseline.capacityWeight
+                && chunks.lockLevel == baseline.lockLevel
+                && chunks.contactRevision == baseline.contactRevision;
         };
         if (pending == mPendingContainerInventories.end() || !sameSeries(pending->second))
         {
@@ -576,7 +578,7 @@ namespace TES3MP
                 return InventoryReplicationReceiveResult::InvalidChunkSequence;
             auto [inserted, unused] = mPendingContainerInventories.insert_or_assign(baseline.container,
                 ContainerInventoryChunks{ baseline.header, baseline.container, baseline.cell, baseline.position,
-                    baseline.revision, baseline.capacityWeight,
+                    baseline.revision, baseline.capacityWeight, baseline.lockLevel, baseline.contactRevision,
                     std::vector<std::optional<ReliableContainerInventoryBaseline>>(baseline.header.chunkCount) });
             (void)unused;
             pending = inserted;
@@ -600,7 +602,8 @@ namespace TES3MP
         header.chunkCount = 1;
         auto created
             = ReliableContainerInventoryBaseline::create(header, pending->second.container, pending->second.cell,
-                pending->second.position, pending->second.revision, pending->second.capacityWeight, stacks, equipment);
+                pending->second.position, pending->second.revision, pending->second.capacityWeight, stacks, equipment,
+                pending->second.lockLevel, pending->second.contactRevision);
         auto* complete = std::get_if<ReliableContainerInventoryBaseline>(&created);
         if (!complete)
             return InventoryReplicationReceiveResult::InvalidChunkSequence;

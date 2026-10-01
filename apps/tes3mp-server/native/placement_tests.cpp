@@ -26,6 +26,7 @@ namespace TES3MP::Native::Testing
                 throw std::runtime_error("Could not write synthetic placement geometry");
         };
         write(new osg::ShapeDrawable(new osg::Box({3,4,5},2,4,6)), "placement-item.osgt");
+        write(new osg::ShapeDrawable(new osg::Box({0,0,30},70,45,60)), "placement-container.osgt");
         write(new osg::ShapeDrawable(new osg::Box({8,10,5},8,12,6)), "placement-gold.osgt");
         const auto plane = [](float half) {
             const osg::Vec3f vertices[]{{-half,-half,0},{half,-half,0},{half,half,0},{-half,half,0}};

@@ -1697,6 +1697,8 @@ namespace TES3MP::Native
         }
         const auto sharedIndex = container(command.containerId);
         const auto& shared = mBinding.mContainers[sharedIndex];
+        if (mContainerLocks[sharedIndex].level)
+            throw std::invalid_argument("Locked native container rejects inventory transfer");
         const auto sharedOwner = mRuntime.ownerPtr(sharedIndex + 2);
         const bool selectedCorpse = mCombat && sharedIndex + 2 == mCombatNpcOwner
             && mCombat->actors[2][8][2] <= 0;
@@ -2300,6 +2302,12 @@ namespace TES3MP::Native
                 ? &mNeighborLives[npcTarget - 3] : nullptr;
         const auto doorTarget = std::ranges::find(mBinding.mDoors, use.targetId,
             &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
+        const auto containerTarget = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) {
+            return value.mId.value() == use.targetId && value.mPlacement
+                && mRuntime.mStore.get<ESM::Container>().search(value.mBase);
+        });
+        const bool objectTarget = use.targetKind == MagicUseTargetKind::Door
+            || use.targetKind == MagicUseTargetKind::Container;
         const bool validDoor = use.targetKind == MagicUseTargetKind::Door && player
             && doorTarget != mBinding.mDoors.end() && mBinding.mStreamExteriors
             && player->transform().cell() == doorTarget->mCell
@@ -2323,6 +2331,27 @@ namespace TES3MP::Native
                 return distance <= reach * reach
                     && mBinding.mNavigatingActor->lineOfSightToDoor(origin, endpoint, use.targetId);
             }();
+        const bool validContainer = use.targetKind == MagicUseTargetKind::Container && mBinding.mContainerMagic && player
+            && containerTarget != mBinding.mContainers.end() && mBinding.mStreamExteriors
+            && player->transform().cell() == containerTarget->mCell
+            && containerTarget->mPlacement->mOwner.empty() && containerTarget->mPlacement->mFaction.empty()
+            && mActiveAreas.size() > worldIndex(containerTarget->mCell)
+            && mActiveAreas[worldIndex(containerTarget->mCell)]
+            && use.expectedTargetRevision.value()
+                == mContainerLocks[size_t(containerTarget - mBinding.mContainers.begin())].revision
+            && [&] {
+                const auto& position = player->transform().position();
+                const std::array<float, 3> origin{float(double(position.x()) / 1024),
+                    float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 64.f};
+                const auto& ref = *containerTarget->mPlacement;
+                const std::array<float, 3> endpoint{ref.mPos.pos[0], ref.mPos.pos[1], ref.mPos.pos[2] + 64.f};
+                const float reach = mRuntime.mStore.get<ESM::GameSetting>()
+                    .find("fCombatDistance")->mValue.getFloat();
+                float distance = 0;
+                for (size_t axis = 0; axis < 3; ++axis)
+                    distance += (origin[axis] - endpoint[axis]) * (origin[axis] - endpoint[axis]);
+                return distance <= reach * reach && mBinding.mNavigatingActor->lineOfSight(origin, endpoint);
+            }();
         if (!player || session->sessionGeneration() != proposal.sessionGeneration()
             || use.sessionId != proposal.sessionId() || use.sessionGeneration != proposal.sessionGeneration()
             || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
@@ -2337,7 +2366,7 @@ namespace TES3MP::Native
                 && (use.sourceKind != MagicUseSourceKind::EnchantedItem || !mBinding.mMagicItemUse))
             || !use.sourceId || (mBinding.mMagicProjectileCollection && !use.commandId.value())
             || (mBinding.mMagicProjectileCollection
-                ? ((use.targetKind != MagicUseTargetKind::Self && use.targetKind != MagicUseTargetKind::Door
+                ? ((use.targetKind != MagicUseTargetKind::Self && !objectTarget
                         && mProjectiles.size() >= MaximumActorProjectiles)
                     || std::ranges::any_of(mProjectiles, [&](const auto& pending) {
                         return pending.caster == player->playerId().value()
@@ -2351,7 +2380,7 @@ namespace TES3MP::Native
                         ? (!targetLife || targetLife->respawnTick || mCombat->actors[npcTarget][8][2] <= 0
                             || use.sourceServerTick.value() < targetLife->bornTick
                             || use.expectedTargetRevision.value() < targetLife->bornTick)
-                        : (use.targetKind == MagicUseTargetKind::Door ? !validDoor
+                        : (objectTarget ? !(validDoor || validContainer)
                             : (use.targetKind != MagicUseTargetKind::Player || !mBinding.mMagicPlayerTarget
                             || use.targetId == player->playerId().value()
                             || std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) {
@@ -2368,7 +2397,7 @@ namespace TES3MP::Native
             || (use.targetKind == MagicUseTargetKind::Self
                 && use.expectedCasterRevision != use.expectedTargetRevision)
             || use.expectedCasterRevision.value() > tick.value()
-            || (use.targetKind != MagicUseTargetKind::Door
+            || (!objectTarget
                 && use.expectedTargetRevision.value() > tick.value())
             || mCombat->actors[actor(player->playerId())][8][2] <= 0)
             return {};
@@ -2381,12 +2410,14 @@ namespace TES3MP::Native
         PlayerId player, const ClientMagicUseCommand& use, const ActorCampaignCombat& combat,
         std::span<const ActorCampaignTimedEffect> effectsState, const PreparedNativeInventory* inventory)
     {
+        const bool objectTarget = use.targetKind == MagicUseTargetKind::Door
+            || use.targetKind == MagicUseTargetKind::Container;
         const auto acceptsObjectTarget = [&](const PreparedInstantEffects& effects) {
             const auto objectEffect = [](const ESM::ENAMstruct& effect) {
                 return effect.mEffectID == ESM::MagicEffect::Lock
                     || effect.mEffectID == ESM::MagicEffect::Open;
             };
-            if (use.targetKind == MagicUseTargetKind::Door)
+            if (use.targetKind == MagicUseTargetKind::Door || use.targetKind == MagicUseTargetKind::Container)
                 return effects.effects.size() == 1 && objectEffect(effects.effects.front())
                     && effects.effects.front().mRange == ESM::RT_Touch
                     && effects.effects.front().mArea == 0 && effects.effects.front().mDuration == 0;
@@ -2413,7 +2444,7 @@ namespace TES3MP::Native
             auto prepared = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge,
                 mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
                 mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                use.targetKind == MagicUseTargetKind::Door);
+                objectTarget);
             if (!prepared || !prepared->affordable || !acceptsObjectTarget(prepared->effects)) return {};
             const auto& effects = prepared->effects;
             if (std::ranges::any_of(effects.effects,
@@ -2443,7 +2474,7 @@ namespace TES3MP::Native
         if (!selected) return {};
         auto prepared = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle,
             mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
-            use.targetKind == MagicUseTargetKind::Door);
+            objectTarget);
         if (!prepared || !acceptsObjectTarget(prepared->effects)
             || std::ranges::any_of(prepared->effects.effects,
                 [&](const auto& effect) { return (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty()))
@@ -3298,7 +3329,8 @@ namespace TES3MP::Native
                                     const auto plan = spell ? prepareInstantSpell(*spell, mRuntime.mStore, true,
                                         mBinding.mExpandedEffects, mBinding.mSpecialConditions,
                                         mBinding.mMovementEffects,
-                                        cast.targetKind == uint64_t(MagicUseTargetKind::Door)) : std::nullopt;
+                                        cast.targetKind == uint64_t(MagicUseTargetKind::Door)
+                                            || cast.targetKind == uint64_t(MagicUseTargetKind::Container)) : std::nullopt;
                                     if (plan) effects = plan->effects;
                                 }
                         }
@@ -3315,17 +3347,24 @@ namespace TES3MP::Native
                                         effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true,
                                             mBinding.mExpandedEffects, false, mBinding.mSpecialConditions,
                                             mBinding.mMovementEffects,
-                                            cast.targetKind == uint64_t(MagicUseTargetKind::Door));
+                                            cast.targetKind == uint64_t(MagicUseTargetKind::Door)
+                                                || cast.targetKind == uint64_t(MagicUseTargetKind::Container));
                                 }
                         }
                         else continue; // Released items may have been consumed or transferred.
                         if (!effects || uint64_t(effects->effects.front().mRange) != cast.range
                             || ((cast.targetKind == uint64_t(MagicUseTargetKind::Self)) != effects->onlyRange(ESM::RT_Self)))
                             throw std::invalid_argument("Saved player cast source/range invalid");
-                        if (cast.targetKind == uint64_t(MagicUseTargetKind::Door)
-                            && (std::ranges::none_of(mBinding.mDoors, [&](const auto& door) {
-                                    return door.mId == cast.target;
-                                }) || effects->effects.size() != 1
+                        if ((cast.targetKind == uint64_t(MagicUseTargetKind::Door)
+                                || cast.targetKind == uint64_t(MagicUseTargetKind::Container))
+                            && ((cast.targetKind == uint64_t(MagicUseTargetKind::Door)
+                                    ? std::ranges::none_of(mBinding.mDoors, [&](const auto& door) {
+                                        return door.mId == cast.target;
+                                    })
+                                    : std::ranges::none_of(mBinding.mContainers, [&](const auto& container) {
+                                        return container.mId.value() == cast.target && container.mPlacement
+                                            && mRuntime.mStore.get<ESM::Container>().search(container.mBase);
+                                    })) || effects->effects.size() != 1
                                 || (effects->effects.front().mEffectID != ESM::MagicEffect::Lock
                                     && effects->effects.front().mEffectID != ESM::MagicEffect::Open)
                                 || effects->effects.front().mRange != ESM::RT_Touch
@@ -6402,7 +6441,9 @@ namespace TES3MP::Native
                         ? victimLife(npcVictim(input.targetId)).generation
                         : input.targetKind == MagicUseTargetKind::Door
                             ? doorContactRevision(*mAreaDoors[size_t(std::ranges::find(mBinding.mDoors, input.targetId,
-                                &InventoryServiceBinding::OrdinaryDoorPlacement::mId) - mBinding.mDoors.begin())].state) : 1};
+                                &InventoryServiceBinding::OrdinaryDoorPlacement::mId) - mBinding.mDoors.begin())].state)
+                        : input.targetKind == MagicUseTargetKind::Container
+                            ? mContainerLocks[container(ContainerId::fromValue(input.targetId))].revision : 1};
             }
             else
             {
@@ -6443,6 +6484,16 @@ namespace TES3MP::Native
                 const auto& door = *mAreaDoors[size_t(found - mBinding.mDoors.begin())].state;
                 if (state.targetLife != doorContactRevision(door)) return false;
                 endpoint = {door.mPosition.pos[0], door.mPosition.pos[1], door.mPosition.pos[2] + 64.f};
+            }
+            else if (state.targetKind == uint64_t(MagicUseTargetKind::Container))
+            {
+                const auto index = container(ContainerId::fromValue(state.target));
+                const auto& placed = mBinding.mContainers[index];
+                if (!placed.mPlacement || state.targetLife != mContainerLocks[index].revision
+                    || placed.mCell != players.findPlayer(PlayerId::fromValue(state.actor).value())->transform().cell())
+                    return false;
+                endpoint = {placed.mPlacement->mPos.pos[0], placed.mPlacement->mPos.pos[1],
+                    placed.mPlacement->mPos.pos[2] + 64.f};
             }
             else
             {
@@ -7361,16 +7412,20 @@ namespace TES3MP::Native
                         std::max<uint64_t>(1, context.identity.life), std::max<uint64_t>(1, cast.commandId),
                         magicVisualRecord(uint64_t(cast.sourceKind), spellEffectSource), *origin, 3});
                 }
-            if (launch.succeeded && cast.targetKind == MagicUseTargetKind::Door)
+            if (launch.succeeded && (cast.targetKind == MagicUseTargetKind::Door
+                    || cast.targetKind == MagicUseTargetKind::Container))
             {
                 const auto& effect = spellRecord.effects.effects.front();
                 const int magnitude = int(MWMechanics::rollEffectMagnitude(
                     float(effect.mMagnMin), float(effect.mMagnMax), rng));
-                if (!stageDoorSpell(command, cast.targetId, effect.mEffectID, magnitude))
+                if (!(cast.targetKind == MagicUseTargetKind::Door
+                        ? stageDoorSpell(command, cast.targetId, effect.mEffectID, magnitude)
+                        : stageContainerSpell(command, cast.targetId, effect.mEffectID, magnitude)))
                     throw std::invalid_argument("Native door spell target changed during launch");
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
             if (launch.succeeded && cast.targetKind != MagicUseTargetKind::Door
+                && cast.targetKind != MagicUseTargetKind::Container
                 && mBinding.mNpcCastLifecycle && caster.getHealth().getCurrent() > 0)
             {
                 const auto origin = combatPosition(owner);
@@ -8585,11 +8640,20 @@ namespace TES3MP::Native
             moving && moving->combat ? &*moving->combat : nullptr,
             moving ? moving->respawn.get() : nullptr);
         if (result)
+        {
+            for (auto& baseline : result->containers)
+            {
+                const auto index = container(baseline.container);
+                const auto lock = areaContainerLock(index, areaDoors);
+                baseline.lockLevel = lock.level;
+                baseline.contactRevision = lock.revision;
+            }
             for (auto& ground : result->groundItems)
             {
                 ground.doors = areaDoorSnapshots(ground.cell, areaDoors);
                 for (auto& neighbor : ground.neighbors) neighbor.doors = areaDoorSnapshots(neighbor.cell, areaDoors);
             }
+        }
         if (result && result->equipment && mBinding.mNavigatingActor)
         {
             const auto state = moving && moving->actor ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();

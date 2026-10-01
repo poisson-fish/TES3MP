@@ -39,14 +39,24 @@ namespace TES3MP::Native
             auto state = std::make_shared<const ESM::DoorState>(binding.door().initialState());
             mAreaDoors.push_back({std::move(binding), std::move(state)});
         }
+        for (const auto& container : mBinding.mContainers)
+        {
+            const auto* placed = container.mPlacement ? &*container.mPlacement : nullptr;
+            if (placed && (placed->mLockLevel < 0 || placed->mLockLevel > 1000
+                    || placed->mIsLocked != (placed->mLockLevel > 0)))
+                throw std::invalid_argument("Native container authored lock outside bounds");
+            mContainerLocks.push_back({uint16_t(placed ? placed->mLockLevel : 0), 1});
+        }
     }
 
     EquipmentBytes InventoryService::sealInventory(std::span<const char> core,
-        std::span<const std::shared_ptr<const ESM::DoorState>> doors) const
+        std::span<const std::shared_ptr<const ESM::DoorState>> doors,
+        std::span<const ContainerLock> locks) const
     {
         if (!mBinding.mStreamExteriors) return {core.begin(), core.end()};
         if (core.empty() || core.size() > MaximumNativeInventoryImageBytes - 24
-            || (!doors.empty() && doors.size() != mAreaDoors.size()))
+            || (!doors.empty() && doors.size() != mAreaDoors.size())
+            || (!locks.empty() && locks.size() != mContainerLocks.size()))
             throw std::invalid_argument("Native area image shape invalid");
         EquipmentBytes result;
         put(result, mBinding.mActorSelections ? SpawnAreaMagic : AreaMagic);
@@ -67,6 +77,17 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native area image exceeds campaign budget");
             put(result, mBinding.mDoors[i].mId); put(result, encoded.size());
             result.insert(result.end(), encoded.begin(), encoded.end());
+        }
+        if (mBinding.mContainerMagic) put(result, mContainerLocks.size());
+        for (size_t i = 0; mBinding.mContainerMagic && i < mContainerLocks.size(); ++i)
+        {
+            const auto lock = locks.empty() ? mContainerLocks[i] : locks[i];
+            if (lock.level > 1000 || !lock.revision || lock.revision == UINT64_MAX
+                || result.size() > MaximumNativeInventoryImageBytes - 24)
+                throw std::invalid_argument("Native container lock image invalid");
+            put(result, mBinding.mContainers[i].mId.value());
+            put(result, lock.level);
+            put(result, lock.revision);
         }
         if (result.size() > MaximumNativeInventoryImageBytes)
             throw std::invalid_argument("Native area image exceeds campaign budget");
@@ -117,10 +138,20 @@ namespace TES3MP::Native
             mAreaDoors[i].binding.preflight(door);
             images.push_back(door);
         }
+        if (mBinding.mContainerMagic && get(bytes, offset) != mContainerLocks.size())
+            throw std::invalid_argument("Native container lock count differs from bound campaign");
+        std::vector<ContainerLock> locks;
+        for (size_t i = 0; mBinding.mContainerMagic && i < mContainerLocks.size(); ++i)
+        {
+            const auto id = get(bytes, offset), level = get(bytes, offset), revision = get(bytes, offset);
+            if (id != mBinding.mContainers[i].mId.value() || level > 1000 || !revision || revision == UINT64_MAX)
+                throw std::invalid_argument("Native container lock identity or state invalid");
+            locks.push_back({uint16_t(level), revision});
+        }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing native area image bytes");
         std::vector<std::shared_ptr<const ESM::DoorState>> states;
         for (size_t i = 0; i < count; ++i) states.push_back(decodeDoor(images[i], mAreaDoors[i].binding));
-        auto sealed = sealInventory(core, states);
+        auto sealed = sealInventory(core, states, locks);
         if (!std::ranges::equal(sealed, bytes)) throw std::invalid_argument("Noncanonical native area image");
         std::unique_ptr<InteriorActorScene::Prepared> step;
         if (mBinding.mNavigatingActor)
@@ -134,6 +165,7 @@ namespace TES3MP::Native
         std::unique_ptr<const EquipmentSessionValues> values;
         mRuntime.restoreSession(std::move(accepted), references, values, restored, validate);
         for (size_t i = 0; i < count; ++i) mAreaDoors[i].state.swap(states[i]);
+        if (mBinding.mContainerMagic) mContainerLocks.swap(locks);
         mCoreImage.swap(restored);
         mImage.swap(sealed);
         if (step) mBinding.mNavigatingActor->install(*step);
@@ -149,11 +181,13 @@ namespace TES3MP::Native
         std::vector<uint64_t> motions;
         std::vector<bool> blocked;
         std::vector<bool> avoid;
+        std::vector<ContainerLock> locks;
         bool consumed = false;
         explicit AreaDoorTransaction(InventoryService& owner) : service(owner), before(owner.mImage)
         {
             for (const auto& door : owner.mAreaDoors)
             { states.push_back(door.state); motions.push_back(door.motion); blocked.push_back(door.blocked); avoid.push_back(false); }
+            locks = owner.mContainerLocks;
         }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
@@ -171,7 +205,7 @@ namespace TES3MP::Native
                     const auto size = get(bytes, offset), count = get(bytes, offset);
                     if (size > bytes.size() - offset || count != states.size())
                         throw std::invalid_argument("Composed door inventory bounds mismatch");
-                    image = service.sealInventory(bytes.subspan(offset, size_t(size)), states);
+                    image = service.sealInventory(bytes.subspan(offset, size_t(size)), states, locks);
                     return persist(std::as_bytes(std::span(image)));
                 };
                 const auto result = command ? command->commit(compose) : persist(std::as_bytes(std::span(image)));
@@ -186,6 +220,7 @@ namespace TES3MP::Native
                         service.mAreaDoors[i].motion = motions[i];
                         service.mAreaDoors[i].blocked = blocked[i];
                     }
+                    if (service.mBinding.mContainerMagic) service.mContainerLocks.swap(locks);
                     service.mImage.swap(image);
                 }
                 return result;
@@ -214,7 +249,7 @@ namespace TES3MP::Native
         if (change.mState.mRef.mLockLevel == result->states[index]->mRef.mLockLevel
             && change.mState.mRef.mIsLocked == result->states[index]->mRef.mIsLocked) return {};
         result->states[index] = std::make_shared<const ESM::DoorState>(change.mState);
-        result->image = sealInventory(mCoreImage, result->states);
+        result->image = sealInventory(mCoreImage, result->states, result->locks);
         return result;
     }
 
@@ -230,7 +265,7 @@ namespace TES3MP::Native
         if (!candidate)
         {
             auto created = std::make_unique<AreaDoorTransaction>(*this);
-            created->image = sealInventory(mCoreImage, created->states);
+            created->image = sealInventory(mCoreImage, created->states, created->locks);
             candidate = std::move(created);
         }
         auto* transaction = dynamic_cast<AreaDoorTransaction*>(candidate.get());
@@ -245,7 +280,40 @@ namespace TES3MP::Native
             if (transaction->motions[index] == std::numeric_limits<uint64_t>::max()) return false;
             transaction->states[index] = std::make_shared<const ESM::DoorState>(change.mState);
             ++transaction->motions[index];
-            transaction->image = sealInventory(mCoreImage, transaction->states);
+            transaction->image = sealInventory(mCoreImage, transaction->states, transaction->locks);
+        }
+        return true;
+    }
+
+    bool InventoryService::stageContainerSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
+        uint64_t placement, ESM::RefId effect, int magnitude)
+    {
+        if (!mBinding.mContainerMagic
+            || (effect != ESM::MagicEffect::Lock && effect != ESM::MagicEffect::Open)
+            || magnitude < 1 || magnitude > 1000) return false;
+        const auto found = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) {
+            return value.mId.value() == placement && value.mPlacement
+                && mRuntime.mStore.get<ESM::Container>().search(value.mBase);
+        });
+        if (found == mBinding.mContainers.end()) return false;
+        if (!candidate)
+        {
+            auto created = std::make_unique<AreaDoorTransaction>(*this);
+            created->image = sealInventory(mCoreImage, created->states, created->locks);
+            candidate = std::move(created);
+        }
+        auto* transaction = dynamic_cast<AreaDoorTransaction*>(candidate.get());
+        if (!transaction || !ownsAreaDoorCandidate(candidate.get())) return false;
+        auto& lock = transaction->locks[size_t(found - mBinding.mContainers.begin())];
+        const auto next = effect == ESM::MagicEffect::Lock
+            ? std::max(lock.level, uint16_t(magnitude))
+            : (lock.level <= magnitude ? uint16_t(0) : lock.level);
+        if (next != lock.level)
+        {
+            if (lock.revision >= UINT64_MAX - 1) return false;
+            lock.level = next;
+            ++lock.revision;
+            transaction->image = sealInventory(mCoreImage, transaction->states, transaction->locks);
         }
         return true;
     }
@@ -297,7 +365,7 @@ namespace TES3MP::Native
             changed = true;
         }
         if (!changed) return {};
-        result->image = sealInventory(mCoreImage, result->states);
+        result->image = sealInventory(mCoreImage, result->states, result->locks);
         return result;
     }
 
@@ -345,5 +413,14 @@ namespace TES3MP::Native
             }
         std::ranges::sort(result, {}, &NativeDoorSnapshot::placement);
         return result;
+    }
+
+    InventoryService::ContainerLock InventoryService::areaContainerLock(
+        size_t index, const PreparedNativeInventory* candidate) const
+    {
+        const auto* prepared = dynamic_cast<const AreaDoorTransaction*>(candidate);
+        if (index >= mContainerLocks.size() || (prepared && !ownsAreaDoorCandidate(candidate)))
+            throw std::invalid_argument("Stale container lock projection");
+        return prepared ? prepared->locks[index] : mContainerLocks[index];
     }
 }

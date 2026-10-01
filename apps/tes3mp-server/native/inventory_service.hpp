@@ -94,6 +94,7 @@ namespace TES3MP::Native
         bool mCombatResolution = false;
         bool mNpcLifecycle = false;
         bool mMagicUse = false;
+        bool mContainerMagic = false; // The 56c descriptor binds one ordinary container into the object spell image.
         bool mMagicProjectile = false;
         bool mMagicItemUse = false;
         bool mMagicTimed = false;
@@ -283,18 +284,29 @@ namespace TES3MP::Native
             std::array<std::optional<ClientDoorObstruction>, 2> reports;
         };
         std::vector<AreaDoor> mAreaDoors;
+        struct ContainerLock
+        {
+            uint16_t level = 0;
+            uint64_t revision = 1;
+            friend bool operator==(const ContainerLock&, const ContainerLock&) = default;
+        };
+        std::vector<ContainerLock> mContainerLocks;
         EquipmentBytes mCoreImage;
         EquipmentBytes sealInventory(std::span<const char> core,
-            std::span<const std::shared_ptr<const ESM::DoorState>> doors = {}) const;
+            std::span<const std::shared_ptr<const ESM::DoorState>> doors = {},
+            std::span<const ContainerLock> locks = {}) const;
         void initializeAreaDoors();
         std::unique_ptr<PreparedNativeInventory> prepareAreaDoor(size_t index, bool activation,
             const CanonicalServerState& players, ServerTick tick, float seconds,
             std::unique_ptr<PreparedNativeInventory> command = {});
         std::vector<NativeDoorSnapshot> areaDoorSnapshots(CellId cell, const PreparedNativeInventory* candidate) const;
+        ContainerLock areaContainerLock(size_t index, const PreparedNativeInventory* candidate) const;
         const PreparedNativeInventory* areaDoorCommand(const PreparedNativeInventory* candidate) const;
         std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
         bool stageDoorSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
+            uint64_t placement, ESM::RefId effect, int magnitude);
+        bool stageContainerSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
             uint64_t placement, ESM::RefId effect, int magnitude);
         void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
             std::span<const char> actor = {},

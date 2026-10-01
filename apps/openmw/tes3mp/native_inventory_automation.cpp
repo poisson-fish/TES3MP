@@ -163,6 +163,13 @@ namespace TES3MP::OpenMWAdapter
                 << "\",\"player_count\":" << mNativePlayerCount.value_or(0)
                 << ",\"container_count\":" << mNativeContainerCount.value_or(0)
                 << ",\"container_id\":" << (mNativeContainerId ? mNativeContainerId->value() : 0)
+                << ",\"container_lock\":" << mNativeContainerLock
+                << ",\"container_contact_revision\":" << mNativeContainerContact
+                << ",\"rendered_container_locked\":" << (mNativeContainerId
+                    && !placedContainer(*mNativeContainerId).isEmpty()
+                    && placedContainer(*mNativeContainerId).getCellRef().isLocked() ? "true" : "false")
+                << ",\"container_window_open\":" << (MWBase::Environment::get().getWindowManager()
+                    ->containsMode(MWGui::GM_Container) ? "true" : "false")
                 << ",\"inventory_revision\":" << mNativeRevision << ",\"resumes\":" << mResumes;
         const auto write = [&](const char* name, const auto& stacks) {
             mOutput << ",\"" << name << "\":[";
@@ -379,7 +386,7 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
-            || action == "castdoor"
+            || action == "castdoor" || action == "castcontainer"
             || action == "dialogue" || action == "dialoguestart")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
@@ -472,7 +479,7 @@ namespace TES3MP::OpenMWAdapter
             if (wm->isGuiMode() || !world->getPlayer().interceptRangedRelease(strength))
                 throw std::runtime_error("Traversal ranged release requires game focus and the desktop input hook");
         }
-        else if (action == "cast" || action == "castactor" || action == "castdoor")
+        else if (action == "cast" || action == "castactor" || action == "castdoor" || action == "castcontainer")
         {
             MWWorld::Ptr target;
             if (action == "castactor")
@@ -491,10 +498,18 @@ namespace TES3MP::OpenMWAdapter
                 if (!mPresentation.captureMagicUse(ESM::RefId::stringRefId(record), {}, target))
                     throw std::runtime_error("Traversal focused door has no authoritative magic capture");
             }
+            if (action == "castcontainer")
+            {
+                target = world->getFocusObject();
+                if (target.isEmpty() || target.getType() != ESM::Container::sRecordId)
+                    throw std::runtime_error("Traversal cast has no focused container");
+                if (!mPresentation.captureMagicUse(ESM::RefId::stringRefId(record), {}, target))
+                    throw std::runtime_error("Traversal focused container has no authoritative magic capture");
+            }
             // Joining/scene presentation may still be installing the normal
             // input hook. Keep this command pending until the desktop can act;
             // the external capture deadline bounds readiness retries.
-            if ((action == "castactor" || action == "castdoor") && (wm->isGuiMode()
+            if ((action == "castactor" || action == "castdoor" || action == "castcontainer") && (wm->isGuiMode()
                     || !world->getPlayer().interceptMagicCast(true, ESM::RefId::stringRefId(record), {}, target)))
                 return;
             if (action == "cast" && (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(
@@ -514,6 +529,8 @@ namespace TES3MP::OpenMWAdapter
             if (corpse != targets.end() && std::ranges::count_if(targets, dead) == 1)
                 ptr = *corpse;
             if (ptr.isEmpty()) throw std::runtime_error("Traversal shared container missing");
+            if (ptr.getCellRef().isLocked())
+                throw std::runtime_error("Traversal shared container is locked");
             wm->pushGuiMode(MWGui::GM_Container, ptr);
         }
         else if (action == "takeall")

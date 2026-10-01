@@ -1084,6 +1084,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ReliableGroundItemBaseline> presentedGroundBaseline;
         std::map<ItemStackId, ObservedInventoryStack> observedInventoryStacks;
         std::map<ContainerId, ContainerRevision> observedContainerRevisions;
+        std::map<ContainerId, uint64_t> observedContainerContacts;
         MWWorld::InventoryRecordMap nativeItemRecords, nativeSoulRecords;
         std::map<ItemStackId, MWWorld::Ptr> presentedGroundItems;
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
@@ -1166,6 +1167,7 @@ namespace TES3MP::OpenMWAdapter
             presentedGroundItems.clear();
             observedInventoryStacks.clear();
             observedContainerRevisions.clear();
+            observedContainerContacts.clear();
             observedPlayerInventoryRevision.reset();
             observedInventoryCanonicalRevision.reset();
             combatSnapshot.reset();
@@ -1786,6 +1788,16 @@ namespace TES3MP::OpenMWAdapter
                     return result;
                 }
                 return std::nullopt;
+            }
+            if (target.getType() == ESM::Container::sRecordId)
+            {
+                const auto id = containerId(target);
+                const auto contact = id ? observedContainerContacts.find(*id) : observedContainerContacts.end();
+                if (contact == observedContainerContacts.end()) return std::nullopt;
+                result.targetKind = MagicUseTargetKind::Container;
+                result.targetId = id->value();
+                result.expectedTargetRevision = CombatRevision::fromValue(contact->second).value();
+                return result;
             }
 
             const auto actor = std::ranges::find_if(actorRemotes,
@@ -2985,7 +2997,10 @@ namespace TES3MP::OpenMWAdapter
             {
                 desiredContainers.emplace(baseline.container, baseline.revision);
                 const auto prior = observedContainerRevisions.find(baseline.container);
-                if (prior != observedContainerRevisions.end() && prior->second == baseline.revision)
+                const auto priorContact = observedContainerContacts.find(baseline.container);
+                if (prior != observedContainerRevisions.end() && prior->second == baseline.revision
+                    && priorContact != observedContainerContacts.end()
+                    && priorContact->second == baseline.contactRevision)
                     continue;
                 const auto localMapping = std::ranges::lower_bound(
                     mapping->containers, baseline.container, {}, &DesktopContainerMapping::id);
@@ -3023,6 +3038,13 @@ namespace TES3MP::OpenMWAdapter
                     return ProviderResult::ContentMappingFailed;
                 if (ptr.isEmpty())
                     continue;
+                if (ptr.getType() == ESM::Container::sRecordId)
+                {
+                    if (baseline.lockLevel) ptr.getCellRef().lock(baseline.lockLevel);
+                    else { ptr.getCellRef().setLockLevel(0); ptr.getCellRef().setLocked(false); }
+                }
+                else if (baseline.lockLevel != 0)
+                    return ProviderResult::ContentMappingFailed;
                 auto& store = ptr.getClass().getContainerStore(ptr);
                 // Content-defined corpses and the selected native NPC may own
                 // loot. A live local actor must not become a loot container.
@@ -3070,6 +3092,7 @@ namespace TES3MP::OpenMWAdapter
                 // callbacks; an already-open loot window still needs a refresh.
                 MWBase::Environment::get().getWindowManager()->inventoryUpdated(ptr);
                 observedContainerRevisions.insert_or_assign(baseline.container, baseline.revision);
+                observedContainerContacts.insert_or_assign(baseline.container, baseline.contactRevision);
             }
             for (const auto& [id, revision] : observedContainerRevisions)
             {
@@ -3081,6 +3104,8 @@ namespace TES3MP::OpenMWAdapter
                 nativeRemotes.erase(remote);
             }
             std::erase_if(observedContainerRevisions,
+                [&](const auto& value) { return !desiredContainers.contains(value.first); });
+            std::erase_if(observedContainerContacts,
                 [&](const auto& value) { return !desiredContainers.contains(value.first); });
             std::erase_if(observedInventoryStacks, [&](const auto& value) {
                 return value.second.container && !desiredContainers.contains(*value.second.container);

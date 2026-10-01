@@ -276,12 +276,15 @@ namespace TES3MP
     std::variant<ReliableContainerInventoryBaseline, InventoryReplicationDecodeError>
     ReliableContainerInventoryBaseline::create(InventoryBaselineHeader header, ContainerId container, CellId cell,
         Position3 position, ContainerRevision revision, std::uint32_t capacityWeight,
-        std::span<const CanonicalItemStack> stacks, std::span<const EquipmentBinding> equipment)
+        std::span<const CanonicalItemStack> stacks, std::span<const EquipmentBinding> equipment,
+        std::uint16_t lockLevel, std::uint64_t contactRevision)
     {
         if (const auto failure = validateHeader(header))
             return *failure;
         if (const auto failure = validateStacks(stacks))
             return *failure;
+        if (lockLevel > 1000 || !contactRevision)
+            return error(Code::InvalidCommandShape, lockLevel, 1000);
         if (equipment.size() > static_cast<std::size_t>(EquipmentSlot::Count))
             return error(Code::TooManyEntries, equipment.size(), static_cast<std::size_t>(EquipmentSlot::Count));
         for (std::size_t i = 0; i < equipment.size(); ++i)
@@ -297,7 +300,8 @@ namespace TES3MP
                     return error(Code::InvalidCommandShape, 0, 0, i);
         }
         return ReliableContainerInventoryBaseline{ header, container, std::move(cell), position, revision,
-            capacityWeight, { stacks.begin(), stacks.end() }, { equipment.begin(), equipment.end() } };
+            capacityWeight, { stacks.begin(), stacks.end() }, { equipment.begin(), equipment.end() },
+            lockLevel, contactRevision };
     }
 
     std::variant<ReliableGroundItemBaseline, InventoryReplicationDecodeError> ReliableGroundItemBaseline::create(
@@ -477,7 +481,8 @@ namespace TES3MP
         for (const auto& binding : input.equipment)
             equipment.emplace_back(binding.stackId.value(), static_cast<std::uint8_t>(binding.slot), 0, 0, 0);
         const auto root = ContainerSchema::CreateReliableContainerInventoryBaselineDirect(
-            builder, header, &cell, &position, &stacks, equipment.empty() ? nullptr : &equipment);
+            builder, header, &cell, &position, &stacks, equipment.empty() ? nullptr : &equipment,
+            input.lockLevel, input.contactRevision);
         ContainerSchema::FinishSizePrefixedReliableContainerInventoryBaselineBuffer(builder, root);
         return take(builder);
     }
@@ -704,7 +709,7 @@ namespace TES3MP
         const auto* position = root->position();
         return ReliableContainerInventoryBaseline::create(std::get<InventoryBaselineHeader>(header), *value(container),
             std::get<CellId>(cell), Position3(position->x(), position->y(), position->z()), *value(revision),
-            h->capacity_weight(), stacks, equipment);
+            h->capacity_weight(), stacks, equipment, root->lock_level(), root->contact_revision());
     }
 
     static GroundItemBaselineDecodeResult decodeGround(std::span<const std::byte> payload, bool allowNeighbors)

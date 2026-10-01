@@ -60,6 +60,8 @@ table ReliableContainerInventoryBaseline {
   position:Position3 (id: 2);
   stacks:[ItemStack] (id: 3);
   equipment:[EquipmentBinding] (id: 4);
+  lock_level:ushort (id: 5);
+  contact_revision:ulong = 1 (id: 6);
 }
 
 root_type ReliableContainerInventoryBaseline;

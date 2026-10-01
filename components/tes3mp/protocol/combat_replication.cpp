@@ -333,7 +333,7 @@ namespace TES3MP
                 return error(Code::InvalidFloat, 0, 0, i);
             if (static_cast<std::uint8_t>(event.sourceKind)
                     > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem)
-                || static_cast<std::uint8_t>(event.targetKind) > static_cast<std::uint8_t>(MagicUseTargetKind::Door)
+                || static_cast<std::uint8_t>(event.targetKind) > static_cast<std::uint8_t>(MagicUseTargetKind::Container)
                 || !event.casterLife || (!event.actorCaster() && event.casterLife != 1)
                 || event.sourceId == 0 || ((event.targetKind == MagicUseTargetKind::Self) != (event.targetId == 0)))
                 return error(Code::InvalidMagicKind, 0, 0, i);
@@ -849,7 +849,8 @@ namespace TES3MP
             if (current.target_kind() != Event::MagicUseTargetKind::Self
                 && current.target_kind() != Event::MagicUseTargetKind::Player
                 && current.target_kind() != Event::MagicUseTargetKind::Actor
-                && current.target_kind() != Event::MagicUseTargetKind::Door)
+                && current.target_kind() != Event::MagicUseTargetKind::Door
+                && current.target_kind() != Event::MagicUseTargetKind::Container)
                 return error(Code::InvalidMagicKind, 0, 0, i);
             const std::variant<PlayerId, ActorId> identity = current.caster_kind() == 1
                 ? std::variant<PlayerId, ActorId>(*value(caster))

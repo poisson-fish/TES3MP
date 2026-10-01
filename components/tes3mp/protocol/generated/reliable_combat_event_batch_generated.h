@@ -100,33 +100,36 @@ enum class MagicUseTargetKind : uint8_t {
   Player = 1,
   Actor = 2,
   Door = 3,
+  Container = 4,
   MIN = Self,
-  MAX = Door
+  MAX = Container
 };
 
-inline const MagicUseTargetKind (&EnumValuesMagicUseTargetKind())[4] {
+inline const MagicUseTargetKind (&EnumValuesMagicUseTargetKind())[5] {
   static const MagicUseTargetKind values[] = {
     MagicUseTargetKind::Self,
     MagicUseTargetKind::Player,
     MagicUseTargetKind::Actor,
-    MagicUseTargetKind::Door
+    MagicUseTargetKind::Door,
+    MagicUseTargetKind::Container
   };
   return values;
 }
 
 inline const char * const *EnumNamesMagicUseTargetKind() {
-  static const char * const names[5] = {
+  static const char * const names[6] = {
     "Self",
     "Player",
     "Actor",
     "Door",
+    "Container",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameMagicUseTargetKind(MagicUseTargetKind e) {
-  if (::flatbuffers::IsOutRange(e, MagicUseTargetKind::Self, MagicUseTargetKind::Door)) return "";
+  if (::flatbuffers::IsOutRange(e, MagicUseTargetKind::Self, MagicUseTargetKind::Container)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesMagicUseTargetKind()[index];
 }

@@ -94,11 +94,14 @@ namespace TES3MP
         // Optional equipment for actor-owned shared storage. Ordinary containers
         // retain an empty table and their original wire representation.
         std::vector<EquipmentBinding> equipment;
+        std::uint16_t lockLevel = 0;
+        std::uint64_t contactRevision = 1;
 
         static std::variant<ReliableContainerInventoryBaseline, InventoryReplicationDecodeError> create(
             InventoryBaselineHeader header, ContainerId container, CellId cell, Position3 position,
             ContainerRevision revision, std::uint32_t capacityWeight, std::span<const CanonicalItemStack> stacks,
-            std::span<const EquipmentBinding> equipment = {});
+            std::span<const EquipmentBinding> equipment = {}, std::uint16_t lockLevel = 0,
+            std::uint64_t contactRevision = 1);
         friend bool operator==(
             const ReliableContainerInventoryBaseline&, const ReliableContainerInventoryBaseline&) noexcept = default;
     };

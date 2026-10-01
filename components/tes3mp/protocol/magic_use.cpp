@@ -88,7 +88,7 @@ namespace TES3MP
         if (static_cast<std::uint8_t>(root->source_kind())
             > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem))
             return error(Code::InvalidSourceKind, static_cast<std::size_t>(root->source_kind()));
-        if (static_cast<std::uint8_t>(root->target_kind()) > static_cast<std::uint8_t>(MagicUseTargetKind::Door))
+        if (static_cast<std::uint8_t>(root->target_kind()) > static_cast<std::uint8_t>(MagicUseTargetKind::Container))
             return error(Code::InvalidTargetKind, static_cast<std::size_t>(root->target_kind()));
         if (root->source_id() == 0)
             return error(Code::InvalidSource);

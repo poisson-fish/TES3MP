@@ -78,6 +78,7 @@ namespace TES3MP::Native
             unsigned descriptorVersion = 0;
             for (unsigned candidate = 3; candidate <= 66; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
+            if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
             const bool meleeCampaign = descriptorVersion >= 21;
             const bool neighborhood = meleeCampaign || version == "native-inventory-20";
@@ -298,6 +299,7 @@ namespace TES3MP::Native
                 binding.mPlacementCombat = descriptorVersion >= 61;
                 binding.mNeighborCombat = descriptorVersion >= 62;
                 binding.mAuthoritativeAim = descriptorVersion >= 64;
+                binding.mContainerMagic = version == "native-inventory-56c";
                 binding.mNeighborLimit = descriptorVersion >= 66 ? 4
                     : descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
@@ -460,6 +462,14 @@ namespace TES3MP::Native
                             throw std::invalid_argument("Native navigating actor must be one unscripted placement");
                     }
                     actorCounts[cellIndex]=references.size();
+                    if (start.binding.mContainerMagic && cellIndex == 0)
+                    {
+                        auto placed = loadout.placedContainers(cell);
+                        if (placed.size() != 1 || placed.front().mScripted || !placed.front().mRef.mTrap.empty()
+                            || !placed.front().mRef.mKey.empty())
+                            throw std::invalid_argument("V56c requires one ordinary untrapped unkeyed placed container");
+                        references.push_back(placed.front());
+                    }
                 }
                 else if (start.worldActors)
                 {
@@ -475,7 +485,9 @@ namespace TES3MP::Native
                     if (start.binding.mStreamExteriors && references.size() > 128)
                         throw std::invalid_argument("Native cell inventory baseline exceeds 128 owners in " + cell.toDebugString());
                     for (const auto& ref : references)
-                        if (ref.mScripted || ref.mRef.mIsLocked || !ref.mRef.mTrap.empty())
+                        if (ref.mScripted || !ref.mRef.mTrap.empty()
+                            || (ref.mRef.mIsLocked && (!start.binding.mContainerMagic
+                                || !loadout.store().get<ESM::Container>().search(ref.mRef.mRefID))))
                             throw std::invalid_argument("Native placed inventory " + std::to_string(ref.mIdentity)
                                 + " (" + ref.mRef.mRefID.toDebugString() + ") in " + cell.toDebugString()
                                 + " requires services: script=" + std::to_string(ref.mScripted)

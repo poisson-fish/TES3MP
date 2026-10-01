@@ -99,6 +99,18 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     if (argc == 2 && std::string_view(argv[1]) == "neighborhoods") { neighborhoods(); return 0; }
+    if (argc == 2 && std::string_view(argv[1]) == "container-lock")
+    {
+        const auto cell = CellId::interior(id<CellSpaceId>(7));
+        const CanonicalItemStack stack{ id<ItemStackId>(10), id<ItemPrototypeId>(20), 1, 30, 40, std::nullopt };
+        const auto baseline = ReliableContainerInventoryBaseline::create(header(), id<ContainerId>(2), cell,
+            Position3(1, 2, 3), id<ContainerRevision>(5), 100, std::span(&stack, 1), {}, 50, 2);
+        assert(std::holds_alternative<ReliableContainerInventoryBaseline>(baseline));
+        const auto wire = encodeReliableContainerInventoryBaseline(std::get<ReliableContainerInventoryBaseline>(baseline));
+        assert(decodeReliableContainerInventoryBaseline(wire) == baseline);
+        std::cout << "PASS container-lock: wire retains lock and contact revision\n";
+        return 0;
+    }
     assert(argc == 1);
     const CanonicalItemStack stack{ id<ItemStackId>(10), id<ItemPrototypeId>(20), 2, 30, 40, id<ActorPrototypeId>(50) };
     const EquipmentBinding binding{ EquipmentSlot::CarriedRight, stack.stackId };

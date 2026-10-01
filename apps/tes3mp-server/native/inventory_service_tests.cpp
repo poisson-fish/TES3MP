@@ -7044,6 +7044,16 @@ namespace TES3MP::Native::Testing
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
             ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("npc_door"); door.mModel = "npc-door.osgt";
             out.startRecord(ESM::Door::sRecordId, 0); door.save(out); out.endRecord(ESM::Door::sRecordId);
+            if (effectFamily == "door-magic")
+            {
+                ESM::Container chest = *base.store().get<ESM::Container>().begin();
+                chest.mId = ESM::RefId::stringRefId("npc_spell_container");
+                chest.mScript = {};
+                chest.mModel = "placement-container.osgt";
+                chest.mFlags = ESM::Container::Unknown; chest.mWeight = 1000;
+                chest.mInventory.mList = {{1, ESM::RefId::stringRefId("iron longsword")}};
+                out.startRecord(ESM::Container::sRecordId, 0); chest.save(out); out.endRecord(ESM::Container::sRecordId);
+            }
             if (effectFamily == "visibility")
             {
                 ESM::Miscellaneous key = *base.store().get<ESM::Miscellaneous>().begin();
@@ -7099,6 +7109,13 @@ namespace TES3MP::Native::Testing
                 if (record == placedActor) placed.mPos = effectFamily == "door-magic"
                     ? ESM::Position{{1000, 1000, 1}, {0, 0, 0}}
                     : ESM::Position{{60, -32, 1}, {0, 0, 0}};
+                placed.save(out);
+            }
+            if (effectFamily == "door-magic")
+            {
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                placed.mRefID = ESM::RefId::stringRefId("npc_spell_container");
+                placed.mPos = {{30, -100, 1}, {0, 0, 0}};
                 placed.save(out);
             }
             if (socialLifecycle)
@@ -8442,7 +8459,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8740,6 +8757,178 @@ namespace TES3MP::Native::Testing
                 && revised.combat->actors[0][9][2] == initial.combat->actors[0][9][2]
                 && doorView(reversed, 2, 3).lockLevel == 0,
                 "Stale door revision paid or wrote after another player's activation");
+            InventoryHost containerHost(descriptor, testContentManifest(), *registry, *crypto, initialImage);
+            auto& chest = containerHost.service(); chest.synchronizeCells(authority);
+            const auto containerView = [&](auto& owner, uint64_t session, uint64_t time,
+                const PreparedNativeInventory* pending = nullptr) {
+                const auto projected = owner.projectInventory(authority, id<SessionId>(session),
+                    id<ServerTick>(time), id<CanonicalRevision>(time), pending);
+                require(projected && projected->containers.size() == 1 && projected->playerInventory.size() == 1,
+                    "Container observer baseline incomplete");
+                return *projected;
+            };
+            const auto containerWire = [&](auto& owner, uint64_t session, uint64_t time, uint16_t level) {
+                const auto projected = containerView(owner, session, time);
+                const auto decoded = decodeReliableContainerInventoryBaseline(
+                    encodeReliableContainerInventoryBaseline(projected.containers.front()));
+                require(std::holds_alternative<ReliableContainerInventoryBaseline>(decoded)
+                    && std::get<ReliableContainerInventoryBaseline>(decoded).lockLevel == level
+                    && std::get<ReliableContainerInventoryBaseline>(decoded).contactRevision
+                        == projected.containers.front().contactRevision,
+                    "Container lock/contact did not survive observer baseline wire");
+            };
+            const auto initialChest = containerView(chest, 1, 1);
+            require(!initialChest.containers.front().stacks.empty()
+                && initialChest.containers.front().lockLevel == 0
+                && initialChest.containers.front().contactRevision == 1,
+                "Ordinary container did not start unlocked");
+            auto lockChest = use;
+            lockChest.targetKind = MagicUseTargetKind::Container;
+            lockChest.targetId = initialChest.containers.front().container.value();
+            lockChest.expectedTargetRevision = id<CombatRevision>(initialChest.containers.front().contactRevision);
+            const auto decodedChest = decodeClientMagicUseCommand(encodeClientMagicUseCommand(lockChest));
+            require(std::holds_alternative<ClientMagicUseCommand>(decodedChest)
+                && std::get<ClientMagicUseCommand>(decodedChest) == lockChest,
+                "Container target did not survive command wire");
+            auto staleChest = lockChest;
+            staleChest.expectedTargetRevision = id<CombatRevision>(2);
+            require(!chest.prepareMagicUse(authority, proposal(staleChest), id<ServerTick>(1)),
+                "Stale container contact was admitted");
+            auto chestIntent = chest.prepareMagicUse(authority, proposal(lockChest), id<ServerTick>(1));
+            require(bool(chestIntent), "Touch Lock was not admitted against the ordinary container");
+            const auto chestBefore = std::vector(chest.inventoryImage().begin(), chest.inventoryImage().end());
+            const auto chestInitialActor = readActorCampaign({reinterpret_cast<const char*>(chestBefore.data()), chestBefore.size()});
+            uint64_t lockedAt = 0;
+            for (uint64_t time = 1; time <= 50; ++time)
+            {
+                auto next = chest.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                    time == 1 ? std::move(chestIntent) : std::unique_ptr<PreparedNativeInventory>{}, &world);
+                require(bool(next), "Container Lock tick failed");
+                const auto staged = containerView(chest, 1, time, next.get()).containers.front();
+                if (staged.lockLevel == 50)
+                {
+                    const auto alice = chest.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), next.get());
+                    const auto bob = chest.projectCombatEvents(authority, id<SessionId>(2),
+                        id<ServerTick>(time), id<CanonicalRevision>(time), next.get());
+                    require(alice && bob && alice->magicEvents().size() == 1
+                        && std::ranges::equal(alice->magicEvents(), bob->magicEvents())
+                        && alice->magicEvents().front().targetKind == MagicUseTargetKind::Container,
+                        "Container spell outcome diverged between observers");
+                    const auto prior = std::vector(chest.inventoryImage().begin(), chest.inventoryImage().end());
+                    require(next->commit(rejected) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(prior, chest.inventoryImage())
+                        && containerView(chest, 2, time).containers.front().lockLevel == 0,
+                        "Rejected container Lock leaked payment or state");
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Container Lock retry failed");
+                    lockedAt = time;
+                    break;
+                }
+                require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Container Lock windup failed");
+            }
+            require(lockedAt, "Container Lock never reached its release key");
+            containerWire(chest, 1, lockedAt, 50); containerWire(chest, 2, lockedAt, 50);
+            const auto lockedChest = containerView(chest, 1, lockedAt);
+            const auto lockedBytes = std::vector(chest.inventoryImage().begin(), chest.inventoryImage().end());
+            const auto lockedActor = readActorCampaign({reinterpret_cast<const char*>(lockedBytes.data()), lockedBytes.size()});
+            require(lockedActor.combat->actors[0][9][2] == chestInitialActor.combat->actors[0][9][2] - 5
+                && lockedChest.containers.front().contactRevision == 2,
+                "Container Lock payment or revision did not commit once");
+            const auto transfer = [&](auto& owner, bool put, uint64_t time) {
+                const auto view = containerView(owner, 1, time);
+                const auto& playerInventory = view.playerInventory.front();
+                const auto available = std::ranges::find_if(playerInventory.stacks, [&](const auto& stack) {
+                    return stack.prototypeId == initialChest.containers.front().stacks.front().prototypeId
+                        && std::ranges::none_of(playerInventory.equipment, [&](const auto& slot) {
+                        return slot.stackId == stack.stackId;
+                    });
+                });
+                const auto& source = put && available != playerInventory.stacks.end() ? *available
+                    : put ? playerInventory.stacks.front() : view.containers.front().stacks.front();
+                const auto& container = view.containers.front();
+                return ClientInventoryTransactionCommand{id<SessionId>(1), SessionGeneration::initial(),
+                    CommandSequence::initial(), id<CommandId>(time + (put ? 100 : 200)), id<CanonicalRevision>(time),
+                    put ? InventoryTransactionKind::PutIntoContainer : InventoryTransactionKind::TakeFromContainer,
+                    container.container, source.prototypeId, source.stackId, 1, {},
+                    view.playerInventory.front().revision, container.revision, {}, container.position};
+            };
+            require(!chest.prepareInventory(authority, bind(authority, transfer(chest, false, lockedAt)).proposal())
+                && !chest.prepareInventory(authority, bind(authority, transfer(chest, true, lockedAt)).proposal()),
+                "Direct take or put bypassed committed container lock");
+            InventoryHost lockedChestHost(descriptor, testContentManifest(), *registry, *crypto, lockedBytes);
+            auto& openedChest = lockedChestHost.service(); openedChest.synchronizeCells(authority);
+            containerWire(openedChest, 1, lockedAt, 50); containerWire(openedChest, 2, lockedAt, 50);
+            require(!openedChest.prepareInventory(authority, bind(authority, transfer(openedChest, false, lockedAt)).proposal()),
+                "Restart lost container transfer denial");
+            uint64_t ready = lockedAt + 1;
+            for (; ready <= lockedAt + 60; ++ready)
+            {
+                const auto image = std::vector(openedChest.inventoryImage().begin(), openedChest.inventoryImage().end());
+                const auto state = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+                if (!state.combat->playerCasts[0]) break;
+                auto ticked = openedChest.prepareNativeTick(authority, id<ServerTick>(ready), 1.f/30, {}, &world);
+                require(ticked && ticked->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Restored container Lock recovery failed");
+            }
+            require(ready <= lockedAt + 60, "Restored container caster never recovered");
+            auto openChest = lockChest;
+            openChest.sourceId = hash("door_spell_open");
+            openChest.commandId = id<CommandId>(ready + 1000);
+            openChest.sourceServerTick = id<ServerTick>(ready);
+            require(!openedChest.prepareMagicUse(authority, proposal(openChest), id<ServerTick>(ready)),
+                "Pre-lock container contact admitted Open");
+            openChest.expectedTargetRevision = id<CombatRevision>(2);
+            auto openIntent = openedChest.prepareMagicUse(authority, proposal(openChest), id<ServerTick>(ready));
+            require(bool(openIntent), "Touch Open was not admitted against locked container");
+            bool containerOpened = false;
+            for (uint64_t time = ready; time <= ready + 50; ++time)
+            {
+                auto next = openedChest.prepareNativeTick(authority, id<ServerTick>(time), 1.f/30,
+                    time == ready ? std::move(openIntent) : std::unique_ptr<PreparedNativeInventory>{}, &world);
+                require(bool(next), "Container Open tick failed");
+                const auto staged = containerView(openedChest, 1, time, next.get()).containers.front();
+                if (staged.lockLevel == 0)
+                {
+                    const auto prior = std::vector(openedChest.inventoryImage().begin(), openedChest.inventoryImage().end());
+                    require(next->commit(rejected) == CanonicalDurabilityResult::Rejected
+                        && std::ranges::equal(prior, openedChest.inventoryImage())
+                        && containerView(openedChest, 2, time).containers.front().lockLevel == 50,
+                        "Rejected container Open leaked payment or unlock");
+                    require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Container Open retry failed");
+                    containerWire(openedChest, 1, time, 0); containerWire(openedChest, 2, time, 0);
+                    const auto after = std::vector(openedChest.inventoryImage().begin(), openedChest.inventoryImage().end());
+                    const auto openedActor = readActorCampaign({reinterpret_cast<const char*>(after.data()), after.size()});
+                    require(openedActor.combat->actors[0][9][2] == chestInitialActor.combat->actors[0][9][2] - 10
+                        && containerView(openedChest, 1, time).containers.front().contactRevision == 3,
+                        "Container Open cost or revision did not commit once");
+                    InventoryHost openRestart(descriptor, testContentManifest(), *registry, *crypto, after);
+                    openRestart.service().synchronizeCells(authority);
+                    containerWire(openRestart.service(), 1, time, 0);
+                    containerWire(openRestart.service(), 2, time, 0);
+                    auto taken = openRestart.service().prepareInventory(authority,
+                        bind(authority, transfer(openRestart.service(), false, time)).proposal());
+                    require(bool(taken),
+                        "Open did not restore direct take access");
+                    require(taken->commit(accepted) == CanonicalDurabilityResult::Committed,
+                        "Unlocked container take did not commit");
+                    try
+                    {
+                        (void)dynamic_cast<InventoryService&>(openRestart.service()).prepare(authority,
+                            bind(authority, transfer(openRestart.service(), true, time)));
+                    }
+                    catch (const std::invalid_argument& error)
+                    { throw std::runtime_error(std::string("Open put rejected: ") + error.what()); }
+                    containerOpened = true;
+                    break;
+                }
+                require(next->commit(accepted) == CanonicalDurabilityResult::Committed,
+                    "Container Open windup failed");
+            }
+            require(containerOpened, "Container Open never reached its release key");
+            std::cout << "container spell=paid Lock/Open transfer=denied-then-allowed write=atomic retry=once restart=two-observers\n";
             std::cout << "door spell=paid Lock/Open contact=validated write=atomic retry=once restart=two-observers\n";
             return;
         }

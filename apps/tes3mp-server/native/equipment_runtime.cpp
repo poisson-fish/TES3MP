@@ -164,7 +164,7 @@ namespace TES3MP::Native
         {
             const auto& placement = binding.mPlacement;
             if (placement && (!placement->mRefNum.hasContentFile() || placement->mRefID != binding.mBase
-                || placement->mIsLocked || !placement->mTrap.empty()
+                || !placement->mTrap.empty()
                 || !placements.insert(placement->mRefNum).second))
                 throw std::invalid_argument("Placed container runtime binding invalid or duplicate");
             ManualRef reference(content, binding.mBase);

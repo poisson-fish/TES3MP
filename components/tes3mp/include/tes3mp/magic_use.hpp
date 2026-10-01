@@ -25,6 +25,7 @@ namespace TES3MP
         Player = 1,
         Actor = 2,
         Door = 3,
+        Container = 4,
     };
 
     enum class MagicUseDecodeErrorCode : std::uint8_t

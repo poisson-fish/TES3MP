@@ -372,6 +372,8 @@ namespace TES3MP
             Position3 position;
             ContainerRevision revision;
             std::uint32_t capacityWeight = 0;
+            std::uint16_t lockLevel = 0;
+            std::uint64_t contactRevision = 1;
             std::vector<std::optional<ReliableContainerInventoryBaseline>> chunks;
         };
         struct GroundItemChunks
