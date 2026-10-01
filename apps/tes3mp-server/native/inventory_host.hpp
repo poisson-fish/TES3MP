@@ -7,6 +7,10 @@
 
 namespace TES3MP::Native
 {
+    // V70 owns bound-item instances and restoration links per actor/effect source.
+    // Equipment, effect lifecycle, derived constants and generated IDs share the
+    // existing actor/inventory commit; prior descriptors retain their layouts.
+    // Fresh campaign; desktop acceptance remains separate from headless checks.
     // V69 uses stock intervention selection with explicit player context and bound
     // destinations, stock object reach, Target/mixed Lock/Open and death-owned
     // soul capture. It retains V68 fields with a new discriminator; fresh campaign.

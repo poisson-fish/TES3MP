@@ -97,6 +97,7 @@ namespace MWWorld
         std::shared_ptr<const EquipmentNpcStats> mNpcStats;
         std::shared_ptr<const EquipmentScriptLocals> mScriptLocals;
         bool mExternalEquipmentEffects = false; // Composed owner stages effects with inventory.
+        std::function<bool(ESM::RefNum)> mPreserveIdentity;
     };
 
     struct PlainEquipmentResult

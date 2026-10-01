@@ -5586,6 +5586,14 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
+        const bool boundLifecycleOnly = effectFamily == "bound-equipment-lifecycle";
+        const bool boundEquipment = effectFamily == "bound-equipment" || boundLifecycleOnly;
+        if (boundEquipment) { effectFamily = "player-travel"; participantHits = true; }
+        const std::array boundEffects{ESM::MagicEffect::BoundDagger, ESM::MagicEffect::BoundLongsword,
+            ESM::MagicEffect::BoundMace, ESM::MagicEffect::BoundBattleAxe, ESM::MagicEffect::BoundSpear,
+            ESM::MagicEffect::BoundLongbow, ESM::MagicEffect::BoundCuirass, ESM::MagicEffect::BoundHelm,
+            ESM::MagicEffect::BoundBoots, ESM::MagicEffect::BoundShield, ESM::MagicEffect::BoundGloves};
+        std::array<bool, 11> boundBeastRestricted{};
         const bool objectTravel = effectFamily == "object-travel";
         const bool objectSpells = effectFamily == "object-spells";
         const bool objectSoul = effectFamily == "object-soul";
@@ -6412,6 +6420,36 @@ namespace TES3MP::Native::Testing
                     else spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 50)});
                     if (!objectSpells) spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Touch, 0, 50)});
                 }
+                if (boundEquipment)
+                {
+                    for (size_t i = 0; i < boundEffects.size(); ++i)
+                    {
+                        const std::string name = "travel_bound_" + std::to_string(i);
+                        spell(name, {effect(boundEffects[i], ESM::RT_Self, 3, 0)});
+                        spell(name + "_overlap", {effect(boundEffects[i], ESM::RT_Self, 8, 0)});
+                        spell(name + "_touch", {effect(boundEffects[i], ESM::RT_Touch, 3, 0)});
+                    }
+                    spell("travel_bound_dispel", {effect(ESM::MagicEffect::Dispel, ESM::RT_Self, 0, 100)});
+                    spell("travel_bound_extra", {effect(ESM::MagicEffect::ExtraSpell, ESM::RT_Self, 3, 0)});
+                    spell("travel_bound_extra_overlap", {effect(ESM::MagicEffect::ExtraSpell, ESM::RT_Self, 8, 0)});
+                    spell("travel_bound_death", {effect(ESM::MagicEffect::BoundGloves, ESM::RT_Self, 30, 0),
+                        effect(ESM::MagicEffect::DamageHealth, ESM::RT_Self, 0, 1000)});
+                    spell("travel_bound_ordered", {effect(ESM::MagicEffect::BoundDagger, ESM::RT_Self, 3, 0),
+                        effect(ESM::MagicEffect::DisintegrateWeapon, ESM::RT_Self, 0, 1000)});
+                    spell("travel_bound_replacement", {effect(ESM::MagicEffect::BoundLongsword, ESM::RT_Self, 3, 0),
+                        effect(ESM::MagicEffect::DisintegrateWeapon, ESM::RT_Self, 0, 25),
+                        effect(ESM::MagicEffect::BoundMace, ESM::RT_Self, 3, 0)});
+                    spell("travel_bound_used", {effect(ESM::MagicEffect::BoundGloves, ESM::RT_Self, 3, 0)}, true);
+                    ESM::Enchantment permanent; permanent.blank();
+                    permanent.mId = ESM::RefId::stringRefId("travel_bound_permanent");
+                    permanent.mData.mType = ESM::Enchantment::ConstantEffect;
+                    permanent.mEffects.populate({effect(ESM::MagicEffect::BoundBoots, ESM::RT_Self, 1, 0)});
+                    out.startRecord(ESM::Enchantment::sRecordId, 0); permanent.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                    auto ring = *base.store().get<ESM::Clothing>().find(ESM::RefId::stringRefId("common_shirt_01"));
+                    ring.mId = permanent.mId; ring.mEnchant = permanent.mId; ring.mScript = {};
+                    ring.mData.mValue = 0; // Ordinary shirt wins stock startup selection.
+                    out.startRecord(ESM::Clothing::sRecordId, 0); ring.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                }
                 if (effectFamily == "player-travel")
                 {
                     if (objectTravel)
@@ -6710,6 +6748,53 @@ namespace TES3MP::Native::Testing
                     out.startRecord(ESM::Spell::sRecordId, 0); interference.save(out); out.endRecord(ESM::Spell::sRecordId);
                 }
             }
+            if (boundEquipment)
+            {
+                // Exercise the stock carried-left exception independently of
+                // NPC auto-selection, which normally chooses an armor shield.
+                MWClass::registerClasses();
+                struct ExtraSpellInventory : MWWorld::InventoryStore { using ContainerStore::addNewStack; } extraInventory;
+                Misc::Rng::Generator extraRng{0}; extraInventory.fill({}, {}, extraRng);
+                MWWorld::ManualRef actor(base.store(), ESM::RefId::stringRefId("player")),
+                    torch(base.store(), ESM::RefId::stringRefId("torch"));
+                const auto light = extraInventory.addNewStack(torch.getPtr(), 1);
+                const MWWorld::ContainerStoreStackContext stackContext{base.store(), [](const auto&) {},
+                    [](const MWWorld::Ptr& item, int count) {
+                        item.getCellRef() = item.getCellRef().copyWithCount(item.getCellRef().getCount() - count);
+                    }, [](const MWWorld::Ptr& item) { item.getCellRef() = item.getCellRef().copyWithCount(0); }};
+                const MWWorld::InventoryStoreEquipmentContext equipmentContext{stackContext, actor.getPtr(), {},
+                    [](const auto&, const auto&) {}, [](const auto&) {}};
+                extraInventory.equip(InventoryStore::Slot_CarriedLeft, light, equipmentContext);
+                MWMechanics::applyExtraSpell(extraInventory, false,
+                    [&](int slot) { extraInventory.unequipSlot(slot, equipmentContext); });
+                require(extraInventory.getSlot(InventoryStore::Slot_CarriedLeft) == light,
+                    "Stock ExtraSpell removed a non-armor carried-left torch");
+                npc.mAiData.mFight = 0;
+                npc.mInventory.mList = {{2, ESM::RefId::stringRefId("iron shortsword")},
+                    {1, ESM::RefId::stringRefId("iron dagger")},
+                    {1, ESM::RefId::stringRefId("common_shirt_01")},
+                    {1, ESM::RefId::stringRefId("common_pants_01")},
+                    {1, ESM::RefId::stringRefId("travel_bound_used")},
+                    {1, ESM::RefId::stringRefId("travel_bound_permanent")}};
+                for (const int type : {ESM::Armor::Cuirass, ESM::Armor::Helmet, ESM::Armor::Boots,
+                        ESM::Armor::Shield, ESM::Armor::LGauntlet, ESM::Armor::RGauntlet})
+                    for (const auto& armor : base.store().get<ESM::Armor>())
+                        if (armor.mData.mType == type && armor.mScript.empty() && armor.mEnchant.empty()
+                            && armor.mData.mHealth > 0 && armor.mData.mArmor > 0)
+                        { npc.mInventory.mList.push_back({1, armor.mId}); break; }
+                for (size_t i = 0; i < boundEffects.size(); ++i)
+                    for (const auto setting : MWMechanics::boundEquipmentSettings(boundEffects[i]))
+                    {
+                        const auto id = ESM::RefId::stringRefId(base.store().get<ESM::GameSetting>().find(setting)->mValue.getString());
+                        if (const auto* armor = base.store().get<ESM::Armor>().search(id))
+                            boundBeastRestricted[i] |= std::ranges::any_of(armor->mParts.mParts, [](const auto& part) {
+                                return part.mPart == ESM::PRT_Head || part.mPart == ESM::PRT_LFoot || part.mPart == ESM::PRT_RFoot;
+                            });
+                    }
+                // An ordinary same-record item must survive temporary ownership.
+                npc.mInventory.mList.push_back({1, ESM::RefId::stringRefId(base.store().get<ESM::GameSetting>()
+                    .find("sMagicBoundDaggerID")->mValue.getString())});
+            }
             const auto observerAppearance = npc;
             auto aiPlayerSpells = npc.mSpells.mList;
             if (aiDisposition)
@@ -6750,7 +6835,7 @@ namespace TES3MP::Native::Testing
                 auto witness = npc;
                 witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
                 witness.mAiData.mAlarm = 100;
-                witness.mAiData.mFight = objectSpells || projectileNeighbors || neighborPhysics ? 0 : 100;
+                witness.mAiData.mFight = boundEquipment || objectSpells || projectileNeighbors || neighborPhysics ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = neighborPhysics ? 200 : 5;
                 witness.mSpells.mList.clear();
                 if (neighborCombat && !objectSpells && !npcRanged && effectFamily != "player-travel")
@@ -6822,7 +6907,7 @@ namespace TES3MP::Native::Testing
             {
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
-                if (aiDisposition || effectFamily == "ai-creature")
+                if (boundEquipment || aiDisposition || effectFamily == "ai-creature")
                 {
                     female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
                     female.mInventory.mList = beast.mInventory.mList = observerAppearance.mInventory.mList;
@@ -6880,6 +6965,15 @@ namespace TES3MP::Native::Testing
                             = participant->mNpdt.mFatigue = 1000;
                         participant->mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 255;
                     }
+                if (boundEquipment)
+                {
+                    female.mNpdt.mHealth = beast.mNpdt.mHealth = 100;
+                    ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("travel_bound_ability");
+                    ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({{ESM::MagicEffect::BoundBoots, {}, {}, ESM::RT_Self, 4, 1, 0, 0}});
+                    beast.mSpells.mList.push_back(ability.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                }
                 if (encounterProfile.find("combined") != std::string_view::npos)
                 {
                     beast.mInventory.mList = {{1, ESM::RefId::stringRefId("iron longsword")}};
@@ -6976,7 +7070,7 @@ namespace TES3MP::Native::Testing
                         return !id.getRefIdString().starts_with("travel_");
                     });
                 else if (effectFamily != "disintegration") npc.mSpells.mList.clear();
-                npc.mInventory.mList.clear();
+                if (!boundEquipment) npc.mInventory.mList.clear();
                 if (objectSoul)
                 {
                     npc.mInventory.mList.push_back({3, ESM::RefId::stringRefId("misc_soulgem_petty")});
@@ -7101,7 +7195,7 @@ namespace TES3MP::Native::Testing
             out.startRecord(ESM::Static::sRecordId, 0); floor.save(out); out.endRecord(ESM::Static::sRecordId);
             ESM::Door door; door.blank(); door.mId = ESM::RefId::stringRefId("npc_door"); door.mModel = "npc-door.osgt";
             out.startRecord(ESM::Door::sRecordId, 0); door.save(out); out.endRecord(ESM::Door::sRecordId);
-            if (effectFamily == "door-magic")
+            if (effectFamily == "door-magic" || boundEquipment)
             {
                 ESM::Container chest = *base.store().get<ESM::Container>().begin();
                 chest.mId = ESM::RefId::stringRefId("npc_spell_container");
@@ -7182,11 +7276,12 @@ namespace TES3MP::Native::Testing
                 placed.mDoorDest = {{60, -250, 1}, {0, 0, 0}};
                 placed.save(out);
             }
-            if (effectFamily == "door-magic")
+            if (effectFamily == "door-magic" || boundEquipment)
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
                 placed.mRefID = ESM::RefId::stringRefId("npc_spell_container");
-                placed.mPos = {{30, -100, 1}, {0, 0, 0}};
+                placed.mPos = boundEquipment ? ESM::Position{{60, -350, 1}, {0, 0, 0}}
+                    : ESM::Position{{30, -100, 1}, {0, 0, 0}};
                 placed.save(out);
             }
             if (socialLifecycle)
@@ -8588,7 +8683,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8617,7 +8712,7 @@ namespace TES3MP::Native::Testing
                     : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
-            if (lifecycle) out << "respawn 3\n";
+            if (lifecycle) out << "respawn " << std::dec << (boundEquipment ? 90 : 3) << "\n";
         }
         if (playerCastLifecycle)
         {
@@ -8658,6 +8753,463 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (boundEquipment)
+        {
+            CanonicalWorldTimeState worldTime;
+            worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            const auto globals = GlobalVariableCatalog::create({}).value();
+            const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+            auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+            const auto hash = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char ch : name) value = (value ^ ch) * 1099511628211ull;
+                return value;
+            };
+            const auto image = [](NativeInventoryAuthority& owner) {
+                const auto bytes = owner.inventoryImage();
+                return std::vector<std::byte>(bytes.begin(), bytes.end());
+            };
+            const auto state = [](NativeInventoryAuthority& owner) {
+                const auto bytes = owner.inventoryImage();
+                return readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+            };
+            const auto seed = image(service);
+            std::unique_ptr<InventoryHost> run;
+            uint64_t tick = 0;
+            const auto fresh = [&] {
+                run = std::make_unique<InventoryHost>(descriptor, manifest, *registry, *crypto, seed);
+                run->service().synchronizeCells(authority); tick = 0;
+            };
+            const auto restart = [&] {
+                const auto bytes = image(run->service());
+                auto recovered = std::make_unique<InventoryHost>(descriptor, manifest, *registry, *crypto, bytes);
+                recovered->service().synchronizeCells(authority);
+                require(image(recovered->service()) == bytes, "Equipment lifecycle restart changed committed state");
+                run = std::move(recovered);
+            };
+            const auto step = [&](std::unique_ptr<PreparedNativeInventory> input = {},
+                std::optional<ActorMagicCast> npc = {}, bool rollback = false) {
+                auto& native = dynamic_cast<InventoryService&>(run->service());
+                const auto before = image(native);
+                auto pending = native.prepareNativeTick(authority, id<ServerTick>(++tick), 1.f/30,
+                    std::move(input), npc, &world);
+                require(bool(pending), "Equipment lifecycle tick rejected");
+                if (rollback)
+                    require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && image(native) == before,
+                        "Rejected equipment lifecycle leaked inventory, effects, resources or RNG");
+                std::vector<MagicUseCombatEvent> cues;
+                if (const auto events = native.projectCombatEvents(authority, id<SessionId>(1),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get()))
+                    cues.assign(events->magicEvents().begin(), events->magicEvents().end());
+                require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed, "Equipment lifecycle commit failed");
+                return cues;
+            };
+            const auto waitRecovery = [&] {
+                for (uint64_t end = tick + 100; tick <= end;)
+                {
+                    const auto current = state(run->service());
+                    if (!current.combat->playerCasts[0] && !current.combat->playerCasts[1] && !current.casting) return;
+                    step();
+                }
+                throw std::runtime_error("Equipment cast recovery exceeded bound");
+            };
+            const auto cast = [&](uint64_t player, std::string_view name, uint64_t itemSource = 0, uint64_t recipient = 0) {
+                waitRecovery();
+                const uint64_t admissionTick = tick + 1;
+                auto& native = run->service();
+                const auto* caster = authority.findPlayer(id<PlayerId>(player));
+                const auto* session = authority.findActiveSession(id<SessionId>(player));
+                ClientMagicUseCommand use{session->sessionId(), session->sessionGeneration(),
+                    id<CommandSequence>(tick + 1), id<CommandId>(tick + player + 100), id<CanonicalRevision>(tick + 1),
+                    itemSource ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell,
+                    itemSource ? itemSource : hash(name), recipient ? MagicUseTargetKind::Player : MagicUseTargetKind::Self, recipient,
+                    id<ServerTick>(tick + 1), CombatRevision::initial(), CombatRevision::initial(), InventoryRevision::initial()};
+                if (itemSource)
+                    use.expectedInventoryRevision = native.projectInventory(authority, session->sessionId(),
+                        id<ServerTick>(std::max<uint64_t>(1, tick)), id<CanonicalRevision>(tick + 1))->playerInventory.front().revision;
+                ServerCommandProposal proposal(session->sessionId(), session->sessionGeneration(), use.commandSequence,
+                    use.commandId, use.observedCanonicalRevision,
+                    EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()), MagicUseCommandProposal(use));
+                auto admitted = native.prepareMagicUse(authority, proposal, id<ServerTick>(tick + 1));
+                require(bool(admitted), "Bound-family player spell not admitted");
+                auto cues = step(std::move(admitted), {}, true);
+                for (uint64_t end = tick + 80; tick <= end;)
+                {
+                    if (std::ranges::any_of(cues, [&](const auto& cue) { return cue.sourceId == (itemSource ? itemSource : hash(name)) && cue.castSucceeded; }))
+                        return tick - admissionTick + 1;
+                    cues = step({}, {}, true);
+                }
+                throw std::runtime_error("Bound-family spell did not release");
+            };
+            const auto inventory = [&](uint64_t player) {
+                const auto view = run->service().projectInventory(authority, id<SessionId>(player), id<ServerTick>(std::max<uint64_t>(1, tick)),
+                    id<CanonicalRevision>(std::max<uint64_t>(1, tick)));
+                require(view && view->playerInventory.size() == 1, "Bound-family inventory projection missing");
+                return view->playerInventory.front();
+            };
+            const auto equip = [&](uint64_t player, ItemStackId item, EquipmentSlot slot, bool on) {
+                const auto view = inventory(player);
+                const auto found = std::ranges::find(view.stacks, item, &CanonicalItemStack::stackId);
+                require(found != view.stacks.end(), "Manual equipment instance missing");
+                const ClientInventoryTransactionCommand input{id<SessionId>(player), SessionGeneration::initial(),
+                    id<CommandSequence>(tick + 1), id<CommandId>(tick + 1000), id<CanonicalRevision>(tick + 1),
+                    on ? InventoryTransactionKind::EquipItem : InventoryTransactionKind::UnequipItem,
+                    {}, found->prototypeId, item, 1, slot, view.revision, {}, {}, Position3(0, 0, 0)};
+                auto pending = run->service().prepareInventory(authority, bind(authority, input).proposal());
+                require(bool(pending), "Manual bound equipment operation rejected");
+                step(std::move(pending), {}, true);
+            };
+            const auto normalWeapon = [&](uint64_t player) {
+                const auto view = inventory(player);
+                const auto record = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron shortsword")));
+                const auto found = std::ranges::find(view.stacks, record, &CanonicalItemStack::prototypeId);
+                require(found != view.stacks.end(), "Normal restoration weapon missing");
+                return found->stackId;
+            };
+            const auto transferPrevious = [&](uint64_t player, ItemStackId item, bool allowed) {
+                const auto before = image(run->service());
+                const auto view = inventory(player);
+                const auto stack = std::ranges::find(view.stacks, item, &CanonicalItemStack::stackId);
+                require(stack != view.stacks.end(), "Equipment replacement transfer source missing");
+                const auto projection = run->service().projectInventory(authority, id<SessionId>(player),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                const auto chest = std::ranges::find_if(projection->containers, [](const auto& value) {
+                    return value.position == Position3(60 * 1024, -350 * 1024, 1024);
+                });
+                require(chest != projection->containers.end(), "Equipment replacement container missing");
+                ClientInventoryTransactionCommand input{id<SessionId>(player), SessionGeneration::initial(),
+                    id<CommandSequence>(tick + 1), id<CommandId>(tick + 2000), id<CanonicalRevision>(tick + 1),
+                    InventoryTransactionKind::PutIntoContainer, chest->container, stack->prototypeId, item, 1, {}, view.revision, chest->revision, {},
+                    authority.findPlayer(id<PlayerId>(player))->transform().position()};
+                std::unique_ptr<PreparedNativeInventory> pending;
+                try { pending = run->service().prepareInventory(authority, bind(authority, input).proposal()); }
+                catch (const std::invalid_argument&) { if (allowed) throw; }
+                require(bool(pending) == allowed && image(run->service()) == before,
+                    allowed ? "Previous equipment removal was rejected or mutated preparation"
+                        : "Temporary equipment transfer was allowed or mutated preparation");
+                if (pending) step(std::move(pending), {}, true);
+            };
+            const auto active = [&](uint64_t actor, uint64_t source) -> std::optional<ActorCampaignTimedEffect> {
+                const auto current = state(run->service());
+                for (const auto& effect : current.timedEffects)
+                    if (effect.actor == actor && effect.source == source && effect.equipmentApplied) return effect;
+                return {};
+            };
+            if (!boundLifecycleOnly) for (size_t i = 0; i < boundEffects.size(); ++i)
+                for (uint64_t player : {1, 2})
+                {
+                    fresh();
+                    const auto normal = normalWeapon(player);
+                    equip(player, normal, EquipmentSlot::CarriedRight, true);
+                    const auto before = inventory(player);
+                    const auto peer = inventory(3 - player);
+                    const std::string name = "travel_bound_" + std::to_string(i);
+                    std::cout << "bound checking=" << i << " player=" << player << std::endl;
+                    cast(player, name);
+                    const bool beastRestriction = player == 2 && boundBeastRestricted[i];
+                    const auto effect = active(player - 1, hash(name));
+                    require(bool(effect) != beastRestriction, "Bound family failed stock beast equip restrictions");
+                    if (effect)
+                    {
+                        const size_t count = boundEffects[i] == ESM::MagicEffect::BoundGloves ? 2 : 1;
+                        const auto equipped = inventory(player);
+                        std::set<ESM::RefNum> identities;
+                        for (size_t n = 0; n < count; ++n)
+                        {
+                            const auto& item = effect->boundItems[n];
+                            require(item.item.isSet() && identities.insert(item.item).second && item.slot >= 0,
+                                "Bound family failed unique item ownership or paired glove slots");
+                            require(equipped.stacks.size() == before.stacks.size() + count,
+                                "Bound item stacked with an ordinary same-record item");
+                        }
+                        restart();
+                        const uint64_t expires = effect->expiresTick;
+                        while (tick < expires) step({}, {}, tick + 1 == expires);
+                    }
+                    require(inventory(player).equipment == before.equipment,
+                        "Bound expiry/failed equip did not restore previous equipment");
+                    require(inventory(player).stacks.size() == before.stacks.size()
+                        && inventory(3 - player).equipment == peer.equipment
+                        && inventory(3 - player).stacks.size() == peer.stacks.size(),
+                        "Bound removal crossed actor ownership or removed an ordinary item");
+                    std::cout << "bound effect=" << i << " player=" << player << " expiry+rollback+restart=pass" << std::endl;
+                }
+            const auto npcGear = [&] {
+                const auto view = run->service().projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(std::max<uint64_t>(1, tick)), id<CanonicalRevision>(std::max<uint64_t>(1, tick)));
+                const auto placement = state(run->service()).combat->npcPlacements.front();
+                require(view && view->equipment, "NPC equipment projection missing");
+                const auto found = std::ranges::find_if(view->equipment->actors,
+                    [&](const auto& actor) { return actor.actor.value() == placement; });
+                require(found != view->equipment->actors.end(), "Selected NPC appearance missing");
+                return found->slots;
+            };
+            const auto castNpc = [&](std::string_view name) {
+                waitRecovery();
+                const auto current = state(run->service());
+                ActorMagicCast input{current.combat->npcPlacements.front(), current.life->generation, tick + 1,
+                    MagicUseSourceKind::Spell, hash(name), MagicUseTargetKind::Self, 0};
+                auto cues = step({}, input, true);
+                for (uint64_t end = tick + 80; tick <= end;)
+                {
+                    if (std::ranges::any_of(cues, [&](const auto& cue) { return cue.actorCaster()
+                            && cue.sourceId == hash(name) && cue.castSucceeded; })) return;
+                    cues = step({}, {}, true);
+                }
+                throw std::runtime_error("Bound-family NPC spell did not release");
+            };
+            if (!boundLifecycleOnly) for (size_t i = 0; i < boundEffects.size(); ++i)
+            {
+                fresh(); const auto gear = npcGear();
+                const std::string name = "travel_bound_" + std::to_string(i);
+                castNpc(name); const auto effect = active(2, hash(name));
+                require(effect && effect->casterKind == 2 && effect->casterLife == 1,
+                    "NPC bound equipment lost effect/life ownership");
+                restart(); while (tick < effect->expiresTick) step({}, {}, tick + 1 == effect->expiresTick);
+                require(npcGear() == gear, "Stock NPC bound expiry did not auto-equip a replacement");
+                std::cout << "bound effect=" << i << " npc expiry+rollback+restart=pass" << std::endl;
+            }
+            fresh(); const auto npcClothes = npcGear();
+            castNpc("travel_bound_extra"); const auto extra = *active(2, hash("travel_bound_extra"));
+            const auto stripped = npcGear();
+            for (size_t slot = 0; slot < stripped.size(); ++slot)
+            {
+                const bool kept = slot == InventoryStore::Slot_CarriedRight || slot == InventoryStore::Slot_Ammunition
+                    || slot == InventoryStore::Slot_Pants;
+                require(kept ? stripped[slot] == npcClothes[slot] : !stripped[slot],
+                    "Stock ExtraSpell did not retain exactly NPC weapon, ammo and pants");
+            }
+            castNpc("travel_bound_extra_overlap");
+            const auto laterExtra = *active(2, hash("travel_bound_extra_overlap"));
+            restart(); while (tick < extra.expiresTick) step({}, {}, tick + 1 == extra.expiresTick);
+            require(npcGear() == stripped, "Overlapping ExtraSpell restored equipment before the last source expired");
+            restart(); while (tick < laterExtra.expiresTick) step({}, {}, tick + 1 == laterExtra.expiresTick);
+            require(npcGear() == npcClothes, "ExtraSpell final expiry did not use stock NPC auto-equipment");
+            fresh(); const auto npcItems = dynamic_cast<InventoryService&>(run->service()).selectedNpcItemIdentities().size();
+            castNpc("travel_bound_death");
+            require(state(run->service()).life->respawnTick
+                && !active(2, hash("travel_bound_death"))
+                && dynamic_cast<InventoryService&>(run->service()).selectedNpcItemIdentities().size() == npcItems,
+                "NPC death retained temporary gloves or leaked corpse items");
+            restart();
+            // A new temporary identity and a rebuilt NPC life share the same
+            // release tick and generated counter, including rejected-write retry.
+            fresh(); const uint64_t castDuration = cast(1, "travel_bound_0_overlap");
+            fresh(); castNpc("travel_bound_death");
+            const uint64_t rebornAt = state(run->service()).life->respawnTick;
+            while (tick + castDuration < rebornAt) step();
+            cast(1, "travel_bound_0_overlap");
+            require(tick == rebornAt && state(run->service()).life->generation == 2
+                && active(0, hash("travel_bound_0_overlap")),
+                "Bound release failed to compose with fresh NPC-life equipment");
+            std::cout << "bound respawn+release tick=" << tick << " committed; restarting" << std::endl;
+            restart();
+            // Shared sources occupy the same slot without sharing temporary IDs.
+            for (bool manual : {false, true})
+            {
+                fresh(); const auto normal = normalWeapon(1); equip(1, normal, EquipmentSlot::CarriedRight, true);
+                cast(1, "travel_bound_0"); const auto first = *active(0, hash("travel_bound_0"));
+                cast(1, "travel_bound_0_overlap"); const auto second = *active(0, hash("travel_bound_0_overlap"));
+                require(first.boundItems[0].item != second.boundItems[0].item,
+                    "Overlapping sources shared a bound item identity");
+                if (manual) equip(1, normal, EquipmentSlot::CarriedRight, true);
+                restart(); while (tick < first.expiresTick) step({}, {}, tick + 1 == first.expiresTick);
+                require(active(0, hash("travel_bound_0_overlap"))->boundItems[0].previous == first.boundItems[0].previous,
+                    "Expired source was not spliced out of restoration ownership");
+                const auto view = inventory(1);
+                const auto right = std::ranges::find(view.equipment, EquipmentSlot::CarriedRight, &EquipmentBinding::slot);
+                require(right != view.equipment.end() && (manual ? right->stackId == normal : right->stackId != normal),
+                    "Expiry overrode a live overlapping source or manual equipment");
+                cast(1, "travel_bound_dispel");
+                require(!active(0, hash("travel_bound_0_overlap")), "Dispel retained bound ownership");
+                const auto restored = inventory(1);
+                require(std::ranges::find(restored.equipment, normal, &EquipmentBinding::stackId) != restored.equipment.end(),
+                    "Dispel did not preserve/restore the normal weapon");
+                restart();
+            }
+            fresh(); cast(1, "travel_bound_10");
+            const auto gloves = *active(0, hash("travel_bound_10"));
+            const auto view = inventory(1);
+            const auto rightGlove = std::ranges::find(view.equipment, EquipmentSlot::RightGauntlet, &EquipmentBinding::slot);
+            require(rightGlove != view.equipment.end(), "Bound right glove did not equip");
+            equip(1, rightGlove->stackId, EquipmentSlot::RightGauntlet, false);
+            restart(); while (tick < gloves.expiresTick) step();
+            require(std::ranges::none_of(inventory(1).equipment, [](const auto& item) { return item.slot == EquipmentSlot::RightGauntlet; }),
+                "Expiry overrode a manually unequipped glove");
+            fresh(); const auto clothes = inventory(1).equipment;
+            cast(1, "travel_bound_extra");
+            require(inventory(1).equipment == clothes, "Stock ExtraSpell changed player equipment");
+            restart();
+            fresh(); cast(1, "travel_bound_death");
+            require(state(run->service()).combat->actors[0][8][2] <= 0
+                && std::ranges::none_of(state(run->service()).timedEffects, [](const auto& effect) { return effect.equipmentApplied && effect.actor == 0; }),
+                "Death retained temporary equipment ownership");
+            restart();
+            fresh(); cast(1, "travel_bound_ordered"); restart();
+            // A bound item disintegrated later in the same ordered cast must be
+            // cleaned up by identity, without restoring it on recovery.
+            const auto ordered = active(0, hash("travel_bound_ordered"));
+            require(ordered.has_value(), "Ordered bound source missing");
+            while (tick < ordered->expiresTick) step(); restart();
+            fresh(); const auto ordinary = normalWeapon(1); equip(1, ordinary, EquipmentSlot::CarriedRight, true);
+            cast(1, "travel_bound_replacement"); restart();
+            const auto replaced = active(0, hash("travel_bound_replacement"));
+            require(replaced.has_value(), "Ordered equipment replacement source missing");
+            while (tick < replaced->expiresTick) step({}, {}, tick + 1 == replaced->expiresTick);
+            const auto afterReplacement = inventory(1);
+            require(std::ranges::find(afterReplacement.equipment, ordinary, &EquipmentBinding::stackId) != afterReplacement.equipment.end(),
+                "Simultaneous replacement expiry restored an expired temporary weapon");
+            restart();
+            for (uint64_t player : {1, 2})
+            {
+                fresh();
+                const auto before = inventory(player);
+                const auto prototype = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("travel_bound_permanent")));
+                const auto source = std::ranges::find(before.stacks, prototype, &CanonicalItemStack::prototypeId);
+                require(source != before.stacks.end(), "Constant bound source missing");
+                equip(player, source->stackId, EquipmentSlot::Shirt, true);
+                const auto current = state(run->service());
+                const auto permanent = std::ranges::find_if(current.timedEffects, [&](const auto& effect) {
+                    return effect.actor == player - 1 && effect.sourceKind == 3 && effect.equipmentApplied;
+                });
+                require(permanent != current.timedEffects.end()
+                    && permanent->boundItems[0].item.isSet() == (player == 1),
+                    "Constant bound source failed equip or beast suppression");
+                const auto itemCount = inventory(player).stacks.size();
+                restart(); for (unsigned n = 0; n < 10; ++n) step({}, {}, n == 0);
+                require(inventory(player).stacks.size() == itemCount, "Failed constant equip retried item allocation");
+                equip(player, source->stackId, EquipmentSlot::Shirt, false);
+                require(inventory(player).stacks.size() == before.stacks.size(), "Constant source replacement retained temporary equipment");
+                restart();
+            }
+            fresh(); step({}, {}, true);
+            const auto ability = active(1, hash("travel_bound_ability"));
+            require(ability && ability->sourceKind == 5 && !ability->boundItems[0].item.isSet(),
+                "Failed passive bound equip was not retained as a dormant source");
+            restart(); cast(2, "travel_bound_death");
+            const auto deadBeast = state(run->service());
+            require(deadBeast.combat->actors[1][8][2] <= 0
+                && std::ranges::none_of(deadBeast.timedEffects, [](const auto& effect) {
+                    return effect.actor == 1 && std::ranges::any_of(effect.boundItems, [](const auto& item) { return item.item.isSet(); });
+                }), "Death retained passive or paired equipment ownership");
+            restart();
+            fresh(); const auto replacementWeapon = normalWeapon(1);
+            equip(1, replacementWeapon, EquipmentSlot::CarriedRight, true);
+            cast(1, "travel_bound_0_overlap"); const auto firstCast = *active(0, hash("travel_bound_0_overlap"));
+            const auto temporaryStack = id<ItemStackId>((uint64_t(UINT32_MAX) << 32) | firstCast.boundItems[0].item.mIndex);
+            transferPrevious(1, temporaryStack, false);
+            const auto durable = image(run->service());
+            const auto& ownedItem = firstCast.boundItems[0];
+            const auto record = ownedItem.previousRecord.serializeText();
+            std::vector<std::byte> metadata;
+            const auto word = [](auto& bytes, uint64_t value) {
+                for (unsigned shift = 0; shift < 64; shift += 8) bytes.push_back(std::byte((value >> shift) & 255));
+            };
+            for (uint64_t value : {uint64_t(ownedItem.item.mIndex), uint64_t(ownedItem.previous.mIndex),
+                    uint64_t(ownedItem.slot + 1), uint64_t(record.size())}) word(metadata, value);
+            for (unsigned char ch : record) metadata.push_back(std::byte(ch));
+            const auto at = std::search(durable.begin(), durable.end(), metadata.begin(), metadata.end());
+            require(at != durable.end(), "Bound metadata fixture location missing");
+            for (bool cyclic : {false, true})
+            {
+                auto malformed = durable;
+                std::vector<std::byte> value;
+                word(value, cyclic ? ownedItem.item.mIndex : UINT64_MAX);
+                std::copy(value.begin(), value.end(), malformed.begin() + (at - durable.begin()) + (cyclic ? 8 : 0));
+                bool refused = false;
+                try { InventoryHost invalid(descriptor, manifest, *registry, *crypto, malformed); }
+                catch (const std::invalid_argument&) { refused = true; }
+                require(refused && image(run->service()) == durable, "Malformed bound ownership recovery was not atomic");
+            }
+            restart(); cast(1, "travel_bound_0_overlap");
+            require(active(0, hash("travel_bound_0_overlap"))->boundItems == firstCast.boundItems
+                && active(0, hash("travel_bound_0_overlap"))->expiresTick == firstCast.expiresTick,
+                "Stock NonRecastable recreated or refreshed a bound source");
+            while (tick + 1 < firstCast.expiresTick) step();
+            transferPrevious(1, replacementWeapon, true);
+            restart(); while (tick < firstCast.expiresTick) step({}, {}, tick + 1 == firstCast.expiresTick);
+            const auto replacementInventory = inventory(1);
+            const auto held = std::ranges::find(replacementInventory.equipment, EquipmentSlot::CarriedRight, &EquipmentBinding::slot);
+            require(held != replacementInventory.equipment.end() && held->stackId != replacementWeapon,
+                "Missing previous instance did not use stock same-record replacement");
+            const auto heldItem = std::ranges::find(replacementInventory.stacks, held->stackId, &CanonicalItemStack::stackId);
+            require(heldItem != replacementInventory.stacks.end()
+                && heldItem->prototypeId == id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("iron shortsword"))),
+                "Replacement restored the wrong record");
+            restart();
+            fresh(); const auto usedInventory = inventory(1);
+            const auto usedItem = std::ranges::find(usedInventory.stacks,
+                id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId("travel_bound_used"))), &CanonicalItemStack::prototypeId);
+            require(usedItem != usedInventory.stacks.end(), "WhenUsed bound source missing");
+            cast(1, "travel_bound_used", usedItem->stackId.value());
+            const auto enchanted = *active(0, hash("travel_bound_used"));
+            require(enchanted.sourceKind == uint64_t(MagicUseSourceKind::EnchantedItem), "WhenUsed bound ownership source changed");
+            restart(); while (tick < enchanted.expiresTick) step({}, {}, tick + 1 == enchanted.expiresTick);
+            require(inventory(1).stacks.size() == usedInventory.stacks.size(), "WhenUsed expiry retained paired bound items");
+            restart();
+            // Admission can race with expiry, or expiry can interrupt an
+            // admitted wind-up. Both must read the candidate equipment.
+            for (bool windup : {false, true})
+            {
+                fresh(); const auto normal = normalWeapon(1); equip(1, normal, EquipmentSlot::CarriedRight, true);
+                cast(1, "travel_bound_0"); const auto bound = *active(0, hash("travel_bound_0"));
+                while (tick + (windup ? 2 : 1) < bound.expiresTick) step();
+                const auto savedAuthority = authority;
+                const auto view = run->service().projectInventory(authority, id<SessionId>(1),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                const auto placement = state(run->service()).combat->npcPlacements.front();
+                const auto motion = std::ranges::find(view->equipment->motions, placement, &NativeActorMotion::placement);
+                require(motion != view->equipment->motions.end(), "Expiry attack actor motion missing");
+                std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+                const auto transform = nearby[0].transform();
+                nearby[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[0], id<ServerTick>(tick + 1),
+                    Transform(transform.cell(), Position3(int64_t((motion->position[0] + 30) * 1024),
+                        int64_t(motion->position[1] * 1024), int64_t(motion->position[2] * 1024)), transform.orientation()),
+                    LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+                const auto* player = authority.findPlayer(id<PlayerId>(1));
+                const ClientMeleeAttackCommand input{id<SessionId>(1), SessionGeneration::initial(),
+                    id<CommandSequence>(tick + 1), id<CommandId>(tick + 3000), id<CanonicalRevision>(tick + 1),
+                    id<ActorId>(placement), id<ServerTick>(tick + 1), CombatRevision::initial(),
+                    CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                const ServerCommandProposal request{id<SessionId>(1), SessionGeneration::initial(),
+                    input.commandSequence, input.commandId, input.observedCanonicalRevision,
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                    MeleeAttackCommandProposal(input)};
+                auto attack = run->service().prepareMeleeAttack(authority, request, id<ServerTick>(tick + 1));
+                require(bool(attack), "Expiry attack admission rejected");
+                step(std::move(attack), {}, true);
+                if (windup) step({}, {}, true);
+                const auto current = state(run->service());
+                require(tick == bound.expiresTick && !active(0, hash("travel_bound_0"))
+                    && current.combat->swings[0]
+                    && (windup ? current.combat->swings[0]->interruption == PlayerSwing::SourceChanged
+                        : current.combat->swings[0]->source == normal.value()),
+                    "Bound expiry combat retained the committed temporary source");
+                restart(); authority = savedAuthority;
+            }
+            const auto originalAuthority = authority;
+            std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
+            const auto initiator = authority.findPlayer(id<PlayerId>(1))->transform();
+            nearby[1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[1], id<ServerTick>(tick + 1),
+                Transform(initiator.cell(), Position3(initiator.position().x() + 30 * 1024,
+                    initiator.position().y(), initiator.position().z()), initiator.orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+            fresh(); const auto casterGear = inventory(1).equipment; const auto recipientGear = inventory(2).equipment;
+            cast(1, "travel_bound_10_touch", 0, 2);
+            const auto received = active(1, hash("travel_bound_10_touch"));
+            require(received && received->caster == 1 && received->casterKind == 1
+                && !active(0, hash("travel_bound_10_touch")) && inventory(1).equipment == casterGear,
+                "Directed bound equipment used the caster inventory instead of the recipient");
+            restart(); while (tick < received->expiresTick) step({}, {}, tick + 1 == received->expiresTick);
+            require(inventory(2).equipment == recipientGear, "Directed paired-glove expiry lost recipient restoration");
+            restart(); authority = originalAuthority;
+            std::cout << "bound shared lifecycle=overlap+manual+paired-gloves+dispel+death+ordered-wear\n";
+            return;
+        }
         if (effectFamily == "player-travel")
         {
             CanonicalWorldTimeState worldTime;

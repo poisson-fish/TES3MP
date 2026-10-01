@@ -33,6 +33,25 @@ focus provider compile. V69 requires a fresh campaign and capability-30 clients.
 containers, unbound destinations and changing frozen NPC collision remain unsupported.
 Travel remains single-effect Self.
 
+**Bound equipment (V70):** all 11 effects and stock ExtraSpell share explicit
+actor/inventory handlers. Sources own distinct temporary identities and previous
+instance/record links, including both gloves. Stock equip restrictions, NPC
+auto-equipment, manual-change priority and expiry/dispel/death cleanup join the
+existing actor/inventory commit. Overlap removal splices restoration links;
+ordinary same-record items survive. Temporary items cannot stack or transfer.
+Constant/passive failed equips stay dormant until their source changes.
+
+Synthetic vanilla checks pass all 11 effects for two players and an NPC
+(`build/logs/bound-equipment-final-02.log`). Shared checks pass rollback/restart, failed equips,
+overlapping sources, manual replacement, ordered wear, paired gloves, WhenUsed,
+directed Touch, malformed recovery, attack admission/wind-up at expiry and
+coincident NPC respawn/player release
+(`build/logs/bound-equipment-lifecycle-12.log`). This also fixes staged caster-life
+reconciliation and neighbor-image composition on respawn. V69 Soultrap regression
+passes (`build/logs/bound-object-soul-regression.log`). V70 requires a fresh
+campaign. Scripted bound records and general item scripts remain unsupported;
+desktop equipment/body/audio acceptance is deferred.
+
 Inherited Touch Lock/Open desktop captures cover their original behavior (`build/logs/object-magic-live-18.log`,
 `build/logs/container-spell-live-final-07.log`). V69 desktop visuals/audio, focus,
 soul-gem UI and destination presentation await grouped acceptance.
@@ -42,12 +61,13 @@ casts pay without moving. Desktops converge under 100 ms jitter and 10% loss (`b
 (`build/logs/player-travel-test-20.log`,
 `build/logs/player-travel-discontinuity-resync-final.log`).
 
-**Next:** grouped V69 two-desktop acceptance for both interventions, Telekinesis
-focus, soul-gem/death state and mixed Target/area effects under loss/reconnect.
-Then creature reactions/mixed combat, bound equipment, summons and actor/life ownership.
+**Next:** review stock summons handlers and implement one connected, bounded
+ownership/lifecycle slice using the existing actor commit. Desktop acceptance
+is deferred; V69/V70 and creature reactions/mixed combat still need grouped
+two-desktop verification under loss/reconnect.
 
 60 M4 IDs still require milestone acceptance or implementation, including the
-headless object/travel family above:
+headless object/travel and equipment families above:
 - Movement (8) and AI/disposition (12): implemented headlessly; acceptance remains.
 - Objects (4): Lock, Open, Telekinesis, Soultrap.
 - Travel (2): DivineIntervention, AlmsiviIntervention.

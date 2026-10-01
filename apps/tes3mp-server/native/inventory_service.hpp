@@ -122,6 +122,7 @@ namespace TES3MP::Native
         bool mLevitationEnabled = true; // Trusted world rule; a disabled world removes Levitate effects.
         bool mScriptedMovementRules = false; // V65 persists stock Enable/DisableLevitation results.
         bool mPlayerTravel = false; // V67 persists one Mark per player and paid Recall relocation.
+        bool mEquipmentFamily = false; // V70 effect-owned bound equipment and stock ExtraSpell.
         bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
         std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;
         bool mScriptedTravelRules = false; // V68 persists stock Enable/DisableTeleporting results.
@@ -275,7 +276,7 @@ namespace TES3MP::Native
             std::span<const ItemCharge> charges = {},
             const EquipmentRuntime::PreparedRespawn* respawn = nullptr,
             std::span<const ProjectileRecovery> recoveries = {},
-            EquipmentSessionValues* stagedValues = nullptr) const;
+            EquipmentSessionValues* stagedValues = nullptr, const EquipmentSessionValues* equipmentEffects = nullptr) const;
         PlainEquipmentValues combatEquipmentValues(size_t owner, const PreparedNativeInventory* command) const;
         EquipmentBytes replaceAreaCore(std::span<const char> area, std::span<const char> core) const;
         ServerApp::NativeTravelDiagnostics mTravelDiagnostics;

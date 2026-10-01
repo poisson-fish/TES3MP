@@ -22,7 +22,7 @@ namespace TES3MP::Native
     bool permanentStatEffect(ESM::RefId effect);
     bool wholeSourceCure(ESM::RefId effect);
     std::optional<PreparedInstantEffects> preparePersistentEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool specialConditions = false);
+        const MWWorld::ESMStore& content, bool specialConditions = false, bool equipmentEffects = false);
     int fortifyDynamicStat(ESM::RefId effect);
     void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
         float magnitude, const MWWorld::ESMStore& content);
@@ -72,21 +72,21 @@ namespace TES3MP::Native
     std::optional<PreparedEnchantmentCast> prepareEnchantmentCast(const ESM::Enchantment& enchantment,
         const MWMechanics::NpcStats& caster, float charge, const MWWorld::ESMStore& content,
         bool actorLifecycle = false, bool expandedEffects = false, bool specialConditions = false,
-        bool movementEffects = false, bool objectMagic = false, bool playerTravel = false);
+        bool movementEffects = false, bool objectMagic = false, bool playerTravel = false, bool equipmentEffects = false);
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
         const MWWorld::ESMStore& content, bool expandedEffects = false, bool specialConditions = false,
-        bool movementEffects = false, bool aiEffects = false, bool objectEffects = false);
+        bool movementEffects = false, bool aiEffects = false, bool objectEffects = false, bool equipmentEffects = false);
     std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects = false);
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects = false, bool equipmentEffects = false);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
         bool persistentSpecial = false, bool specialConditions = false, bool movementEffects = false,
-        bool objectMagic = false, bool playerTravel = false);
+        bool objectMagic = false, bool playerTravel = false, bool equipmentEffects = false);
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
         bool specialConditions = false, bool movementEffects = false, bool objectMagic = false,
-        bool playerTravel = false);
+        bool playerTravel = false, bool equipmentEffects = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);

@@ -94,6 +94,7 @@ namespace MWWorld
         std::function<void(const Ptr&)> mRegisterSplit;
         std::function<void(const Ptr&, int)> mRemoveSplit;
         std::function<void(const Ptr&)> mDeleteStack;
+        std::function<bool(ESM::RefNum)> mPreserveIdentity;
     };
 
     struct ContainerStoreInitialContext

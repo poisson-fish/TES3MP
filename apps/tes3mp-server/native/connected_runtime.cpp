@@ -5,6 +5,11 @@
 #include "runtime_phases.hpp"
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <components/esm3/loadclot.hpp>
+#include <apps/openmw/mwclass/armor.hpp>
+#include <apps/openmw/mwclass/clothing.hpp>
+#include <apps/openmw/mwclass/creature.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
+#include <apps/openmw/mwworld/inventoryitem.hpp>
 
 #include <limits>
 #include <stdexcept>
@@ -654,7 +659,7 @@ namespace TES3MP::Native
     size_t EquipmentRuntime::PreparedRespawn::revision() const { return mState->beforeRevision + 1; }
 
     std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareRespawn(
-        size_t owner, const PlainEquipmentValues& baseline)
+        size_t owner, const PlainEquipmentValues& baseline, ESM::RefNum candidateCounter)
     {
         if (!mConnected || mRestartActor || mFailedClosed || owner < 2 || owner >= ownerCount()
             || !inventoryStorage(owner) || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
@@ -663,6 +668,12 @@ namespace TES3MP::Native
         baseline.validate(mStore, actorId, mScriptLocals.get());
         auto replacement = baseline;
         auto counter = mWorld.getLastGeneratedRefNum();
+        if (candidateCounter.isSet())
+        {
+            if (candidateCounter.mContentFile != -1 || candidateCounter.mIndex < counter.mIndex)
+                throw std::invalid_argument("NPC respawn candidate counter invalid");
+            counter = candidateCounter;
+        }
         if (counter.mContentFile != -1 || replacement.mObjects.size() > UINT32_MAX - counter.mIndex)
             throw std::invalid_argument("NPC respawn item identity counter exhausted");
         std::map<ESM::RefNum, ESM::RefNum> identities;
@@ -889,6 +900,183 @@ namespace TES3MP::Native
         return std::unique_ptr<PreparedProjectileLoot>(new PreparedProjectileLoot(std::move(staged)));
     }
 
+    bool EquipmentRuntime::stageEquipmentMagic(EquipmentSessionValues& values, size_t owner, ESM::RefId effect,
+        std::array<MWMechanics::BoundEquipmentItem, 2>& items, bool removing,
+        bool alive, bool werewolf, const MWMechanics::NpcStats& stats,
+        const std::function<void()>& drawWeapon, bool extraSpellRemains)
+    {
+        if (owner >= ownerCount() || !inventoryStorage(owner)) return false;
+        auto& saved = owner < 2 ? values.mActors[owner] : values.mContainers.at(owner - 2);
+        auto counter = values.mActors[0].mLastGenerated;
+        const auto settings = MWMechanics::boundEquipmentSettings(effect);
+        std::array<ESM::RefId, 2> records;
+        if (!removing)
+        {
+            if (saved.mObjects.size() + settings.size() > PlainEquipmentValues::MaxItems
+                || settings.size() > UINT32_MAX - counter.mIndex || counter.mContentFile != -1)
+                throw std::invalid_argument("Bound equipment item budget exhausted");
+            for (size_t i = 0; i < settings.size(); ++i)
+            {
+                const auto& name = mStore.get<ESM::GameSetting>().find(settings[i])->mValue.getString();
+                if (name.empty() || name.size() > 256)
+                    throw std::invalid_argument("Bound equipment GMST record exceeds budget");
+                const auto record = records[i] = ESM::RefId::stringRefId(name);
+                const auto info = inventoryItemRecord(mStore, record);
+                if ((info.mType != ESM::Armor::sRecordId && info.mType != ESM::Weapon::sRecordId)
+                    || !info.mScript.empty())
+                    throw std::invalid_argument("Bound equipment requires a supported unscripted weapon or armor record");
+                ESM::ObjectState object; object.blank();
+                object.mRef.mRefID = record; object.mRef.mRefNum = {++counter.mIndex, -1};
+                object.mRef.mCount = 1; object.mEnabled = 1; object.mHasCustomState = false;
+                items[i].item = object.mRef.mRefNum;
+                saved.mObjects.push_back(std::move(object));
+            }
+        }
+        // No node is installed before the enclosing durable actor/inventory write.
+        saved.mLastGenerated = counter;
+        auto restored = RestoredPlainEquipment::restore(saved, mStore, saved.mActor, mScriptLocals);
+        auto& inventory = restored.installationCandidate(mStore, saved.mActor, saved.mLastGenerated);
+        const auto actor = ownerPtr(owner);
+        const auto find = [&](ESM::RefNum id) {
+            return std::find_if(inventory.begin(), inventory.end(), [&](const auto& item) {
+                return item.getCellRef().getRefNum() == id;
+            });
+        };
+        const auto canEquip = [&](const ConstPtr& item) {
+            if (item.getType() == ESM::Armor::sRecordId)
+                return static_cast<const MWClass::Armor&>(item.getClass()).canBeEquipped(item, actor, mStore, inventory).first != 0;
+            if (item.getType() == ESM::Clothing::sRecordId)
+                return static_cast<const MWClass::Clothing&>(item.getClass()).canBeEquipped(item, actor, mStore).first != 0;
+            return item.getClass().canBeEquipped(item, actor).first != 0;
+        };
+        ContainerStoreStackContext split{mStore,
+            [&](const Ptr& item) {
+                if (counter.mIndex == UINT32_MAX || inventory.storedSize() > PlainEquipmentValues::MaxItems)
+                    throw std::invalid_argument("Bound restoration split budget exhausted");
+                item.getCellRef().setRefNum({++counter.mIndex, -1});
+            },
+            [](const Ptr& item, int count) { item.getCellRef() = item.getCellRef().copyWithCount(item.getCellRef().getCount() - count); },
+            [](const Ptr& item) { item.getCellRef() = item.getCellRef().copyWithCount(0); },
+            [](ESM::RefNum) { return true; }};
+        // Preserve identities throughout effect-owned operations, including
+        // displaced items which later become another source's restoration link.
+        InventoryStoreEquipmentContext equipContext{split, actor, owner < 2 ? actor : Ptr{},
+            [](const Ptr&, const ESM::RefId& script) {
+                if (!script.empty()) throw std::invalid_argument("Bound equipment scripted unequip unavailable");
+            }, [](const Ptr&) {}};
+        const auto equip = [&](const Ptr& item) {
+            if (!alive || werewolf || !canEquip(item)) return;
+            const auto [slots, stackable] = item.getClass().getEquipmentSlots(item);
+            if (!stackable && item.getCellRef().getCount() > 1 && inventory.storedSize() >= PlainEquipmentValues::MaxItems)
+                throw std::invalid_argument("Bound restoration split budget exhausted");
+            if (!slots.empty()) inventory.equip(slots.front(), find(item.getCellRef().getRefNum()), equipContext);
+        };
+        const auto skill = [&](ESM::RefId id) {
+            return actor.getClass().isNpc() ? stats.getSkill(id).getModified()
+                : static_cast<const MWClass::Creature&>(actor.getClass()).getSkill(actor, id, mStore);
+        };
+        const auto autoEquip = [&] {
+            if (!alive || werewolf) return;
+            inventory.autoEquip({mStore, actor.getClass().isNpc(), actor.getClass().isNpc() ? 0
+                    : actor.get<ESM::Creature>()->mBase->mAiData.mServices, skill,
+                [&](const ConstPtr& item) {
+                    const auto& armor = static_cast<const MWClass::Armor&>(item.getClass());
+                    return armor.getSkillAdjustedArmorRating(item, skill(armor.getEquipmentSkill(item, mStore)), mStore);
+                }, canEquip, [&](const Ptr& item) {
+                    if (inventory.storedSize() >= PlainEquipmentValues::MaxItems)
+                        throw std::invalid_argument("Bound auto-equipment split budget exhausted");
+                    inventory.unstack(item, 1, split);
+                }, [] {}});
+        };
+        size_t addedIndex = 0;
+        MWMechanics::BoundEquipmentContext context{inventory, owner < 2, !alive, werewolf,
+            [&](ESM::RefId record) {
+                const auto it = find(items.at(addedIndex++).item);
+                if (it != inventory.end() && it->getCellRef().getRefId() == record) return *it;
+                throw std::logic_error("Bound item creation lost its identity");
+            }, equip,
+            [&](const Ptr& item) {
+                item.getCellRef() = item.getCellRef().copyWithCount(0);
+                inventory.unequipRemovedItem(item, equipContext);
+            },
+            [&](const MWMechanics::BoundEquipmentItem& item) {
+                const auto exact = find(item.previous);
+                if (exact != inventory.end() && exact->getCellRef().getRefId() == item.previousRecord) return *exact;
+                for (const auto& candidate : inventory)
+                    if (candidate.getCellRef().getRefId() == item.previousRecord && canEquip(candidate)
+                        && (!mPreserveIdentity || !mPreserveIdentity(candidate.getCellRef().getRefNum()))) return candidate;
+                return Ptr{};
+            }, autoEquip, drawWeapon};
+        bool equipped = true;
+        if (effect == ESM::MagicEffect::ExtraSpell)
+        {
+            if (!removing) MWMechanics::applyExtraSpell(inventory, owner < 2,
+                [&](int slot) { inventory.unequipSlot(slot, equipContext); });
+            else if (owner >= 2 && !extraSpellRemains) autoEquip();
+        }
+        else for (size_t i = 0; i < settings.size(); ++i)
+        {
+            if (removing) MWMechanics::removeBoundEquipment(items[settings.size() - 1 - i], context);
+            else
+            {
+                equipped &= MWMechanics::addBoundEquipment(records[i], items[i], context);
+            }
+        }
+        restored.exportValues(saved);
+        if (removing) std::erase_if(saved.mObjects, [&](const auto& object) {
+            return std::ranges::any_of(items, [&](const auto& item) { return item.item.isSet() && item.item == object.mRef.mRefNum; });
+        });
+        for (auto& value : values.mActors) value.mLastGenerated = counter;
+        for (auto& value : values.mContainers) value.mLastGenerated = counter;
+        if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
+        return equipped;
+    }
+
+    bool EquipmentRuntime::stageEquipmentSelection(EquipmentSessionValues& values, size_t owner,
+        ESM::RefNum selected, int slot)
+    {
+        if (owner >= ownerCount() || !inventoryStorage(owner)) return false;
+        auto& saved = owner < 2 ? values.mActors[owner] : values.mContainers.at(owner - 2);
+        auto counter = values.mActors[0].mLastGenerated;
+        auto restored = RestoredPlainEquipment::restore(saved, mStore, saved.mActor, mScriptLocals);
+        auto& inventory = restored.installationCandidate(mStore, saved.mActor, saved.mLastGenerated);
+        const auto item = std::find_if(inventory.begin(), inventory.end(), [&](const auto& value) {
+            return value.getCellRef().getRefNum() == selected;
+        });
+        if (item == inventory.end()) return false;
+        const auto actor = ownerPtr(owner);
+        const auto slots = item->getClass().getEquipmentSlots(*item).first;
+        if (std::ranges::find(slots, slot) == slots.end()) return false;
+        const auto allowed = item->getType() == ESM::Armor::sRecordId
+            ? static_cast<const MWClass::Armor&>(item->getClass()).canBeEquipped(*item, actor, mStore, inventory)
+            : item->getType() == ESM::Clothing::sRecordId
+                ? static_cast<const MWClass::Clothing&>(item->getClass()).canBeEquipped(*item, actor, mStore)
+                : item->getClass().canBeEquipped(*item, actor);
+        if (!allowed.first) return false;
+        if (!item->getClass().getEquipmentSlots(*item).second && item->getCellRef().getCount() > 1
+            && inventory.storedSize() >= PlainEquipmentValues::MaxItems)
+            throw std::invalid_argument("Equipment selection split budget exhausted");
+        ContainerStoreStackContext split{mStore,
+            [&](const Ptr& value) {
+                if (counter.mIndex == UINT32_MAX || inventory.storedSize() >= PlainEquipmentValues::MaxItems)
+                    throw std::invalid_argument("Equipment selection split budget exhausted");
+                value.getCellRef().setRefNum({++counter.mIndex, -1});
+            },
+            [](const Ptr& value, int count) {
+                value.getCellRef() = value.getCellRef().copyWithCount(value.getCellRef().getCount() - count);
+            }, [](const Ptr& value) { value.getCellRef() = value.getCellRef().copyWithCount(0); },
+            [](ESM::RefNum) { return true; }};
+        inventory.equip(slot, item, {split, actor, owner < 2 ? actor : Ptr{},
+            [](const Ptr&, ESM::RefId script) {
+                if (!script.empty()) throw std::invalid_argument("Equipment selection scripted unequip unavailable");
+            }, [](const Ptr&) {}});
+        restored.exportValues(saved);
+        for (auto& value : values.mActors) value.mLastGenerated = counter;
+        for (auto& value : values.mContainers) value.mLastGenerated = counter;
+        if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
+        return saved.mSlots[slot] == selected;
+    }
+
     bool EquipmentRuntime::stageSoulCapture(EquipmentSessionValues& values, size_t owner, ESM::RefId soul, int value)
     {
         if (owner >= ownerCount() || value <= 0) return false;
@@ -905,8 +1093,8 @@ namespace TES3MP::Native
             throw std::invalid_argument("Soul capture inventory budget exhausted");
         const ContainerStoreStackContext context{mStore,
             [&](const Ptr& item) { item.getCellRef().setRefNum({++counter.mIndex, -1}); },
-            [](const Ptr& item, int count) { item.getCellRef().setCount(item.getCellRef().getCount() - count); },
-            [](const Ptr& item) { item.getCellRef().setCount(0); }};
+            [](const Ptr& item, int count) { item.getCellRef() = item.getCellRef().copyWithCount(item.getCellRef().getCount() - count); },
+            [](const Ptr& item) { item.getCellRef() = item.getCellRef().copyWithCount(0); }};
         if (!MWMechanics::captureSoul(candidate, soul, value,
                 multiplier, &context)) return false;
         restored.exportValues(inventory);

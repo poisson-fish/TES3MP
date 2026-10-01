@@ -1,5 +1,6 @@
 #include "spelleffects.hpp"
 #include "objectmagic.hpp"
+#include "boundequipment.hpp"
 
 #include <algorithm>
 #include <array>
@@ -208,106 +209,50 @@ namespace
         return false;
     }
 
-    int getBoundItemSlot(const MWWorld::Ptr& boundPtr)
+    MWMechanics::BoundEquipmentContext stockBoundEquipmentContext(const MWWorld::Ptr& actor)
     {
-        const auto [slots, _] = boundPtr.getClass().getEquipmentSlots(boundPtr);
-        if (!slots.empty())
-            return slots[0];
-        return -1;
+        auto& store = actor.getClass().getInventoryStore(actor);
+        return {store, actor == MWMechanics::getPlayer(), actor.getClass().getCreatureStats(actor).isDead(),
+            actor.getClass().isNpc() && actor.getClass().getNpcStats(actor).isWerewolf(),
+            [&](ESM::RefId id) { return *store.MWWorld::ContainerStore::add(id, 1); },
+            [actor](const MWWorld::Ptr& item) { MWWorld::ActionEquip(item).execute(actor); },
+            [&](const MWWorld::Ptr& item) { store.remove(item, 1); },
+            [&](const MWMechanics::BoundEquipmentItem& item) { return store.findReplacement(item.previousRecord); },
+            [&] { store.autoEquip(); },
+            [] { MWBase::Environment::get().getWorld()->getPlayer().setDrawState(MWMechanics::DrawState::Weapon); }};
     }
 
     bool addBoundItem(const ESM::RefId& itemId, const MWWorld::Ptr& actor)
     {
-        MWWorld::InventoryStore& store = actor.getClass().getInventoryStore(actor);
-        MWWorld::Ptr boundPtr = *store.MWWorld::ContainerStore::add(itemId, 1);
-
-        int slot = getBoundItemSlot(boundPtr);
-        auto prevItem = slot >= 0 ? store.getSlot(slot) : store.end();
-
-        MWWorld::ActionEquip action(boundPtr);
-        action.execute(actor);
-
-        MWWorld::Ptr newItem;
-        auto it = slot >= 0 ? store.getSlot(slot) : store.end();
-        // Equip can fail because beast races cannot equip boots/helmets
-        if (it != store.end())
-            newItem = *it;
-
-        if (newItem.isEmpty() || boundPtr != newItem)
-            return false;
-
-        if (actor == MWMechanics::getPlayer())
-        {
-            MWWorld::Player& player = MWBase::Environment::get().getWorld()->getPlayer();
-
-            // change draw state only if the item is in player's right hand
-            if (slot == MWWorld::InventoryStore::Slot_CarriedRight)
-                player.setDrawState(MWMechanics::DrawState::Weapon);
-
-            if (prevItem != store.end())
-                player.setPreviousItem(itemId, prevItem->getCellRef().getRefId());
-        }
-
-        return true;
+        MWMechanics::BoundEquipmentItem item;
+        const auto context = stockBoundEquipmentContext(actor);
+        const bool equipped = MWMechanics::addBoundEquipment(itemId, item, context);
+        if (equipped && context.player && !item.previousRecord.empty())
+            MWBase::Environment::get().getWorld()->getPlayer().setPreviousItem(itemId, item.previousRecord);
+        return equipped;
     }
 
     void removeBoundItem(const ESM::RefId& itemId, const MWWorld::Ptr& actor)
     {
-        MWWorld::InventoryStore& store = actor.getClass().getInventoryStore(actor);
-        auto item = std::find_if(
-            store.begin(), store.end(), [&](const auto& it) { return it.getCellRef().getRefId() == itemId; });
-        if (item == store.end())
-            return;
-        int slot = getBoundItemSlot(*item);
-
-        auto currentItem = store.getSlot(slot);
-
-        bool wasEquipped = currentItem != store.end() && currentItem->getCellRef().getRefId() == itemId;
-
-        if (wasEquipped)
-            store.remove(*currentItem, 1);
-        else
-            store.remove(itemId, 1);
-
-        if (actor != MWMechanics::getPlayer())
+        const auto context = stockBoundEquipmentContext(actor);
+        auto& store = context.inventory;
+        const auto item = std::find_if(store.begin(), store.end(), [&](const auto& value) {
+            return value.getCellRef().getRefId() == itemId;
+        });
+        if (item == store.end()) return;
+        const auto slots = item->getClass().getEquipmentSlots(*item).first;
+        const int slot = slots.empty() ? -1 : slots.front();
+        // Prefer the equipped stock instance when duplicate records exist.
+        const auto current = slot >= 0 ? store.getSlot(slot) : store.end();
+        const auto selected = current != store.end() && current->getCellRef().getRefId() == itemId ? current : item;
+        MWMechanics::BoundEquipmentItem state{selected->getCellRef().getRefNum(), {}, {}, slot};
+        if (context.player)
         {
-            // Equip a replacement
-            if (!wasEquipped)
-                return;
-
-            auto type = currentItem->getType();
-            if (type != ESM::Weapon::sRecordId && type != ESM::Armor::sRecordId && type != ESM::Clothing::sRecordId)
-                return;
-
-            if (actor.getClass().getCreatureStats(actor).isDead())
-                return;
-
-            if (!actor.getClass().hasInventoryStore(actor))
-                return;
-
-            if (actor.getClass().isNpc() && actor.getClass().getNpcStats(actor).isWerewolf())
-                return;
-
-            actor.getClass().getInventoryStore(actor).autoEquip();
-
-            return;
+            auto& player = MWBase::Environment::get().getWorld()->getPlayer();
+            state.previousRecord = player.getPreviousItem(itemId);
+            player.erasePreviousItem(itemId);
         }
-
-        MWWorld::Player& player = MWBase::Environment::get().getWorld()->getPlayer();
-        ESM::RefId prevItemId = player.getPreviousItem(itemId);
-        player.erasePreviousItem(itemId);
-
-        if (!prevItemId.empty() && wasEquipped)
-        {
-            // Find previous item (or its replacement) by id.
-            // we should equip previous item only if expired bound item was equipped.
-            MWWorld::Ptr prevItem = store.findReplacement(prevItemId);
-            if (!prevItem.isEmpty())
-            {
-                MWWorld::ActionEquip action(prevItem);
-                action.execute(actor);
-            }
-        }
+        MWMechanics::removeBoundEquipment(state, context);
     }
 
     bool isCorprusEffect(const MWMechanics::ActiveSpells::ActiveEffect& effect, bool harmfulOnly = false)
@@ -418,23 +363,6 @@ namespace
             }
         }
         return MWMechanics::MagicApplicationResult::Type::APPLIED;
-    }
-
-    const std::unordered_map<ESM::RefId, std::string_view>& getBoundItemsMap()
-    {
-        static const std::unordered_map<ESM::RefId, std::string_view> sBoundItemsMap{
-            { ESM::MagicEffect::BoundBattleAxe, "sMagicBoundBattleAxeID" },
-            { ESM::MagicEffect::BoundBoots, "sMagicBoundBootsID" },
-            { ESM::MagicEffect::BoundCuirass, "sMagicBoundCuirassID" },
-            { ESM::MagicEffect::BoundDagger, "sMagicBoundDaggerID" },
-            { ESM::MagicEffect::BoundHelm, "sMagicBoundHelmID" },
-            { ESM::MagicEffect::BoundLongbow, "sMagicBoundLongbowID" },
-            { ESM::MagicEffect::BoundLongsword, "sMagicBoundLongswordID" },
-            { ESM::MagicEffect::BoundMace, "sMagicBoundMaceID" },
-            { ESM::MagicEffect::BoundShield, "sMagicBoundShieldID" },
-            { ESM::MagicEffect::BoundSpear, "sMagicBoundSpearID" },
-        };
-        return sBoundItemsMap;
     }
 
     using SpellsPurge = void (MWMechanics::Spells::*)();
@@ -667,30 +595,8 @@ namespace MWMechanics
             {
                 if (!target.getClass().hasInventoryStore(target))
                     return ESM::ActiveEffect::Flag_Invalid;
-                if (target != getPlayer())
-                {
-                    auto& store = target.getClass().getInventoryStore(target);
-                    for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
-                    {
-                        // Unequip everything except weapons, torches, and pants
-                        switch (slot)
-                        {
-                            case MWWorld::InventoryStore::Slot_Ammunition:
-                            case MWWorld::InventoryStore::Slot_CarriedRight:
-                            case MWWorld::InventoryStore::Slot_Pants:
-                                continue;
-                            case MWWorld::InventoryStore::Slot_CarriedLeft:
-                            {
-                                auto carried = store.getSlot(slot);
-                                if (carried == store.end() || carried.getType() != MWWorld::ContainerStore::Type_Armor)
-                                    continue;
-                                [[fallthrough]];
-                            }
-                            default:
-                                store.unequipSlot(slot);
-                        }
-                    }
-                }
+                auto& store = target.getClass().getInventoryStore(target);
+                applyExtraSpell(store, target == getPlayer(), [&](int slot) { store.unequipSlot(slot); });
             }
             else if (effect.mEffectId == ESM::MagicEffect::TurnUndead)
             {
@@ -799,7 +705,7 @@ namespace MWMechanics
             {
                 if (!target.getClass().hasInventoryStore(target))
                     return ESM::ActiveEffect::Flag_Invalid;
-                std::string_view item = getBoundItemsMap().at(effect.mEffectId);
+                std::string_view item = boundEquipmentSettings(effect.mEffectId).front();
                 const MWWorld::Store<ESM::GameSetting>& gmst = world->getStore().get<ESM::GameSetting>();
                 const ESM::RefId itemId = ESM::RefId::stringRefId(gmst.find(item)->mValue.getString());
                 if (!addBoundItem(itemId, target))
@@ -1221,7 +1127,7 @@ namespace MWMechanics
                 || effect.mEffectId == ESM::MagicEffect::BoundBoots
                 || effect.mEffectId == ESM::MagicEffect::BoundShield)
             {
-                std::string_view item = getBoundItemsMap().at(effect.mEffectId);
+                std::string_view item = boundEquipmentSettings(effect.mEffectId).front();
                 removeBoundItem(
                     ESM::RefId::stringRefId(world->getStore().get<ESM::GameSetting>().find(item)->mValue.getString()),
                     target);

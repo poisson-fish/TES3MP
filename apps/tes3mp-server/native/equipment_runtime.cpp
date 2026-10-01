@@ -885,7 +885,7 @@ namespace TES3MP::Native
     {
         const auto player = mActors.at(actor < 2 ? actor : initiator)->getPtr();
         return { mStore, mWorld, mScripts, actor >= 2 && actorInventory(ownerPtr(actor)) ? ownerPtr(actor) : player,
-            player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals, mConstantEffects };
+            player, actor < 2 ? mNpcStats[actor] : nullptr, mScriptLocals, mConstantEffects, mPreserveIdentity };
     }
 
     auto EquipmentRuntime::cellValues(const ESM::CellRef& ref)

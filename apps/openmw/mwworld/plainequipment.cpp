@@ -829,6 +829,7 @@ namespace MWWorld
                 [&](const Ptr& item, const ESM::RefId&) { MWScript::unequipItemLocals(item, scriptContext); },
                 [this](const Ptr&) { effect(Kind::EquipmentChanged); }
             };
+            context.mStack.mPreserveIdentity = mContext.mPreserveIdentity;
             if (equip)
             {
                 mResult.mSkipped = !MWScript::beginItemUse(*item, scriptContext);
@@ -919,6 +920,7 @@ namespace MWWorld
             || item.getContainerStore() != &source || item.getCellRef().getRefNum() != expectedIdentity
             || !ContainerStore::isStorableType(item.getType()) || count <= 0
             || count > std::abs(static_cast<int64_t>(item.getCellRef().getCount(false)))
+            || (contexts[0].mPreserveIdentity && contexts[0].mPreserveIdentity(expectedIdentity))
             || (!allowEquippedSource && dynamic_cast<const InventoryStore*>(&source)
                 && std::any_of(static_cast<const InventoryStore&>(source).mSlots.begin(),
                     static_cast<const InventoryStore&>(source).mSlots.end(), [&](const auto& slot) {
@@ -937,7 +939,8 @@ namespace MWWorld
         if (takeAll)
             for (auto it = source.begin(); it != source.end(); ++it)
             {
-                if ((!it->getClass().getScript(*it).empty()
+                if ((contexts[0].mPreserveIdentity && contexts[0].mPreserveIdentity(it->getCellRef().getRefNum()))
+                    || (!it->getClass().getScript(*it).empty()
                         && !scriptedRangedItem(inventoryItemRecord(contexts[0].mStore,
                             it->getCellRef().getRefId())))
                     || (!allowEquippedSource && dynamic_cast<const InventoryStore*>(&source)
@@ -1043,7 +1046,8 @@ namespace MWWorld
     {
         const auto& live = State::storage(inventory, context);
         const auto counter = context.mWorldModel.getLastGeneratedRefNum();
-        if (!dynamic_cast<const InventoryStore*>(&live) || count <= 0
+        if ((!pickup && context.mPreserveIdentity && context.mPreserveIdentity(identity))
+            || !dynamic_cast<const InventoryStore*>(&live) || count <= 0
             || expectedRevision != context.mWorldModel.getPtrRegistryRevision()
             || expectedRevision >= std::numeric_limits<size_t>::max() - 1
             || counter.mContentFile != -1 || counter.mIndex == UINT32_MAX)

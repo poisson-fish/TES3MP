@@ -82,8 +82,7 @@ namespace TES3MP::Native
             const auto* enchantment = store.get<ESM::Enchantment>().search(ammunition.mEnchant);
             const uint64_t source = spellRecordId(ammunition.mEnchant);
             const auto effects = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes
-                ? prepareInstantEffects(enchantment->mEffects, store, binding.mActorEffectLifecycle,
-                    binding.mExpandedEffects, false, binding.mSpecialConditions, binding.mMovementEffects)
+                ? prepareInstantEffects(enchantment->mEffects, store, binding.mActorEffectLifecycle, binding.mExpandedEffects, false, binding.mSpecialConditions, binding.mMovementEffects, false, false, binding.mEquipmentFamily)
                 : std::nullopt;
             return source && enchantmentBySource(store, source) == enchantment && effects;
         }
@@ -592,7 +591,7 @@ namespace TES3MP::Native
             uint64_t tick, const MWWorld::ESMStore& content, bool general,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
             bool expanded, bool specialConditions, bool movementEffects, bool aiDecisions,
-            bool npcActor, bool undeadActor, bool levitationEnabled = true, bool objectEffects = false)
+            bool npcActor, bool undeadActor, bool levitationEnabled = true, bool objectEffects = false, bool equipmentEffects = false)
         {
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
@@ -609,9 +608,9 @@ namespace TES3MP::Native
                 PreparedInstantEffects plan;
                 if (general)
                 {
-                    auto prepared = prepareConstantEffects(record.mEnchant, content, expanded, specialConditions,
-                        movementEffects, aiDecisions, objectEffects);
-                    if (!prepared) throw std::invalid_argument("Native constant effects unsupported");
+                    auto prepared = prepareConstantEffects(record.mEnchant, content, expanded, specialConditions, movementEffects, aiDecisions, objectEffects, equipmentEffects);
+                    if (!prepared) throw std::invalid_argument("Native constant effects unsupported: "
+                        + record.mEnchant.serializeText());
                     plan = std::move(*prepared);
                 }
                 else
@@ -631,7 +630,8 @@ namespace TES3MP::Native
                             actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
                     const bool noMagnitude = (entry.mEffectID == ESM::MagicEffect::Invisibility
                         || entry.mEffectID == ESM::MagicEffect::WaterBreathing
-                        || entry.mEffectID == ESM::MagicEffect::WaterWalking)
+                        || entry.mEffectID == ESM::MagicEffect::WaterWalking
+                        || (equipmentEffects && MWMechanics::equipmentMagicEffect(entry.mEffectID)))
                         && (content.get<ESM::MagicEffect>().find(entry.mEffectID)->mData.mFlags
                             & ESM::MagicEffect::NoMagnitude);
                     const uint64_t argument = !entry.mAttribute.empty()
@@ -695,9 +695,9 @@ namespace TES3MP::Native
             uint64_t tick, const MWWorld::ESMStore& content,
             std::vector<ActorCampaignTimedEffect>& effects, Misc::Rng::Generator* rng,
             bool movementEffects, bool aiEffects, bool npcActor, bool undeadActor,
-            bool levitationEnabled = true, bool objectEffects = false)
+            bool levitationEnabled = true, bool objectEffects = false, bool equipmentEffects = false)
         {
-            if (!movementEffects && !aiEffects && !objectEffects) return false;
+            if (!movementEffects && !aiEffects && !objectEffects && !equipmentEffects) return false;
             std::vector<ActorCampaignTimedEffect> desired;
             bool changed = false;
             for (const auto id : actorSpells(ptr).mList)
@@ -707,10 +707,11 @@ namespace TES3MP::Native
                 const bool relevant = std::ranges::any_of(spell->mEffects.mList, [&](const auto& entry) {
                     return (aiEffects && aiDispositionEffect(entry.mData.mEffectID))
                         || (movementEffects && movementEffect(entry.mData.mEffectID))
-                        || (objectEffects && entry.mData.mEffectID == ESM::MagicEffect::Telekinesis);
+                        || (objectEffects && entry.mData.mEffectID == ESM::MagicEffect::Telekinesis)
+                        || (equipmentEffects && MWMechanics::equipmentMagicEffect(entry.mData.mEffectID));
                 });
                 if (!relevant) continue;
-                const auto plan = preparePassiveActorEffects(*spell, content, movementEffects, aiEffects, objectEffects);
+                const auto plan = preparePassiveActorEffects(*spell, content, movementEffects, aiEffects, objectEffects, equipmentEffects);
                 const uint64_t source = spellRecordId(id);
                 if (!plan || !source || spellBySource(content, source) != spell)
                     throw std::invalid_argument("Native passive AI source unsupported or ambiguous");
@@ -834,7 +835,8 @@ namespace TES3MP::Native
             std::span<const uint64_t> ordinals, MWMechanics::NpcStats* externalCaster = nullptr,
             bool ignoreResistance = false, const std::function<float(size_t)>& sunExposure = {},
             const std::function<void(size_t, ESM::RefId, float)>& disintegrate = {},
-            const std::function<bool(size_t, ESM::RefId)>& castable = {})
+            const std::function<bool(size_t, ESM::RefId)>& castable = {},
+            const std::function<bool(ActorCampaignTimedEffect&, bool)>& equipmentMagic = {})
         {
             if (identities.size() != combat.actors.size() || actorKinds.size() != identities.size()
                 || targetIndex >= identities.size())
@@ -857,6 +859,14 @@ namespace TES3MP::Native
             const size_t casterIndex = size_t(found - identities.begin());
             states[targetIndex] = &target;
             if (externalCaster && casterIndex < states.size()) states[casterIndex] = externalCaster;
+            const bool nonRecastable = std::ranges::all_of(plan.effects, [&](const auto& entry) {
+                return entry.mRange != range || (content.get<ESM::MagicEffect>().find(entry.mEffectID)->mData.mFlags
+                    & ESM::MagicEffect::NonRecastable);
+            });
+            if (nonRecastable && std::ranges::any_of(effects, [&](const auto& entry) {
+                    return entry.actor == targetIndex && entry.source == source
+                        && entry.sourceKind == sourceKind && entry.expiresTick > tick;
+                })) return {{}, std::vector<std::optional<ActorCasterIdentity>>(states.size())};
             const auto prior = std::array{target.getHealth().getCurrent(), target.getMagicka().getCurrent(), target.getFatigue().getCurrent()};
             const ESM::Spell* spell = nullptr;
             const ESM::Enchantment* enchantment = nullptr;
@@ -872,6 +882,8 @@ namespace TES3MP::Native
                     casterIndex < states.size() ? states[casterIndex]->getSkill(ESM::Skill::Enchant).getModified() : 0.f);
             ExpandedEffectResult result{.deaths = std::vector<std::optional<ActorCasterIdentity>>(states.size())};
             const auto undo = [&](const ActorCampaignTimedEffect& effect) {
+                if (effect.equipmentApplied && equipmentMagic)
+                { auto removed = effect; equipmentMagic(removed, true); }
                 for (size_t i = 0; i < states.size(); ++i) applyEffectStats(*states[i], content, {&effect, 1}, i, -1.f);
                 const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
                 auto& victim = *states[effect.actor];
@@ -1050,6 +1062,8 @@ namespace TES3MP::Native
                             : !effect.mSkill.empty() ? uint64_t(ESM::Skill::refIdToIndex(effect.mSkill) + 9) : 0,
                         ordinal, attribution.kind, attribution.life,
                         (absorb >= 0 || absorbStat(effect.mEffectID)) && author < states.size() ? author + 1 : 0};
+                    if (MWMechanics::equipmentMagicEffect(effect.mEffectID)
+                        && (!equipmentMagic || !equipmentMagic(active, false))) return;
                     effects.push_back(active);
                     for (size_t i = 0; i < states.size(); ++i) applyEffectStats(*states[i], content, {&active, 1}, i, 1.f);
                     if (sourceKind == 4 && spell && MWMechanics::Spells::hasCorprusEffect(spell)
@@ -1283,6 +1297,11 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Native player cast timing invalid");
             }
         }
+        mRuntime.mPreserveIdentity = [this](ESM::RefNum item) {
+            return mBinding.mEquipmentFamily && std::ranges::any_of(mTimedEffects, [&](const auto& effect) {
+                return std::ranges::any_of(effect.boundItems, [&](const auto& bound) { return bound.item.isSet() && bound.item == item; });
+            });
+        };
         if (mBinding.mWeaponMelee && !mBinding.mBoundHits)
             throw std::invalid_argument("Native weapon execution requires participant resource binding");
         if (mBinding.mGeneralAttackModes && !mBinding.mWeaponMelee)
@@ -1361,7 +1380,8 @@ namespace TES3MP::Native
                     if (!mBinding.mAiDecisions) return false;
                     const auto* spell = content.get<ESM::Spell>().search(id);
                     return spell && preparePassiveActorEffects(*spell, content,
-                        mBinding.mMovementEffects, mBinding.mAiDecisions, mBinding.mObjectTravelFamily).has_value();
+                        mBinding.mMovementEffects, mBinding.mAiDecisions, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily).has_value();
                 });
             if (selected.getType() == ESM::Creature::sRecordId
                 && (!mBinding.mActorPresentation || !creatureSpellsSupported
@@ -2535,7 +2555,8 @@ namespace TES3MP::Native
             auto prepared = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge, mRuntime.mStore,
                 mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
                 mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                objectTarget || mBinding.mObjectTravelFamily, mBinding.mPlayerTravel);
+                objectTarget || mBinding.mObjectTravelFamily, mBinding.mPlayerTravel,
+                mBinding.mEquipmentFamily);
             if (!prepared || !prepared->affordable || !acceptsObjectTarget(prepared->effects)) return {};
             const auto& effects = prepared->effects;
             if (std::ranges::any_of(effects.effects,
@@ -2565,7 +2586,8 @@ namespace TES3MP::Native
         if (!selected) return {};
         auto prepared = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects,
             mBinding.mSpecialConditions, mBinding.mMovementEffects,
-            objectTarget || mBinding.mObjectTravelFamily, mBinding.mPlayerTravel);
+            objectTarget || mBinding.mObjectTravelFamily, mBinding.mPlayerTravel,
+            mBinding.mEquipmentFamily);
         if (!prepared || !acceptsObjectTarget(prepared->effects)
             || std::ranges::any_of(prepared->effects.effects,
                 [&](const auto& effect) { return (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty()))
@@ -2784,7 +2806,8 @@ namespace TES3MP::Native
                 || mBinding.mRangedFlight != hasRangedFlight(magic)
                 || mBinding.mAuthoritativeAim != hasAuthoritativeAim(magic)
                 || mBinding.mScriptedMovementRules != hasMovementRules(magic)
-                || mBinding.mObjectTravelFamily != (magic == ObjectTravelCampaignMagic)
+                || mBinding.mObjectTravelFamily != hasObjectTravel(magic)
+                || mBinding.mEquipmentFamily != (magic == EquipmentFamilyCampaignMagic)
                 || mBinding.mPlayerTravel != hasPlayerTravel(magic)
                 || mBinding.mScriptedTravelRules != hasTravelRules(magic)
                 || mBinding.mKnockoutAnimation != hasKnockoutAnimation(magic)
@@ -2956,11 +2979,7 @@ namespace TES3MP::Native
                         if (!id.empty() && spellRecordId(id) == pending.source)
                         {
                             const auto* selected = mRuntime.mStore.get<ESM::Spell>().search(id);
-                            const auto plan = selected ? prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                                mBinding.mExpandedEffects,
-                                mBinding.mSpecialConditions,
-                                mBinding.mMovementEffects,
-                                mBinding.mObjectTravelFamily) : std::nullopt;
+                            const auto plan = selected ? prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily) : std::nullopt;
                             if (!plan || !plan->effects.hasRange(ESM::RT_Target)
                                 || (!mBinding.mNpcCastLifecycle && plan->effects.hasRange(ESM::RT_Touch)))
                                 throw std::invalid_argument("Native projectile spell source invalid");
@@ -2976,10 +2995,7 @@ namespace TES3MP::Native
                     const auto* selected = enchantmentBySource(mRuntime.mStore, pending.effectSource);
                     const auto effects = selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
                         || selected->mData.mType == ESM::Enchantment::CastOnce)
-                        ? prepareInstantEffects(selected->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                            mBinding.mExpandedEffects, false,
-                            mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                            mBinding.mObjectTravelFamily) : std::nullopt;
+                        ? prepareInstantEffects(selected->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, false, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily) : std::nullopt;
                     if (!effects || !effects->hasRange(ESM::RT_Target) || (!mBinding.mNpcCastLifecycle && effects->hasRange(ESM::RT_Touch))
                         || (!mBinding.mMagicArea && std::ranges::any_of(effects->effects,
                             [](const auto& effect) { return effect.mArea != 0; })))
@@ -2991,7 +3007,8 @@ namespace TES3MP::Native
                 {
                     const auto* spell = spellBySource(mRuntime.mStore, condition.source);
                     if (!decoded.tick || !spell || !preparePersistentEffects(*spell, mRuntime.mStore,
-                            mBinding.mSpecialConditions))
+                            mBinding.mSpecialConditions,
+                            mBinding.mEquipmentFamily))
                         throw std::invalid_argument("Native saved condition source unsupported");
                     if (mBinding.mSpecialConditions && condition.nextWorseningMs
                         && !MWMechanics::Spells::hasCorprusEffect(spell))
@@ -3038,6 +3055,7 @@ namespace TES3MP::Native
                         && !(mBinding.mExpandedEffects && expandedCombatEffect(id))
                         && !(mBinding.mMovementEffects && (movementEffect(id) || aiDispositionEffect(id)))
                         && !(mBinding.mObjectTravelFamily && (id == ESM::MagicEffect::Telekinesis || id == ESM::MagicEffect::Soultrap))
+                        && !(mBinding.mEquipmentFamily && MWMechanics::equipmentMagicEffect(id))
                         && !(mBinding.mSpecialConditions && (id == ESM::MagicEffect::Corprus
                             || id == ESM::MagicEffect::Vampirism))
                         && !((mBinding.mNpcCastLifecycle || (mBinding.mConstantEffects && effect.sourceKind == 3))
@@ -3072,7 +3090,8 @@ namespace TES3MP::Native
                     {
                         const auto* spell = spellBySource(mRuntime.mStore, effect.source);
                         const auto plan = spell ? preparePersistentEffects(*spell, mRuntime.mStore,
-                            mBinding.mSpecialConditions) : std::nullopt;
+                            mBinding.mSpecialConditions,
+                            mBinding.mEquipmentFamily) : std::nullopt;
                         if (plan && effect.ordinal < plan->effects.size())
                         {
                             const auto& entry = plan->effects[effect.ordinal];
@@ -3094,7 +3113,8 @@ namespace TES3MP::Native
                     {
                         const auto* spell = spellBySource(mRuntime.mStore, effect.source);
                         const auto plan = spell ? preparePassiveActorEffects(*spell, mRuntime.mStore,
-                            mBinding.mMovementEffects, mBinding.mAiDecisions, mBinding.mObjectTravelFamily) : std::nullopt;
+                            mBinding.mMovementEffects, mBinding.mAiDecisions, mBinding.mObjectTravelFamily,
+                            mBinding.mEquipmentFamily) : std::nullopt;
                         const auto ptr = mRuntime.ownerPtr(recoveredOwner(effect.actor));
                         if (plan && effect.ordinal < plan->effects.size())
                         {
@@ -3180,6 +3200,66 @@ namespace TES3MP::Native
             EquipmentBytes retained(reinterpret_cast<const char*>(image.data()), reinterpret_cast<const char*>(image.data()+image.size()));
             recoverAreas(std::as_bytes(decoded.inventory), references, decoded.actor,
                 [&](const EquipmentSessionValues& session) {
+                if (mBinding.mEquipmentFamily)
+                {
+                    std::set<ESM::RefNum> owned;
+                    std::map<ESM::RefNum, std::pair<size_t, MWMechanics::BoundEquipmentItem>> links;
+                    for (const auto& effect : decoded.timedEffects)
+                    {
+                        const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                        const auto settings = MWMechanics::boundEquipmentSettings(id);
+                        const size_t owner = recoveredOwner(size_t(effect.actor));
+                        const auto& values = owner < 2 ? session.mActors[owner] : session.mContainers.at(owner - 2);
+                        if (decoded.combat->actors[effect.actor][8][2] <= 0
+                            && std::ranges::any_of(effect.boundItems, [](const auto& item) { return item.item.isSet(); }))
+                            throw std::invalid_argument("Saved dead actor retains equipment magic");
+                        for (size_t i = 0; i < effect.boundItems.size(); ++i)
+                        {
+                            const auto& bound = effect.boundItems[i];
+                            // Permanent sources retain a completed failed attempt,
+                            // matching stock invalid effects until their source is
+                            // replaced. They must not allocate/retry every frame.
+                            if (effect.equipmentApplied && (effect.sourceKind == 3 || effect.sourceKind == 5)
+                                && std::ranges::none_of(effect.boundItems, [](const auto& item) { return item.item.isSet(); }))
+                                continue;
+                            if (!effect.equipmentApplied || i >= settings.size())
+                            {
+                                if (bound.item.isSet()) throw std::invalid_argument("Saved equipment source owns unexpected item");
+                                continue;
+                            }
+                            const auto item = std::ranges::find(values.mObjects, bound.item,
+                                [](const auto& value) { return value.mRef.mRefNum; });
+                            const auto expected = ESM::RefId::stringRefId(mRuntime.mStore.get<ESM::GameSetting>().find(settings[i])->mValue.getString());
+                            if (!bound.item.isSet() || !owned.insert(bound.item).second || item == values.mObjects.end()
+                                || item->mRef.mRefID != expected || item->mRef.mCount != 1)
+                                throw std::invalid_argument("Saved bound item ownership differs from inventory");
+                            const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, expected);
+                            if (bound.slot < 0 || !record.mSlots.contains(bound.slot)
+                                || bound.previous == bound.item || (bound.previous.isSet() != !bound.previousRecord.empty()))
+                                throw std::invalid_argument("Saved bound restoration link invalid");
+                            if (!bound.previousRecord.empty()
+                                && !MWWorld::inventoryItemRecord(mRuntime.mStore, bound.previousRecord).mSlots.contains(bound.slot))
+                                throw std::invalid_argument("Saved bound restoration slot differs from record");
+                            const auto previous = std::ranges::find(values.mObjects, bound.previous,
+                                [](const auto& value) { return value.mRef.mRefNum; });
+                            if (previous != values.mObjects.end() && previous->mRef.mRefID != bound.previousRecord)
+                                throw std::invalid_argument("Saved bound restoration record changed");
+                            links.emplace(bound.item, std::pair{owner, bound});
+                        }
+                    }
+                    for (const auto& [identity, link] : links)
+                    {
+                        std::set<ESM::RefNum> visited{identity};
+                        auto previous = link.second.previous;
+                        for (auto found = links.find(previous); found != links.end(); found = links.find(previous))
+                        {
+                            if (!visited.insert(previous).second || found->second.first != link.first
+                                || found->second.second.slot != link.second.slot)
+                                throw std::invalid_argument("Saved bound restoration chain invalid");
+                            previous = found->second.second.previous;
+                        }
+                    }
+                }
                 if (mBinding.mPlayerAi)
                     for (size_t i = 0; i < 2; ++i)
                     {
@@ -3403,7 +3483,8 @@ namespace TES3MP::Native
                             mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
                             mBinding.mAiDecisions, actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead,
                             mBinding.mScriptedMovementRules ? decoded.combat->levitationEnabled
-                                : mBinding.mLevitationEnabled, mBinding.mObjectTravelFamily);
+                                : mBinding.mLevitationEnabled, mBinding.mObjectTravelFamily,
+                                mBinding.mEquipmentFamily);
                     }
                 }
                 if (mBinding.mAiDecisions || mBinding.mMovementEffects)
@@ -3416,7 +3497,8 @@ namespace TES3MP::Native
                             mBinding.mMovementEffects, mBinding.mAiDecisions,
                             actorIndex == 2 && aiNpc, actorIndex == 2 && aiUndead,
                             mBinding.mScriptedMovementRules ? decoded.combat->levitationEnabled
-                                : mBinding.mLevitationEnabled, mBinding.mObjectTravelFamily);
+                                : mBinding.mLevitationEnabled, mBinding.mObjectTravelFamily,
+                                mBinding.mEquipmentFamily);
                 if (mBinding.mPlayerCastLifecycle)
                     for (size_t i = 0; i < 2; ++i)
                     {
@@ -3436,7 +3518,8 @@ namespace TES3MP::Native
                                         mBinding.mMovementEffects,
                                         (cast.targetKind == uint64_t(MagicUseTargetKind::Door)
                                             || cast.targetKind == uint64_t(MagicUseTargetKind::Container) || mBinding.mObjectTravelFamily),
-                                        mBinding.mPlayerTravel) : std::nullopt;
+                                        mBinding.mPlayerTravel,
+                                        mBinding.mEquipmentFamily) : std::nullopt;
                                     if (plan) effects = plan->effects;
                                 }
                         }
@@ -3457,7 +3540,8 @@ namespace TES3MP::Native
                                             mBinding.mMovementEffects,
                                             (cast.targetKind == uint64_t(MagicUseTargetKind::Door)
                                                 || cast.targetKind == uint64_t(MagicUseTargetKind::Container) || mBinding.mObjectTravelFamily),
-                                            mBinding.mPlayerTravel);
+                                            mBinding.mPlayerTravel,
+                                            mBinding.mEquipmentFamily);
                                 }
                         }
                         else continue; // Released items may have been consumed or transferred.
@@ -3496,9 +3580,7 @@ namespace TES3MP::Native
                     {
                         if (effects) throw std::invalid_argument("Native saved cast source ambiguous");
                         const auto* source = mRuntime.mStore.get<ESM::Spell>().search(id);
-                        const auto plan = source ? prepareInstantSpell(*source, mRuntime.mStore, true, mBinding.mExpandedEffects,
-                            mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                            mBinding.mObjectTravelFamily) : std::nullopt;
+                        const auto plan = source ? prepareInstantSpell(*source, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily) : std::nullopt;
                         if (plan) effects = plan->effects;
                     }
                 }
@@ -3513,10 +3595,7 @@ namespace TES3MP::Native
                             const auto ptr = reference.getPtr();
                             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(ptr.getClass().getEnchantment(ptr));
                             if (enchantment && enchantment->mData.mType == ESM::Enchantment::WhenUsed)
-                                effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true, mBinding.mExpandedEffects,
-                                    false, mBinding.mSpecialConditions,
-                                    mBinding.mMovementEffects,
-                                    mBinding.mObjectTravelFamily);
+                                effects = prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, true, mBinding.mExpandedEffects, false, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                         }
                 }
                 if (!effects || uint64_t(effects->effects.front().mRange) != cast.range
@@ -3630,6 +3709,18 @@ namespace TES3MP::Native
         }
         const size_t timedSize = mBinding.mMagicTimed
             ? 8 + timedEffects.size() * (mBinding.mExpandedEffects ? 120 : mBinding.mDurableCasters ? 112 : mBinding.mGeneralConstants ? 96 : mBinding.mActorEffectLifecycle ? 80 : 24) : 0;
+        size_t equipmentSize = 0;
+        if (mBinding.mEquipmentFamily)
+            for (const auto& effect : timedEffects)
+            {
+                equipmentSize += 9 * 8;
+                for (const auto& item : effect.boundItems)
+                {
+                    const auto text = item.previousRecord.serializeText();
+                    if (text.size() > 256) throw std::invalid_argument("Bound restoration record exceeds budget");
+                    equipmentSize += text.size();
+                }
+            }
         size_t swingSize = 0;
         if (mBinding.mPlayerMelee[0])
             for (const auto& swing : combat->swings)
@@ -3648,11 +3739,12 @@ namespace TES3MP::Native
         if (core.empty() || actor.empty() || actor.size() > 65536
             || timedEffects.size() > (mBinding.mGeneralConstants ? MaximumActorTimedEffects : 16)
             || projectiles.size() > (mBinding.mMagicProjectileCollection ? MaximumActorProjectiles : 1)
-            || 56 + meleeSize + combatSize + playerAiSize + lifeSize + neighborAttackSize + projectileSize + timedSize + castSize + swingSize + actor.size() > MaximumNativeInventoryImageBytes
-            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - neighborAttackSize - projectileSize - timedSize - castSize - swingSize - actor.size())
+            || 56 + meleeSize + combatSize + playerAiSize + lifeSize + neighborAttackSize + projectileSize + timedSize + equipmentSize + castSize + swingSize + actor.size() > MaximumNativeInventoryImageBytes
+            || core.size() > MaximumNativeInventoryImageBytes - 56 - meleeSize - combatSize - playerAiSize - lifeSize - neighborAttackSize - projectileSize - timedSize - equipmentSize - castSize - swingSize - actor.size())
             throw std::invalid_argument("Native actor campaign exceeds bound");
         EquipmentBytes result;
-        putAreaWord(result, mBinding.mObjectTravelFamily ? ObjectTravelCampaignMagic
+        putAreaWord(result, mBinding.mEquipmentFamily ? EquipmentFamilyCampaignMagic
+            : mBinding.mObjectTravelFamily ? ObjectTravelCampaignMagic
             : mBinding.mScriptedTravelRules ? TravelRuleCampaignMagic
             : mBinding.mPlayerTravel ? PlayerTravelCampaignMagic
             : mBinding.mScriptedMovementRules ? MovementRuleCampaignMagic
@@ -3893,6 +3985,17 @@ namespace TES3MP::Native
                     { putAreaWord(result, effect.casterKind); putAreaWord(result, effect.casterLife); }
                     if (mBinding.mExpandedEffects) putAreaWord(result, effect.beneficiary);
                 }
+                if (mBinding.mEquipmentFamily)
+                {
+                    putAreaWord(result, effect.equipmentApplied);
+                    for (const auto& item : effect.boundItems)
+                    {
+                        const auto text = item.previousRecord.serializeText();
+                        for (const auto value : {uint64_t(item.item.mIndex), uint64_t(item.previous.mIndex),
+                                uint64_t(item.slot + 1), uint64_t(text.size())}) putAreaWord(result, value);
+                        result.insert(result.end(), text.begin(), text.end());
+                    }
+                }
             }
         }
         if (mBinding.mNpcCastLifecycle)
@@ -4083,7 +4186,8 @@ namespace TES3MP::Native
     EquipmentBytes InventoryService::stagedWeaponCore(std::span<const WeaponWear> wear,
         const PreparedNativeInventory* command, std::span<const ItemCharge> charges,
         const EquipmentRuntime::PreparedRespawn* respawn,
-        std::span<const ProjectileRecovery> recoveries, EquipmentSessionValues* stagedValues) const
+        std::span<const ProjectileRecovery> recoveries, EquipmentSessionValues* stagedValues,
+        const EquipmentSessionValues* equipmentEffects) const
     {
         if (wear.size() > (mBinding.mRangedFlight ? 3 * MWWorld::InventoryStore::Slots : 4)
             || charges.size() > 2 + MaximumActorProjectiles || (wear.empty() && charges.empty() && recoveries.empty() && !stagedValues)
@@ -4095,17 +4199,19 @@ namespace TES3MP::Native
         const auto* equipment = dynamic_cast<const EquipmentTransaction*>(command);
         const auto* world = dynamic_cast<const WorldTransaction*>(command);
         const auto candidateValues = [&](size_t owner) {
-            return respawn && respawn->owner() == owner ? respawn->values()
-                : combatEquipmentValues(owner, command);
+            return equipmentEffects ? (owner < 2 ? equipmentEffects->mActors[owner]
+                    : equipmentEffects->mContainers.at(owner - 2))
+                : respawn && respawn->owner() == owner ? respawn->values() : combatEquipmentValues(owner, command);
         };
         const uint64_t revision = transfer ? transfer->prepared.candidate().mRevision
             : equipment ? equipment->prepared.candidate().mRevision
             : world ? world->prepared.revision() : mWorld.getPtrRegistryRevision();
         if (revision >= std::numeric_limits<size_t>::max()
-                - wear.size() - charges.size() - recoveries.size() - size_t(bool(respawn)))
+                - wear.size() - charges.size() - recoveries.size() - size_t(bool(respawn)) - size_t(equipmentEffects != nullptr))
             throw std::invalid_argument("Native melee inventory revision exhausted");
         EquipmentSessionValues values{{candidateValues(0), candidateValues(1)},
-            revision + wear.size() + charges.size() + recoveries.size() + size_t(bool(respawn))};
+            revision + wear.size() + charges.size() + recoveries.size() + size_t(bool(respawn))
+                + size_t(equipmentEffects != nullptr)};
         for (size_t i = 2; i < mRuntime.ownerCount(); ++i)
             values.mContainers.push_back(candidateValues(i));
         if (world)
@@ -4212,6 +4318,12 @@ namespace TES3MP::Native
             if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
         }
         EquipmentBytes core;
+        auto counter = values.mActors[0].mLastGenerated;
+        for (const auto& value : values.mActors) counter.mIndex = std::max(counter.mIndex, value.mLastGenerated.mIndex);
+        for (const auto& value : values.mContainers) counter.mIndex = std::max(counter.mIndex, value.mLastGenerated.mIndex);
+        for (auto& value : values.mActors) value.mLastGenerated = counter;
+        for (auto& value : values.mContainers) value.mLastGenerated = counter;
+        if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
         if (stagedValues) *stagedValues = values;
         mRuntime.encodeSession(std::move(values), core);
         return core;
@@ -4361,7 +4473,7 @@ namespace TES3MP::Native
             try
             {
                 for (const auto& change : wear)
-                    if (const auto current = equippedCandidateCondition(
+                    if (!loot) if (const auto current = equippedCandidateCondition(
                             service.combatEquipmentValues(change.owner, command.get()), change.slot,
                             service.mRuntime.mStore); !current || current->item != change.before)
                         return CanonicalDurabilityResult::Rejected;
@@ -4906,6 +5018,12 @@ namespace TES3MP::Native
             });
         auto life = mLife;
         auto neighborLives = mNeighborLives;
+        const auto candidateCasterIdentity = [&](size_t index) {
+            auto identity = magicCaster(index).identity;
+            if (mBinding.mDurableCasters && index >= 2)
+                identity.life = index == 2 ? life->generation : neighborLives.at(index - 3).generation;
+            return identity;
+        };
         auto projectiles = mProjectiles;
         std::unique_ptr<EquipmentRuntime::PreparedRespawn> respawn;
         std::array<bool, 2> transformedNow{}, changingWerewolfEquipment{};
@@ -4914,17 +5032,172 @@ namespace TES3MP::Native
         std::vector<ItemCharge> charges;
         std::vector<ProjectileRecovery> recoveries;
         std::vector<std::pair<PlayerId, Transform>> relocations;
+        std::optional<EquipmentSessionValues> equipmentValues;
+        std::vector<ActorCampaignTimedEffect> equipmentSources;
+        for (const auto& effect : mTimedEffects)
+            if (effect.equipmentApplied) equipmentSources.push_back(effect);
+        const auto sourceKey = [](const ActorCampaignTimedEffect& effect) {
+            return std::tuple(effect.actor, effect.effectIndex, effect.caster, effect.casterKind,
+                effect.casterLife, effect.source, effect.sourceKind, effect.startTick, effect.ordinal);
+        };
+        const auto candidateEquipmentValues = [&](size_t owner) {
+            if (equipmentValues) return owner < 2 ? equipmentValues->mActors[owner] : equipmentValues->mContainers.at(owner - 2);
+            if (respawn && respawn->owner() == owner) return respawn->values();
+            return combatEquipmentValues(owner, command.get());
+        };
+        const auto weaponCondition = [&](size_t owner) -> std::optional<EquipmentRuntime::EquippedWeaponCondition> {
+            if (!equipmentValues) return mRuntime.equippedWeaponCondition(owner);
+            const auto values = candidateEquipmentValues(owner);
+            const auto selected = values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+            const auto item = std::ranges::find(values.mObjects, selected,
+                [](const auto& value) { return value.mRef.mRefNum; });
+            if (!selected.isSet() || item == values.mObjects.end()
+                || mRuntime.mStore.find(item->mRef.mRefID) != ESM::Weapon::sRecordId) return {};
+            const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(item->mRef.mRefID);
+            if (!(MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth))
+                return EquipmentRuntime::EquippedWeaponCondition{selected, 0};
+            return equippedCandidateCondition(values, MWWorld::InventoryStore::Slot_CarriedRight, mRuntime.mStore)->item;
+        };
+        const auto candidateArmorCondition = [&](size_t owner, int slot) {
+            if (!equipmentValues) return mRuntime.equippedArmorCondition(owner, slot);
+            const auto item = equippedCandidateCondition(candidateEquipmentValues(owner), slot, mRuntime.mStore);
+            return item ? std::optional(item->item) : std::optional<EquipmentRuntime::EquippedWeaponCondition>{};
+        };
+        const auto flushEquipmentWear = [&] {
+            if (!equipmentValues) return;
+            // Ordered effects can replace the worn slot before the tick ends.
+            // Apply wear to its instance before any ownership/equipment change.
+            for (const auto& change : wear)
+            {
+                auto& values = change.owner < 2 ? equipmentValues->mActors[change.owner]
+                    : equipmentValues->mContainers.at(change.owner - 2);
+                const auto item = std::ranges::find(values.mObjects, change.before.mItem,
+                    [](const auto& object) { return object.mRef.mRefNum; });
+                if (item == values.mObjects.end() || change.condition < 0 || change.condition > change.before.mCondition)
+                    throw std::invalid_argument("Equipment lifecycle wear identity invalid");
+                item->mRef.mChargeInt = change.condition;
+                if (change.remainder) item->mRef.mChargeIntRemainder = *change.remainder;
+                if (!change.condition && values.mSlots.at(change.slot) == change.before.mItem)
+                    values.mSlots[change.slot] = {};
+            }
+            wear.clear();
+        };
+        const auto composeRespawnEquipment = [&] {
+            if (!equipmentValues || !respawn) return;
+            flushEquipmentWear();
+            const size_t owner = respawn->owner();
+            (owner < 2 ? equipmentValues->mActors[owner] : equipmentValues->mContainers.at(owner - 2)) = respawn->values();
+            const auto counter = respawn->values().mLastGenerated;
+            for (auto& value : equipmentValues->mActors) value.mLastGenerated = counter;
+            for (auto& value : equipmentValues->mContainers) value.mLastGenerated = counter;
+            if (equipmentValues->mWorldItems) equipmentValues->mWorldItems->mLastGenerated = counter;
+        };
+        const auto stageEquipmentMagic = [&](ActorCampaignTimedEffect& effect, bool removing) {
+            if (!mBinding.mEquipmentFamily || !combat) return false;
+            const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+            const size_t index = size_t(effect.actor), owner = combatOwner(index);
+            if (!mRuntime.inventoryStorage(owner)) return false;
+            if (!equipmentValues)
+            {
+                equipmentValues.emplace();
+                (void)stagedWeaponCore({}, command.get(), {}, respawn.get(), {}, &*equipmentValues);
+            }
+            flushEquipmentWear();
+            const bool alive = combat->actors[index][8][2] > 0;
+            const bool werewolf = index < 2 && combat->players[index].werewolf;
+            if (!removing && (!alive || werewolf) && (effect.sourceKind == 3 || effect.sourceKind == 5))
+            {
+                effect.equipmentApplied = true;
+                effect.boundItems = {};
+                equipmentSources.push_back(effect);
+                return true;
+            }
+            const auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+            const bool extraRemains = std::ranges::any_of(timedEffects, [&](const auto& active) {
+                return active.actor == index && active.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::ExtraSpell))
+                    && sourceKey(active) != sourceKey(effect) && active.expiresTick > tick.value();
+            });
+            bool equipped = mRuntime.stageEquipmentMagic(*equipmentValues, owner, id, effect.boundItems, removing,
+                alive, werewolf, stats, [&] {
+                    if (index < 2) combat->players[index].drawState = uint64_t(MWMechanics::DrawState::Weapon);
+                }, extraRemains);
+            if (removing)
+            {
+                // Splice expired sources out of restoration chains. B must not
+                // restore an already expired A when their shared slot overlaps.
+                for (const auto& item : effect.boundItems)
+                    if (item.item.isSet())
+                        for (auto* list : {&timedEffects, &equipmentSources})
+                            for (auto& active : *list)
+                                if (active.actor == effect.actor && sourceKey(active) != sourceKey(effect))
+                                    for (auto& link : active.boundItems)
+                                        if (link.previous == item.item)
+                                        { link.previous = item.previous; link.previousRecord = item.previousRecord; }
+                std::erase_if(equipmentSources, [&](const auto& active) { return sourceKey(active) == sourceKey(effect); });
+                return true;
+            }
+            effect.equipmentApplied = true;
+            // Stock singles expire immediately after failed equip; gloves retain
+            // both attempts until their source expires, even if one cannot equip.
+            if (!equipped && id != ESM::MagicEffect::BoundGloves && id != ESM::MagicEffect::ExtraSpell)
+            {
+                mRuntime.stageEquipmentMagic(*equipmentValues, owner, id, effect.boundItems, true,
+                    alive, werewolf, stats, [] {}, extraRemains);
+                if (effect.sourceKind == 3 || effect.sourceKind == 5)
+                {
+                    effect.boundItems = {};
+                    equipmentSources.push_back(effect);
+                    return true;
+                }
+                return false;
+            }
+            equipmentSources.push_back(effect);
+            return true;
+        };
+        const auto syncEquipmentMagic = [&] {
+            if (!mBinding.mEquipmentFamily || !combat) return;
+            std::erase_if(timedEffects, [&](const auto& effect) {
+                return MWMechanics::equipmentMagicEffect(ESM::MagicEffect::indexToRefId(int(effect.effectIndex)))
+                    && combat->actors.at(size_t(effect.actor))[8][2] <= 0
+                    && effect.sourceKind != 3 && effect.sourceKind != 5;
+            });
+            for (auto& effect : timedEffects)
+                if (effect.equipmentApplied && combat->actors.at(size_t(effect.actor))[8][2] <= 0
+                    && std::ranges::any_of(effect.boundItems, [](const auto& item) { return item.item.isSet(); }))
+                {
+                    auto removed = effect;
+                    stageEquipmentMagic(removed, true);
+                    effect.boundItems = {};
+                    equipmentSources.push_back(effect);
+                }
+            const auto previous = equipmentSources;
+            for (const auto& prior : previous)
+                if (std::ranges::none_of(timedEffects, [&](const auto& active) { return sourceKey(active) == sourceKey(prior); }))
+                {
+                    // Earlier removals may already have spliced this source's
+                    // links (including simultaneous expiry/death of a chain).
+                    const auto found = std::ranges::find_if(equipmentSources,
+                        [&](const auto& active) { return sourceKey(active) == sourceKey(prior); });
+                    if (found != equipmentSources.end())
+                    { auto effect = *found; stageEquipmentMagic(effect, true); }
+                }
+            std::erase_if(timedEffects, [&](auto& effect) {
+                if (!MWMechanics::equipmentMagicEffect(ESM::MagicEffect::indexToRefId(int(effect.effectIndex)))
+                    || effect.equipmentApplied) return false;
+                return !stageEquipmentMagic(effect, false);
+            });
+        };
         const auto stageDisintegrate = [&](size_t recipient, ESM::RefId effect, float magnitude) {
             if (recipient < 2 && changingWerewolfEquipment[recipient]) return;
             if (!std::isfinite(magnitude) || magnitude < 0.f || magnitude > 100000.f)
                 throw std::invalid_argument("Native disintegration magnitude invalid");
             const size_t owner = combatOwner(recipient);
-            const auto values = combatEquipmentValues(owner, command.get());
+            const auto values = candidateEquipmentValues(owner);
             const auto applySlot = [&](int slot) {
                 const auto selected = equippedCandidateCondition(values, slot, mRuntime.mStore);
                 if (!selected) return false;
                 auto staged = std::ranges::find_if(wear, [&](const auto& change) {
-                    return change.owner == owner && change.slot == slot;
+                    return change.owner == owner && change.before.mItem == selected->item.mItem;
                 });
                 const int beforeCondition = staged == wear.end() ? selected->item.mCondition : staged->condition;
                 if (!beforeCondition) return false;
@@ -4992,8 +5265,8 @@ namespace TES3MP::Native
                                 float(double(position.z()) / 1024)}, npc->mBase->mRace,
                             ptr.getCellRef().getScale());
                     }
-                    return true;
-                });
+                    return !MWMechanics::equipmentMagicEffect(effect) || mBinding.mEquipmentFamily;
+                }, stageEquipmentMagic);
             for (size_t i = 2; i < result.deaths.size(); ++i)
             {
                 auto* victimLife = i == 2 ? &*life
@@ -5064,7 +5337,8 @@ namespace TES3MP::Native
                             {mBinding.mPlayers[index].value(), 1, 1}, tick.value(), mRuntime.mStore,
                             mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                             mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                            mBinding.mAiDecisions, false, false, levitationEnabled, mBinding.mObjectTravelFamily))
+                            mBinding.mAiDecisions, false, false, levitationEnabled, mBinding.mObjectTravelFamily,
+                            mBinding.mEquipmentFamily))
                         updateResources(index, beforeEquipment, timedEffects, mBinding.mKnockoutAnimation);
                     combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
                 }
@@ -5347,6 +5621,7 @@ namespace TES3MP::Native
         }
         const auto beforeExpiry = timedEffects;
         std::erase_if(timedEffects, [tick](const auto& effect) { return effect.expiresTick <= tick.value(); });
+        syncEquipmentMagic();
         if (combat && mBinding.mNpcCastLifecycle)
             for (size_t actor = 0; actor < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++actor)
                 updateResources(actor, beforeExpiry, timedEffects, mBinding.mKnockoutAnimation);
@@ -5355,17 +5630,18 @@ namespace TES3MP::Native
             for (size_t actorIndex = 0; actorIndex < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++actorIndex)
             {
                 const size_t owner = combatOwner(actorIndex);
-                auto values = combatEquipmentValues(owner, command.get());
+                auto values = candidateEquipmentValues(owner);
                 for (const auto& change : wear)
                     if (change.owner == owner && !change.condition)
                         values.mSlots[change.slot] = {};
                 Misc::Rng::Generator rng{combat->rng};
                 const auto previous = timedEffects;
-                if (reconcileConstants(values, actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
+                if (reconcileConstants(values, actorIndex, candidateCasterIdentity(actorIndex), tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
                         mBinding.mAiDecisions, actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
-                        actorIndex == 2 && aiUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        actorIndex == 2 && aiUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5379,7 +5655,8 @@ namespace TES3MP::Native
                         actorIndex, magicCaster(actorIndex).identity, tick.value(), mRuntime.mStore,
                         timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
                         actorIndex >= 2 && (actorIndex == 2 ? aiNpc : true),
-                        actorIndex == 2 && aiUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        actorIndex == 2 && aiUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(actorIndex, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5389,7 +5666,7 @@ namespace TES3MP::Native
             if (std::ranges::any_of(combat->conditions, [&](const auto& condition) {
                     return sameCondition(condition, index, member.source);
                 })) return;
-            const auto plan = preparePersistentEffects(spell, mRuntime.mStore, mBinding.mSpecialConditions);
+            const auto plan = preparePersistentEffects(spell, mRuntime.mStore, mBinding.mSpecialConditions, mBinding.mEquipmentFamily);
             if (!plan || !member.source || spellBySource(mRuntime.mStore, member.source) != &spell)
                 throw std::invalid_argument("Native persistent condition unsupported");
             if (combat->conditions.size() >= ActorCampaignCombat::MaximumConditionSources)
@@ -5534,15 +5811,13 @@ namespace TES3MP::Native
             if (weapon.mEnchant.empty()) return;
             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(weapon.mEnchant);
             if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenStrikes) return;
-            const auto values = mRuntime.installedValues(context.inventoryOwner);
+            const auto values = candidateEquipmentValues(context.inventoryOwner);
             const auto item = std::ranges::find(values.mObjects, held.mItem,
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == values.mObjects.end())
                 throw std::invalid_argument("Native strike weapon identity missing");
             const float beforeCharge = item->mRef.mEnchantmentCharge;
-            const auto prepared = prepareEnchantmentCast(*enchantment, attacker, beforeCharge, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                mBinding.mExpandedEffects, mBinding.mSpecialConditions,
-                mBinding.mMovementEffects, mBinding.mObjectTravelFamily);
+            const auto prepared = prepareEnchantmentCast(*enchantment, attacker, beforeCharge, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
             if (!prepared || std::ranges::any_of(prepared->effects.effects,
                     [&](const auto& effect) { return effect.mArea != 0
                         || (!mBinding.mNpcCastLifecycle && (!effect.mAttribute.empty() || !effect.mSkill.empty())); }))
@@ -5581,9 +5856,7 @@ namespace TES3MP::Native
             if (ammunition.mEnchant.empty()) return;
             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(ammunition.mEnchant);
             const auto effects = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes
-                ? prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                    mBinding.mExpandedEffects, false, mBinding.mSpecialConditions,
-                    mBinding.mMovementEffects, mBinding.mObjectTravelFamily)
+                ? prepareInstantEffects(enchantment->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, false, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily)
                 : std::nullopt;
             const uint64_t source = spellRecordId(ammunition.mEnchant);
             if (!effects || !source || enchantmentBySource(mRuntime.mStore, source) != enchantment)
@@ -5658,7 +5931,7 @@ namespace TES3MP::Native
         const auto armorCondition = [&](size_t owner, int slot) {
             if (owner < 2 && changingWerewolfEquipment[owner])
                 return std::optional<EquipmentRuntime::EquippedWeaponCondition>{};
-            auto result = mRuntime.equippedArmorCondition(owner, slot);
+            auto result = candidateArmorCondition(owner, slot);
             if (result && mBinding.mPlayerMelee[0])
                 for (const auto& change : wear)
                     if (change.owner == owner && change.slot == slot)
@@ -5674,7 +5947,7 @@ namespace TES3MP::Native
                 for (auto& change : wear)
                     if (change.owner == owner && change.slot == slot)
                     { change.condition = condition; return; }
-            wear.push_back({owner, *mRuntime.equippedArmorCondition(owner, slot), condition, slot});
+            wear.push_back({owner, *candidateArmorCondition(owner, slot), condition, slot});
         };
         const auto armorRating = [&](size_t owner, const MWMechanics::NpcStats& stats) {
             if (mRuntime.ownerPtr(owner).getType() == ESM::Creature::sRecordId)
@@ -5698,11 +5971,7 @@ namespace TES3MP::Native
             for (const auto& [slot, weight] : slots)
             {
                 float part = unarmored;
-                const auto selected = inventory->getSlot(slot);
-                if (selected != inventory->end() && selected->getType() == ESM::Armor::sRecordId
-                    && (!mBinding.mPlayerMelee[0] || armorCondition(owner, slot)))
-                {
-                    const auto item = *selected;
+                const auto rate = [&](const MWWorld::ConstPtr& item) {
                     const auto& armor = static_cast<const MWClass::Armor&>(item.getClass());
                     part = armor.getSkillAdjustedArmorRating(item,
                         stats.getSkill(armor.getEquipmentSkill(item, mRuntime.mStore)).getModified(),
@@ -5711,6 +5980,24 @@ namespace TES3MP::Native
                         part *= mBinding.mPlayerMelee[0]
                             ? float(armorCondition(owner, slot)->mCondition) / std::max(1, item.getClass().getItemMaxHealth(item))
                             : item.getClass().getItemNormalizedHealth(item);
+                };
+                if (equipmentValues)
+                {
+                    const auto values = candidateEquipmentValues(owner);
+                    if (const auto condition = armorCondition(owner, slot))
+                    {
+                        const auto selected = std::ranges::find(values.mObjects, condition->mItem,
+                            [](const auto& item) { return item.mRef.mRefNum; });
+                        if (selected == values.mObjects.end()) throw std::invalid_argument("Candidate armor rating item missing");
+                        MWWorld::ManualRef reference(mRuntime.mStore, selected->mRef.mRefID);
+                        rate(reference.getPtr());
+                    }
+                }
+                else
+                {
+                    const auto selected = inventory->getSlot(slot);
+                    if (selected != inventory->end() && selected->getType() == ESM::Armor::sRecordId
+                        && (!mBinding.mPlayerMelee[0] || armorCondition(owner, slot))) rate(*selected);
                 }
                 rating += part * weight;
             }
@@ -5740,11 +6027,25 @@ namespace TES3MP::Native
             {
                 const auto* inventory = mRuntime.inventoryStorage(owner);
                 if (!inventory) throw std::invalid_argument("Native block defender has no inventory");
-                const auto right = inventory->getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
-                if (right != inventory->end() && right->getType() == ESM::Weapon::sRecordId)
+                if (equipmentValues)
                 {
-                    const auto& equipped = mRuntime.mStore.get<ESM::Weapon>().find(right->getCellRef().getRefId())->mData;
-                    readyToBlock = carriedLeftVisibleForWeapon(equipped.mType);
+                    const auto values = candidateEquipmentValues(owner);
+                    if (const auto held = weaponCondition(owner))
+                    {
+                        const auto right = std::ranges::find(values.mObjects, held->mItem,
+                            [](const auto& item) { return item.mRef.mRefNum; });
+                        const auto& equipped = mRuntime.mStore.get<ESM::Weapon>().find(right->mRef.mRefID)->mData;
+                        readyToBlock = carriedLeftVisibleForWeapon(equipped.mType);
+                    }
+                }
+                else
+                {
+                    const auto right = inventory->getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
+                    if (right != inventory->end() && right->getType() == ESM::Weapon::sRecordId)
+                    {
+                        const auto& equipped = mRuntime.mStore.get<ESM::Weapon>().find(right->getCellRef().getRefId())->mData;
+                        readyToBlock = carriedLeftVisibleForWeapon(equipped.mType);
+                    }
                 }
             }
             if (!projectile && shield && shield->mCondition > 0 && !victim.getKnockedDown()
@@ -5861,7 +6162,9 @@ namespace TES3MP::Native
         if (dueRespawn)
         {
             if (life->generation == UINT32_MAX) throw std::invalid_argument("NPC life generation exhausted");
-            respawn = mRuntime.prepareRespawn(mCombatNpcOwner, mRespawnInventory);
+            respawn = mRuntime.prepareRespawn(mCombatNpcOwner, mRespawnInventory,
+                equipmentValues ? equipmentValues->mActors[0].mLastGenerated : ESM::RefNum{});
+            composeRespawnEquipment();
             step = mBinding.mNavigatingActor->prepareSelectedRestore(life->spawnActor, doors);
             after = step->snapshot();
             combat->actors[2] = life->spawnStats;
@@ -5891,7 +6194,8 @@ namespace TES3MP::Native
                         mBinding.mDurableCasters ? 2u : 0u, mBinding.mDurableCasters ? life->generation + 1 : 0u}, tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                        mBinding.mAiDecisions, aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        mBinding.mAiDecisions, aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5902,7 +6206,8 @@ namespace TES3MP::Native
                 if (reconcilePassiveActorEffects(mRuntime.ownerPtr(mCombatNpcOwner), 2,
                         {before.mActor, 2, life->generation + 1}, tick.value(), mRuntime.mStore,
                         timedEffects, &rng, mBinding.mMovementEffects, mBinding.mAiDecisions,
-                        aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5919,7 +6224,9 @@ namespace TES3MP::Native
             if (adjacentLife.generation == UINT32_MAX)
                 throw std::invalid_argument("Neighbor life generation exhausted");
             const size_t owner = combatOwner(index);
-            respawn = mRuntime.prepareRespawn(owner, mNeighborRespawnInventory.at(i));
+            respawn = mRuntime.prepareRespawn(owner, mNeighborRespawnInventory.at(i),
+                equipmentValues ? equipmentValues->mActors[0].mLastGenerated : ESM::RefNum{});
+            composeRespawnEquipment();
             step = mBinding.mNavigatingActor->prepareNeighborRestore(i, adjacentLife.spawnActor, doors);
             after = step->snapshot();
             combat->actors[index] = adjacentLife.spawnStats;
@@ -5951,7 +6258,8 @@ namespace TES3MP::Native
                         {combat->npcPlacements.at(i + 1), 2, adjacentLife.generation + 1},
                         tick.value(), mRuntime.mStore, mBinding.mGeneralConstants, timedEffects, &rng,
                         mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                        mBinding.mAiDecisions, neighborNpc, neighborUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        mBinding.mAiDecisions, neighborNpc, neighborUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5963,7 +6271,8 @@ namespace TES3MP::Native
                         {combat->npcPlacements.at(i + 1), 2, adjacentLife.generation + 1},
                         tick.value(), mRuntime.mStore, timedEffects, &rng,
                         mBinding.mMovementEffects, mBinding.mAiDecisions,
-                        neighborNpc, neighborUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                        neighborNpc, neighborUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -5997,8 +6306,8 @@ namespace TES3MP::Native
             if (playerAttack)
             {
                 const auto owner = actor(playerAttacker);
-                const auto held = mRuntime.equippedWeaponCondition(owner);
-                const auto values = combatEquipmentValues(owner, command.get());
+                const auto held = weaponCondition(owner);
+                const auto values = candidateEquipmentValues(owner);
                 const ESM::Weapon* weapon = nullptr;
                 if (held)
                 {
@@ -6056,9 +6365,9 @@ namespace TES3MP::Native
                 // that transaction so the saved wind-up keeps a valid source.
                 if (!swing.state.mHit)
                 {
-                    const auto values = combatEquipmentValues(owner, command.get());
+                    const auto values = candidateEquipmentValues(owner);
                     const auto slot = values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
-                    const auto held = mRuntime.equippedWeaponCondition(owner);
+                    const auto held = weaponCondition(owner);
                     if (swing.source != (slot.isSet() ? wireId(slot).value() : 0)
                         || (held && held->mCondition <= 0 && weapon
                             && (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth)))
@@ -6123,7 +6432,7 @@ namespace TES3MP::Native
                         float(double(position.z()) / 1024));
                     if (swing.ammunition)
                     {
-                        const auto values = combatEquipmentValues(owner, command.get());
+                        const auto values = candidateEquipmentValues(owner);
                         const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon,
                             mBinding);
                         if (!ammo) throw std::invalid_argument("Bow release lost ammunition");
@@ -6147,7 +6456,7 @@ namespace TES3MP::Native
                             if (!std::isfinite(speed) || speed <= 0 || speed > 50000)
                                 throw std::invalid_argument("Native projectile launch speed invalid");
                             for (size_t axis = 0; axis < 3; ++axis) arrow.velocity[axis] = arrow.direction[axis] * speed;
-                            const auto held = mRuntime.equippedWeaponCondition(owner);
+                            const auto held = weaponCondition(owner);
                             arrow.condition = (MWMechanics::getWeaponType(weapon->mData.mType)->mFlags & ESM::WeaponType::HasHealth)
                                 && weapon->mData.mHealth && held
                                 ? std::clamp(float(held->mCondition) / weapon->mData.mHealth, 0.f, 1.f) : 1.f;
@@ -6274,7 +6583,7 @@ namespace TES3MP::Native
             if (mBinding.mKnockoutRules) victim.setKnockedDown(combat->knockedDown[defender]);
             addTimedResistance(attacker, timedEffects, owner);
             addTimedResistance(victim, timedEffects, defender);
-            const auto held = mRuntime.equippedWeaponCondition(owner);
+            const auto held = weaponCondition(owner);
             if ((!request.projectile && held && held->mCondition <= 0) || victim.getHealth().getCurrent() <= 0)
                 throw std::invalid_argument("Native player attack became stale before tick composition");
             const ESM::Weapon* weapon = nullptr;
@@ -6282,7 +6591,7 @@ namespace TES3MP::Native
                 weapon = mRuntime.mStore.get<ESM::Weapon>().find(ESM::RefId::stringRefId(request.projectile->weapon));
             else if (held)
             {
-                const auto values = mRuntime.installedValues(owner);
+                const auto values = candidateEquipmentValues(owner);
                 const auto item = std::ranges::find(values.mObjects, held->mItem,
                     [](const auto& object) { return object.mRef.mRefNum; });
                 if (item == values.mObjects.end() || mRuntime.mStore.find(item->mRef.mRefID) != ESM::Weapon::sRecordId)
@@ -6500,7 +6809,7 @@ namespace TES3MP::Native
             float damage = 0.f;
             bool blocked = false;
             const auto owner = combatOwner(attackerIndex);
-            const auto held = mRuntime.equippedWeaponCondition(owner);
+            const auto held = weaponCondition(owner);
             if (success)
             {
                 damage = MWMechanics::projectileBaseDamage(*weapon, *ammunition, flight.strength);
@@ -6741,13 +7050,12 @@ namespace TES3MP::Native
                     if (selected) throw std::invalid_argument("Native actor spell identity ambiguous");
                     selected = mRuntime.mStore.get<ESM::Spell>().search(id);
                 }
-                if (selected) prepared = prepareInstantSpell(*selected, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions,
-                    mBinding.mMovementEffects, mBinding.mObjectTravelFamily);
+                if (selected) prepared = prepareInstantSpell(*selected, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                 if (prepared && caster.getMagicka().getCurrent() < prepared->cost) prepared.reset();
             }
             else if (use.sourceKind == MagicUseSourceKind::EnchantedItem && mBinding.mMagicItemUse)
             {
-                const auto values = mRuntime.installedValues(context.inventoryOwner);
+                const auto values = candidateEquipmentValues(context.inventoryOwner);
                 const auto item = std::ranges::find_if(values.mObjects, [&](const auto& object) {
                     return object.mRef.mCount > 0 && wireId(object.mRef.mRefNum).value() == use.sourceId;
                 });
@@ -6760,10 +7068,7 @@ namespace TES3MP::Native
                     const auto* enchantment = enchantId.empty() ? nullptr : mRuntime.mStore.get<ESM::Enchantment>().search(enchantId);
                     if (enchantment && enchantment->mData.mType == ESM::Enchantment::WhenUsed)
                     {
-                        const auto plan = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge, mRuntime.mStore, true,
-                            mBinding.mExpandedEffects, mBinding.mSpecialConditions,
-                            mBinding.mMovementEffects,
-                            mBinding.mObjectTravelFamily);
+                        const auto plan = prepareEnchantmentCast(*enchantment, caster, item->mRef.mEnchantmentCharge, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                         effectSource = spellRecordId(enchantId);
                         if (plan && plan->affordable && effectSource
                             && enchantmentBySource(mRuntime.mStore, effectSource) == enchantment)
@@ -7012,7 +7317,7 @@ namespace TES3MP::Native
             && !life->respawnTick && combat->actors[2][8][2] > 0
             && !combat->knockedDown[2] && !hasParalysis(timedEffects, 2) && !combat->hitRecoveryTicks[2]
             && tick.value() / reactionTicks != mActorTick / reactionTicks
-            && (mBinding.mNpcWeaponCompetition || !mRuntime.equippedWeaponCondition(mCombatNpcOwner))
+            && (mBinding.mNpcWeaponCompetition || !weaponCondition(mCombatNpcOwner))
             && (!melee || (mBinding.mWeaponMelee ? !target : !melee->snapshot().mReleased)
                 || melee->snapshot().mPhase == MeleeAnimation::Phase::Complete)
             && std::ranges::none_of(projectiles, [](const auto& flight) { return flight.casterKind == 2; }))
@@ -7056,6 +7361,7 @@ namespace TES3MP::Native
                     victim.setDrawState(MWMechanics::DrawState::Spell);
                 AiMagicContext selection{caster, &victim};
                 selection.expandedEffects = mBinding.mExpandedEffects;
+                selection.equipmentEffects = mBinding.mEquipmentFamily;
                 selection.specialConditions = mBinding.mSpecialConditions;
                 for (const auto& effect : timedEffects)
                 {
@@ -7074,14 +7380,14 @@ namespace TES3MP::Native
                 selection.enemyWerewolf = victim.isWerewolf();
                 std::optional<float> weaponRating = 0.f;
                 const ESM::ObjectState* winningWeapon = nullptr;
-                const auto values = mRuntime.installedValues(mCombatNpcOwner);
+                const auto values = candidateEquipmentValues(mCombatNpcOwner);
                 float arrowRating = 0.f, boltRating = 0.f;
                 if (mBinding.mNpcFullSelection)
                 {
                     // Player contacts still use the bounded body proxy. Keep its
                     // reach basis consistent with authoritative melee validation.
                     float reach = mRuntime.mStore.get<ESM::GameSetting>().find("fCombatDistance")->mValue.getFloat();
-                    const auto enemyValues = mRuntime.installedValues(actor(enemy->playerId()));
+                    const auto enemyValues = candidateEquipmentValues(actor(enemy->playerId()));
                     const auto right = enemyValues.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
                     const auto held = std::ranges::find(enemyValues.mObjects, right,
                         [](const auto& object) { return object.mRef.mRefNum; });
@@ -7135,9 +7441,7 @@ namespace TES3MP::Native
                 {
                     const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id);
                     if (!spell) continue;
-                    const auto plan = prepareInstantSpell(*spell, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions,
-                        mBinding.mMovementEffects,
-                        mBinding.mObjectTravelFamily);
+                    const auto plan = prepareInstantSpell(*spell, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                     // Filter whole sources before rating: an unsupported winner
                     // must not hide a lower-ranked executable spell.
                     if (!plan || (plan->effects.hasRange(ESM::RT_Touch) && (!mBinding.mNpcCastLifecycle
@@ -7164,10 +7468,7 @@ namespace TES3MP::Native
                     const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
                     if (!record.mWhenUsed) continue;
                     const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().find(record.mEnchant);
-                    const auto plan = prepareEnchantmentCast(*enchantment, caster, item.mRef.mEnchantmentCharge, mRuntime.mStore, true,
-                        mBinding.mExpandedEffects, mBinding.mSpecialConditions,
-                        mBinding.mMovementEffects,
-                        mBinding.mObjectTravelFamily);
+                    const auto plan = prepareEnchantmentCast(*enchantment, caster, item.mRef.mEnchantmentCharge, mRuntime.mStore, true, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                     if (!plan || (!mBinding.mNpcCastLifecycle && std::ranges::any_of(plan->effects.effects,
                             [](const auto& effect) { return !effect.mAttribute.empty() || !effect.mSkill.empty(); })) || (plan->effects.hasRange(ESM::RT_Touch) && (!mBinding.mNpcCastLifecycle
                         || (!plan->effects.hasRange(ESM::RT_Target) && nearest > std::pow(mRuntime.mStore.get<ESM::GameSetting>().find("fCombatDistance")->mValue.getFloat(), 2))))
@@ -7208,7 +7509,7 @@ namespace TES3MP::Native
                     if (tick.value() > UINT64_MAX - 30)
                         throw std::invalid_argument("Native flee deadline exhausted");
                     const auto enemyIndex = actor(enemy->playerId());
-                    const auto enemyValues = combatEquipmentValues(enemyIndex, command.get());
+                    const auto enemyValues = candidateEquipmentValues(enemyIndex);
                     const auto right = enemyValues.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
                     const auto held = std::ranges::find_if(enemyValues.mObjects,
                         [&](const auto& item) { return item.mRef.mRefNum == right; });
@@ -7368,17 +7669,31 @@ namespace TES3MP::Native
                                 for (const auto mode : {"chop", "slash", "thrust"})
                                     (void)mBinding.mWeaponMelee(weapon, mode);
                             else (void)mBinding.mWeaponMelee(weapon, {});
-                            auto prepared = mRuntime.prepareNpcEquipment(mCombatNpcOwner, winningWeapon->mRef.mRefNum);
-                            const auto equipped = mRuntime.preparedValues(prepared, mCombatNpcOwner);
+                            std::optional<EquipmentRuntime::PreparedEquipment> prepared;
+                            PlainEquipmentValues equipped;
+                            if (equipmentValues)
+                            {
+                                flushEquipmentWear();
+                                if (!mRuntime.stageEquipmentSelection(*equipmentValues, mCombatNpcOwner,
+                                        winningWeapon->mRef.mRefNum, MWWorld::InventoryStore::Slot_CarriedRight))
+                                    throw std::invalid_argument("NPC candidate weapon selection failed");
+                                equipped = candidateEquipmentValues(mCombatNpcOwner);
+                            }
+                            else
+                            {
+                                prepared.emplace(mRuntime.prepareNpcEquipment(mCombatNpcOwner, winningWeapon->mRef.mRefNum));
+                                equipped = mRuntime.preparedValues(*prepared, mCombatNpcOwner);
+                            }
                             Misc::Rng::Generator rng{combat->rng};
                             const auto previous = timedEffects;
-                            if (reconcileConstants(equipped, 2, magicCaster(2).identity, tick.value(), mRuntime.mStore,
+                            if (reconcileConstants(equipped, 2, candidateCasterIdentity(2), tick.value(), mRuntime.mStore,
                                     mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                                     mBinding.mSpecialConditions, mBinding.mMovementEffects,
-                                    mBinding.mAiDecisions, aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily))
+                                    mBinding.mAiDecisions, aiNpc, aiUndead, levitationEnabled, mBinding.mObjectTravelFamily,
+                                    mBinding.mEquipmentFamily))
                                 updateResources(2, previous, timedEffects, mBinding.mKnockoutAnimation);
                             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
-                            command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
+                            if (prepared) command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(*prepared));
                         }
                     }
                     else if (ranged && !equippedAmmunition(values, mRuntime.mStore, *weapon,
@@ -7393,9 +7708,19 @@ namespace TES3MP::Native
                         });
                         if (ammunition != values.mObjects.end() && !command)
                         {
-                            auto prepared = mRuntime.prepareNpcEquipment(mCombatNpcOwner, ammunition->mRef.mRefNum,
-                                MWWorld::InventoryStore::Slot_Ammunition);
-                            command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
+                            if (equipmentValues)
+                            {
+                                flushEquipmentWear();
+                                if (!mRuntime.stageEquipmentSelection(*equipmentValues, mCombatNpcOwner,
+                                        ammunition->mRef.mRefNum, MWWorld::InventoryStore::Slot_Ammunition))
+                                    throw std::invalid_argument("NPC candidate ammunition selection failed");
+                            }
+                            else
+                            {
+                                auto prepared = mRuntime.prepareNpcEquipment(mCombatNpcOwner, ammunition->mRef.mRefNum,
+                                    MWWorld::InventoryStore::Slot_Ammunition);
+                                command = std::make_unique<EquipmentTransaction>(*this, players, std::nullopt, std::move(prepared));
+                            }
                         }
                     }
                     else if (weapon || !values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight].isSet())
@@ -7848,21 +8173,13 @@ namespace TES3MP::Native
                                     selected = mRuntime.mStore.get<ESM::Spell>().search(id);
                                 }
                             if (!selected) throw std::invalid_argument("Native projectile spell source missing");
-                            const auto plan = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                                mBinding.mExpandedEffects,
-                                mBinding.mSpecialConditions,
-                                mBinding.mMovementEffects,
-                                mBinding.mObjectTravelFamily);
+                            const auto plan = prepareInstantSpell(*selected, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                             if (plan) effects = plan->effects;
                         }
                         else if (const auto* selected = enchantmentBySource(mRuntime.mStore, pending.effectSource);
                             selected && (selected->mData.mType == ESM::Enchantment::WhenUsed
                                 || selected->mData.mType == ESM::Enchantment::CastOnce))
-                            effects = prepareInstantEffects(selected->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle,
-                                mBinding.mExpandedEffects, false,
-                                mBinding.mSpecialConditions,
-                                mBinding.mMovementEffects,
-                                mBinding.mObjectTravelFamily);
+                            effects = prepareInstantEffects(selected->mEffects, mRuntime.mStore, mBinding.mActorEffectLifecycle, mBinding.mExpandedEffects, false, mBinding.mSpecialConditions, mBinding.mMovementEffects, mBinding.mObjectTravelFamily, false, mBinding.mEquipmentFamily);
                         if (!effects || !effects->hasRange(ESM::RT_Target))
                             throw std::invalid_argument("Native projectile effect plan changed");
                         Misc::Rng::Generator rng{combat->rng};
@@ -7945,9 +8262,9 @@ namespace TES3MP::Native
             projectiles = std::move(remaining);
         }
         const auto selectedNpcWeapon = [&]() -> const ESM::Weapon* {
-            const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+            const auto held = weaponCondition(mCombatNpcOwner);
             if (!held) return nullptr;
-            const auto values = mRuntime.installedValues(mCombatNpcOwner);
+            const auto values = candidateEquipmentValues(mCombatNpcOwner);
             const auto item = std::ranges::find(values.mObjects, held->mItem,
                 [](const auto& object) { return object.mRef.mRefNum; });
             if (item == values.mObjects.end()) throw std::invalid_argument("Native NPC weapon source missing");
@@ -8024,10 +8341,10 @@ namespace TES3MP::Native
             {
                 if (combat->arrows.size() >= MaximumActorProjectiles) throw std::invalid_argument("NPC projectile capacity exceeded");
                 const auto* weapon = selectedNpcWeapon();
-                const auto values = combatEquipmentValues(mCombatNpcOwner, command.get());
+                const auto values = candidateEquipmentValues(mCombatNpcOwner);
                 const auto* ammo = equippedAmmunition(values, mRuntime.mStore, *weapon,
                     mBinding);
-                const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
+                const auto held = weaponCondition(mCombatNpcOwner);
                 const auto* victim = players.findPlayer(*PlayerId::fromValue(target));
                 if (!ammo || !held || !victim || life->respawnTick || combat->actors[2][8][2] <= 0)
                     throw std::invalid_argument("NPC projectile source or target changed before release");
@@ -8072,8 +8389,8 @@ namespace TES3MP::Native
                 bool targetDied = false;
                 auto attacker = loadCombatStats(mRuntime.mStore, combat->actors[2], timedEffects, 2);
                 addTimedResistance(attacker, timedEffects, 2);
-                const auto held = mRuntime.equippedWeaponCondition(mCombatNpcOwner);
-                const auto values = mRuntime.installedValues(mCombatNpcOwner);
+                const auto held = weaponCondition(mCombatNpcOwner);
+                const auto values = candidateEquipmentValues(mCombatNpcOwner);
                 const ESM::Weapon* weapon = nullptr;
                 if (held)
                 {
@@ -8268,16 +8585,17 @@ namespace TES3MP::Native
                 if (std::ranges::none_of(wear, [owner](const auto& change) {
                         return change.owner == owner && change.condition == 0;
                     })) continue;
-                auto values = combatEquipmentValues(owner, command.get());
+                auto values = candidateEquipmentValues(owner);
                 for (const auto& change : wear)
                     if (change.owner == owner && change.condition == 0) values.mSlots[change.slot] = {};
                 const auto previous = timedEffects;
                 Misc::Rng::Generator rng{combat->rng};
-                if (reconcileConstants(values, index, magicCaster(index).identity, tick.value(), mRuntime.mStore,
+                if (reconcileConstants(values, index, candidateCasterIdentity(index), tick.value(), mRuntime.mStore,
                         mBinding.mGeneralConstants, timedEffects, &rng, mBinding.mExpandedEffects,
                         mBinding.mSpecialConditions, mBinding.mMovementEffects,
                         mBinding.mAiDecisions, index == 2 && aiNpc, index == 2 && aiUndead,
-                        levitationEnabled, mBinding.mObjectTravelFamily))
+                        levitationEnabled, mBinding.mObjectTravelFamily,
+                        mBinding.mEquipmentFamily))
                     updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
                 combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             }
@@ -8401,9 +8719,9 @@ namespace TES3MP::Native
                                 settings.find("iFightDistanceBase")->mValue.getInteger(),
                                 settings.find("fFightDistanceMultiplier")->mValue.getFloat()));
                         float attackRating = 0.f;
-                        if (const auto held = mRuntime.equippedWeaponCondition(combatOwner(index)))
+                        if (const auto held = weaponCondition(combatOwner(index)))
                         {
-                            const auto values = mRuntime.installedValues(combatOwner(index));
+                            const auto values = candidateEquipmentValues(combatOwner(index));
                             const auto item = std::ranges::find(values.mObjects, held->mItem,
                                 [](const auto& value) { return value.mRef.mRefNum; });
                             if (item == values.mObjects.end())
@@ -8412,6 +8730,7 @@ namespace TES3MP::Native
                             {
                                 AiMagicContext context{stats, &victim};
                                 context.expandedEffects = mBinding.mExpandedEffects;
+                                context.equipmentEffects = mBinding.mEquipmentFamily;
                                 const auto scored = rateAiWeapon(context, *weapon, held->mCondition,
                                     item->mRef.mEnchantmentCharge,
                                     mBinding.mEnchantedWeaponsAreMagical, mRuntime.mStore);
@@ -8539,8 +8858,8 @@ namespace TES3MP::Native
             if (adjacent->mActor != combat->npcPlacements.at(i + 1))
                 throw std::invalid_argument("Native neighbor attack placement changed");
             const size_t owner = combatOwner(index);
-            const auto values = combatEquipmentValues(owner, command.get());
-            const auto held = mRuntime.equippedWeaponCondition(owner);
+            const auto values = candidateEquipmentValues(owner);
+            const auto held = weaponCondition(owner);
             const ESM::Weapon* weapon = nullptr;
             if (held)
             {
@@ -8737,6 +9056,31 @@ namespace TES3MP::Native
             }
             }
         }
+        flushEquipmentWear();
+        syncEquipmentMagic();
+        if (equipmentValues && combat)
+        {
+            for (unsigned pass = 0; pass < 16; ++pass)
+            {
+                const auto previous = timedEffects;
+                Misc::Rng::Generator rng{combat->rng};
+                for (size_t index = 0; index < combat->actors.size(); ++index)
+                {
+                    const auto ptr = mRuntime.ownerPtr(combatOwner(index));
+                    const bool npc = ptr.getClass().isNpc();
+                    if (reconcileConstants(candidateEquipmentValues(combatOwner(index)), index, candidateCasterIdentity(index),
+                            tick.value(), mRuntime.mStore, mBinding.mGeneralConstants, timedEffects, &rng,
+                            mBinding.mExpandedEffects, mBinding.mSpecialConditions, mBinding.mMovementEffects,
+                            mBinding.mAiDecisions, npc, !npc && ptr.get<ESM::Creature>()->mBase->mData.mType == ESM::Creature::Undead,
+                            levitationEnabled, mBinding.mObjectTravelFamily, true))
+                        updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
+                }
+                combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
+                syncEquipmentMagic();
+                if (timedEffects == previous) break;
+                if (pass == 15) throw std::invalid_argument("Bound equipment constant lifecycle did not converge");
+            }
+        }
         struct SoulCapture { size_t owner; ESM::RefId soul; int value; };
         std::vector<std::vector<SoulCapture>> soulCaptures;
         if (mBinding.mObjectTravelFamily && combat)
@@ -8771,11 +9115,12 @@ namespace TES3MP::Native
             }
         }
         std::unique_ptr<EquipmentRuntime::PreparedProjectileLoot> loot;
-        if (!wear.empty() || !charges.empty() || !recoveries.empty() || !soulCaptures.empty())
+        if (!wear.empty() || !charges.empty() || !recoveries.empty() || !soulCaptures.empty() || equipmentValues)
         {
             EquipmentSessionValues stagedValues;
             wornCore = stagedWeaponCore(wear, command.get(), charges, respawn.get(), recoveries,
-                (recoveries.empty() && soulCaptures.empty()) ? nullptr : &stagedValues);
+                (recoveries.empty() && soulCaptures.empty() && !equipmentValues) ? nullptr : &stagedValues,
+                equipmentValues ? &*equipmentValues : nullptr);
             bool capturedSoul = false;
             for (const auto& candidates : soulCaptures)
                 for (const auto& capture : candidates)
@@ -8787,7 +9132,7 @@ namespace TES3MP::Native
                 ++stagedValues.mRevision;
                 mRuntime.encodeSession(stagedValues, wornCore);
             }
-            if (!recoveries.empty() || capturedSoul)
+            if (!recoveries.empty() || capturedSoul || equipmentValues)
             {
                 if (dynamic_cast<const WorldTransaction*>(command.get()))
                     throw std::invalid_argument("Projectile recovery cannot share a world transfer tick");

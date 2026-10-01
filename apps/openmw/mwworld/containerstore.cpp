@@ -430,7 +430,9 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::restack(
 
     for (MWWorld::ContainerStoreIterator iter(begin()); iter != end(); ++iter)
     {
-        if (stacks(*iter, item, context.mStore))
+        if ((!context.mPreserveIdentity || (!context.mPreserveIdentity(item.getCellRef().getRefNum())
+                && !context.mPreserveIdentity(iter->getCellRef().getRefNum())))
+            && stacks(*iter, item, context.mStore))
         {
             iter->getCellRef().setCount(
                 addItems(iter->getCellRef().getCount(false), item.getCellRef().getCount(false)));

@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_EQUIPMENT_RUNTIME_H
 
 #include "equipment_command.hpp"
+#include <apps/openmw/mwmechanics/boundequipment.hpp>
 #include "inventory_transfer_command.hpp"
 #include "equipment_file.hpp"
 #include "session_commit.hpp"
@@ -246,7 +247,8 @@ namespace TES3MP::Native
         };
         // Rebuild one placed actor's starting inventory with fresh item identities.
         // The caller persists image() with the actor life and frame before install.
-        std::unique_ptr<PreparedRespawn> prepareRespawn(size_t owner, const PlainEquipmentValues& baseline);
+        std::unique_ptr<PreparedRespawn> prepareRespawn(size_t owner, const PlainEquipmentValues& baseline,
+            ESM::RefNum candidateCounter = {});
         // Replace a player's slots and transformation robe in one detached image.
         // Ordinary item identities and their object state are retained.
         std::unique_ptr<PreparedRespawn> prepareWerewolfEquipment(size_t owner, bool transformed);
@@ -267,6 +269,12 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedProjectileLoot> prepareProjectileLoot(
             const EquipmentSessionValues& values, std::span<const size_t> owners);
         void installProjectileLoot(PreparedProjectileLoot& prepared) noexcept;
+        std::function<bool(ESM::RefNum)> mPreserveIdentity;
+        bool stageEquipmentMagic(EquipmentSessionValues& values, size_t owner, ESM::RefId effect,
+            std::array<MWMechanics::BoundEquipmentItem, 2>& items, bool removing,
+            bool alive, bool werewolf, const MWMechanics::NpcStats& stats,
+            const std::function<void()>& drawWeapon, bool extraSpellRemains = false);
+        bool stageEquipmentSelection(EquipmentSessionValues& values, size_t owner, ESM::RefNum item, int slot);
         bool stageSoulCapture(EquipmentSessionValues& values, size_t owner, ESM::RefId soul, int value);
         class PreparedDoor
         {

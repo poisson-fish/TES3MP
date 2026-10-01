@@ -1543,8 +1543,10 @@ namespace TES3MP::Native
         };
         const auto vector = [&]() { const auto x=real(), y=real(), z=real(); return osg::Vec3f(x,y,z); };
         const auto boolean = [&]() { const auto value=word(); if (value>1) throw std::invalid_argument("Invalid actor image boolean"); return bool(value); };
-        if (word() != (mImpl->mAvoidanceEnabled ? 2 : 1) || word() != mImpl->mActorId)
-            throw std::invalid_argument("Actor image identity mismatch");
+        const auto version = word(), actor = word();
+        if (version != (mImpl->mAvoidanceEnabled ? 2 : 1) || actor != mImpl->mActorId)
+            throw std::invalid_argument("Actor image identity mismatch: version=" + std::to_string(version)
+                + " actor=" + std::to_string(actor) + " expected=" + std::to_string(mImpl->mActorId));
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
         frame->mPosition = vector(); frame->mInertia = vector(); frame->mLastStuckPosition = vector();
         if (!contains({frame->mPosition.x(), frame->mPosition.y(), frame->mPosition.z()}))
@@ -1763,7 +1765,12 @@ namespace TES3MP::Native
         for (size_t i = frames.size(); i-- > 1; )
         {
             auto* current = frames[i - 1];
-            current->mState->bytes = joinActorImages(current->mState->bytes, frames[i]->image());
+            // A restored frame already contains its neighbor image. Rebuild
+            // the actor's own bytes before composing the candidate chain.
+            const auto& state = *current->mState;
+            current->mState->bytes = joinActorImages(
+                scenes[i - 1]->mImpl->encode(*state.frame, state.path, state.contacts, state.travel),
+                frames[i]->image());
         }
     }
 

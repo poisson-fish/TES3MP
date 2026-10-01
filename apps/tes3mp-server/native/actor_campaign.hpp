@@ -1,6 +1,7 @@
 #ifndef TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #define TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #include "actor_spawns.hpp"
+#include <apps/openmw/mwmechanics/boundequipment.hpp>
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
 #include <tes3mp/spatial_types.hpp>
@@ -57,8 +58,11 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerTravelCampaignMagic = 0x5e50434154335354;
     inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
     inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
+    inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
+    inline constexpr bool hasObjectTravel(uint64_t magic)
+    { return magic == ObjectTravelCampaignMagic || magic == EquipmentFamilyCampaignMagic; }
     inline constexpr bool hasTravelRules(uint64_t magic)
-    { return magic == TravelRuleCampaignMagic || magic == ObjectTravelCampaignMagic; }
+    { return magic == TravelRuleCampaignMagic || hasObjectTravel(magic); }
     inline constexpr bool hasPlayerTravel(uint64_t magic)
     { return magic == PlayerTravelCampaignMagic || hasTravelRules(magic); }
     inline constexpr bool hasMovementRules(uint64_t magic)
@@ -299,6 +303,8 @@ namespace TES3MP::Native
         uint64_t argument = 0, ordinal = 0;
         uint64_t casterKind = 0, casterLife = 0;
         uint64_t beneficiary = 0; // V51: combat index + 1; 0 if the caster life is unavailable.
+        bool equipmentApplied = false;
+        std::array<MWMechanics::BoundEquipmentItem, 2> boundItems{};
         bool operator==(const ActorCampaignTimedEffect&) const = default;
     };
     inline constexpr size_t MaximumActorTimedEffects = 512;
@@ -808,7 +814,7 @@ namespace TES3MP::Native
                 {
                     value.targetKind = getAreaWord(bytes, offset);
                     if (value.targetKind != 1 && value.targetKind != 2
-                        && !(magic == ObjectTravelCampaignMagic && (value.targetKind == 3 || value.targetKind == 4)))
+                        && !(hasObjectTravel(magic) && (value.targetKind == 3 || value.targetKind == 4)))
                         throw std::invalid_argument("Native projectile target kind invalid");
                 }
                 if (magic == MultipleProjectileActorCampaignMagic || hasKnockoutState(magic))
@@ -865,7 +871,7 @@ namespace TES3MP::Native
             || hasKnockoutState(magic))
         {
             const auto count = getAreaWord(bytes, offset);
-            const size_t effectBytes = hasExpandedEffects(magic) ? 120 : hasCasterState(magic) ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
+            const size_t effectBytes = magic == EquipmentFamilyCampaignMagic ? 192 : hasExpandedEffects(magic) ? 120 : hasCasterState(magic) ? 112 : hasGeneralConstantState(magic) ? 96 : magic == EffectActorCampaignMagic || hasConstantState(magic) ? 80 : 24;
             if (count > (hasGeneralConstantState(magic) ? MaximumActorTimedEffects : 16) || count > (bytes.size() - offset) / effectBytes)
                 throw std::invalid_argument("Native timed effect count invalid");
             timedEffects.reserve(size_t(count));
@@ -927,6 +933,29 @@ namespace TES3MP::Native
                                 || effect.expiresTick != UINT64_MAX)
                             : (!effect.durationTicks || effect.durationTicks > 108000)))
                         throw std::invalid_argument("Native effect identity or duration invalid");
+                }
+                if (magic == EquipmentFamilyCampaignMagic)
+                {
+                    const auto applied = getAreaWord(bytes, offset);
+                    if (applied > 1) throw std::invalid_argument("Native equipment application flag invalid");
+                    effect.equipmentApplied = applied != 0;
+                    for (auto& item : effect.boundItems)
+                    {
+                        const auto identity = getAreaWord(bytes, offset), previous = getAreaWord(bytes, offset);
+                        const auto slot = getAreaWord(bytes, offset), length = getAreaWord(bytes, offset);
+                        if (identity > UINT32_MAX || previous > UINT32_MAX || slot > MWWorld::InventoryStore::Slots
+                            || length > 256 || length > bytes.size() - offset)
+                            throw std::invalid_argument("Native bound item identity or restoration invalid");
+                        item.item = {uint32_t(identity), -1}; item.previous = {uint32_t(previous), -1};
+                        item.slot = int(slot) - 1;
+                        item.previousRecord = ESM::RefId::deserializeText(std::string_view(bytes.data() + offset, size_t(length)));
+                        offset += size_t(length);
+                        if (!identity && (previous || slot || !item.previousRecord.empty()))
+                            throw std::invalid_argument("Native empty bound item carries restoration state");
+                    }
+                    if (effect.equipmentApplied && !MWMechanics::equipmentMagicEffect(
+                            ESM::MagicEffect::indexToRefId(int(effect.effectIndex))))
+                        throw std::invalid_argument("Native equipment source application mismatch");
                 }
                 if (effect.actor >= (hasNeighborCombat(magic) ? combat->actors.size() : 3)
                     || !std::isfinite(effect.magnitude)
