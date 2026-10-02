@@ -5,6 +5,7 @@
 #include <apps/openmw/mwworld/cellstore.hpp>
 #include <apps/openmw/mwworld/placedrefid.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
+#include <apps/openmw/mwworld/intervention.hpp>
 
 #include <optional>
 #include <algorithm>
@@ -45,7 +46,7 @@ namespace TES3MP::Native
         return *position;
     }
 
-    std::vector<ESM::RefId> Loadout::playerAreas(ESM::RefId start, unsigned exteriorRadius, size_t limit)
+    std::vector<ESM::RefId> Loadout::playerAreas(ESM::RefId start, unsigned exteriorRadius, size_t limit, bool interventionDestinations)
     {
         validateCell(start);
         if (!limit || limit > 256 || exteriorRadius > 7)
@@ -85,6 +86,25 @@ namespace TES3MP::Native
                         || std::abs(ext->getY() - anchor->getY()) > int(exteriorRadius))) continue;
                 add(door.mDestination);
             }
+        if (interventionDestinations)
+        {
+            MWClass::registerClasses();
+            MWWorld::WorldModel model(mStore, mReaders, 1);
+            // Resolve stock destinations before manifest/fingerprint binding.
+            // Every added destination receives the same streamed ownership.
+            for (size_t i = 0; i < result.size(); ++i)
+            {
+                osg::Vec3f origin;
+                if (const auto* ext = result[i].getIf<ESM::ESM3ExteriorCellRefId>())
+                    origin = osg::Vec3f(float(ext->getX()) * 8192.f, float(ext->getY()) * 8192.f, 0.f);
+                for (const auto id : {"divinemarker", "templemarker"})
+                {
+                    const auto marker = MWWorld::closestInterventionMarker(model, result[i], origin,
+                        ESM::RefId::stringRefId(id), 256);
+                    if (!marker.isEmpty()) add(marker.getCell()->getCell()->getId());
+                }
+            }
+        }
         std::sort(result.begin() + 1, result.end());
         return result;
     }

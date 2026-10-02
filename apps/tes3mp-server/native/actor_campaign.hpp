@@ -1,6 +1,7 @@
 #ifndef TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #define TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #include "actor_spawns.hpp"
+#include "magic_runtime.hpp"
 #include <apps/openmw/mwmechanics/boundequipment.hpp>
 #include <apps/openmw/mwmechanics/powercooldown.hpp>
 #include "melee_animation.hpp"
@@ -62,6 +63,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t SummonsActorSetMagic = 0x6350434154335354;
     inline constexpr uint64_t PlayerLivesCampaignMagic = 0x6450434154335354;
     inline constexpr uint64_t BodyCampaignMagic = 0x6550434154335354;
+    inline constexpr uint64_t TargetCampaignMagic = 0x6850434154335354;
     inline constexpr uint64_t PassiveCampaignMagic = 0x6750434154335354;
     inline constexpr uint64_t PowerCampaignMagic = 0x6650434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
@@ -240,6 +242,7 @@ namespace TES3MP::Native
         static constexpr size_t MaximumPowerUses = 1024;
         std::vector<PowerUse> powers;
         bool passiveSelf = false;
+        bool genericTargets = false;
         struct PassiveCorprus
         {
             uint64_t actor = 0, source = 0, kind = 0;
@@ -371,10 +374,19 @@ namespace TES3MP::Native
         std::span<const char> dynamicActors;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
-        const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr)
+        const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr, bool genericTargets = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == TargetCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested Target envelope");
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != PassiveCampaignMagic) throw std::invalid_argument("Targets require passive campaign");
+            auto result = readActorCampaign(bytes.subspan(offset), false, nullptr, true);
+            result.combat->genericTargets = true;
+            return result;
+        }
         if (magic == PassiveCampaignMagic)
         {
             if (playerLives || dynamicDomain) throw std::invalid_argument("Nested passive envelope");
@@ -401,14 +413,14 @@ namespace TES3MP::Native
             {
                 ActorCampaignCombat::PassiveApplication application{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
                     getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
-                if (!application.source || (application.kind != 3 && application.kind != 5) || application.ordinal >= 8
+                if (!application.source || (application.kind != 3 && application.kind != 5) || application.ordinal >= (genericTargets ? MaximumNativeMagicSourceEffects : 8)
                     || std::ranges::find(applications, application) != applications.end())
                     throw std::invalid_argument("Native passive application invalid");
                 applications.push_back(application);
             }
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != PowerCampaignMagic) throw std::invalid_argument("Passives require power campaign");
-            auto result = readActorCampaign(bytes.subspan(offset));
+            auto result = readActorCampaign(bytes.subspan(offset), false, nullptr, genericTargets);
             for (const auto& clock : clocks)
                 if (clock.actor >= result.combat->actors.size()) throw std::invalid_argument("Native passive clock actor invalid");
             for (const auto& application : applications)
@@ -436,7 +448,7 @@ namespace TES3MP::Native
             }
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != BodyCampaignMagic) throw std::invalid_argument("Powers require body campaign");
-            auto result = readActorCampaign(bytes.subspan(offset));
+            auto result = readActorCampaign(bytes.subspan(offset), false, nullptr, genericTargets);
             for (const auto& use : powers)
                 if (use.actor >= result.combat->actors.size()) throw std::invalid_argument("Native power actor invalid");
             result.combat->powerSources = true;
@@ -461,7 +473,7 @@ namespace TES3MP::Native
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != PlayerLivesCampaignMagic)
                 throw std::invalid_argument("Native death bodies require player lives");
-            auto result = readActorCampaign(bytes.subspan(offset));
+            auto result = readActorCampaign(bytes.subspan(offset), false, nullptr, genericTargets);
             if (!result.combat || result.combat->actors.size() != bodies.size())
                 throw std::invalid_argument("Native death body domain invalid");
             for (size_t i = 0; i < bodies.size(); ++i)
@@ -532,7 +544,7 @@ namespace TES3MP::Native
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != SummonsActorSetMagic || lives[0].player == lives[1].player)
                 throw std::invalid_argument("Player lives require distinct players and summon campaign");
-            auto result = readActorCampaign(bytes.subspan(offset), false, &lives);
+            auto result = readActorCampaign(bytes.subspan(offset), false, &lives, genericTargets);
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto& value = lives[i];
@@ -569,7 +581,7 @@ namespace TES3MP::Native
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != EquipmentFamilyCampaignMagic)
                 throw std::invalid_argument("Dynamic actors require equipment campaign");
-            auto result = readActorCampaign(bytes.subspan(offset), true, playerLives);
+            auto result = readActorCampaign(bytes.subspan(offset), true, playerLives, genericTargets);
             result.dynamicActors = actors;
             return result;
         }
@@ -1073,7 +1085,7 @@ namespace TES3MP::Native
                     || hasKnockoutState(magic))
                 {
                     value.targetKind = getAreaWord(bytes, offset);
-                    if (value.targetKind != 1 && value.targetKind != 2
+                    if (!(genericTargets && value.targetKind == 0) && value.targetKind != 1 && value.targetKind != 2
                         && !(hasObjectTravel(magic) && (value.targetKind == 3 || value.targetKind == 4)))
                         throw std::invalid_argument("Native projectile target kind invalid");
                 }
@@ -1111,9 +1123,9 @@ namespace TES3MP::Native
                 const auto targetGeneration = value.targetKind == 2
                     ? target == 2 ? life->generation
                         : target < combat->actors.size() ? neighborLives[target - 3].generation : 0 : 1;
-                if (!value.caster || !value.source || !value.target || !value.generation
-                    || (value.targetKind == 2 && value.generation != targetGeneration)
-                    || value.expiresTick <= tick
+                if (!value.caster || !value.source || (value.targetKind == 0 ? (!genericTargets || value.target || value.generation) : (!value.target || !value.generation))
+                    || (value.targetKind == 2 && (genericTargets ? value.generation > targetGeneration : value.generation != targetGeneration))
+                    || value.expiresTick <= tick || (genericTargets && value.expiresTick < 90)
                     || value.expiresTick - tick > 90 || length2 < 1.f || length2 > 1e6f)
                     throw std::invalid_argument("Native projectile identity or lifetime invalid");
                 if (value.commandId && std::ranges::any_of(projectiles, [&](const auto& previous) {
@@ -1159,7 +1171,7 @@ namespace TES3MP::Native
                     {
                         effect.argument = getAreaWord(bytes, offset);
                         effect.ordinal = getAreaWord(bytes, offset);
-                        if (effect.argument > 35 || effect.ordinal >= 8
+                        if (effect.argument > 35 || effect.ordinal >= (genericTargets ? MaximumNativeMagicSourceEffects : 8)
                             || (!hasCastLifecycle(magic) && effect.sourceKind != 3 && (effect.argument || effect.ordinal)))
                             throw std::invalid_argument("Native effect argument or ordinal invalid");
                     }
@@ -1191,7 +1203,7 @@ namespace TES3MP::Native
                         || (effect.sourceKind >= 3
                             ? (!hasConstantState(magic) || effect.durationTicks != 0
                                 || effect.expiresTick != UINT64_MAX)
-                            : (!effect.durationTicks || effect.durationTicks > 108000)))
+                            : (!effect.durationTicks || effect.durationTicks > (genericTargets ? uint64_t(MaximumMagicDuration) * 30 : 108000))))
                         throw std::invalid_argument("Native effect identity or duration invalid");
                 }
                 if (magic == EquipmentFamilyCampaignMagic)
@@ -1221,7 +1233,7 @@ namespace TES3MP::Native
                     || !std::isfinite(effect.magnitude)
                     || (effect.magnitude < 0 || (effect.magnitude == 0 && effect.sourceKind < 3)) || effect.magnitude > (hasKnockoutState(magic) && effect.effectIndex ? 100000 : 1000)
                     || effect.expiresTick <= tick
-                    || (effect.sourceKind < 3 && effect.expiresTick - tick > 108000))
+                    || (effect.sourceKind < 3 && effect.expiresTick - tick > (genericTargets ? uint64_t(MaximumMagicDuration) * 30 : 108000)))
                     throw std::invalid_argument("Native timed effect state invalid");
                 timedEffects.push_back(effect);
             }

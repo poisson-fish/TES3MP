@@ -4,6 +4,7 @@
 #include <components/esm3/effectlist.hpp>
 #include <components/esm3/loadspel.hpp>
 #include <components/misc/rng.hpp>
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -13,6 +14,10 @@ namespace ESM { struct Enchantment; }
 
 namespace TES3MP::Native
 {
+    inline constexpr size_t MaximumNativeMagicSourceEffects = 32;
+    inline constexpr int MaximumMagicArea = 65535;
+    inline constexpr int MaximumMagicDuration = 86400;
+    inline constexpr int MaximumMagicMagnitude = 100000;
     struct PreparedInstantEffects;
     // Modifiers consumed by shared hit chance/evasion and armor calculations.
     bool expandedCombatEffect(ESM::RefId effect);

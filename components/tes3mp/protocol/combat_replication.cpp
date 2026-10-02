@@ -362,7 +362,7 @@ namespace TES3MP
                 || (cue.casterKind != 1 && cue.casterKind != 2) || cue.sourceKind > 1 || cue.range > 3
                 || cue.record.empty() || cue.record.size() > 256 || cue.record.find('\0') != std::string::npos
                 || cue.objectSound > 2 || (cue.objectSound && (cue.presentation != 1 || cue.targetKind < 3))
-                || cue.presentation > 3 || cue.outcome > 5 || cue.school > 5 || cue.ordinal >= 8
+                || cue.presentation > 3 || cue.outcome > 5 || cue.school > 5 || cue.ordinal >= MaximumMagicSourceEffects
                 || (cue.presentation == 1 && (cue.targetKind < 1 || cue.targetKind > 4 || !cue.target || !cue.targetLife || cue.range > 2))
                 || (cue.presentation != 1 && (cue.targetKind || cue.target || cue.targetLife || cue.outcome || cue.ordinal))
                 || ((cue.presentation == 2 || cue.presentation == 3) && cue.range != 3))

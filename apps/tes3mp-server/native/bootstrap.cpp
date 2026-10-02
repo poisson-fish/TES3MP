@@ -137,7 +137,7 @@ try
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
             "START is an interior name or exterior:X:Y; exterior radius defaults to 1 (maximum 7).\n"
             "Use RADIUS=single for a one-cell connection/presentation check with travel disabled.\n"
-            "OpenMW discovers the area and connected interiors. Outputs native-inventory-15 and matching\n"
+            "OpenMW discovers the area, connected interiors and intervention destinations. Outputs native-inventory-15 and matching\n"
             "server/client content settings, without fixture plugins or reference recipes.\n"
             "Spawn uses a discovered incoming door destination, or explicit OpenMW coordinates.\n"
             "Set the two established player IDs in native.txt; their registrations must bind manifest.txt.\n"
@@ -157,7 +157,7 @@ try
     TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(3, arguments));
     const auto actorA = TES3MP::Native::interiorCell(argv[4]), actorB = TES3MP::Native::interiorCell(argv[5]);
     loadout.store().get<ESM::NPC>().find(actorA); loadout.store().get<ESM::NPC>().find(actorB);
-    const auto cells = singleCell ? std::vector{start} : loadout.playerAreas(start, unsigned(radius), 256);
+    const auto cells = singleCell ? std::vector{start} : loadout.playerAreas(start, unsigned(radius), 256, true);
     std::optional<ESM::Position> spawnPosition;
     if (argc == 8)
     {

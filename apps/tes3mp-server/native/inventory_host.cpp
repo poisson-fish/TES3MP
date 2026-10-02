@@ -77,7 +77,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 75; ++candidate)
+            for (unsigned candidate = 3; candidate <= 76; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -302,6 +302,7 @@ namespace TES3MP::Native
                 binding.mCommittedDeath = descriptorVersion >= 73;
                 binding.mPowerSources = descriptorVersion >= 74;
                 binding.mPassiveSelf = descriptorVersion >= 75;
+                binding.mGenericTargets = descriptorVersion >= 76;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;

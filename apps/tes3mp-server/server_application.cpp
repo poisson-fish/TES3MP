@@ -1475,8 +1475,11 @@ namespace TES3MP::ServerApp
                         const auto& hello = session->negotiatedHello();
                         const bool applications = hello && std::ranges::binary_search(
                             hello->negotiatedCapabilities(), spellApplicationPresentationCapability());
+                        const bool extended = hello && std::ranges::binary_search(
+                            hello->negotiatedCapabilities(), extendedSpellSourcesCapability());
                         auto cues = std::vector<MagicImpactCue>(events->magicImpactCues().begin(), events->magicImpactCues().end());
-                        std::erase_if(cues, [applications](const auto& cue) {
+                        std::erase_if(cues, [applications, extended](const auto& cue) {
+                            if (!extended && cue.ordinal >= 8) return true;
                             return applications ? (cue.presentation == 0 && cue.range == 3) : cue.presentation != 0;
                         });
                         auto filtered = ReliableCombatEventBatch::create(events->targetSessionId(),

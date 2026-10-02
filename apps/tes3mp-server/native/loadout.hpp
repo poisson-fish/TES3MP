@@ -102,7 +102,8 @@ namespace TES3MP::Native
         std::vector<PlacedDoor> teleportDoors(ESM::RefId cell, ESM::RefId destination);
         // An empty destination filter discovers all usable outgoing doors.
         std::vector<PlacedDoor> teleportDoors(ESM::RefId cell, std::span<const ESM::RefId> destinations);
-        std::vector<ESM::RefId> playerAreas(ESM::RefId start, unsigned exteriorRadius, size_t limit);
+        std::vector<ESM::RefId> playerAreas(ESM::RefId start, unsigned exteriorRadius, size_t limit,
+            bool interventionDestinations = false);
         ESM::Position playerSpawn(ESM::RefId start, std::span<const ESM::RefId> cells,
             std::optional<ESM::Position> explicitPosition = {});
         std::vector<PlacedDoor> ordinaryDoors(ESM::RefId cell, size_t limit);

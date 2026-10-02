@@ -260,23 +260,23 @@ matching source life; older caps persist.
 **Player travel (V67/V68).** Each player owns a durable Mark. Recall commits
 payment/destination/epoch; rejection retries, storage failure closes until coherent
 restart. V68 persists bounded Enable/DisableTeleporting. Disabled/unmarked casts
-pay without teleporting. Fresh campaigns; V67 layout stays unchanged.
+pay without teleporting.
 
-**Object/travel (V69).** Fresh discriminator retains prior layouts. Explicit-player
+**Object/travel (V69).** Explicit-player
 stock intervention search caps interiors at 256 cells and rejects unbound
 destinations. Shared reach/Lock/Open rules, collision identity and ordered effects
 join the existing commit. Stock gem selection captures once per new creature
 death with matching caster life; gem/death/revision/payment persist together.
 T3D2/capability 30 feeds Telekinesis into stock focus; the server owns reach/access/sight.
 
-**Equipment ownership (V70).** Fresh campaigns retain prior layouts. Shared stock
+**Equipment ownership (V70).** Shared stock
 bound/ExtraSpell handlers own temporary identities and acyclic restoration links;
 ordinary items remain independent. Forbid temporary stacking/transfers; splice
 expired links; manual changes win. Effects/constants, wear, draw and counters join
 the actor commit. Rejection installs nothing; failed permanent attempts remain
 dormant until source changes. Recovery validates ownership. General scripts remain M5.
 
-**Dynamic actors (V71).** Fresh wrapper; namespace 3 separates bounded actors.
+**Dynamic actors (V71).** Namespace 3 separates bounded actors.
 References share the inventory counter. Stage collision/inventory membership before
 durability. Owner/source/life forms an acyclic forest; removal deletes descendants
 without respawn. Recovery validates sources, selectors, identities, lives and animation
@@ -293,25 +293,31 @@ Cleanup/RNG/membership/relocation/zero velocity/epoch share durability. Recovery
 history/baselines; old-life timestamps reject. Capability 32 gates player life semantics.
 Quest credit and wider spawn policy remain M5.
 
-**Committed bodies (V73).** Wrap V72 with bounded durable death action/group/frame;
-older layouts stay unchanged. Select stock groups once with durable RNG and sample
+**Committed bodies (V73).** Wrap V72 with bounded durable death action/group/frame. Select stock groups once with durable RNG and sample
 committed active clocks. Clip stop completes presentation without local death
 cleanup; negotiated lives retain server-owned respawn. Capability 33 gates recipes;
 published capability-30 aliases appear once. Recover projectiles according to
 WhenStrikes application; preserve non-strike consumption/state in the existing transaction.
 
-**Spell sources (V74).** Wrap V73 with bounded per-actor/source power deadlines on
-canonical game time; share stock 24-hour eligibility and preserve older layouts.
+**Spell sources (V74).** Persist per-actor/source power deadlines on canonical game time with stock 24-hour eligibility.
 Reuse authored/racial/stock-autocalculated sources, launch rules and Dispel immunity.
 Travel runs by recipient/effect ordinal inside the existing tick; staged relocations
 compose before canonical publication. Stock ignored target/range entries preserve
 other ordinals. Scripts and spellbook mutation remain M5.
 
 **Passive Self (V75).** Wrap V74 with bounded application witnesses/Corprus clocks;
-fresh campaigns preserve earlier layouts. Shared stock handlers retain resistance,
+shared stock handlers retain resistance,
 base-stat rules and no-ops. Cures quench ordinals; removal undoes harmful worsening,
 preserving beneficial extras. Dormant actions wait; recovery never replays.
 Metadata/mutations commit together.
+
+**Target recipients (V76).** Wrap V75. Zero-recipient Self commands launch by
+release facing; persist direction/caster life/time. Collision/impact areas reuse
+stock effect transactions. Reject recipients born after release; retain named lives
+and object revisions. Discover intervention marker cells before manifest binding;
+budget exhaustion rejects. Bounds: 32 effects, area 65,535, duration 86,400s,
+magnitude 100,000, plus existing effect/cue/image limits. Capability 35 admits
+ordinals beyond seven; older peers omit those transient applications.
 
 **Spell presentation (capability 34).** Publish committed windup, failed school and
 ordinal results with caster/target lives. Reuse stock cast/hit/protection/object/area

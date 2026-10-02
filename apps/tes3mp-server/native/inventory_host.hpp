@@ -7,6 +7,9 @@
 
 namespace TES3MP::Native
 {
+    // V76 wraps V75: unbound Target flight follows authoritative release facing;
+    // collision selects recipients, retaining caster/recipient lives and object revisions.
+    // Expanded sources retain bounded dimensions and capability-35 ordinal cues.
     // V72 composes player death attribution, life generations, owned-effect cleanup
     // and respawn with canonical spatial epochs. First bound position/configured
     // stats own respawn; ordinary inventory survives. Capability 32 clients required.

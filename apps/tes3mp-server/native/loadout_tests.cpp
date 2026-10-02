@@ -6874,7 +6874,7 @@ int main(int argc, char** argv)
         if (argc == 5 && (std::string_view(argv[1]) == "bound-equipment"
                 || std::string_view(argv[1]) == "bound-equipment-lifecycle"
                 || std::string_view(argv[1]).starts_with("summons-integrated")
-                || std::string_view(argv[1]) == "player-lives" || (std::string_view(argv[1]) == "actor-bodies" || std::string_view(argv[1]) == "spell-completeness") || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives" || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
+                || std::string_view(argv[1]) == "player-lives" || (std::string_view(argv[1]) == "actor-bodies" || std::string_view(argv[1]) == "spell-completeness" || std::string_view(argv[1]) == "target-recipients") || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives" || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),

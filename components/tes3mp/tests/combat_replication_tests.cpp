@@ -519,12 +519,13 @@ namespace
         const auto rejects = [&] { return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(build()); };
         for (uint8_t outcome = 0; outcome <= 5; ++outcome)
         { cue.outcome = outcome; if (!roundTrip()) return false; }
+        cue.ordinal = TES3MP::MaximumMagicSourceEffects - 1; if (!roundTrip()) return false;
         const auto valid = cue;
         cue.outcome = 6; if (!rejects()) return false;
         cue = valid; cue.targetLife = 0; if (!rejects()) return false;
         cue = valid; cue.target = 0; if (!rejects()) return false;
         cue = valid; cue.targetKind = 5; if (!rejects()) return false;
-        cue = valid; cue.ordinal = 8; if (!rejects()) return false;
+        cue = valid; cue.ordinal = TES3MP::MaximumMagicSourceEffects; if (!rejects()) return false;
         cue = valid; cue.objectSound = 1; if (!rejects()) return false;
         cue = valid; cue.presentation = 2; if (!rejects()) return false;
         cue = {1, 0, 1, 4, 91, "mixed_spell", {}, 3}; cue.presentation = 2;

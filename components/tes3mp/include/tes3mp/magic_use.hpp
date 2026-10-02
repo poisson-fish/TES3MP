@@ -13,6 +13,7 @@
 
 namespace TES3MP
 {
+    inline constexpr std::size_t MaximumMagicSourceEffects = 32;
     enum class MagicUseSourceKind : std::uint8_t
     {
         Spell = 0,

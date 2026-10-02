@@ -37,7 +37,7 @@ namespace TES3MP::Native
     {
         if (spell.mData.mType != ESM::Spell::ST_Disease && spell.mData.mType != ESM::Spell::ST_Blight
             && spell.mData.mType != ESM::Spell::ST_Curse) return std::nullopt;
-        if (spell.mEffects.mList.empty() || spell.mEffects.mList.size() > 8) return std::nullopt;
+        if (spell.mEffects.mList.empty() || spell.mEffects.mList.size() > MaximumNativeMagicSourceEffects) return std::nullopt;
         auto normalized = spell.mEffects;
         bool selfCorprus = false;
         for (auto& entry : normalized.mList)
@@ -242,7 +242,7 @@ namespace TES3MP::Native
             const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects,
             bool aiEffects, bool objectEffects, bool equipmentEffects, bool summonEffects, bool passiveSelf)
         {
-            if (effects.mList.empty() || effects.mList.size() > 8) return std::nullopt;
+            if (effects.mList.empty() || effects.mList.size() > MaximumNativeMagicSourceEffects) return std::nullopt;
             PreparedInstantEffects result;
             for (const auto& entry : effects.mList)
             {
@@ -255,7 +255,7 @@ namespace TES3MP::Native
                 // Keep ignored entries as ordinal witnesses for later Self effects.
                 if ((equipmentEffects || passiveSelf) && (effect.mRange == ESM::RT_Touch || effect.mRange == ESM::RT_Target))
                 {
-                    if (!magic || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000)
+                    if (!magic || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > MaximumMagicMagnitude)
                         return std::nullopt;
                     result.effects.push_back(effect);
                     continue;
@@ -267,7 +267,7 @@ namespace TES3MP::Native
                     if (!magic || !supportedInstantEffect(effect, true, expandedEffects, specialConditions,
                             specialConditions, movementEffects, objectEffects, objectEffects, equipmentEffects, summonEffects)
                         || effect.mRange != ESM::RT_Self || effect.mMagnMin < 0
-                        || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                        || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > MaximumMagicMagnitude
                         || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
                         || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty())) return std::nullopt;
                     result.effects.push_back(effect);
@@ -346,7 +346,7 @@ namespace TES3MP::Native
                         && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
                     || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID))))
                     || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
-                    || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                    || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > MaximumMagicMagnitude
                     || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
                     || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty()))
                     return std::nullopt;
@@ -380,7 +380,7 @@ namespace TES3MP::Native
         const MWWorld::ESMStore& content, bool actorLifecycle, bool expandedEffects,
         bool persistentSpecial, bool specialConditions, bool movementEffects, bool objectMagic, bool playerTravel, bool equipmentEffects, bool summonEffects)
     {
-        if (effects.mList.empty() || effects.mList.size() > 8) return std::nullopt;
+        if (effects.mList.empty() || effects.mList.size() > MaximumNativeMagicSourceEffects) return std::nullopt;
         PreparedInstantEffects result;
         for (const auto& entry : effects.mList)
         {
@@ -402,16 +402,16 @@ namespace TES3MP::Native
                 || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty())
                 || (effect.mRange != ESM::RT_Self && effect.mRange != ESM::RT_Touch
                     && effect.mRange != ESM::RT_Target)
-                || effect.mArea < 0 || effect.mArea > 64
+                || effect.mArea < 0 || effect.mArea > MaximumMagicArea
                 || effect.mMagnMin < (expandedEffects ? 0 : 1)
-                || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > MaximumMagicMagnitude
                 || (!actorLifecycle && effect.mEffectID == ESM::MagicEffect::ResistMagicka
                     && effect.mMagnMin != effect.mMagnMax)
-                || (actorLifecycle ? (effect.mDuration < 0 || effect.mDuration > 3600
+                || (actorLifecycle ? (effect.mDuration < 0 || effect.mDuration > MaximumMagicDuration
                         || (!expandedEffects && effect.mDuration == 0 && (!supportedInstantEffect(effect, false)
                             || effect.mEffectID == ESM::MagicEffect::ResistMagicka)))
                     : (effect.mEffectID == ESM::MagicEffect::ResistMagicka
-                        ? effect.mDuration < 1 || effect.mDuration > 3600 : effect.mDuration != 0))
+                        ? effect.mDuration < 1 || effect.mDuration > MaximumMagicDuration : effect.mDuration != 0))
                 || ((magic->mData.mFlags & ESM::MagicEffect::NoDuration) && !(objectMagic
                     && (effect.mEffectID == ESM::MagicEffect::Lock || effect.mEffectID == ESM::MagicEffect::Open)
                     || playerTravel && (effect.mEffectID == ESM::MagicEffect::Mark

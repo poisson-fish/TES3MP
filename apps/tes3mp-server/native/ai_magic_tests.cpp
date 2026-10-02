@@ -1111,6 +1111,34 @@ namespace
             << " TR spells=" << trSpells << " TR WhenUsed=" << trItems << " mixed=" << mixed
             << "; selection/preparation only, no live network outcomes\n";
     }
+    void sourceLimits()
+    {
+        MWWorld::ESMStore store; content(store);
+        auto source = spell("large source", ESM::MagicEffect::RestoreHealth, ESM::RT_Target);
+        source.mEffects.mList.resize(MaximumNativeMagicSourceEffects, source.mEffects.mList.front());
+        for (auto& entry : source.mEffects.mList)
+        {
+            entry.mData.mArea = MaximumMagicArea;
+            entry.mData.mDuration = MaximumMagicDuration;
+            entry.mData.mMagnMin = entry.mData.mMagnMax = MaximumMagicMagnitude;
+        }
+        source.mEffects.updateIndexes();
+        const auto prepare = [&] { return prepareInstantEffects(source.mEffects, store, true, true); };
+        const auto plan = prepare();
+        require(plan && plan->effects.size() == MaximumNativeMagicSourceEffects,
+            "Declared maximum source dimensions rejected");
+        source.mEffects.mList.push_back(source.mEffects.mList.front());
+        require(!prepare(), "Oversized source admitted"); source.mEffects.mList.pop_back();
+        for (auto field : {&ESM::ENAMstruct::mArea, &ESM::ENAMstruct::mDuration, &ESM::ENAMstruct::mMagnMax})
+        {
+            const auto old = source.mEffects.mList.front().mData.*field;
+            source.mEffects.mList.front().mData.*field = old + 1;
+            require(!prepare(), "Oversized effect dimension admitted");
+            source.mEffects.mList.front().mData.*field = old;
+        }
+        require(prepare().has_value(), "Rejected dimensions changed subsequent preparation");
+    }
+
 }
 
 int main(int argc, char** argv)
@@ -1121,7 +1149,8 @@ int main(int argc, char** argv)
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "awareness-rules") awarenessRules();
+        if (filter == "source-limits") sourceLimits();
+        else if (filter == "awareness-rules") awarenessRules();
         else if (filter == "mixed-passive-rules") mixedPassiveRules();
         else if (filter == "passive-stat-rules") passiveStatRules();
         else if (filter == "passive-self-rules") passiveSelfRules();

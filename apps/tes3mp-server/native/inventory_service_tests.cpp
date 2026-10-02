@@ -5596,7 +5596,8 @@ namespace TES3MP::Native::Testing
         const bool mixedPassives = passiveSelf || statPassives || harmfulPassives || effectFamily == "mixed-passives";
         if (sneakDetection) effectFamily = "concealment";
         if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
-        const bool spellCompleteness = effectFamily == "spell-completeness";
+        const bool genericTargets = effectFamily == "target-recipients";
+        const bool spellCompleteness = genericTargets || effectFamily == "spell-completeness";
         const bool committedBodies = spellCompleteness || effectFamily == "actor-bodies";
         const bool playerLives = effectFamily == "player-lives" || committedBodies;
         const bool summons = mixedPassives || playerLives || effectFamily.starts_with("summons-integrated");
@@ -5615,7 +5616,7 @@ namespace TES3MP::Native::Testing
             ESM::MagicEffect::BoundLongbow, ESM::MagicEffect::BoundCuirass, ESM::MagicEffect::BoundHelm,
             ESM::MagicEffect::BoundBoots, ESM::MagicEffect::BoundShield, ESM::MagicEffect::BoundGloves};
         std::array<bool, 11> boundBeastRestricted{};
-        const bool objectTravel = passiveSelf || effectFamily == "object-travel";
+        const bool objectTravel = genericTargets || passiveSelf || effectFamily == "object-travel";
         const bool objectSpells = effectFamily == "object-spells";
         const bool objectSoul = effectFamily == "object-soul" || playerLives;
         if (objectSoul) effectFamily = "player-travel";
@@ -6582,6 +6583,20 @@ namespace TES3MP::Native::Testing
                         effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                     if (spellCompleteness)
                     {
+                        if (genericTargets)
+                        {
+                            std::vector<ESM::ENAMstruct> wide(8, effect(ESM::MagicEffect::Lock, ESM::RT_Self, 0, 0));
+                            auto large = effect(ESM::MagicEffect::Shield, ESM::RT_Self, 4000, 2000);
+                            large.mArea = 65; wide.push_back(large);
+                            spell("target_wide", wide);
+                            spell("target_object", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 23)});
+                            spell("target_recipient", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 0),
+                                effect(ESM::MagicEffect::Soultrap, ESM::RT_Target, 10, 0),
+                                effect(ESM::MagicEffect::Shield, ESM::RT_Target, 10, 13)});
+                            auto areaEffect = effect(ESM::MagicEffect::Shield, ESM::RT_Target, 10, 19);
+                            areaEffect.mArea = 20;
+                            spell("target_area", {areaEffect});
+                        }
                         spell("travel_power", {effect(ESM::MagicEffect::Shield, ESM::RT_Self, 4, 11)});
                         spell("travel_absorb", {effect(ESM::MagicEffect::SpellAbsorption, ESM::RT_Self, 20, 100)});
                         spell("travel_actor_noop", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 10),
@@ -7722,6 +7737,18 @@ namespace TES3MP::Native::Testing
                     "Explicit exterior contexts did not preserve stock SW-first grid selection");
                 require(MWWorld::closestInterventionMarker(model, ESM::RefId::stringRefId("NPC Door Contact Test"),
                         {}, id, 256).isEmpty(), "Isolated interior invented an intervention destination");
+                if (genericTargets)
+                {
+                    const auto discovered = loadout.playerAreas(ESM::RefId::esm3ExteriorCell(80, 80), 0, 256, true);
+                    const auto selected = MWWorld::closestInterventionMarker(model, ESM::RefId::esm3ExteriorCell(80, 80),
+                        {80*8192.f, 80*8192.f, 0}, ESM::RefId::stringRefId("divinemarker"), 256);
+                    require(!selected.isEmpty() && std::ranges::find(discovered, selected.getCell()->getCell()->getId()) != discovered.end(),
+                        "Discovery omitted an intervention destination outside the initial area");
+                    bool bounded = false;
+                    try { (void)loadout.playerAreas(ESM::RefId::esm3ExteriorCell(80, 80), 0, 1, true); }
+                    catch (const std::invalid_argument&) { bounded = true; }
+                    require(bounded, "Intervention destination discovery bypassed the cell budget");
+                }
                 struct Gem { float capacity; bool empty; };
                 const std::array gems{Gem{5, true}, Gem{100, false}, Gem{80, true}, Gem{20, true}, Gem{20, true}};
                 const auto select = [&](int value) { return MWMechanics::smallestSoulGem(gems.begin(), gems.end(), value,
@@ -9037,7 +9064,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9471,9 +9498,10 @@ namespace TES3MP::Native::Testing
             std::unique_ptr<InventoryHost> run;
             uint64_t tick = 0;
             std::vector<std::pair<PlayerId, Transform>> lastRelocations;
+            std::vector<MagicImpactCue> committedImpacts;
             const auto fresh = [&] {
                 run = std::make_unique<InventoryHost>(descriptor, manifest, *registry, *crypto, seed);
-                run->service().synchronizeCells(authority); tick = 0;
+                run->service().synchronizeCells(authority); tick = 0; committedImpacts.clear();
             };
             const auto restart = [&] {
                 const auto bytes = image(run->service());
@@ -9517,6 +9545,7 @@ namespace TES3MP::Native::Testing
                         "Rejected equipment lifecycle leaked inventory, effects, resources or RNG");
                 lastRelocations.assign(pending->playerRelocations().begin(), pending->playerRelocations().end());
                 std::vector<MagicUseCombatEvent> cues;
+                std::vector<MagicImpactCue> impacts;
                 if (const auto events = native.projectCombatEvents(authority, id<SessionId>(1),
                         id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get()))
                 {
@@ -9528,6 +9557,7 @@ namespace TES3MP::Native::Testing
                             "Summon combat events changed across wire encoding");
                     }
                     cues.assign(events->magicEvents().begin(), events->magicEvents().end());
+                    impacts.assign(events->magicImpactCues().begin(), events->magicImpactCues().end());
                 }
                 if (summons && !authority.activeSessions().empty())
                 {
@@ -9541,6 +9571,7 @@ namespace TES3MP::Native::Testing
                 }
                 require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                     == CanonicalDurabilityResult::Committed, "Equipment lifecycle commit failed");
+                committedImpacts.insert(committedImpacts.end(), impacts.begin(), impacts.end());
                 return cues;
             };
             const auto waitRecovery = [&] {
@@ -9634,6 +9665,136 @@ namespace TES3MP::Native::Testing
                     if (effect.actor == actor && effect.source == source && effect.equipmentApplied) return effect;
                 return {};
             };
+            if (genericTargets)
+            {
+                const auto move = [&](uint64_t player, Position3 position, Orientation3 facing) {
+                    std::vector<CanonicalPlayerEntityState> moved(authority.players().begin(), authority.players().end());
+                    for (auto& entity : moved) if (entity.playerId().value() == player)
+                        entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity,
+                            id<ServerTick>(std::max<uint64_t>(entity.lastSpatialChangeTick().value(), std::max<uint64_t>(1, tick))), Transform(entity.transform().cell(), position, facing), LinearVelocity3(0, 0, 0)));
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(moved, authority.activeSessions()));
+                    run->service().synchronizeCells(authority);
+                };
+                const Orientation3 forward(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0));
+                const auto hitEffect = [&](size_t actor, std::string_view source) {
+                    return std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                        return effect.actor == actor && effect.source == hash(source) && effect.ordinal == (source == "target_recipient" ? 2 : 0)
+                            && effect.casterLife == 1;
+                    });
+                };
+                const auto finishFlight = [&] {
+                    for (unsigned n = 0; n < 95 && !state(run->service()).projectiles.empty(); ++n) step({}, {}, true);
+                    require(state(run->service()).projectiles.empty(), "Generic Target flight did not terminate");
+                };
+                fresh(); cast(1, "target_wide"); restart();
+                require(std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                    return effect.actor == 0 && effect.source == hash("target_wide") && effect.ordinal == 8
+                        && effect.magnitude == 2000 && effect.durationTicks == 120000;
+                }), "Extended spell count/area/duration/magnitude lost its ordinal or recovery");
+                fresh();
+                move(1, Position3(-160*1024, -400*1024, 1024), forward);
+                move(2, Position3(-160*1024, -200*1024, 1024), forward);
+                cast(1, "target_recipient");
+                require(state(run->service()).projectiles.size() == 1 && !state(run->service()).projectiles[0].target
+                    && !state(run->service()).projectiles[0].generation, "Unbound Target launch retained a victim");
+                const auto flightImage = image(run->service());
+                const auto flight = state(run->service()).projectiles.front();
+                std::vector<std::byte> prefix;
+                for (const auto word : {flight.caster, flight.source, flight.target, flight.generation, flight.expiresTick})
+                    for (unsigned byte = 0; byte < 8; ++byte) prefix.push_back(std::byte(word >> (byte*8)));
+                const auto at = std::search(flightImage.begin(), flightImage.end(), prefix.begin(), prefix.end());
+                require(at != flightImage.end(), "Unbound flight metadata absent");
+                for (const auto [field, value] : {std::pair{size_t(3), uint64_t(1)}, {size_t(4), uint64_t(89)}})
+                {
+                    auto invalid = flightImage;
+                    for (unsigned byte = 0; byte < 8; ++byte) invalid.at(size_t(at-flightImage.begin()) + field*8 + byte) = std::byte(value >> (byte*8));
+                    bool rejected = false;
+                    try { InventoryHost malformed(descriptor, manifest, *registry, *crypto, invalid); }
+                    catch (const std::invalid_argument&) { rejected = true; }
+                    require(rejected && image(run->service()) == flightImage, "Malformed unbound flight recovery was not atomic");
+                }
+                restart(); finishFlight();
+                require(hitEffect(1, "target_recipient") && !hitEffect(0, "target_recipient"), "Collision recipient or stock actor Lock no-op changed");
+                for (const auto [ordinal, outcome] : {std::pair{0, 4}, {1, 5}, {2, 0}})
+                    require(std::ranges::count_if(committedImpacts, [&](const auto& cue) {
+                        return cue.presentation == 1 && cue.record == "target_recipient" && cue.targetKind == 1
+                            && cue.target == 2 && cue.targetLife == 1 && cue.casterLife == 1
+                            && cue.ordinal == ordinal && cue.outcome == outcome;
+                    }) == 1, "Committed ordinal outcome/life was missing or duplicated");
+                restart();
+                fresh();
+                move(1, Position3(-160*1024, -400*1024, 1024), forward);
+                move(2, Position3(-160*1024, -200*1024, 1024), forward);
+                cast(1, "target_recipient");
+                move(2, Position3(400*1024, -200*1024, 1024), forward);
+                finishFlight();
+                require(!hitEffect(1, "target_recipient"), "Miss applied direct Target effects");
+                restart();
+                fresh();
+                move(1, Position3(-160*1024, -400*1024, 1024), forward);
+                move(2, Position3(-160*1024, -200*1024, 1024), forward);
+                cast(1, "target_area"); restart(); finishFlight();
+                require(hitEffect(1, "target_area"), "Area Target lost its direct recipient");
+                require(std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                    return effect.actor >= 2 && effect.source == hash("target_area"); }), "Area did not resolve around impact");
+                restart();
+                for (const auto [index, x, y] : {std::tuple{size_t(2), 60, -32}, {size_t(6), 325, -120}})
+                {
+                    fresh();
+                    move(1, Position3(x*1024, (y-250)*1024, 1024), forward);
+                    move(2, Position3(-600*1024, -400*1024, 1024), forward);
+                    cast(1, "target_recipient"); restart(); finishFlight();
+                    require(hitEffect(index, "target_recipient"), "Unbound NPC/creature collision lost its effect recipient");
+                    const auto trapped = std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                        return effect.actor == index && effect.source == hash("target_recipient") && effect.ordinal == 1;
+                    });
+                    require(trapped == (index == 6), "Stock Soultrap eligibility did not distinguish NPC/creature recipients");
+                    restart();
+                }
+                fresh();
+                move(1, Position3(0, -250*1024, 1024), forward);
+                move(2, Position3(-600*1024, -400*1024, 1024), forward);
+                cast(1, "target_object"); restart(); finishFlight();
+                const auto locked = run->service().projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                require(std::ranges::any_of(locked->groundItems.front().doors, [](const auto& door) { return door.lockLevel == 23; }),
+                    "Unbound object collision failed to commit Lock/revision");
+                restart();
+                fresh();
+                move(1, Position3(60*1024, -600*1024, 1024),
+                    Orientation3(Turn32::fromValue(0xf8000000u), Turn32::fromValue(0), Turn32::fromValue(0)));
+                move(2, Position3(-600*1024, -400*1024, 1024), forward);
+                cast(1, "target_object"); restart(); finishFlight();
+                const auto containerHit = run->service().projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                require(std::ranges::any_of(containerHit->containers, [](const auto& object) {
+                    return object.lockLevel == 23 && object.contactRevision > 1;
+                }), "Unbound container collision failed Lock/revision");
+                restart();
+                fresh();
+                move(1, Position3(-160*1024, -1800*1024, 1024), forward);
+                move(2, Position3(1000*1024, -400*1024, 1024), forward);
+                cast(1, "target_recipient");
+                cast(2, "travel_bound_death");
+                for (unsigned n = 0; n < 25 && state(run->service()).combat->playerLives[1].generation == 1; ++n) step({}, {}, true);
+                const auto born = state(run->service());
+                require(born.combat->playerLives[1].generation == 2 && !born.projectiles.empty(), "Stale-life fixture did not retain an old flight across respawn");
+                const auto point = born.projectiles.front().position;
+                move(2, Position3(std::llround(point[0]*1024), std::llround((point[1]+10)*1024), std::llround((point[2]-64)*1024)), forward);
+                restart(); finishFlight();
+                require(!hitEffect(1, "target_recipient"), "Old flight applied effects to a new recipient life");
+                restart();
+                fresh();
+                move(1, Position3(-160*1024, -400*1024, 1024), forward);
+                move(2, Position3(-160*1024, -200*1024, 1024), forward);
+                cast(1, "target_recipient");
+                auto stale = dynamic_cast<InventoryService&>(run->service()).prepareNativeTick(authority, id<ServerTick>(tick+1), 1.f/30, {}, {}, &world);
+                step({}, {}, true);
+                const auto committed = image(run->service());
+                require(stale->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected
+                    && image(run->service()) == committed, "Stale recipient transaction leaked effects");
+                finishFlight(); restart();
+                std::cout << "generic Target: players/NPCs/creatures/doors/containers, miss/world, impact area, stock eligibility+ordinal outcomes, stale life+transaction, rollback/retry/restart; discovery+size limits passed\n";
+                return;
+            }
             if (spellCompleteness)
             {
                 const auto hasEffect = [&](size_t actor, std::string_view source, float magnitude) {

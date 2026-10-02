@@ -128,6 +128,7 @@ namespace TES3MP::Native
         bool mSummons = false;
         bool mPlayerLifecycle = false; // V72: life-owned consequences and respawn share the actor/spatial commit.
         bool mCommittedDeath = false; // V73: durable body-bound death clocks, sampled by the shared timeline.
+        bool mGenericTargets = false; // V76: collision selects Target recipients.
         bool mPassiveSelf = false; // V75: complete passive Self lifecycle.
         bool mPowerSources = false; // V74: stock powers with durable game-time cooldowns.
         DynamicActorSet mDynamicActors;

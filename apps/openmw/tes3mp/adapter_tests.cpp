@@ -1150,7 +1150,7 @@ int main(int argc, char** argv)
             nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
             magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(),
-            committedDeathPresentationCapability(), spellApplicationPresentationCapability() };
+            committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability() };
         std::ranges::sort(required);
         required.erase(std::unique(required.begin(), required.end()), required.end());
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));

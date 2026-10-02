@@ -1125,7 +1125,7 @@ if __name__ == "__main__":
     parser.add_argument("--spell-presentation", action="store_true", help="Fresh V74 per-effect outcomes, M4 variants, stock presentation comparison and reconnect")
     parser.add_argument("--combat-families", action="store_true", help="V73 bound equipment, all summon selectors and actor death/life presentation")
     parser.add_argument("--combat-summon", type=int, help="Focus a combat-families repair on one summon selector and actor lives")
-    parser.add_argument("--descriptor-version", type=int, choices=(73, 74, 75), help="Exercise an existing capture against the current campaign")
+    parser.add_argument("--descriptor-version", type=int, choices=(73, 74, 75, 76), help="Exercise an existing capture against the current campaign")
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--content-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
