@@ -166,16 +166,17 @@ namespace
             return TES3MP::decodeReliableCombatEventBatch({reinterpret_cast<const std::byte*>(builder.GetBufferPointer()), builder.GetSize()});
         };
         for (const auto& [id, life, kind] : std::array<std::tuple<uint64_t, uint64_t, uint8_t>, 6>{
-                {{0, 1, 2}, {7, 0, 2}, {7, 1, 0}, {7, 1, 3}, {7, 1, 255}, {7, 2, 1}}})
+                {{0, 1, 2}, {7, 0, 2}, {7, 1, 0}, {7, 1, 3}, {7, 1, 255}, {7, uint64_t(UINT32_MAX) + 1, 1}}})
             if (!std::holds_alternative<TES3MP::CombatReplicationDecodeError>(decode(id, life, kind))) return false;
         const auto actor = decode(7, 3, 2);
-        const auto player = decode(7, 1, 1);
+        const auto player = decode(7, 2, 1);
         if (!std::holds_alternative<TES3MP::ReliableCombatEventBatch>(actor)
             || !std::holds_alternative<TES3MP::ReliableCombatEventBatch>(player)) return false;
         const auto& a = std::get<TES3MP::ReliableCombatEventBatch>(actor);
         const auto& b = std::get<TES3MP::ReliableCombatEventBatch>(player);
         if (!a.magicEvents()[0].actorCaster() || a.magicEvents()[0].casterLife != 3
-            || b.magicEvents()[0].actorCaster() || a.magicEvents()[0].caster == b.magicEvents()[0].caster) return false;
+            || b.magicEvents()[0].actorCaster() || b.magicEvents()[0].casterLife != 2
+            || a.magicEvents()[0].caster == b.magicEvents()[0].caster) return false;
         const std::array mixed{a.magicEvents()[0], b.magicEvents()[0]};
         auto batch = std::get<TES3MP::ReliableCombatEventBatch>(TES3MP::ReliableCombatEventBatch::create(
             value<TES3MP::SessionId>(1), TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(1),
@@ -515,6 +516,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "actor-casts")
+        return actor_casts_reject_malformed_wire_identity() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "object-reach")
         return object_reach_round_trip_and_bounds() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "player-casts")

@@ -46,8 +46,8 @@ namespace TES3MP::Native
         static bool dynamic(uint64_t actor) { return (actor & IdentityTag) == IdentityTag; }
         static void validateIdentity(ActorCasterIdentity identity)
         {
-            if (!identity.id || !identity.life || (identity.kind != 1 && identity.kind != 2)
-                || (identity.kind == 1 && (identity.life != 1 || dynamic(identity.id)))
+            if (!identity.id || !identity.life || identity.life > UINT32_MAX || (identity.kind != 1 && identity.kind != 2)
+                || (identity.kind == 1 && dynamic(identity.id))
                 || (dynamic(identity.id) && identity.life != 1))
                 throw std::invalid_argument("Dynamic actor owner/caster life invalid");
         }

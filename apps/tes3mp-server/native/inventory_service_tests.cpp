@@ -5587,11 +5587,12 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool summons = effectFamily.starts_with("summons-integrated");
+        const bool playerLives = effectFamily == "player-lives";
+        const bool summons = playerLives || effectFamily.starts_with("summons-integrated");
         const auto summonProfile = effectFamily;
         const auto summonEffect = summonProfile == "summons-integrated-quadruped" ? ESM::MagicEffect::SummonClannfear
             : summonProfile == "summons-integrated-flying" ? ESM::MagicEffect::SummonWingedTwilight
-            : summonProfile == "summons-integrated-caster" ? ESM::MagicEffect::SummonStormAtronach
+            : (summonProfile == "summons-integrated-caster" || summonProfile == "summons-integrated-scheduling") ? ESM::MagicEffect::SummonStormAtronach
             : summonProfile == "summons-integrated-disease" ? ESM::MagicEffect::SummonBonewalker
             : summonProfile == "summons-integrated-ranged" ? ESM::MagicEffect::SummonSkeletalMinion
             : ESM::MagicEffect::SummonScamp;
@@ -5605,7 +5606,7 @@ namespace TES3MP::Native::Testing
         std::array<bool, 11> boundBeastRestricted{};
         const bool objectTravel = effectFamily == "object-travel";
         const bool objectSpells = effectFamily == "object-spells";
-        const bool objectSoul = effectFamily == "object-soul";
+        const bool objectSoul = effectFamily == "object-soul" || playerLives;
         if (objectSoul) effectFamily = "player-travel";
         if (objectTravel) effectFamily = "player-travel";
         if (objectSpells) effectFamily = "door-magic";
@@ -6431,7 +6432,23 @@ namespace TES3MP::Native::Testing
                 }
                 if (summons && summonProfile != "summons-integrated-resources")
                 {
-                    spell("summon_lifecycle", {effect(summonEffect, ESM::RT_Self, 30, 0)});
+                    if (summonProfile == "summons-integrated-scheduling")
+                        spell("summon_lifecycle", {effect(summonEffect, ESM::RT_Self, 180, 0),
+                            effect(ESM::MagicEffect::BoundDagger, ESM::RT_Self, 180, 0),
+                            effect(ESM::MagicEffect::FortifyHealth, ESM::RT_Self, 180, 10),
+                            effect(ESM::MagicEffect::DamageHealth, ESM::RT_Self, 30, 1),
+                            effect(ESM::MagicEffect::StuntedMagicka, ESM::RT_Self, 60, 0)});
+                    else spell("summon_lifecycle", {effect(summonEffect, ESM::RT_Self, 30, 0)});
+                    if (playerLives)
+                    {
+                        spell("life_owned", {effect(summonEffect, ESM::RT_Self, 30, 0),
+                            effect(ESM::MagicEffect::BoundLongsword, ESM::RT_Self, 30, 0)});
+                        spell("life_links", {effect(ESM::MagicEffect::CommandCreature, ESM::RT_Touch, 30, 100),
+                            effect(ESM::MagicEffect::Soultrap, ESM::RT_Touch, 30, 0),
+                            effect(ESM::MagicEffect::AbsorbHealth, ESM::RT_Touch, 30, 1)});
+                        spell("life_kill", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 1000)});
+                    }
+
                     auto creature = *base.store().get<ESM::Creature>().find(MWMechanics::getSummonedCreature(summonEffect, base.store()));
                     creature.mId = ESM::RefId::stringRefId("summon_lifecycle_body");
                     if (summonProfile != "summons-integrated-disease") creature.mScript = {};
@@ -6895,7 +6912,8 @@ namespace TES3MP::Native::Testing
                         "Neighbor creature fixture requires a walking biped");
                     creature.mId = ESM::RefId::stringRefId("neighbor_test_creature");
                     creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
-                    creature.mData.mHealth = 5; creature.mData.mMana = 100; creature.mData.mFatigue = 100;
+                    creature.mData.mHealth = playerLives ? 200 : 5;
+                    creature.mData.mMana = 100; creature.mData.mFatigue = 100;
                     if (objectSoul) creature.mData.mSoul = 10;
                     creature.mData.mLevel = 1; creature.mAiData.mFight = 0;
                     creature.mData.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Agility)] = 0;
@@ -7010,7 +7028,7 @@ namespace TES3MP::Native::Testing
                     }
                 if (boundEquipment)
                 {
-                    female.mNpdt.mHealth = beast.mNpdt.mHealth = summons ? 30000 : 100;
+                    female.mNpdt.mHealth = beast.mNpdt.mHealth = summons && !playerLives ? 30000 : 100;
                     ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("travel_bound_ability");
                     ability.mData.mType = ESM::Spell::ST_Ability;
                     ability.mEffects.populate({{ESM::MagicEffect::BoundBoots, {}, {}, ESM::RT_Self, 4, 1, 0, 0}});
@@ -8757,7 +8775,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8786,7 +8804,7 @@ namespace TES3MP::Native::Testing
                     : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
-            if (lifecycle) out << "respawn " << std::dec << (boundEquipment ? 90 : 3) << "\n";
+            if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
         }
         if (playerCastLifecycle)
         {
@@ -8827,6 +8845,296 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (playerLives)
+        {
+            // One real canonical file owns actor lives, inventories and spatial epochs.
+            auto nearby = std::vector(authority.players().begin(), authority.players().end());
+            for (size_t i = 0; i < nearby.size(); ++i)
+                nearby[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(nearby[i], id<ServerTick>(1),
+                    Transform(nearby[i].transform().cell(), Position3((325 + int(i) * 25) * 1024, -200 * 1024, 1024),
+                        nearby[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(nearby, authority.activeSessions()));
+            auto& native = dynamic_cast<InventoryService&>(service);
+            const auto hash = [](std::string_view name) {
+                uint64_t value = 14695981039346656037ull;
+                for (unsigned char ch : name) value = (value ^ ch) * 1099511628211ull;
+                return value;
+            };
+            const auto image = [](NativeInventoryAuthority& owner) {
+                const auto bytes = owner.inventoryImage(); return std::vector<std::byte>(bytes.begin(), bytes.end());
+            };
+            const auto state = [](NativeInventoryAuthority& owner) {
+                const auto bytes = owner.inventoryImage();
+                return readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+            };
+            CanonicalWorldTimeState time;
+            time.daysPassed = 42; time.day = 1; time.year = 427;
+            const auto globals = GlobalVariableCatalog::create({}).value();
+            const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+            auto world = CanonicalWorldState::initial(time, globals, quests, factions).value();
+            const auto catalog = ServerScriptStateCatalog::create({}).value();
+            auto scripts = CanonicalScriptState::initial(catalog).value();
+            NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+            struct Collision final : ServerCollisionQuery
+            {
+                std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest& request) noexcept override
+                { return ServerCollisionResult{request.currentRoot.position(), LinearVelocity3(0, 0, 0)}; }
+            } collision;
+            CanonicalCommandReducer reducer(authority, observability, manifest, collision);
+            std::array<std::byte, 32> configuration{}; configuration[0] = std::byte{72};
+            const auto identity = CanonicalPersistenceIdentity::create(testContentManifestId(),
+                ServerConfigurationId::fromBytes(configuration).value(), {}, catalog, {}).value();
+            const auto path = scratch / "player-lives.bin";
+            auto file = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            struct Port final : CanonicalDurabilityPort
+            {
+                ServerApp::CanonicalPersistenceFile& file;
+                CanonicalDurabilityResult outcome = CanonicalDurabilityResult::Committed;
+                explicit Port(ServerApp::CanonicalPersistenceFile& value) : file(value) {}
+                CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+                    CanonicalRevision revision, std::span<const DurableCommandOrder> commands,
+                    const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat,
+                    const CanonicalInteractiveObjectWorld* objects, const CanonicalActorWorld* actors,
+                    const CanonicalWorldState* world, const CanonicalScriptState* scripts,
+                    std::span<const std::byte> bytes) noexcept override
+                {
+                    return outcome == CanonicalDurabilityResult::Committed
+                        ? file.commit(candidate, revision, commands, inventory, combat, objects, actors, world, scripts, bytes) : outcome;
+                }
+            } port(*file);
+            require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, &world, &scripts, &native),
+                "Player lives durability configuration failed");
+            Clock clock; uint64_t tick = 0;
+            const auto prepare = [&](CanonicalCommandReducer& owner, const ServerCommandProposal* command = nullptr) {
+                ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(++tick), IngressOrdinal::initial());
+                if (command) require(intake.submit(*command) == CommandSubmissionResult::Accepted, "Life command intake failed");
+                clock.value += tick * 33'333'334;
+                const auto batches = intake.pump();
+                require(batches && batches.batches().size() == 1, "Life tick intake failed");
+                auto pending = owner.prepareTick(batches.batches().front());
+                require(pending.result() && owner.stageNativeDoorStep(pending, id<ServerTick>(tick), 1.f/30),
+                    "Player lives native composition failed");
+                return pending;
+            };
+            const auto commit = [&](CanonicalCommandReducer& owner, NativeInventoryAuthority& runtime, auto& pending, bool rollback = false) {
+                if (rollback)
+                {
+                    const auto before = image(runtime);
+                    const auto publication = owner.latestPublication();
+                    port.outcome = CanonicalDurabilityResult::Rejected;
+                    require(!owner.commit(std::move(pending)) && image(runtime) == before && owner.latestPublication() == publication,
+                        "Rejected life transition leaked native or spatial state");
+                    port.outcome = CanonicalDurabilityResult::Committed;
+                    auto retry = prepare(owner);
+                    require(owner.commit(std::move(retry)), "Player life retry failed");
+                }
+                else require(owner.commit(std::move(pending)), "Player lives commit failed");
+                dynamic_cast<InventoryService&>(runtime).synchronizeCells(owner.state());
+            };
+            const auto proposal = [&](CanonicalCommandReducer& owner, uint64_t player, std::string_view spell,
+                MagicUseTargetKind kind, uint64_t target, uint64_t sourceTick = 0) {
+                const auto* session = owner.state().findActiveSession(id<SessionId>(player));
+                const auto* caster = owner.state().findPlayer(session->playerId());
+                const auto sequence = session->highestContiguousFinalizedCommand()
+                    ? *session->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+                ClientMagicUseCommand use{session->sessionId(), session->sessionGeneration(), sequence,
+                    id<CommandId>(tick + player + 1000), owner.canonicalRevision(), MagicUseSourceKind::Spell,
+                    hash(spell), kind, target, id<ServerTick>(sourceTick ? sourceTick : tick),
+                    id<CombatRevision>(sourceTick ? sourceTick : tick), id<CombatRevision>(sourceTick ? sourceTick : tick), InventoryRevision::initial()};
+                return ServerCommandProposal(session->sessionId(), session->sessionGeneration(), sequence, use.commandId,
+                    owner.canonicalRevision(), EntityPrecondition(caster->entityId(), caster->entityRevision(), caster->authorityEpoch()),
+                    MagicUseCommandProposal(use));
+            };
+            const auto cast = [&](CanonicalCommandReducer& owner, InventoryService& runtime, uint64_t player, std::string_view spell, MagicUseTargetKind kind, uint64_t target) {
+                for (uint64_t end = tick + 100; state(runtime).combat->playerCasts[player - 1] && tick < end;)
+                { auto next = prepare(owner); commit(owner, runtime, next); }
+                const auto request = proposal(owner, player, spell, kind, target);
+                auto next = prepare(owner, &request);
+                if (next.result().dispositions()[0].disposition() != CommandDisposition::Applied)
+                {
+                    const auto debug = state(runtime);
+                    std::cerr << "life spell=" << spell << " tick=" << tick << " player=" << player
+                        << " disposition=" << int(next.result().dispositions()[0].disposition())
+                        << " health=" << debug.combat->actors[player - 1][8][2]
+                        << " target-health=" << debug.combat->actors.back()[8][2]
+                        << " target-deadline=" << debug.neighborLives.back().respawnTick << '\n';
+                }
+                require(next.result().dispositions()[0].disposition() == CommandDisposition::Applied, "Player life spell admission failed");
+                commit(owner, runtime, next);
+                for (uint64_t end = tick + 100; tick < end;)
+                {
+                    auto pending = prepare(owner);
+                    const auto cues = runtime.projectCombatEvents(pending.candidateState(), id<SessionId>(player),
+                        id<ServerTick>(tick), pending.candidateRevision(), pending.candidateNativeInventory());
+                    const bool released = cues && std::ranges::any_of(cues->magicEvents(), [&](const auto& cue) {
+                        return cue.sourceId == hash(spell) && cue.castSucceeded;
+                    });
+                    if (released)
+                    {
+                        require(std::holds_alternative<ReliableCombatEventBatch>(decodeReliableCombatEventBatch(encodeReliableCombatEventBatch(*cues))),
+                            "Life cast event codec rejected");
+                        for (const auto& cue : cues->magicEvents()) if (cue.sourceId == hash(spell) && cue.castSucceeded)
+                            require(cue.casterLife == state(runtime).combat->playerLives[player - 1].generation,
+                                "Committed cast cue aliased a different player life");
+                    }
+                    commit(owner, runtime, pending, released && &owner == &reducer);
+                    if (released) return;
+                }
+                const auto stalled = state(runtime);
+                std::cerr << "life release=" << spell << " player=" << player << " tick=" << tick
+                    << " health=" << stalled.combat->actors[player - 1][8][2]
+                    << " fatigue=" << stalled.combat->actors[player - 1][10][2]
+                    << " target-health=" << stalled.combat->actors.back()[8][2]
+                    << " target-deadline=" << stalled.neighborLives.back().respawnTick << '\n';
+                throw std::runtime_error("Player life cast did not release");
+            };
+            auto checkpoint = prepare(reducer); commit(reducer, native, checkpoint);
+            const auto origin = *reducer.state().findPlayer(id<PlayerId>(1));
+            const auto peer = *reducer.state().findPlayer(id<PlayerId>(2));
+            const auto creature = state(native).combat->npcPlacements.back();
+            cast(reducer, native, 1, "life_links", MagicUseTargetKind::Actor, creature);
+            for (uint64_t end = tick + 90; tick < end && !state(native).projectiles.empty();)
+            { auto next = prepare(reducer); commit(reducer, native, next); }
+            require(std::ranges::any_of(state(native).timedEffects, [&](const auto& effect) {
+                return effect.caster == 1 && effect.casterLife == 1 && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Soultrap));
+            }), "Old-life target links absent");
+            cast(reducer, native, 1, "life_owned", MagicUseTargetKind::Self, 0);
+            const auto owned = state(native);
+            require(!DynamicActorSet::restore(owned.dynamicActors).bodies.empty()
+                && std::ranges::any_of(owned.timedEffects, [](const auto& effect) { return effect.actor == 0 && effect.boundItems[0].item.isSet(); }),
+                "Connected fixture did not establish bound and summon ownership");
+            const uint64_t staleTick = tick;
+            const auto beforeDeathEpoch = reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch();
+            cast(reducer, native, 2, "life_kill", MagicUseTargetKind::Player, 1);
+            const auto dead = state(native);
+            const auto death = dead.combat->playerLives[0].deaths.back();
+            require(death.life == 1 && death.killer == 2 && death.killerKind == 1 && death.killerLife == 1
+                && dead.combat->playerLives[0].generation == 1 && dead.combat->playerLives[0].respawnTick
+                && !native.allowsPlayerMovement(id<PlayerId>(1))
+                && DynamicActorSet::restore(dead.dynamicActors).bodies.empty()
+                && std::ranges::none_of(dead.timedEffects, [](const auto& effect) { return effect.actor == 0 && effect.sourceKind <= 2; })
+                && !dead.combat->playerCasts[0] && !dead.combat->swings[0]
+                && reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch() != beforeDeathEpoch,
+                "Player death split attribution, ownership, controls or authority");
+            const auto deadBytes = image(native);
+            {
+                InventoryHost deadRestart(descriptor, manifest, *registry, *crypto, deadBytes);
+                require(image(deadRestart.service()) == deadBytes, "Dead-life recovery changed consequences");
+            }
+            const auto deadline = dead.combat->playerLives[0].respawnTick;
+            while (tick + 1 < deadline) { auto next = prepare(reducer); commit(reducer, native, next); }
+            const auto deadEpoch = reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch();
+            auto respawn = prepare(reducer);
+            require(respawn.candidateState().findPlayer(id<PlayerId>(1))->authorityEpoch() != deadEpoch
+                && respawn.candidateState().findPlayer(id<PlayerId>(1))->transform() == origin.transform()
+                && respawn.candidateState().findPlayer(id<PlayerId>(1))->linearVelocity() == LinearVelocity3(0, 0, 0),
+                "Respawn did not compose canonical relocation and zero velocity");
+            commit(reducer, native, respawn, true);
+            const auto alive = state(native);
+            require(alive.combat->playerLives[0].generation == 2 && !alive.combat->playerLives[0].respawnTick
+                && alive.combat->playerLives[0].deaths == dead.combat->playerLives[0].deaths
+                && alive.combat->actors[0][8][2] > 0 && native.allowsPlayerMovement(id<PlayerId>(1))
+                && reducer.state().findPlayer(id<PlayerId>(2))->authorityEpoch() == peer.authorityEpoch(),
+                "Respawn changed death history, peer life or restored controls");
+            auto disk = std::get<std::unique_ptr<ServerApp::CanonicalPersistenceFile>>(
+                ServerApp::CanonicalPersistenceFile::open(path, identity));
+            const auto saved = image(native);
+            require(std::ranges::equal(disk->prefix().latest()->nativeInventory(), saved)
+                && disk->restoredState()->findPlayer(id<PlayerId>(1))->authorityEpoch()
+                    == reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch(), "Life restart split canonical and native images");
+            InventoryHost recovered(descriptor, manifest, *registry, *crypto, saved);
+            auto& restoredNative = dynamic_cast<InventoryService&>(recovered.service());
+            auto resumed = std::get<CanonicalServerState>(createCanonicalServerState(disk->restoredState()->players(), reducer.state().activeSessions()));
+            CanonicalCommandReducer continued(resumed, *disk->restoredStateVersion(), *disk->restoredCanonicalRevision(),
+                *disk->restoredCheckpointTick(), observability, {}, manifest, collision);
+            Port resumedPort(*disk);
+            require(continued.configureDurability(resumedPort, nullptr, nullptr, nullptr, nullptr, &world, &scripts, &restoredNative),
+                "Recovered life reducer configuration failed");
+            restoredNative.synchronizeCells(continued.state());
+            require(image(restoredNative) == saved, "Player life recovery changed committed image");
+            // The same authenticated session and current epoch cannot launder old-life combat ticks.
+            require(tick + 1 - staleTick <= 64, "Stale-life check escaped the normal combat retry window");
+            const auto staleCast = proposal(continued, 1, "life_owned", MagicUseTargetKind::Self, 0, staleTick);
+            require(!restoredNative.prepareMagicUse(continued.state(), staleCast, id<ServerTick>(tick + 1)), "Recovery admitted old-life cast");
+            const auto freshCast = proposal(continued, 1, "life_owned", MagicUseTargetKind::Self, 0);
+            require(bool(restoredNative.prepareMagicUse(continued.state(), freshCast, id<ServerTick>(tick + 1))),
+                "Stale cast check lacked a valid current-life control");
+            const auto staleTarget = proposal(continued, 2, "life_kill", MagicUseTargetKind::Player, 1, staleTick);
+            require(!restoredNative.prepareMagicUse(continued.state(), staleTarget, id<ServerTick>(tick + 1)),
+                "Surviving caster admitted an old target life after recovery");
+            const auto freshTarget = proposal(continued, 2, "life_kill", MagicUseTargetKind::Player, 1);
+            require(bool(restoredNative.prepareMagicUse(continued.state(), freshTarget, id<ServerTick>(tick + 1))),
+                "Stale target check lacked a valid current-life control");
+            const auto* session = continued.state().findActiveSession(id<SessionId>(1));
+            const auto* player = continued.state().findPlayer(id<PlayerId>(1));
+            ClientMeleeAttackCommand attack{session->sessionId(), session->sessionGeneration(), CommandSequence::initial(),
+                id<CommandId>(tick + 2000), continued.canonicalRevision(), id<ActorId>(creature),
+                id<ServerTick>(staleTick), id<CombatRevision>(staleTick), id<CombatRevision>(tick), MeleeAttackType::Chop, 1.f};
+            ServerCommandProposal staleAttack(session->sessionId(), session->sessionGeneration(), attack.commandSequence,
+                attack.commandId, continued.canonicalRevision(), EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MeleeAttackCommandProposal(attack));
+            require(!restoredNative.prepareMeleeAttack(continued.state(), staleAttack, id<ServerTick>(tick + 1)), "Recovery admitted old-life attack");
+            auto freshAttack = attack;
+            freshAttack.sourceServerTick = id<ServerTick>(tick);
+            freshAttack.expectedAttackerRevision = id<CombatRevision>(tick);
+            ServerCommandProposal attackControl(session->sessionId(), session->sessionGeneration(), freshAttack.commandSequence,
+                freshAttack.commandId, continued.canonicalRevision(), EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MeleeAttackCommandProposal(freshAttack));
+            require(bool(restoredNative.prepareMeleeAttack(continued.state(), attackControl, id<ServerTick>(tick + 1))),
+                "Stale attack check lacked a valid current-life control");
+            const auto sequence = session->highestContiguousFinalizedCommand()
+                ? *session->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+            ServerCommandProposal staleMotion(session->sessionId(), session->sessionGeneration(), sequence, id<CommandId>(tick + 3000),
+                continued.canonicalRevision(), EntityPrecondition(player->entityId(), player->entityRevision(), beforeDeathEpoch),
+                PlayerMotionCommandProposal(LinearVelocity3(100, 0, 0)));
+            auto motion = prepare(continued, &staleMotion);
+            require(motion.result().dispositions()[0].disposition() == CommandDisposition::AuthorityEpochMismatch,
+                "Restart admitted old-life movement epoch");
+            require(continued.commit(std::move(motion)), "Recovered life continuation failed");
+            require(state(restoredNative).combat->playerLives[0].deaths == alive.combat->playerLives[0].deaths,
+                "Restart duplicated attributed player death");
+            const auto oldMarker = state(restoredNative);
+            require(std::ranges::any_of(oldMarker.timedEffects, [](const auto& effect) {
+                return effect.caster == 1 && effect.casterLife == 1 && !effect.beneficiary
+                    && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::AbsorbHealth));
+            }), "Respawn inherited an old-life Absorb benefit");
+            const auto soulCount = [&] {
+                const auto view = restoredNative.projectInventory(continued.state(), id<SessionId>(1), id<ServerTick>(tick), continued.canonicalRevision());
+                uint64_t count = 0;
+                for (const auto& stack : view->playerInventory.front().stacks) if (stack.soulPrototype) count += stack.count;
+                return count;
+            };
+            const auto soulsBefore = soulCount();
+            cast(continued, restoredNative, 2, "life_kill", MagicUseTargetKind::Actor, creature);
+            require(soulCount() == soulsBefore, "Old-life Soultrap filled a respawned player's gem");
+            const auto npcDeath = state(restoredNative).neighborLives.back().deaths.back();
+            require(npcDeath.killer == 2 && npcDeath.killerKind == 1 && npcDeath.killerLife == 1,
+                "NPC death lost player life attribution");
+            cast(continued, restoredNative, 1, "life_owned", MagicUseTargetKind::Self, 0);
+            const auto newLife = state(restoredNative);
+            const auto newActors = DynamicActorSet::restore(newLife.dynamicActors);
+            require(std::ranges::any_of(newActors.ownership.entries, [](const auto& entry) {
+                return entry.source.owner == ActorCasterIdentity{1, 1, 2} && entry.source.caster == ActorCasterIdentity{1, 1, 2};
+            }), "Respawn cast retained life-1 summon ownership");
+            const auto finalBytes = image(restoredNative);
+            {
+                InventoryHost finalRestart(descriptor, manifest, *registry, *crypto, finalBytes);
+                require(image(finalRestart.service()) == finalBytes, "Life-2 ownership restart changed consequences");
+            }
+            for (uint64_t malformedGeneration : {uint64_t(0), uint64_t(UINT32_MAX)})
+            {
+                auto malformed = finalBytes;
+                for (size_t byte = 0; byte < 8; ++byte) malformed[16 + byte] = std::byte((malformedGeneration >> (8 * byte)) & 255);
+                bool rejected = false;
+                try { restoredNative.recover(malformed, {}); }
+                catch (const std::invalid_argument&) { rejected = true; }
+                require(rejected && image(restoredNative) == finalBytes, "Malformed life history partially installed recovery");
+            }
+            std::cout << "player lives integrated=death+respawn+restart ownership=bound+summon+target-effects rollback=death+respawn stale=cast+attack+motion+Soultrap new-life=cast+summon history=durable malformed=atomic\n";
+            return;
+        }
         if (boundEquipment)
         {
             CanonicalWorldTimeState worldTime;
@@ -8874,7 +9182,7 @@ namespace TES3MP::Native::Testing
                     "Actor lifecycle preparation changed live membership");
                 if (rollback)
                     require(pending->commit([&](auto bytes) {
-                        if (summons)
+                        if (summons && !authority.activeSessions().empty())
                         {
                             const auto saved = readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
                             const auto staged = DynamicActorSet::restore(saved.dynamicActors);
@@ -8899,7 +9207,7 @@ namespace TES3MP::Native::Testing
                 if (const auto events = native.projectCombatEvents(authority, id<SessionId>(1),
                         id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get()))
                 {
-                    if (summons)
+                    if (summons && !authority.activeSessions().empty())
                     {
                         const auto wire = decodeReliableCombatEventBatch(encodeReliableCombatEventBatch(*events));
                         require(std::holds_alternative<ReliableCombatEventBatch>(wire)
@@ -8908,7 +9216,7 @@ namespace TES3MP::Native::Testing
                     }
                     cues.assign(events->magicEvents().begin(), events->magicEvents().end());
                 }
-                if (summons)
+                if (summons && !authority.activeSessions().empty())
                 {
                     const auto snapshot = native.projectCombat(authority, id<SessionId>(1),
                         id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
@@ -8917,11 +9225,6 @@ namespace TES3MP::Native::Testing
                     require(std::holds_alternative<LatestWinsCombatSnapshot>(wire)
                         && std::get<LatestWinsCombatSnapshot>(wire) == *snapshot,
                         "Summon combat state changed across wire encoding");
-                    if (std::ranges::any_of(snapshot->actors(), [](const auto& value) {
-                            return DynamicActorOwnership::dynamic(value.actorId.value()); }))
-                        require(!native.stageWaitRestRecovery(*pending, authority, world, 1, WaitRestMode::Wait)
-                            && image(native) == before,
-                            "Time skip expired a summon source without composing membership removal");
                 }
                 require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                     == CanonicalDurabilityResult::Committed, "Equipment lifecycle commit failed");
@@ -9097,6 +9400,8 @@ namespace TES3MP::Native::Testing
                 if (summonProfile == "summons-integrated-flying")
                     require(followed[2] > start[2] + 10.f, "Intrinsic flying summon did not follow vertically");
                 restart();
+                if (summonProfile == "summons-integrated-scheduling")
+                    for (size_t i = 0; i < 200; ++i) step();
                 const auto normal = normalWeapon(1); equip(1, normal, EquipmentSlot::CarriedRight, true);
                 replica = view();
                 const size_t victimIndex = 3;
@@ -9119,7 +9424,7 @@ namespace TES3MP::Native::Testing
                 step(std::move(attack), {}, true);
                 bool fought = false, restartedAttack = false, spellReleased = false, rangedReleased = false, meleeReleased = false;
                 bool clearedProjectileAim = false;
-                while (tick + 1 < deadline)
+                while (tick + 1 < deadline && !(summonProfile == "summons-integrated-scheduling" && fought && restartedAttack))
                 {
                     const auto previous = state(run->service());
                     if (summonProfile == "summons-integrated-ranged" && !clearedProjectileAim
@@ -9145,7 +9450,7 @@ namespace TES3MP::Native::Testing
                     const bool inCast = body.casting.has_value();
                     meleeReleased |= action.contact && action.state.mHit;
                     if ((action.target || inCast) && !restartedAttack
-                        && (summonProfile != "summons-integrated-caster" || inCast))
+                        && ((summonProfile != "summons-integrated-caster" && summonProfile != "summons-integrated-scheduling") || inCast))
                     {
                         require(inCast ? (body.casting->target == placement && body.casting->targetKind == 2
                                 && body.casting->targetLife == current.neighborLives.at(victimIndex - 3).generation)
@@ -9168,6 +9473,34 @@ namespace TES3MP::Native::Testing
                                 require(rejected, "Recovery admitted changed summon cast life/resources");
                             }
                         }
+                        if (summonProfile == "summons-integrated-scheduling")
+                        {
+                            require(inCast, "Scheduling fixture did not capture a summon cast clock");
+                            auto& native = dynamic_cast<InventoryService&>(run->service());
+                            const auto beforeUnload = image(native);
+                            const auto durableBeforeUnload = readActorCampaign({reinterpret_cast<const char*>(beforeUnload.data()), beforeUnload.size()});
+                            const auto occupied = authority;
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+                            native.synchronizeCells(authority);
+                            require(native.activeActorCollisionBodies() == 0 && image(native) == beforeUnload,
+                                "Idle summon collision did not unload without changing durable state");
+                            step({}, {}, true);
+                            const auto paused = state(native);
+                            const auto dormant = DynamicActorSet::restore(paused.dynamicActors);
+                            require(dormant.bodies.front().casting == body.casting
+                                && dormant.bodies.front().enemy == body.enemy && paused.combat->rng == current.combat->rng
+                                && std::ranges::equal(paused.actor, durableBeforeUnload.actor)
+                                && std::ranges::equal(paused.inventory, durableBeforeUnload.inventory),
+                                "Dormant summon simulation advanced clocks, targets, position, inventory or RNG");
+                            const auto pausedBytes = image(native);
+                            authority = occupied;
+                            native.synchronizeCells(authority);
+                            require(native.activeActorCollisionBodies() == collisionBodies + 1
+                                && image(native) == pausedBytes, "Summon collision reload lost membership");
+                            const auto reloaded = view();
+                            const auto retained = std::ranges::find(reloaded.equipment->motions, summoned, &NativeActorMotion::placement);
+                            require(retained != reloaded.equipment->motions.end(), "Reload changed summon identity");
+                        }
                         restart(); restartedAttack = true;
                     }
                     if ((current.combat->actors[victimIndex][8][2] < previous.combat->actors[victimIndex][8][2]
@@ -9186,6 +9519,89 @@ namespace TES3MP::Native::Testing
                 if (summonProfile == "summons-integrated-caster") require(spellReleased, "Stock caster did not release its known spell");
                 if (summonProfile == "summons-integrated-ranged") require(rangedReleased, "Stock armed body did not release its ranged attack");
                 require(fought && restartedAttack, "Summon did not fight and retain its owner-directed actor target across restart");
+                if (summonProfile == "summons-integrated-scheduling")
+                {
+                    for (size_t i = 0; i < 100 && state(run->service()).combat->swings[0]; ++i) step();
+                    const auto skip = [&](WaitRestMode mode) {
+                        auto& native = dynamic_cast<InventoryService&>(run->service());
+                        const auto beforeSkip = image(native);
+                        const auto beforeClock = readActorCampaign({reinterpret_cast<const char*>(beforeSkip.data()), beforeSkip.size()});
+                        const auto beforeBodies = native.activeActorCollisionBodies();
+                        auto pending = native.prepareNativeScheduledTick(authority, id<ServerTick>(++tick), 1.f/30, {}, &world,
+                            std::get<WaitRestRequest>(WaitRestRequest::create(1, mode)));
+                        require(pending && pending->waitRestApplied(), "Active summon elapsed-time request rejected");
+                        std::vector<std::byte> durable;
+                        require(pending->commit([&](auto bytes) {
+                            durable.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected && image(native) == beforeSkip
+                            && native.activeActorCollisionBodies() == beforeBodies, "Rejected skip leaked scheduling or membership");
+                        InventoryHost rejected(descriptor, manifest, *registry, *crypto, beforeSkip);
+                        require(image(rejected.service()) == beforeSkip, "Rejected skip recovery changed prior state");
+                        require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed && image(native) == durable, "Skip retry changed durable outcome");
+                        const auto afterClock = state(native);
+                        require(afterClock.tick == tick && tick == beforeClock.tick + 1,
+                            "Elapsed time advanced the authoritative action/respawn tick clock");
+                        if (mode == WaitRestMode::Wait)
+                        {
+                            const auto damage = std::ranges::find_if(beforeClock.timedEffects, [](const auto& effect) {
+                                return effect.actor == 0 && effect.effectIndex
+                                    == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::DamageHealth));
+                            });
+                            require(damage != beforeClock.timedEffects.end(), "Scheduling damage interval absent");
+                            // The existing caster encounter can leave a Shock Damage interval.
+                            // Both intervals must run once, each capped at its own deadline.
+                            double loss = 0;
+                            for (const auto& effect : beforeClock.timedEffects)
+                                if (effect.actor == 0 && (effect.effectIndex
+                                        == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::DamageHealth))
+                                    || effect.effectIndex
+                                        == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::ShockDamage))))
+                                    loss += effect.magnitude * double(effect.expiresTick - beforeClock.tick) / 30.0;
+                            std::fprintf(stderr, "skip resources health=%.9g/%.9g loss=%.9g magicka=%.9g/%.9g fatigue=%.9g/%.9g\n",
+                                beforeClock.combat->actors[0][8][2], afterClock.combat->actors[0][8][2], loss,
+                                beforeClock.combat->actors[0][9][2], afterClock.combat->actors[0][9][2],
+                                beforeClock.combat->actors[0][10][2], afterClock.combat->actors[0][10][2]);
+                            require(std::abs(afterClock.combat->actors[0][8][2]
+                                    - (beforeClock.combat->actors[0][8][2] - loss)) < .05,
+                                "Wait double-ticked damage or exceeded its duration");
+                            require(afterClock.combat->actors[0][9][2] == beforeClock.combat->actors[0][9][2],
+                                "Wait restored sleep-only magicka");
+                            require(afterClock.combat->actors[0][10][2] >= beforeClock.combat->actors[0][10][2],
+                                "Wait failed to restore fatigue");
+                        }
+                        for (const auto& effect : afterClock.timedEffects)
+                            if (effect.sourceKind < 3 && effect.source == hash("summon_lifecycle"))
+                            {
+                                const auto prior = std::ranges::find_if(beforeClock.timedEffects, [&](const auto& entry) {
+                                    return entry.actor == effect.actor && entry.source == effect.source
+                                        && entry.sourceKind == effect.sourceKind && entry.ordinal == effect.ordinal;
+                                });
+                                require(prior != beforeClock.timedEffects.end() && effect.startTick == prior->startTick
+                                    && effect.expiresTick == prior->expiresTick - 3600 && effect.magnitude == prior->magnitude,
+                                    "Partial skip changed source identity, roll or 30 Hz elapsed deadline");
+                            }
+                        world = std::get<CanonicalWorldState>(advanceCanonicalWorldTimeByHours(world, id<ServerTick>(tick), 1));
+                        pending.reset(); // Detached stores must die before their host.
+                        restart();
+                        std::cerr << "summon skip committed: mode=" << unsigned(mode) << " tick=" << tick << '\n';
+                    };
+                    skip(WaitRestMode::Wait);
+                    const auto remaining = DynamicActorSet::restore(state(run->service()).dynamicActors);
+                    require(remaining.bodies.size() == 1 && remaining.bodies.front().collision.actor == summoned
+                        && remaining.bodies.front().reference == actors.bodies.front().reference,
+                        "Partial time skip rerolled or recreated the summon");
+                    require(std::ranges::none_of(state(run->service()).timedEffects, [](const auto& effect) {
+                        return effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                    }), "Wait did not expire an ordinary temporary effect beside the summon");
+                    skip(WaitRestMode::Rest);
+                    require(!active(0, hash("summon_lifecycle")), "Rest did not clean up temporary bound equipment");
+                    require(DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.empty()
+                        && dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies() == collisionBodies,
+                        "Elapsed summon expiry did not atomically remove collision, inventory and membership");
+                    std::cout << "summon scheduling: unload->reload->wait->rest->restart cast=paused identities=retained rejection=atomic\n";
+                    return;
+                }
                 step({}, {}, true);
                 require(tick == deadline && DynamicActorSet::restore(state(run->service()).dynamicActors).bodies.empty()
                     && dynamic_cast<InventoryService&>(run->service()).activeActorCollisionBodies() == collisionBodies,
@@ -13766,10 +14182,11 @@ namespace TES3MP::Native::Testing
             {
                 auto running = make(); auto& runtime = running->service();
                 const auto world = specialWorld();
-                auto pending = advance(runtime, 1);
+                auto pending = runtime.prepareNativeScheduledTick(authority, id<ServerTick>(1), 1.f/30, {}, &world,
+                    std::get<WaitRestRequest>(WaitRestRequest::create(1, WaitRestMode::Rest)));
                 const auto before = bytes(runtime);
                 const auto baseline = read(before);
-                require(runtime.stageWaitRestRecovery(*pending, authority, world, 1, WaitRestMode::Rest),
+                require(pending && pending->waitRestApplied(),
                     "Native rest candidate rejected");
                 std::vector<std::byte> candidate;
                 require(pending->commit([&](auto image) {
@@ -13789,8 +14206,9 @@ namespace TES3MP::Native::Testing
                     "Native rest resources changed after restart");
 
                 auto waiting = make(); auto& waitRuntime = waiting->service();
-                auto waited = advance(waitRuntime, 1);
-                require(waitRuntime.stageWaitRestRecovery(*waited, authority, world, 2, WaitRestMode::Wait),
+                auto waited = waitRuntime.prepareNativeScheduledTick(authority, id<ServerTick>(1), 1.f/30, {}, &world,
+                    std::get<WaitRestRequest>(WaitRestRequest::create(2, WaitRestMode::Wait)));
+                require(waited && waited->waitRestApplied(),
                     "Native wait candidate rejected");
                 require(waited->commit(accepted) == CanonicalDurabilityResult::Committed,
                     "Native wait commit failed");
@@ -13818,8 +14236,9 @@ namespace TES3MP::Native::Testing
                 });
                 const double suppressedHours = double(active->expiresTick - (activeTick + 1))
                     * world.time().timeScale() / (30.0 * 3600.0);
-                auto sleep = advance(affectedRuntime, activeTick + 1);
-                require(affectedRuntime.stageWaitRestRecovery(*sleep, authority, world, 1, WaitRestMode::Rest),
+                auto sleep = affectedRuntime.prepareNativeScheduledTick(authority, id<ServerTick>(activeTick + 1), 1.f/30, {}, &world,
+                    std::get<WaitRestRequest>(WaitRestRequest::create(1, WaitRestMode::Rest)));
+                require(sleep && sleep->waitRestApplied(),
                     "StuntedMagicka rest candidate rejected");
                 std::vector<std::byte> sleptImage;
                 require(sleep->commit([&](auto image) {
@@ -13855,8 +14274,9 @@ namespace TES3MP::Native::Testing
                 }
                 require(lastingTick, "Long StuntedMagicka never became active");
                 const auto beforeLong = read(bytes(lastingRuntime));
-                auto longSleep = advance(lastingRuntime, lastingTick + 1);
-                require(lastingRuntime.stageWaitRestRecovery(*longSleep, authority, world, 1, WaitRestMode::Rest)
+                auto longSleep = lastingRuntime.prepareNativeScheduledTick(authority, id<ServerTick>(lastingTick + 1), 1.f/30, {}, &world,
+                    std::get<WaitRestRequest>(WaitRestRequest::create(1, WaitRestMode::Rest)));
+                require(longSleep && longSleep->waitRestApplied()
                     && longSleep->commit(accepted) == CanonicalDurabilityResult::Committed,
                     "Long StuntedMagicka rest failed");
                 const auto afterLong = read(bytes(lastingRuntime));

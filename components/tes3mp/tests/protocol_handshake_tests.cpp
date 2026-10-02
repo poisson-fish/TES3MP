@@ -177,7 +177,8 @@ namespace
     bool actor_cast_layout_requires_capability()
     {
         for (const auto required : {TES3MP::actorCastLifecycleCapability().value(),
-                TES3MP::playerSwingPresentationCapability().value(), TES3MP::knockoutPresentationCapability().value(), TES3MP::expandedCombatEffectsCapability().value()})
+                TES3MP::playerSwingPresentationCapability().value(), TES3MP::knockoutPresentationCapability().value(),
+                TES3MP::expandedCombatEffectsCapability().value(), TES3MP::playerLifeReplicationCapability().value()})
         {
             const auto server = offer(versionRange(1, 10, 10), {}, {required});
             const auto old = ClientHello::fromOffer(offer(versionRange(1, 10, 10), {5, 19, required - 1}, {}));
@@ -530,6 +531,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "actor-capabilities")
+        return actor_cast_layout_requires_capability() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--print-golden")
     {
         const Fixture fixture;

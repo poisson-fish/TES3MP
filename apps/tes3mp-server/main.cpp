@@ -708,6 +708,7 @@ int main(int argc, char** argv)
         || std::ranges::find(requiredCapabilities, TES3MP::combatReplicationCapability()) != requiredCapabilities.end())
     {
         requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
+        requiredCapabilities.push_back(TES3MP::playerLifeReplicationCapability());
         requiredCapabilities.push_back(TES3MP::actorCastLifecycleCapability());
         requiredCapabilities.push_back(TES3MP::playerSwingPresentationCapability());
         requiredCapabilities.push_back(TES3MP::knockoutPresentationCapability());

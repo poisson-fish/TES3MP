@@ -59,6 +59,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t TravelRuleCampaignMagic = 0x5f50434154335354;
     inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
     inline constexpr uint64_t SummonsActorSetMagic = 0x6350434154335354;
+    inline constexpr uint64_t PlayerLivesCampaignMagic = 0x6450434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
     inline constexpr bool hasObjectTravel(uint64_t magic)
     { return magic == ObjectTravelCampaignMagic || magic == EquipmentFamilyCampaignMagic; }
@@ -113,17 +114,17 @@ namespace TES3MP::Native
     { return magic == KnockoutActorCampaignMagic || magic == MeleeDefenseActorCampaignMagic
         || magic == EffectActorCampaignMagic || hasConstantState(magic); }
     inline constexpr size_t MaximumActorProjectiles = 8;
-    // Kind 1 is a durable player identity (one life until player respawn exists),
+    // Kind 1 is a durable player identity and life,
     // kind 2 is a content placement/life. Zero metadata belongs only to legacy images.
     struct ActorCasterIdentity
     {
         uint64_t id = 0, kind = 0, life = 0;
         bool operator==(const ActorCasterIdentity&) const = default;
     };
-    inline void validateActorCaster(ActorCasterIdentity caster, uint64_t generation)
+    inline void validateActorCaster(ActorCasterIdentity caster, uint64_t generation, uint64_t playerGeneration = 1)
     {
         if (!caster.id || (caster.kind != 1 && caster.kind != 2) || !caster.life
-            || (caster.kind == 1 ? caster.life != 1 : caster.life > generation))
+            || caster.life > (caster.kind == 1 ? playerGeneration : generation))
             throw std::invalid_argument("Native caster kind or life invalid");
     }
     // OpenMW attribute, dynamic and skill StatState<float> fields for both
@@ -177,6 +178,14 @@ namespace TES3MP::Native
         { cast.phase = ActorCampaignCast::Released; return true; }
         return false;
     }
+    struct ActorDeathEvent
+    {
+        uint64_t life = 0;
+        uint64_t tick = 0;
+        uint64_t killer = 0;
+        uint64_t killerKind = 0, killerLife = 0;
+        bool operator==(const ActorDeathEvent&) const = default;
+    };
     struct ActorCampaignCombat
     {
         struct NeighborAttack
@@ -227,6 +236,15 @@ namespace TES3MP::Native
         std::vector<ConditionSource> conditions;
         static constexpr size_t StatCount = 8 + 3 + 27;
         using Stats = std::array<std::array<float, 5>, StatCount>;
+        struct PlayerLife
+        {
+            uint64_t player = 0, generation = 1, bornTick = 0, respawnTick = 0;
+            std::optional<Transform> spawn;
+            Stats spawnStats{};
+            std::vector<ActorDeathEvent> deaths;
+            bool operator==(const PlayerLife&) const = default;
+        };
+        std::array<PlayerLife, 2> playerLives;
         // Players occupy indices 0/1. V61 NPC indices follow this ordered,
         // placement-keyed domain; index 2 remains the selected legacy actor.
         std::vector<uint64_t> npcPlacements;
@@ -244,7 +262,7 @@ namespace TES3MP::Native
         std::vector<BowProjectile> arrows;
         std::array<std::optional<ActorCampaignCast>, 2> playerCasts;
         std::array<std::string, 2> playerCastResources;
-        uint64_t npcAction = 0;
+        uint64_t npcAction = 0, npcTargetLife = 0;
         // A stock flee decision lasts through its blind-run interval. The
         // destination and expiry commit with combat and navigation state.
         uint64_t fleeTarget = 0, fleeUntil = 0;
@@ -256,16 +274,8 @@ namespace TES3MP::Native
     {
         std::string identity;
         MeleeAnimation::Snapshot state;
-        uint64_t target = 0;
+        uint64_t target = 0, targetLife = 0;
         bool contact = false;
-    };
-    struct ActorDeathEvent
-    {
-        uint64_t life = 0;
-        uint64_t tick = 0;
-        uint64_t killer = 0;
-        uint64_t killerKind = 0, killerLife = 0;
-        bool operator==(const ActorDeathEvent&) const = default;
     };
     struct ActorCampaignLife
     {
@@ -326,10 +336,99 @@ namespace TES3MP::Native
         std::optional<ActorCampaignCast> casting;
         std::span<const char> dynamicActors;
     };
-    inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false)
+    inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
+        const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == PlayerLivesCampaignMagic)
+        {
+            if (playerLives || dynamicDomain) throw std::invalid_argument("Nested player life envelope");
+            std::array<ActorCampaignCombat::PlayerLife, 2> lives;
+            for (auto& value : lives)
+            {
+                value.player = getAreaWord(bytes, offset);
+                value.generation = getAreaWord(bytes, offset);
+                value.bornTick = getAreaWord(bytes, offset);
+                value.respawnTick = getAreaWord(bytes, offset);
+                const auto present = getAreaWord(bytes, offset);
+                if (!value.player || !value.generation || value.generation > UINT32_MAX || present > 1)
+                    throw std::invalid_argument("Player life identity invalid");
+                if (present)
+                {
+                    const auto kind = getAreaWord(bytes, offset), space = getAreaWord(bytes, offset);
+                    const auto x = getAreaWord(bytes, offset), y = getAreaWord(bytes, offset);
+                    if (kind > 1 || !space || space > 0x7fffffff || x > UINT32_MAX || y > UINT32_MAX
+                        || (!kind && (x || y))) throw std::invalid_argument("Player spawn cell invalid");
+                    std::array<int64_t, 3> position;
+                    for (auto& axis : position) axis = std::bit_cast<int64_t>(getAreaWord(bytes, offset));
+                    std::array<uint32_t, 3> rotation;
+                    for (auto& axis : rotation)
+                    {
+                        const auto bits = getAreaWord(bytes, offset);
+                        if (bits > UINT32_MAX) throw std::invalid_argument("Player spawn rotation invalid");
+                        axis = uint32_t(bits);
+                    }
+                    const auto cell = kind == 0 ? CellId::interior(*CellSpaceId::fromValue(space))
+                        : CellId::exterior(*CellSpaceId::fromValue(space),
+                            std::bit_cast<int32_t>(uint32_t(x)), std::bit_cast<int32_t>(uint32_t(y)));
+                    value.spawn.emplace(cell, Position3(position[0], position[1], position[2]),
+                        Orientation3(Turn32::fromValue(rotation[0]), Turn32::fromValue(rotation[1]),
+                            Turn32::fromValue(rotation[2])));
+                }
+                for (auto& stat : value.spawnStats) for (float& number : stat)
+                {
+                    const auto bits = getAreaWord(bytes, offset);
+                    if (bits > UINT32_MAX) throw std::invalid_argument("Player spawn stat bits invalid");
+                    number = std::bit_cast<float>(uint32_t(bits));
+                    if (!std::isfinite(number) || std::abs(number) > 1e7f)
+                        throw std::invalid_argument("Player spawn stat invalid");
+                }
+                const auto count = getAreaWord(bytes, offset);
+                if (count != value.generation - (value.respawnTick ? 0 : 1)
+                    || count > (bytes.size() - offset) / 40)
+                    throw std::invalid_argument("Player death history bound invalid");
+                for (uint64_t i = 0; i < count; ++i)
+                {
+                    ActorDeathEvent event{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
+                        getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                    if (event.life != i + 1 || !event.tick
+                        || (!value.deaths.empty() && event.tick <= value.deaths.back().tick)
+                        || (event.killer ? (event.killerKind < 1 || event.killerKind > 2 || !event.killerLife)
+                            : event.killerKind || event.killerLife))
+                        throw std::invalid_argument("Player attributed death invalid");
+                    value.deaths.push_back(event);
+                }
+            }
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != SummonsActorSetMagic || lives[0].player == lives[1].player)
+                throw std::invalid_argument("Player lives require distinct players and summon campaign");
+            auto result = readActorCampaign(bytes.subspan(offset), false, &lives);
+            for (size_t i = 0; i < 2; ++i)
+            {
+                const auto& value = lives[i];
+                if (value.bornTick > result.tick || (!value.spawn && (value.generation != 1 || value.respawnTick))
+                    || (value.generation == 1 ? value.bornTick != 0
+                        : value.bornTick <= value.deaths.at(size_t(value.generation - 2)).tick)
+                    || (value.respawnTick && value.bornTick > value.deaths.back().tick)
+                    || (value.spawnStats[8][2] <= 0)
+                    || ((result.combat->actors[i][8][2] <= 0) != bool(value.respawnTick))
+                    || (!value.deaths.empty() && (value.deaths.back().tick > result.tick
+                        || (value.respawnTick ? value.respawnTick <= value.deaths.back().tick
+                            : value.bornTick <= value.deaths.back().tick))))
+                    throw std::invalid_argument("Player life chronology or body invalid");
+            }
+            result.combat->playerLives = std::move(lives);
+            return result;
+        }
+        const auto playerGeneration = [&](uint64_t id) -> uint64_t {
+            if (!playerLives) return 1;
+            for (const auto& value : *playerLives) if (value.player == id) return value.generation;
+            return 0;
+        };
+        const auto validateCaster = [&](ActorCasterIdentity caster, uint64_t generation) {
+            validateActorCaster(caster, generation, playerGeneration(caster.id));
+        };
         if (magic == SummonsActorSetMagic)
         {
             if (dynamicDomain) throw std::invalid_argument("Nested dynamic actor envelope");
@@ -341,7 +440,7 @@ namespace TES3MP::Native
             size_t inner = offset;
             if (getAreaWord(bytes, inner) != EquipmentFamilyCampaignMagic)
                 throw std::invalid_argument("Dynamic actors require equipment campaign");
-            auto result = readActorCampaign(bytes.subspan(offset), true);
+            auto result = readActorCampaign(bytes.subspan(offset), true, playerLives);
             result.dynamicActors = actors;
             return result;
         }
@@ -403,6 +502,12 @@ namespace TES3MP::Native
                     || (!hasWeaponExecution(magic) && value.state.mReleased != bool(value.target)))
                     throw std::invalid_argument("Native melee contact state invalid");
                 value.contact = bool(contact);
+                if (playerLives)
+                {
+                    value.targetLife = getAreaWord(bytes, offset);
+                    if (value.target ? value.targetLife != playerGeneration(value.target) : value.targetLife != 0)
+                        throw std::invalid_argument("NPC melee player target life invalid");
+                }
             }
             melee = std::move(value);
         }
@@ -733,7 +838,7 @@ namespace TES3MP::Native
                 {
                     event.killerKind = getAreaWord(bytes, offset);
                     event.killerLife = getAreaWord(bytes, offset);
-                    validateActorCaster({event.killer, event.killerKind, event.killerLife}, event.life);
+                    validateCaster({event.killer, event.killerKind, event.killerLife}, playerLives ? UINT32_MAX : event.life);
                 }
                 if (event.life != state.deaths.size() + 1 || event.life > state.generation || !event.tick || !event.killer
                     || event.tick > tick || !state.deaths.empty() && (event.life <= state.deaths.back().life
@@ -793,7 +898,7 @@ namespace TES3MP::Native
                 {
                     ActorDeathEvent event{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
                         getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
-                    validateActorCaster({event.killer, event.killerKind, event.killerLife}, UINT32_MAX);
+                    validateCaster({event.killer, event.killerKind, event.killerLife}, UINT32_MAX);
                     if (event.life != d + 1 || !event.tick || event.tick > tick
                         || (!state.deaths.empty() && event.tick <= state.deaths.back().tick))
                         throw std::invalid_argument("Native neighbor death history invalid");
@@ -870,7 +975,7 @@ namespace TES3MP::Native
                 {
                     value.casterKind = getAreaWord(bytes, offset);
                     value.casterLife = getAreaWord(bytes, offset);
-                    validateActorCaster({value.caster, value.casterKind, value.casterLife}, life->generation);
+                    validateCaster({value.caster, value.casterKind, value.casterLife}, life->generation);
                 }
                 const auto target = hasNeighborCombat(magic) && value.targetKind == 2
                     ? std::ranges::find(combat->npcPlacements, value.target) - combat->npcPlacements.begin() + 2 : 2;
@@ -938,7 +1043,7 @@ namespace TES3MP::Native
                         if (hasNeighborCombat(magic))
                             for (const auto& adjacent : neighborLives)
                                 maximumLife = std::max(maximumLife, adjacent.generation);
-                        validateActorCaster({effect.caster, effect.casterKind, effect.casterLife}, maximumLife);
+                        validateCaster({effect.caster, effect.casterKind, effect.casterLife}, maximumLife);
                     }
                     if (hasExpandedEffects(magic))
                     {
@@ -1008,6 +1113,9 @@ namespace TES3MP::Native
                 for (auto* field : {&value.actor, &value.life, &value.cast, &value.sourceKind, &value.source,
                         &value.targetKind, &value.target, &value.range, &value.elapsed, &value.phase})
                     *field = getAreaWord(bytes, offset);
+                if (playerLives) value.targetLife = getAreaWord(bytes, offset);
+                if (playerLives && (value.targetKind ? value.targetLife != playerGeneration(value.target) : value.targetLife != 0))
+                    throw std::invalid_argument("NPC cast player target life invalid");
                 if (!value.actor || !life || value.life != life->generation || !value.cast || value.cast > tick
                     || !value.source || value.sourceKind > 1
                     || value.targetKind > 1
@@ -1037,12 +1145,12 @@ namespace TES3MP::Native
                 const auto targetGeneration = value.targetKind == 2
                     ? targetIndex == 2 ? life->generation
                         : targetIndex < combat->actors.size() ? neighborLives[targetIndex - 3].generation : 0 : 1;
-                if (!value.actor || value.life != 1 || !value.cast || !value.source || value.sourceKind > 1
+                if (!value.actor || value.life != (playerLives ? (*playerLives)[i].generation : 1) || !value.cast || !value.source || value.sourceKind > 1
                     || value.targetKind > 4 || ((value.targetKind == 0) != (value.target == 0))
                     || (value.targetKind == 2 ? (!targetGeneration || !value.targetLife || value.targetLife > targetGeneration
                         || (value.phase < ActorCampaignCast::Released && value.targetLife != targetGeneration))
                         : value.targetKind == 3 || value.targetKind == 4 ? !value.targetLife
-                        : value.targetLife != 1)
+                        : value.targetLife != playerGeneration(value.targetKind ? value.target : value.actor))
                     || value.range > 2 || value.elapsed > 1800 || value.phase < 1 || value.phase > 5
                     || (value.phase <= ActorCampaignCast::Prepared && value.elapsed))
                     throw std::invalid_argument("Native player cast state invalid");
@@ -1199,7 +1307,7 @@ namespace TES3MP::Native
                 const size_t targetIndex = worldShot || value.targetKind == 1 ? 0 : hasNeighborCombat(magic)
                     ? size_t(std::ranges::find(combat->npcPlacements, value.target)
                         - combat->npcPlacements.begin()) + 2 : 2;
-                const auto targetGeneration = value.targetKind == 1 ? 1 : targetIndex == 2 ? life->generation
+                const auto targetGeneration = value.targetKind == 1 ? playerGeneration(value.target) : targetIndex == 2 ? life->generation
                     : targetIndex > 2 && targetIndex < combat->actors.size()
                         ? neighborLives[targetIndex - 3].generation : 0;
                 const size_t casterIndex = value.casterKind == 2 && hasNeighborCombat(magic)
@@ -1214,7 +1322,7 @@ namespace TES3MP::Native
                     || !((value.casterKind == 1 && value.targetKind == 2)
                         || (value.casterKind == 2 && (value.targetKind == 1
                             || (dynamicDomain && value.targetKind == 2 && targetIndex != casterIndex))))
-                    || (value.casterKind == 1 ? value.casterLife != 1
+                    || (value.casterKind == 1 ? (!value.casterLife || value.casterLife > playerGeneration(value.caster))
                         : value.casterKind != 2 || !casterGeneration || value.casterLife > casterGeneration)
                     || !value.releaseTick || value.releaseTick > tick || value.strength < 0 || value.strength > 1
                     || std::abs(norm - 1.f) > .001f

@@ -22,7 +22,7 @@ class WaitRestContractTests(unittest.TestCase):
         source = (ROOT / "apps/tes3mp-server/server_application.cpp").read_text(encoding="utf-8")
         consent = source.index("waitRestConsentsCandidate.size() == prepared.candidateState().activeSessions().size()")
         exact = source.index("found->second.request == first", consent)
-        native = source.index("stageNativeWaitRest", exact)
+        native = source.index("stageNativeDoorStep", exact)
         recovery = source.index("applyAuthoritativeWaitRestRecovery", exact)
         time = source.index("advanceCanonicalWorldTimeByHours", recovery)
         stage = source.index("stageSimulationCandidates", time)

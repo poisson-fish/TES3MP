@@ -23,6 +23,7 @@ namespace TES3MP
         virtual std::optional<Transform> playerDestination() const { return {}; }
         virtual std::span<const std::pair<PlayerId, Transform>> playerRelocations() const { return {}; }
         virtual bool changesInventory() const noexcept { return true; }
+        virtual bool waitRestApplied() const noexcept { return false; }
         virtual CanonicalDurabilityResult commit(const NativeInventoryCommit& durability) noexcept = 0;
     };
 
@@ -65,8 +66,13 @@ namespace TES3MP
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             const CanonicalWorldState* world = nullptr)
         { return command ? std::move(command) : prepareDoorStep(players, tick, seconds); }
-        virtual bool stageWaitRestRecovery(PreparedNativeInventory&, const CanonicalServerState&,
-            const CanonicalWorldState&, std::uint8_t, WaitRestMode) { return false; }
+        // Admit elapsed menu time before effect/resource/membership cleanup.
+        // The candidate flag couples the world clock to the same durable tick.
+        virtual std::unique_ptr<PreparedNativeInventory> prepareNativeScheduledTick(
+            const CanonicalServerState& players, ServerTick tick, float seconds,
+            std::unique_ptr<PreparedNativeInventory> command, const CanonicalWorldState* world,
+            std::optional<WaitRestRequest> waitRest)
+        { return prepareNativeTick(players, tick, seconds, std::move(command), world); }
         virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };
 }

@@ -288,9 +288,8 @@ namespace TES3MP
             std::optional<CanonicalCombatWorld> combat, const CanonicalActorWorld* baseActors,
             std::optional<CanonicalActorWorld> actors, const CanonicalWorldState* baseWorld = nullptr,
             std::optional<CanonicalWorldState> world = std::nullopt) noexcept;
-        bool stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds) noexcept;
-        bool stageNativeWaitRest(PreparedBatch& prepared, const CanonicalWorldState& world,
-            std::uint8_t hours, WaitRestMode mode) noexcept;
+        bool stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds,
+            std::optional<WaitRestRequest> waitRest = {}) noexcept;
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);

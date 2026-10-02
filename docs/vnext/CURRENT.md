@@ -1,11 +1,10 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-steps NPCs/doors at 60 Hz, commits at 30 Hz and binds four fixed neighbors. Sneak, AI
-jumps and mixed passives remain.
+runs NPC/door substeps at 60 Hz, commits at 30 Hz; sneak/jumps/mixed passives remain.
 
-Ranged combat and V64 aim pass under loss (`build/logs/desktop-ranged-aim-live-01.log`).
-Enchanted ammo/general scripts and live body acceptance remain open.
+Ranged/V64 aim passes loss (`build/logs/desktop-ranged-aim-live-01.log`);
+enchanted ammo/general scripts and live bodies remain open.
 
 Neighbor combat/creature attribution pass loss/reconnect
 (`build/logs/desktop-neighbor-creature-damage-live-04.log`). Reactions remain unverified.
@@ -31,56 +30,59 @@ temporary identities/restoration, gloves and expiry/dispel/death cleanup. Manual
 changes win; overlap preserves ordinary items. Temporary items cannot stack/transfer;
 failed permanent equips stay dormant.
 
-Synthetic vanilla checks pass two players/NPC
-(`build/logs/bound-equipment-final-02.log`). Rollback/restart, failed equips,
-overlap, replacement/wear, gloves, WhenUsed/Touch, malformed recovery, attack expiry
-and coincident respawn/release pass
-(`build/logs/bound-equipment-lifecycle-12.log`). V69 Soultrap regression
-passes (`build/logs/bound-object-soul-regression.log`). V70 requires a fresh
-campaign. Scripted bound records and general item scripts remain unsupported;
-desktop equipment/body/audio acceptance is deferred.
+Synthetic vanilla (`build/logs/bound-equipment-final-02.log`) and lifecycle
+(`build/logs/bound-equipment-lifecycle-12.log`) checks cover rollback/restart,
+restoration, wear, malformed recovery and coincident respawn/release. Soultrap
+regression passes (`build/logs/bound-object-soul-regression.log`). Fresh V70 campaign;
+scripted bound records/general item scripts unsupported; desktop acceptance deferred.
 
 **Mark/Recall (V68):** disabled/unmarked casts pay. Loss/reconnect
 (`build/logs/player-travel-desktop-live-14.log`), rollback/restart/epochs
 (`build/logs/player-travel-test-20.log`) and cross-cell resync
 (`build/logs/player-travel-discontinuity-resync-final.log`) pass.
 
-**Summons (V71):** the 22 selectors were already checked. Ownership, dormant
-attempts, capacity/removal and recovery evidence remains
+**Summons (V71):** all 22 selectors, ownership, dormant attempts, capacity/removal and recovery pass
 (`build/logs/summons-stock-seams-02.log`, `build/logs/summons-ownership-02.log`,
 `build/logs/summons-capacity-02.log`, `build/logs/summons-recovery-02.log`).
-Up to 32 bodies stage native hulls, stock equipment/stats, sources, RNG and
-membership in one commit; summons never respawn. Stock creature speed/damage,
-rotating quadruped hulls and intrinsic flight use shared movement/combat.
-Movement/attack/hit/death/cast resources bind for all 20 configured stock records
-across Morrowind/Tribunal/Bloodmoon (two selectors name reserved placeholders).
-Random attacks retain authored hit/start timing and zero-length knockout loops.
-Known spells/WhenUsed compete with melee/ranged choices through existing ratings,
-payment, flight, defense and death writers. Cast clocks, target lives and animation
-hashes persist; replication/presentation reuse dynamic identities.
+Up to 32 bodies commit collision, equipment/stats, ownership, RNG and membership
+without respawning. Shared stock movement/combat handles quadrupeds, flight,
+melee/ranged/known-spell/WhenUsed choices. Authored timing, targets, lives and
+animation resources bind across 20 stock records (two selectors are placeholders).
 
-The integrated fixture covers Clannfear, Winged Twilight, Storm Atronach, armed
-Skeleton and Bonewalker: follow/combat, attack/cast restart, expiry, rollback,
-malformed recovery, codecs and uncertain durable outcomes. Evidence is synthetic:
-arena/vitals change; Skeleton receives stock bow/ammo; Twilight's stock walking
-flag changes to intrinsic flight. Bonewalker's exact stock Brown Rot initializer
+Synthetic lifecycle fixtures cover Clannfear, Twilight, Atronach, armed Skeleton
+and Bonewalker, including combat, rollback/recovery and codecs. Arena/vitals change;
+Skeleton receives bow/ammo; Twilight's walking flag becomes intrinsic flight. Bonewalker's exact stock Brown Rot initializer
 uses the condition writer; general scripts/overrides remain unsupported.
 Resource/body logs: `build/logs/summons-body-resources-final.log`,
 `build/logs/summons-body-quadruped-final.log`, `build/logs/summons-body-flying-final.log`,
 `build/logs/summons-body-caster-final-02.log`, `build/logs/summons-body-ranged-final.log`,
 `build/logs/summons-body-disease-final.log` and `build/logs/summons-body-biped-final.log`.
-V71 requires a fresh campaign and complete resources within the bound area.
-Collision resources stay resident; wait/rest with active summons rejects.
-Desktop acceptance stays grouped.
+V71 requires fresh campaigns/complete bound-area resources.
+Collision unloads with inactive areas; reload retains identities, inventories,
+targets and cast clocks. One scheduling fixture covers unload/reload, wait/rest,
+elapsed damage, source/bound/summon expiry and rejected-write recovery/restart
+(`build/logs/summon-scheduling-final-04.log`). Resource/caster regressions: `build/logs/summon-rest-regression-01.log`, `build/logs/summon-caster-scheduling-regression-01.log`. Effects/game time commit together;
+action/respawn ticks remain unchanged. Desktop acceptance stays grouped.
 
-**Next:** continue M4 player lives and remaining movement/AI consumers; resolve
-summon residency/time-skip gaps before M4 exit. Keep desktop acceptance grouped.
+**Player lives (V72):** attacks, casts, effects, Command, Soultrap and summon
+ownership distinguish player lives. Death attribution/history, body-effect and
+owned-source cleanup, respawn and canonical position/velocity/epochs commit together. Respawn uses first bound position,
+configured stats and the descriptor's tick delay; ordinary inventory/social/Mark
+survive. Offline players remain dead until active. Historical attribution survives without benefiting/controlling new caster lives.
+
+A synthetic death/respawn/restart fixture passes rollback, stale-life rejection,
+current-life controls, Soultrap and life-2 ownership/recovery (`build/logs/player-lives-14.log`). Cast codec and capability
+negotiation pass (`build/logs/player-lives-codec-test.log`,
+`build/logs/player-lives-handshake-test.log`); legacy equipment lifecycle passes
+(`build/logs/player-lives-bound-regression.log`). Server/client capability callers
+compile. Fresh V72 campaign/capability-32 clients required; M5 quest credit and
+grouped live acceptance remain.
+
+**Next:** finish sneak, jump and mixed-passive consumers before M4 exit. Keep desktop acceptance grouped.
 
 60 M4 IDs still require acceptance or implementation:
 - Movement (8) and AI/disposition (12): implemented headlessly; acceptance remains.
 - Objects (4): Lock, Open, Telekinesis, Soultrap.
 - Travel (2): DivineIntervention, AlmsiviIntervention.
 - Equipment (12): 11 bound effects and stock ExtraSpell.
-- Summons (22): configured stock bodies covered headlessly; residency/time skips and acceptance remain.
-
-Player lives and live stock-body acceptance remain unproven.
+- Summons (22): configured bodies/residency/time skips covered headlessly; acceptance remains.

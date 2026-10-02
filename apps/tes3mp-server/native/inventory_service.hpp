@@ -125,6 +125,7 @@ namespace TES3MP::Native
         bool mPlayerTravel = false; // V67 persists one Mark per player and paid Recall relocation.
         bool mEquipmentFamily = false; // V70 effect-owned bound equipment and stock ExtraSpell.
         bool mSummons = false;
+        bool mPlayerLifecycle = false; // V72: life-owned consequences and respawn share the actor/spatial commit.
         DynamicActorSet mDynamicActors;
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
         std::map<uint64_t, BoundCastAnimations> mDynamicCasts;
@@ -174,7 +175,7 @@ namespace TES3MP::Native
         bool mTravelerNeighborhood = false;
         size_t mTravelerCellBudget = 9;
         size_t mTravelerStepBudget = 2;
-        std::function<void(bool)> mNavigationActivity;
+        std::function<void(bool, const DynamicActorSet&)> mNavigationActivity;
         std::vector<const WorldItems*> worldDomains() const
         {
             std::vector<const WorldItems*> result;
@@ -468,15 +469,17 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             const CanonicalWorldState* world = nullptr) override;
-        bool stageWaitRestRecovery(PreparedNativeInventory& candidate, const CanonicalServerState& players,
-            const CanonicalWorldState& world, std::uint8_t hours, WaitRestMode mode) override;
+        std::unique_ptr<PreparedNativeInventory> prepareNativeScheduledTick(const CanonicalServerState& players,
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+            const CanonicalWorldState* world, std::optional<WaitRestRequest> waitRest) override;
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
             std::span<const PlayerAiUpdate> playerAiUpdates = {},
             std::span<const PlayerSocialAction> socialActions = {},
             std::optional<FactionScriptRequest> factionScript = {},
-            std::optional<MovementRuleScriptRequest> movementRuleScript = {});
+            std::optional<MovementRuleScriptRequest> movementRuleScript = {},
+            std::optional<WaitRestRequest> waitRest = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

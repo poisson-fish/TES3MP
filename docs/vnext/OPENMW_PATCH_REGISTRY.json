@@ -6,7 +6,7 @@
       "id": "M4-010",
       "slice": "connected authoritative summon lifecycle",
       "owner": "OpenMW mechanics and app-local dynamic actor ownership",
-      "purpose": "Consolidate all 22 explicit-store summon selectors and shared creation/failure, placement and nested removal callbacks. V71 stages bounded dynamic collision bodies, stock-filled/equipped inventories, source/owner/life ownership, follow distance and actor-to-actor combat in the existing durable actor transaction. Stock hulls, creature speed/damage primitives, random attack keys and native cast clocks support quadrupeds and intrinsic flight alongside bipeds. Known spells and equipped WhenUsed sources compete with melee/ranged weapons through existing ratings, payment, hit, flight, defense and death writers; resource hashes and cast target lives survive recovery. The exact stock Bonewalker disease initializer feeds the existing condition writer; general scripts remain unsupported. Native desktop presentation accepts dynamic identities and creature clips without local gameplay. Resources remain resident and active summons reject wait/rest; desktop acceptance stays grouped.",
+      "purpose": "Consolidate all 22 explicit-store summon selectors and shared creation/failure, placement and nested removal callbacks. V71 stages bounded dynamic collision bodies, stock-filled/equipped inventories, source/owner/life ownership, follow distance and actor-to-actor combat in the existing durable actor transaction. Stock hulls, creature speed/damage primitives, random attack keys and native cast clocks support quadrupeds and intrinsic flight alongside bipeds. Known spells and equipped WhenUsed sources compete with melee/ranged weapons through existing ratings, payment, hit, flight, defense and death writers; resource hashes and cast target lives survive recovery. The exact stock Bonewalker disease initializer feeds the existing condition writer; general scripts remain unsupported. Native desktop presentation accepts dynamic identities and creature clips without local gameplay. Collision follows active processing areas and reloads exact committed actor images after validating collision/animation resources. Wait/rest advances stock elapsed effects/resources before shared bound-item, death and summon-membership cleanup, with game time in the same commit and no action/respawn tick jump; desktop acceptance stays grouped.",
       "paths": [
         "apps/openmw/mwmechanics/summoning.cpp",
         "apps/openmw/mwmechanics/summoning.hpp",
@@ -26,7 +26,8 @@
         "tes3mp_native_loadout_tests summons-integrated-ranged",
         "tes3mp_native_loadout_tests summons-integrated-disease",
         "tes3mp_native_melee_tests creature-scheduling",
-        "tes3mp_native_melee_tests knockout-timing"
+        "tes3mp_native_melee_tests knockout-timing",
+        "tes3mp_native_loadout_tests summons-integrated-scheduling"
       ],
       "disposition": "shared stock mechanics with authoritative actor-transaction integration",
       "removal_condition": "OpenMW provides equivalent explicit-store summon lifecycle, follow distance and detached actor-membership interfaces"

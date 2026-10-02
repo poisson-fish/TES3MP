@@ -335,7 +335,7 @@ namespace TES3MP
             if (static_cast<std::uint8_t>(event.sourceKind)
                     > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem)
                 || static_cast<std::uint8_t>(event.targetKind) > static_cast<std::uint8_t>(MagicUseTargetKind::Container)
-                || !event.casterLife || (!event.actorCaster() && event.casterLife != 1)
+                || !event.casterLife || (!event.actorCaster() && event.casterLife > UINT32_MAX)
                 || event.sourceId == 0 || ((event.targetKind == MagicUseTargetKind::Self) != (event.targetId == 0)))
                 return error(Code::InvalidMagicKind, 0, 0, i);
         }
@@ -834,7 +834,7 @@ namespace TES3MP
         {
             const auto current = copyStruct(encodedMagicEvents, i);
             if ((current.caster_kind() != 1 && current.caster_kind() != 2) || !current.caster_life()
-                || (current.caster_kind() == 1 && current.caster_life() != 1))
+                || (current.caster_kind() == 1 && current.caster_life() > UINT32_MAX))
                 return error(Code::InvalidMagicKind, 0, 0, i);
             auto caster = strong<PlayerId>(current.caster_id(), i);
             auto casterRevision = strong<CombatRevision>(current.caster_combat_revision(), i);

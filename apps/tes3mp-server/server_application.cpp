@@ -1060,8 +1060,7 @@ namespace TES3MP::ServerApp
             commandWorlds.scriptState = mWiring->scriptState;
             commandWorlds.scriptStateCatalog = mWiring->scriptStateCatalog;
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds, pumpedScripts.commands());
-            if (!prepared.result() || !mWiring->reducer.stageNativeDoorStep(prepared,
-                    batch.scheduledTick().value(), 1.f / ServerTicksPerSecond))
+            if (!prepared.result())
             {
                 mFailure = "command reduction failed: tick=" + std::to_string(batch.scheduledTick().value().value())
                     + " preparation=" + std::to_string(static_cast<unsigned>(prepared.result().error()));
@@ -1075,7 +1074,6 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>> weatherUpdates;
             std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>> worldTimeUpdates;
             std::vector<CellId> changedObjectCells;
-            bool refreshInventoryBaselines = prepared.candidateNativeInventory() && prepared.candidateNativeInventory()->changesInventory();
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
             auto waitRestConsentsCandidate = mWaitRestConsents;
@@ -1109,6 +1107,14 @@ namespace TES3MP::ServerApp
                 if (unanimous)
                     waitRestCommit = first;
             }
+            if (!mWiring->reducer.stageNativeDoorStep(prepared, batch.scheduledTick().value(),
+                    1.f / ServerTicksPerSecond, waitRestCommit))
+            {
+                mFailure = "native tick scheduling failed";
+                return false;
+            }
+            bool refreshInventoryBaselines = prepared.candidateNativeInventory()
+                && prepared.candidateNativeInventory()->changesInventory();
             auto dialogueChoiceResultsCandidate = mDialogueChoiceResults;
             std::erase_if(dialogueChoiceResultsCandidate, [&prepared](const auto& entry) {
                 const auto* active = prepared.candidateState().findActiveSession(entry.first.first);
@@ -1381,9 +1387,8 @@ namespace TES3MP::ServerApp
                         mFailure = "native wait/rest requires world time";
                         return false;
                     }
-                    const auto& baseWorld = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
-                    waitRestApplied = mWiring->reducer.stageNativeWaitRest(prepared, baseWorld,
-                        waitRestCommit->hours(), waitRestCommit->mode());
+                    waitRestApplied = prepared.candidateNativeInventory()
+                        && prepared.candidateNativeInventory()->waitRestApplied();
                 }
                 else
                 {

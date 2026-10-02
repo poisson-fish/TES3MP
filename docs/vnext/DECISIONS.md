@@ -60,17 +60,15 @@ Recovery validates them without rolling. Modifiers overlay detached stats.
 Use server-time contacts pending measurements. Replicate reliable action/life
 events and latest-wins motion. V31 uses a 32-unit sphere until shared hulls bind.
 
-**Melee state.** Negative fatigue blocks attacks and routes unarmed damage to
-health. V50 persists knockout/knockdown/get-up; stock health-hit rolls cannot
-restart knockdown. Inactivity pauses; death clears clocks. V34 shares shield
-visibility/recovery, V43 binds hit clips/timers, V44 persists targets/recipes.
-Detached equip never repeats on recovery; completion resumes selection, breakage
-removes passives. Fresh campaigns.
+**Melee state.** Stock negative fatigue/health-hit rules govern damage and
+knockout/knockdown/get-up. Persist actor-bound clips, targets and clocks;
+inactivity pauses, death clears, recovery never repeats equip. Breakage removes
+passives; fresh campaigns.
 
-**Actor presentation (V52/V53).** Clients sample committed motion/action without
-gameplay. Persist clips/life; hold on pauses. Player cast release/payment and
-interruption commit atomically; offline casts pause. T3C7/capability 25 and
-T3C8/capability 26 require fresh campaigns.
+**Actor presentation (V52/V53).** Clients sample committed motion/action;
+clips/lives persist, pauses hold. Player cast release/payment/interruption commit
+atomically; offline casts pause. T3C7/capability 25 and T3C8/capability 26 require
+fresh campaigns.
 
 **V64 physical aim.** T3MC carries bounded world aim. The server saves flight
 direction, charges at the authored key and sweeps contact. World misses use target
@@ -115,10 +113,9 @@ cannot affect new lives. OpenMW supplies reconstruction data; authored corpses,
 summons, scripted spawns and deleted placements are not permanent spawn points.
 M4 records causal events; M5 owns personal quest credit.
 
-**V25 deadline rule:** one initially living content placement respawns after a
-descriptor-bound delay of authoritative 30 Hz ticks (capture: 27,000). Game-time
-skips and downtime do not count. Restore actor/inventory together with fresh item
-identities. Wider spawn policy awaits evidence.
+**V25 deadline rule:** descriptor-bound 30 Hz deadlines exclude downtime/time
+skips. Initially living content placements restore actor/inventory with fresh item
+identities. Capture delay: 27,000 ticks. Wider spawn policy awaits evidence.
 
 | State | Ownership and lifetime |
 |---|---|
@@ -252,14 +249,11 @@ committed Charm into stock dialogue disposition.
 state and spell/item selection. Recovery validates content IDs/inventory; only
 trusted updates write them. Share stock aggression with server authority.
 
-**Social lifecycle (V59–V66).** Commit werewolf equipment, effects, stats, crime
-and witness engagement together. Bind at most 128 unscripted, unleveled
-witnesses. Neighbor bodies, paths and pursuit share one collision world.
-Engagement keys by placement/player; no implicit migration. V61 binds
-stats/body/hit resources by placement on recovery. V62 gives two neighbors
-combat/lives; V63 gives three placement/life-bound spells/projectiles; V66 gives
-four with shared social targeting. Player Command follows an available, living
-caster; older caps persist.
+**Social lifecycle (V59-V66).** Commit werewolf equipment/effects/stats, crime and
+witness engagement together. At most 128 unscripted, unleveled witnesses share
+collision; placement-bound bodies, resources, combat/lives and social targeting
+recover without migration. Command requires an available living caster with
+matching source life; older caps persist.
 
 **Player travel (V67/V68).** Each player owns a durable Mark. Recall commits
 payment/destination/epoch; rejection retries, storage failure closes until coherent
@@ -273,27 +267,35 @@ join the existing commit. Stock gem selection captures once per new creature
 death with matching caster life; gem/death/revision/payment persist together.
 T3D2/capability 30 feeds Telekinesis into stock focus; the server owns reach/access/sight.
 
-**Equipment ownership (V70).** Fresh campaign; prior layouts remain. Shared stock
-bound/ExtraSpell handlers take explicit actor/inventory callbacks. Sources own
-temporary identities and previous-instance/record links; ordinary same-record
-items remain independent. Prevent temporary stacking/transfers; splice expired
-sources from restoration chains. Manual changes win. Inventory, sources/constants,
-wear, draw state and counters join the existing actor commit; rejection installs
-nothing. Failed permanent attempts stay dormant until source changes. Recovery
-validates ownership and acyclic actor/slot-consistent links. General scripts remain M5.
+**Equipment ownership (V70).** Fresh campaigns retain prior layouts. Shared stock
+bound/ExtraSpell handlers own temporary identities and acyclic restoration links;
+ordinary items remain independent. Forbid temporary stacking/transfers; splice
+expired links; manual changes win. Effects/constants, wear, draw and counters join
+the actor commit. Rejection installs nothing; failed permanent attempts remain
+dormant until source changes. Recovery validates ownership. General scripts remain M5.
 
-**Dynamic actors (V71).** Fresh campaign wrapper binds bounded ownership, native references
-and collision resources. Namespace 3 separates dynamic actors; native references
-share the inventory counter. Stage actor/collision/inventory membership before
-durability; install/replicate one image. Owner/source/life forms an acyclic forest;
-removal deletes descendants without respawn. Recovery validates selectors,
-sources, lives, native identities and animation hashes. Creature hulls, movement,
-damage and attack keys reuse stock mechanics; melee, ranged and spell choices
-share combat/payment/defense/death writers. Cast source/target life and clocks persist.
-The exact stock Bonewalker initializer acquires Brown Rot through the condition
-writer; script overrides/general execution remain M5. Presentation has no gameplay
-writer. Resources remain resident pending coherent streamed reconstruction;
-wait/rest with active summons remains unsupported. Desktop acceptance stays grouped.
+**Dynamic actors (V71).** Fresh wrapper; namespace 3 separates bounded dynamic
+actors. Native references share the inventory counter. Stage collision/inventory
+membership before durability. Owner/source/life forms an acyclic forest; removal
+deletes descendants without respawn. Recovery validates sources, selectors,
+identities, lives and animation hashes. Stock movement/combat shares payment,
+defense/death writers. The stock Bonewalker initializer uses the condition writer;
+script overrides/general execution remain M5. Collision follows active areas and
+reloads validated resources/committed images. Wait/rest composes elapsed effects,
+resources and cleanup with game time; action/respawn ticks stay unchanged.
+Desktop acceptance stays grouped.
+
+**Player lives (V72).** Wrap V71 without changing older campaigns. Bound player
+ID/generation/birth, spawn and complete attributed deaths persist for M5; zero
+killer identity denotes environmental player death. Death clears body/owned
+sources and pending actions; historical effects on other actors retain attribution.
+Command, Absorb benefits and Soultrap require the living matching caster life.
+Respawn restores configured stats at the first bound position, preserves ordinary
+inventory/social/Mark, and increments generation on authoritative ticks while
+online. Cleanup, RNG, membership and canonical relocation/zero velocity/epoch
+share durability. Recovery validates history/baselines; old-life combat timestamps
+reject within retry windows. Capability 32 gates player cast/event life semantics.
+Quest credit and wider spawn policy remain M5.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

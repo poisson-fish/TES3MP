@@ -77,7 +77,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 71; ++candidate)
+            for (unsigned candidate = 3; candidate <= 72; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -298,6 +298,7 @@ namespace TES3MP::Native
                 binding.mObjectTravelFamily = descriptorVersion >= 69;
                 binding.mEquipmentFamily = descriptorVersion >= 70;
                 binding.mSummons = descriptorVersion >= 71;
+                binding.mPlayerLifecycle = descriptorVersion >= 72;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
@@ -812,7 +813,7 @@ namespace TES3MP::Native
                             return cache.emplace(key, scene->bindWeaponMeleeAnimation(actor, weapon, key.second)).first->second;
                         };
                     }
-                if (start.binding.mRetainTraveler && !start.binding.mSummons)
+                if (start.binding.mRetainTraveler)
                 {
                     const auto meleeIdentity = start.binding.mBoundMelee
                         ? start.binding.mBoundMelee->mResourceIdentity : std::string{};
@@ -828,10 +829,14 @@ namespace TES3MP::Native
                             if (start.binding.mPlacementCombat)
                                 for (const auto& adjacent : neighborOwners) actors.push_back(adjacent.mBase);
                             return actors;
-                        }()](bool active) {
+                        }()](bool active, const DynamicActorSet& actors) {
                         if (active && !scene->loaded())
                         {
-                            auto fresh = createScene();
+                            std::vector<DynamicActorBody> bodies;
+                            for (const auto& body : actors.bodies) bodies.push_back(body.collision);
+                            auto fresh = createScene(bodies);
+                            if (!bodies.empty() && DynamicActorSet::resources(*fresh) != actors.collisionResources)
+                                throw std::invalid_argument("Summon collision resources changed after unloading");
                             if (!meleeIdentity.empty() && fresh->bindMeleeAnimation(
                                     meleeGroup, meleeAttack, meleeSpeed).mResourceIdentity != meleeIdentity)
                                 throw std::invalid_argument("Native melee resource changed after binding");
@@ -844,6 +849,22 @@ namespace TES3MP::Native
                                         || rebound.knockout != (*hits)[i].knockout || rebound.knockdown != (*hits)[i].knockdown)
                                         throw std::invalid_argument("Native hit resource changed after binding");
                                 }
+                            for (const auto& body : actors.bodies)
+                            {
+                                const auto rebound = fresh->bindHitAnimations(body.collision.record, knockout);
+                                std::istringstream animation(rebound.resourceIdentity);
+                                if (Files::getHash("native-summon-animation", animation) != body.animationResources)
+                                    throw std::invalid_argument("Summon animation resources changed after unloading");
+                                const auto casts = fresh->bindCastAnimations(body.collision.record);
+                                if (body.casting)
+                                {
+                                    const auto& cast = *body.casting;
+                                    const auto timing = casts.ranges.at(cast.range);
+                                    if (cast.elapsed >= timing.stopTicks || (cast.phase >= ActorCampaignCast::Released
+                                            ? cast.elapsed < timing.releaseTicks : cast.elapsed >= timing.releaseTicks))
+                                        throw std::invalid_argument("Summon cast clock changed after unloading");
+                                }
+                            }
                             scene->reload(*fresh);
                         }
                         else if (!active) scene->unload();

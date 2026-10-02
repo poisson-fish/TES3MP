@@ -2087,7 +2087,8 @@ namespace TES3MP
             batch);
     }
 
-    bool CanonicalCommandReducer::stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds) noexcept
+    bool CanonicalCommandReducer::stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds,
+        std::optional<WaitRestRequest> waitRest) noexcept
     try
     {
         if (!prepared.result() || prepared.mBaseVersion != mStateVersion) return false;
@@ -2095,8 +2096,8 @@ namespace TES3MP
         // command candidate before one durability callback and publication.
         if (!mNativeInventory) return true;
         const bool hadCommand = static_cast<bool>(prepared.mNativeInventory);
-        auto door = mNativeInventory->prepareNativeTick(*prepared.mState, tick, seconds,
-            std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld);
+        auto door = mNativeInventory->prepareNativeScheduledTick(*prepared.mState, tick, seconds,
+            std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld, waitRest);
         if (!door) return true;
         const auto destinations = door->playerRelocations();
         if (!destinations.empty())
@@ -2145,17 +2146,6 @@ namespace TES3MP
         prepared.mStateVersion = *version;
         prepared.mCanonicalRevision = *revision;
         return true;
-    }
-    catch (...) { return false; }
-
-    bool CanonicalCommandReducer::stageNativeWaitRest(PreparedBatch& prepared,
-        const CanonicalWorldState& world, std::uint8_t hours, WaitRestMode mode) noexcept
-    try
-    {
-        return prepared.result() && prepared.mBaseVersion == mStateVersion && mNativeInventory
-            && prepared.mNativeInventory
-            && mNativeInventory->stageWaitRestRecovery(*prepared.mNativeInventory, *prepared.mState,
-                world, hours, mode);
     }
     catch (...) { return false; }
 

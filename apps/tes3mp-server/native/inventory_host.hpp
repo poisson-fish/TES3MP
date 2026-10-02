@@ -7,6 +7,9 @@
 
 namespace TES3MP::Native
 {
+    // V72 composes player death attribution, life generations, owned-effect cleanup
+    // and respawn with canonical spatial epochs. First bound position/configured
+    // stats own respawn; ordinary inventory survives. Capability 32 clients required.
     // V70 owns bound-item instances and restoration links per actor/effect source.
     // V71 composes owned summon bodies, collision, inventories and actor/life targets.
     // Equipment, effect lifecycle, derived constants and generated IDs share the
@@ -109,7 +112,7 @@ namespace TES3MP::Native
     // weapon competition and equipped WhenUsed scheduling remain pending.
     // Keeps V38 image layout; descriptor identity requires a fresh campaign.
     // V38 persists caster kind and life through projectiles, timed/constant
-    // effects and NPC death history. Players retain life 1 across reconnect;
+    // effects and NPC death history. Before V72, players retain life 1 across reconnect;
     // NPC placement/life attribution survives respawn on other targets.
     // Requires a fresh campaign; V37 and older retain their recovery layouts.
     // Trusted NPC spells/WhenUsed share player launch/contact/effect execution.
