@@ -1,6 +1,7 @@
 #include "actor_interest_projection.hpp"
 
 #include <tes3mp/protocol_frame.hpp>
+#include <algorithm>
 
 namespace TES3MP::ServerApp
 {
@@ -192,11 +193,36 @@ namespace TES3MP::ServerApp
                     MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(view)))
                 return false;
         for (const auto& [connection, events] : combatEvents)
-            if ((!events.events().empty() || !events.actorEvents().empty() || !events.magicEvents().empty()
-                    || !events.magicEffectEvents().empty())
-                && !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
-                    MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(events)))
-                return false;
+        {
+            const bool gameplay = !events.events().empty() || !events.actorEvents().empty()
+                || !events.magicEvents().empty() || !events.magicEffectEvents().empty();
+            if (!gameplay && events.magicImpactCues().empty()) continue;
+            auto payload = encodeReliableCombatEventBatch(events);
+            if (payload.size() <= ReliableOperationMaximumPayloadBytes)
+            {
+                if (!add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                        MessageKind::ReliableCombatEventBatch, std::move(payload))) return false;
+                continue;
+            }
+            // Application results can exceed one operation frame. Preserve the
+            // whole committed tick's queue admission and ordered delivery; do not
+            // repeat gameplay events in the bounded presentation-only chunks.
+            const auto emit = [&](std::span<const MagicImpactCue> cues, bool includeGameplay) {
+                const auto built = ReliableCombatEventBatch::create(events.targetSessionId(),
+                    events.targetSessionGeneration(), events.serverTick(), events.canonicalRevision(),
+                    includeGameplay ? events.events() : std::span<const MeleeCombatEvent>{},
+                    includeGameplay ? events.actorEvents() : std::span<const ActorMeleeCombatEvent>{},
+                    includeGameplay ? events.magicEvents() : std::span<const MagicUseCombatEvent>{},
+                    includeGameplay ? events.magicEffectEvents() : std::span<const MagicEffectCombatEvent>{}, cues);
+                const auto* chunk = std::get_if<ReliableCombatEventBatch>(&built);
+                return chunk && add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                    MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(*chunk));
+            };
+            if (gameplay && !emit({}, true)) return false;
+            for (size_t offset = 0; offset < events.magicImpactCues().size(); offset += 32)
+                if (!emit(events.magicImpactCues().subspan(offset,
+                        std::min<size_t>(32, events.magicImpactCues().size() - offset)), false)) return false;
+        }
         for (const auto& [connection, result] : dialogueResults)
             if (!add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
                     MessageKind::ReliableDialogueChoiceResult, encodeReliableDialogueChoiceResult(result)))

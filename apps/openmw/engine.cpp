@@ -1,4 +1,7 @@
 #include "engine.hpp"
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+#include "tes3mp/desktop_automation.hpp"
+#endif
 #include "tes3mp/engine_coordinator.hpp"
 
 #include <cerrno>
@@ -218,6 +221,11 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
                     mStateManager->getState() == MWBase::StateManager::State_Running);
             }
         }
+
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+        if (!mMultiplayerCoordinator && mStateManager->getState() == MWBase::StateManager::State_Running)
+            TES3MP::OpenMWAdapter::requestStockSpellPresentationCast(frametime);
+#endif
 
         // When the window is minimized, pause the game. Currently this *has* to be here to work around a MyGUI bug.
         // If we are not currently rendering, then RenderItems will not be reused resulting in a memory leak upon

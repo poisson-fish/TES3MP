@@ -255,7 +255,8 @@ namespace MWRender
         PtrAnimationMap::const_iterator iter = mObjects.find(ptr.mRef);
         if (iter != mObjects.end())
             return iter->second;
-
+        if (const auto replica = mReplicatedActors.find(ptr.mRef); replica != mReplicatedActors.end())
+            return replica->second;
         return nullptr;
     }
 
@@ -264,7 +265,8 @@ namespace MWRender
         PtrAnimationMap::const_iterator iter = mObjects.find(ptr.mRef);
         if (iter != mObjects.end())
             return iter->second;
-
+        if (const auto replica = mReplicatedActors.find(ptr.mRef); replica != mReplicatedActors.end())
+            return replica->second;
         return nullptr;
     }
 

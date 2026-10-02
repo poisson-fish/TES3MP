@@ -614,15 +614,7 @@ namespace MWMechanics
         }
         if (reflected)
         {
-            const ESM::Static* reflectStatic = MWBase::Environment::get().getESMStore()->get<ESM::Static>().find(
-                ESM::RefId::stringRefId("VFX_Reflect"));
-            MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(ptr);
-            if (animation && !reflectStatic->mModel.empty())
-            {
-                const VFS::Path::Normalized reflectStaticModel
-                    = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(reflectStatic->mModel));
-                animation->addEffect(reflectStaticModel, ESM::MagicEffect::Reflect.getValue(), false);
-            }
+            playSpellProtection(ptr, true);
             caster.getClass().getCreatureStats(caster).getActiveSpells().addSpell(*reflected);
         }
         if (removedSpell)

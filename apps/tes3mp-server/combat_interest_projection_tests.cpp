@@ -2,6 +2,8 @@
 #include "combat_interest_projection.hpp"
 
 #include <array>
+#include <string_view>
+#include <iostream>
 #include <variant>
 #include <vector>
 
@@ -177,9 +179,11 @@ namespace
         return queues.hasPending(connection) == std::optional<bool>(true);
     }
 
-    bool magic_only_combat_batch_is_admitted()
+    bool magic_only_combat_batch_is_admitted(bool presentationOnly = false, size_t cueCount = 1)
     {
-        const auto policy = *OutboundQueuePolicy::create(1, 4096, 1, 1, 1, 1, 1, 1, 8, 250);
+        const auto policy = *OutboundQueuePolicy::create(cueCount > 1 ? 16 : 1,
+            cueCount > 1 ? 128 * 1024 : 4096, cueCount > 1 ? 16 : 1,
+            cueCount > 1 ? 8 : 1, cueCount > 1 ? 16 : 1, 1, 1, 1, 16, 250);
         const auto connection = TransportConnectionId::initial();
         auto queues = *OutboundQueueSet::create(policy, 1);
         if (queues.attach(connection) != TransportResult::Accepted)
@@ -187,8 +191,14 @@ namespace
         const std::array magicEvents{ MagicUseCombatEvent{ id<PlayerId>(1), MagicUseSourceKind::EnchantedItem, 3,
             MagicUseTargetKind::Actor, 4, id<CombatRevision>(5), id<CombatRevision>(6), true, 0.f, 0.f, 0.f, 0.f, -9.f,
             0.f, false } };
+        MagicImpactCue cue{1, 0, 1, 1, 9, "fireball", {}, 3};
+        cue.presentation = 3;
+        if (cueCount > 1) cue.record = std::string(256, 'x');
+        const std::vector<MagicImpactCue> cues(cueCount, cue);
         auto created = ReliableCombatEventBatch::create(id<SessionId>(2), SessionGeneration::initial(),
-            id<ServerTick>(7), id<CanonicalRevision>(8), {}, {}, magicEvents);
+            id<ServerTick>(7), id<CanonicalRevision>(8), {}, {},
+            presentationOnly ? std::span<const MagicUseCombatEvent>{} : magicEvents, {},
+            presentationOnly ? std::span<const MagicImpactCue>{cues} : std::span<const MagicImpactCue>{});
         const auto* batch = std::get_if<ReliableCombatEventBatch>(&created);
         if (!batch)
             return false;
@@ -197,8 +207,25 @@ namespace
         if (!ServerApp::admitCombinedInterestTickAtomically(queues, {}, {}, {}, {}, {}, {}, {}, delivery))
             return false;
         RecordingTransport transport;
-        if (queues.pump(transport, connection, 0) != OutboundPumpResult::Progress || transport.sent.size() != 1)
+        if (queues.pump(transport, connection, 0) != OutboundPumpResult::Progress
+            || transport.sent.size() != (cueCount > 1 ? 8 : 1))
             return false;
+        if (cueCount > 1)
+        {
+            size_t received = 0;
+            for (const auto& message : transport.sent)
+            {
+                const auto frame = decodeProtocolFrame(message.bytes);
+                const auto* typed = std::get_if<DecodedFrame>(&frame);
+                if (!typed || typed->payload().size() > ReliableOperationMaximumPayloadBytes) return false;
+                const auto parsed = decodeReliableCombatEventBatch(typed->payload());
+                const auto* chunk = std::get_if<ReliableCombatEventBatch>(&parsed);
+                if (!chunk || !chunk->magicEvents().empty()) return false;
+                for (const auto& actual : chunk->magicImpactCues()) if (actual != cue) return false;
+                received += chunk->magicImpactCues().size();
+            }
+            return received == cueCount;
+        }
         const auto frame = decodeProtocolFrame(transport.sent.front().bytes);
         const auto* decodedFrame = std::get_if<DecodedFrame>(&frame);
         const auto decoded = decodedFrame
@@ -207,12 +234,23 @@ namespace
                   id<SessionId>(2), SessionGeneration::initial(), id<ServerTick>(7), id<CanonicalRevision>(8), {});
         const auto* decodedBatch = std::get_if<ReliableCombatEventBatch>(&decoded);
         return decodedFrame && decodedFrame->messageKind() == MessageKind::ReliableCombatEventBatch && decodedBatch
-            && decodedBatch->magicEvents().size() == 1 && decodedBatch->magicEvents()[0] == magicEvents[0];
+            && (presentationOnly ? decodedBatch->magicEvents().empty() && decodedBatch->magicImpactCues().size() == 1
+                    && decodedBatch->magicImpactCues()[0] == cue
+                : decodedBatch->magicEvents().size() == 1 && decodedBatch->magicEvents()[0] == magicEvents[0]);
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "spell-cues")
+    {
+        if (!magic_only_combat_batch_is_admitted(true))
+        { std::cerr << "FAIL presentation-only admission\n"; return 1; }
+        if (!magic_only_combat_batch_is_admitted(true, MaximumReplicatedMagicImpactCues))
+        { std::cerr << "FAIL bounded presentation chunk admission\n"; return 1; }
+        std::cout << "PASS presentation-only and maximum-size chunked admission\n";
+        return 0;
+    }
     return combat_projection_is_private_and_cell_scoped()
             && dialogue_result_admission_is_typed_atomic_and_backpressured() && magic_only_combat_batch_is_admitted()
         ? 0

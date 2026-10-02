@@ -67,13 +67,21 @@ namespace MWMechanics
         void playSpellCastingEffects(const ESM::Enchantment* enchantment) const;
 
         void playSpellCastingEffects(const ESM::Spell* spell) const;
+        void playSpellCastingHands(const std::vector<ESM::IndexedENAMstruct>& effects) const;
 
         /// @note \a target can be any type of object, not just actors.
         void inflict(const MWWorld::Ptr& target, const ESM::EffectList& effects, ESM::RangeType range,
             bool exploded = false) const;
     };
 
-    void playEffects(const MWWorld::Ptr& target, const ESM::MagicEffect& magicEffect, bool playNonLooping = true);
+    void playEffects(const MWWorld::Ptr& target, const ESM::MagicEffect& magicEffect,
+        bool playNonLooping = true, bool playLooping = true, std::string_view visualId = {});
+    void playSpellObjectGlow(const MWWorld::Ptr& target, const ESM::MagicEffect& effect);
+    void playSpellObjectSound(const MWWorld::Ptr& target, bool success);
+    void playSpellFailure(const MWWorld::Ptr& caster, ESM::RefId school);
+    void playSpellProtection(const MWWorld::Ptr& target, bool reflected);
+    void playSpellExplosion(const ESM::ENAMstruct& effect, const osg::Vec3f& position,
+        bool actorHit, bool fromProjectile = false);
 }
 
 #endif

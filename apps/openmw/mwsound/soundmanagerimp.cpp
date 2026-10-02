@@ -684,14 +684,28 @@ namespace MWSound
         if (snditer != mActiveSounds.end())
         {
             for (SoundBufferRefPair& snd : snditer->second.mList)
+            {
                 mOutput->finishSound(snd.first.get());
+                if (snd.first.get() == mUnderwaterSound) mUnderwaterSound = nullptr;
+                if (snd.first.get() == mNearWaterSound) mNearWaterSound = nullptr;
+                mSoundBuffers.release(*snd.second);
+            }
+            // The caller may destroy the reference immediately. A later audio
+            // update must not dereference it even when every source has stopped.
+            mActiveSounds.erase(snditer);
         }
         SaySoundMap::iterator sayiter = mSaySoundsQueue.find(ptr.mRef);
         if (sayiter != mSaySoundsQueue.end())
+        {
             mOutput->finishStream(sayiter->second.mStream.get());
+            mSaySoundsQueue.erase(sayiter);
+        }
         sayiter = mActiveSaySounds.find(ptr.mRef);
         if (sayiter != mActiveSaySounds.end())
+        {
             mOutput->finishStream(sayiter->second.mStream.get());
+            mActiveSaySounds.erase(sayiter);
+        }
     }
 
     void SoundManager::stopSound(const MWWorld::CellStore* cell)

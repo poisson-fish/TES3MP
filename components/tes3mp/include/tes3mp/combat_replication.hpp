@@ -55,7 +55,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumReplicatedMagicEffectEvents = MaximumCombatEventsPerBatch;
     inline constexpr std::size_t MaximumReplicatedPhysicalProjectiles = 8;
     inline constexpr std::size_t MaximumReplicatedMagicProjectiles = 8;
-    inline constexpr std::size_t MaximumReplicatedMagicImpactCues = 32;
+    inline constexpr std::size_t MaximumReplicatedMagicImpactCues = 256;
 
     // A durable release receipt also carries its last committed flight/terminal
     // position. Identity includes the caster life so respawn cannot revive a shot.
@@ -86,6 +86,13 @@ namespace TES3MP
         std::string record;
         std::array<float, 3> position{};
         std::uint8_t range = 2; // ESM Self/Touch/Target hit: 0..2; committed cast: 3.
+        // 0 legacy explosion/release, 1 application, 2 failure, 3 windup.
+        std::uint8_t presentation = 0, targetKind = 0, outcome = 0, school = 0;
+        std::uint64_t target = 0, targetLife = 0;
+        std::uint16_t ordinal = 0;
+        bool actorHit = false, fromProjectile = false;
+        std::uint8_t objectSound = 0; // 0 none, 1 Open Lock, 2 Open Lock Fail.
+        // Application outcome: 0 applied, 1 resisted, 2 reflected, 3 absorbed, 4 ignored before hit, 5 ignored after hit.
         friend bool operator==(const MagicImpactCue&, const MagicImpactCue&) = default;
     };
 

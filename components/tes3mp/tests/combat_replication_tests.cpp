@@ -501,6 +501,40 @@ namespace
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(event());
     }
 
+    bool spell_applications_round_trip_and_reject_invalid_results()
+    {
+        TES3MP::MagicImpactCue cue{1, 0, 1, 4, 91, "mixed_spell", {}, 1};
+        cue.presentation = 1; cue.targetKind = 2; cue.target = 81; cue.targetLife = 3; cue.ordinal = 7;
+        const auto build = [&] { return TES3MP::ReliableCombatEventBatch::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(40),
+            value<TES3MP::CanonicalRevision>(40), {}, {}, {}, {}, {&cue, 1}); };
+        const auto roundTrip = [&] {
+            const auto created = build();
+            const auto* batch = std::get_if<TES3MP::ReliableCombatEventBatch>(&created);
+            if (!batch) return false;
+            const auto decoded = TES3MP::decodeReliableCombatEventBatch(TES3MP::encodeReliableCombatEventBatch(*batch));
+            const auto* result = std::get_if<TES3MP::ReliableCombatEventBatch>(&decoded);
+            return result && *result == *batch;
+        };
+        const auto rejects = [&] { return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(build()); };
+        for (uint8_t outcome = 0; outcome <= 5; ++outcome)
+        { cue.outcome = outcome; if (!roundTrip()) return false; }
+        const auto valid = cue;
+        cue.outcome = 6; if (!rejects()) return false;
+        cue = valid; cue.targetLife = 0; if (!rejects()) return false;
+        cue = valid; cue.target = 0; if (!rejects()) return false;
+        cue = valid; cue.targetKind = 5; if (!rejects()) return false;
+        cue = valid; cue.ordinal = 8; if (!rejects()) return false;
+        cue = valid; cue.objectSound = 1; if (!rejects()) return false;
+        cue = valid; cue.presentation = 2; if (!rejects()) return false;
+        cue = {1, 0, 1, 4, 91, "mixed_spell", {}, 3}; cue.presentation = 2;
+        for (uint8_t school = 0; school < 6; ++school)
+        { cue.school = school; if (!roundTrip()) return false; }
+        cue.school = 6; if (!rejects()) return false;
+        cue.school = 0; cue.presentation = 3;
+        return roundTrip();
+    }
+
     bool frame_classes_are_pinned()
     {
         const auto command = TES3MP::messageDescriptor(TES3MP::MessageKind::ClientMeleeAttackCommand);
@@ -516,6 +550,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "spell-applications")
+        return spell_applications_round_trip_and_reject_invalid_results() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "actor-casts")
         return actor_casts_reject_malformed_wire_identity() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "object-reach")

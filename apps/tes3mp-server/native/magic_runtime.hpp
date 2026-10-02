@@ -21,11 +21,12 @@ namespace TES3MP::Native
     bool supportedCombatModifier(ESM::RefId effect);
     bool permanentStatEffect(ESM::RefId effect);
     bool wholeSourceCure(ESM::RefId effect);
+    bool passiveActionEffect(ESM::RefId effect);
     std::optional<PreparedInstantEffects> preparePersistentEffects(const ESM::Spell& spell,
         const MWWorld::ESMStore& content, bool specialConditions = false, bool equipmentEffects = false, bool summonEffects = false);
     int fortifyDynamicStat(ESM::RefId effect);
     void applyPermanentStatEffect(MWMechanics::NpcStats& target, const ESM::ENAMstruct& effect,
-        float magnitude, const MWWorld::ESMStore& content);
+        float magnitude, const MWWorld::ESMStore& content, bool affectsBase = false);
     // Source-neutral bounded effect plan. Spell and enchantment records both
     // carry an ESM::EffectList; non-self targets require authoritative contact.
     // In V35 the composed actor tick installs timed effect instances separately.
@@ -76,9 +77,9 @@ namespace TES3MP::Native
 
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId enchantment,
         const MWWorld::ESMStore& content, bool expandedEffects = false, bool specialConditions = false,
-        bool movementEffects = false, bool aiEffects = false, bool objectEffects = false, bool equipmentEffects = false, bool summonEffects = false);
+        bool movementEffects = false, bool aiEffects = false, bool objectEffects = false, bool equipmentEffects = false, bool summonEffects = false, bool passiveSelf = false);
     std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects = false, bool equipmentEffects = false, bool summonEffects = false);
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects = false, bool equipmentEffects = false, bool summonEffects = false, bool passiveSelf = false);
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
         bool persistentSpecial = false, bool specialConditions = false, bool movementEffects = false,

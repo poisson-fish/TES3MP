@@ -1469,7 +1469,23 @@ namespace TES3MP::ServerApp
                     auto events = mWiring->nativeInventory->projectCombatEvents(prepared.candidateState(),
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
                         prepared.candidateNativeInventory());
-                    if (events) combatEvents.emplace_back(*connection, std::move(*events));
+                    if (events)
+                    {
+                        const auto* session = mWiring->sessions.session(*connection);
+                        const auto& hello = session->negotiatedHello();
+                        const bool applications = hello && std::ranges::binary_search(
+                            hello->negotiatedCapabilities(), spellApplicationPresentationCapability());
+                        auto cues = std::vector<MagicImpactCue>(events->magicImpactCues().begin(), events->magicImpactCues().end());
+                        std::erase_if(cues, [applications](const auto& cue) {
+                            return applications ? (cue.presentation == 0 && cue.range == 3) : cue.presentation != 0;
+                        });
+                        auto filtered = ReliableCombatEventBatch::create(events->targetSessionId(),
+                            events->targetSessionGeneration(), events->serverTick(), events->canonicalRevision(),
+                            events->events(), events->actorEvents(), events->magicEvents(), events->magicEffectEvents(), cues);
+                        auto* value = std::get_if<ReliableCombatEventBatch>(&filtered);
+                        if (!value) { mFailure = "native spell presentation projection failed"; return false; }
+                        combatEvents.emplace_back(*connection, std::move(*value));
+                    }
                 }
             }
             else if (mWiring->combat)

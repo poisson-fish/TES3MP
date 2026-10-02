@@ -624,7 +624,17 @@ struct MagicImpactCue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_X = 16,
     VT_Y = 18,
     VT_Z = 20,
-    VT_RANGE = 22
+    VT_RANGE = 22,
+    VT_PRESENTATION = 24,
+    VT_TARGET_KIND = 26,
+    VT_OUTCOME = 28,
+    VT_SCHOOL = 30,
+    VT_TARGET = 32,
+    VT_TARGET_LIFE = 34,
+    VT_ORDINAL = 36,
+    VT_ACTOR_HIT = 38,
+    VT_FROM_PROJECTILE = 40,
+    VT_OBJECT_SOUND = 42
   };
   uint8_t caster_kind() const {
     return GetField<uint8_t>(VT_CASTER_KIND, 0);
@@ -656,6 +666,36 @@ struct MagicImpactCue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   uint8_t range() const {
     return GetField<uint8_t>(VT_RANGE, 2);
   }
+  uint8_t presentation() const {
+    return GetField<uint8_t>(VT_PRESENTATION, 0);
+  }
+  uint8_t target_kind() const {
+    return GetField<uint8_t>(VT_TARGET_KIND, 0);
+  }
+  uint8_t outcome() const {
+    return GetField<uint8_t>(VT_OUTCOME, 0);
+  }
+  uint8_t school() const {
+    return GetField<uint8_t>(VT_SCHOOL, 0);
+  }
+  uint64_t target() const {
+    return GetField<uint64_t>(VT_TARGET, 0);
+  }
+  uint64_t target_life() const {
+    return GetField<uint64_t>(VT_TARGET_LIFE, 0);
+  }
+  uint16_t ordinal() const {
+    return GetField<uint16_t>(VT_ORDINAL, 0);
+  }
+  bool actor_hit() const {
+    return GetField<uint8_t>(VT_ACTOR_HIT, 0) != 0;
+  }
+  bool from_projectile() const {
+    return GetField<uint8_t>(VT_FROM_PROJECTILE, 0) != 0;
+  }
+  uint8_t object_sound() const {
+    return GetField<uint8_t>(VT_OBJECT_SOUND, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -670,6 +710,16 @@ struct MagicImpactCue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<float>(verifier, VT_Y, 4) &&
            VerifyField<float>(verifier, VT_Z, 4) &&
            VerifyField<uint8_t>(verifier, VT_RANGE, 1) &&
+           VerifyField<uint8_t>(verifier, VT_PRESENTATION, 1) &&
+           VerifyField<uint8_t>(verifier, VT_TARGET_KIND, 1) &&
+           VerifyField<uint8_t>(verifier, VT_OUTCOME, 1) &&
+           VerifyField<uint8_t>(verifier, VT_SCHOOL, 1) &&
+           VerifyField<uint64_t>(verifier, VT_TARGET, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TARGET_LIFE, 8) &&
+           VerifyField<uint16_t>(verifier, VT_ORDINAL, 2) &&
+           VerifyField<uint8_t>(verifier, VT_ACTOR_HIT, 1) &&
+           VerifyField<uint8_t>(verifier, VT_FROM_PROJECTILE, 1) &&
+           VerifyField<uint8_t>(verifier, VT_OBJECT_SOUND, 1) &&
            verifier.EndTable();
   }
 };
@@ -708,6 +758,36 @@ struct MagicImpactCueBuilder {
   void add_range(uint8_t range) {
     fbb_.AddElement<uint8_t>(MagicImpactCue::VT_RANGE, range, 2);
   }
+  void add_presentation(uint8_t presentation) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_PRESENTATION, presentation, 0);
+  }
+  void add_target_kind(uint8_t target_kind) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_TARGET_KIND, target_kind, 0);
+  }
+  void add_outcome(uint8_t outcome) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_OUTCOME, outcome, 0);
+  }
+  void add_school(uint8_t school) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_SCHOOL, school, 0);
+  }
+  void add_target(uint64_t target) {
+    fbb_.AddElement<uint64_t>(MagicImpactCue::VT_TARGET, target, 0);
+  }
+  void add_target_life(uint64_t target_life) {
+    fbb_.AddElement<uint64_t>(MagicImpactCue::VT_TARGET_LIFE, target_life, 0);
+  }
+  void add_ordinal(uint16_t ordinal) {
+    fbb_.AddElement<uint16_t>(MagicImpactCue::VT_ORDINAL, ordinal, 0);
+  }
+  void add_actor_hit(bool actor_hit) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_ACTOR_HIT, static_cast<uint8_t>(actor_hit), 0);
+  }
+  void add_from_projectile(bool from_projectile) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_FROM_PROJECTILE, static_cast<uint8_t>(from_projectile), 0);
+  }
+  void add_object_sound(uint8_t object_sound) {
+    fbb_.AddElement<uint8_t>(MagicImpactCue::VT_OBJECT_SOUND, object_sound, 0);
+  }
   explicit MagicImpactCueBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -730,8 +810,20 @@ inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCue(
     float x = 0.0f,
     float y = 0.0f,
     float z = 0.0f,
-    uint8_t range = 2) {
+    uint8_t range = 2,
+    uint8_t presentation = 0,
+    uint8_t target_kind = 0,
+    uint8_t outcome = 0,
+    uint8_t school = 0,
+    uint64_t target = 0,
+    uint64_t target_life = 0,
+    uint16_t ordinal = 0,
+    bool actor_hit = false,
+    bool from_projectile = false,
+    uint8_t object_sound = 0) {
   MagicImpactCueBuilder builder_(_fbb);
+  builder_.add_target_life(target_life);
+  builder_.add_target(target);
   builder_.add_command(command);
   builder_.add_caster_life(caster_life);
   builder_.add_caster(caster);
@@ -739,6 +831,14 @@ inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCue(
   builder_.add_y(y);
   builder_.add_x(x);
   builder_.add_record(record);
+  builder_.add_ordinal(ordinal);
+  builder_.add_object_sound(object_sound);
+  builder_.add_from_projectile(from_projectile);
+  builder_.add_actor_hit(actor_hit);
+  builder_.add_school(school);
+  builder_.add_outcome(outcome);
+  builder_.add_target_kind(target_kind);
+  builder_.add_presentation(presentation);
   builder_.add_range(range);
   builder_.add_source_kind(source_kind);
   builder_.add_caster_kind(caster_kind);
@@ -756,7 +856,17 @@ inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCueDirect(
     float x = 0.0f,
     float y = 0.0f,
     float z = 0.0f,
-    uint8_t range = 2) {
+    uint8_t range = 2,
+    uint8_t presentation = 0,
+    uint8_t target_kind = 0,
+    uint8_t outcome = 0,
+    uint8_t school = 0,
+    uint64_t target = 0,
+    uint64_t target_life = 0,
+    uint16_t ordinal = 0,
+    bool actor_hit = false,
+    bool from_projectile = false,
+    uint8_t object_sound = 0) {
   auto record__ = record ? _fbb.CreateString(record) : 0;
   return TES3MP::Protocol::Schema::CombatEvent::CreateMagicImpactCue(
       _fbb,
@@ -769,7 +879,17 @@ inline ::flatbuffers::Offset<MagicImpactCue> CreateMagicImpactCueDirect(
       x,
       y,
       z,
-      range);
+      range,
+      presentation,
+      target_kind,
+      outcome,
+      school,
+      target,
+      target_life,
+      ordinal,
+      actor_hit,
+      from_projectile,
+      object_sound);
 }
 
 struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {

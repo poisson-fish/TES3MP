@@ -128,6 +128,7 @@ namespace TES3MP::Native
         bool mSummons = false;
         bool mPlayerLifecycle = false; // V72: life-owned consequences and respawn share the actor/spatial commit.
         bool mCommittedDeath = false; // V73: durable body-bound death clocks, sampled by the shared timeline.
+        bool mPassiveSelf = false; // V75: complete passive Self lifecycle.
         bool mPowerSources = false; // V74: stock powers with durable game-time cooldowns.
         DynamicActorSet mDynamicActors;
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
@@ -326,9 +327,9 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> actorDoorFrames(const PreparedNativeInventory* candidate = nullptr) const;
         bool ownsAreaDoorCandidate(const PreparedNativeInventory* candidate) const;
         bool stageDoorSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
-            uint64_t placement, ESM::RefId effect, int magnitude);
+            uint64_t placement, ESM::RefId effect, int magnitude, uint8_t* sound = nullptr);
         bool stageContainerSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
-            uint64_t placement, ESM::RefId effect, int magnitude);
+            uint64_t placement, ESM::RefId effect, int magnitude, uint8_t* sound = nullptr);
         void recoverAreas(std::span<const std::byte> image, std::span<const ESM::RefId> references,
             std::span<const char> actor = {},
             const std::function<void(const EquipmentSessionValues&)>& validate = {});

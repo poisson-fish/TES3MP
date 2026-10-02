@@ -17,6 +17,8 @@
 #include "../mwworld/player.hpp"
 #include "../mwworld/manualref.hpp"
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/spellcasting.hpp"
+#include "../mwworld/esmstore.hpp"
 #include <cmath>
 #include <iomanip>
 #include <bit>
@@ -25,6 +27,7 @@
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadcrea.hpp>
+#include <components/esm3/loadspel.hpp>
 #include <osgDB/WriteFile>
 
 #include <stdexcept>
@@ -399,12 +402,12 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
-            || action == "castdoor" || action == "castcontainer" || action == "castat"
+            || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict"
             || action == "dialogue" || action == "dialoguestart")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
-            if (action == "castat" && (!(file >> targetKind >> targetId) || targetKind < 1 || targetKind > 2 || !targetId))
+            if ((action == "castat" || action == "castpredict") && (!(file >> targetKind >> targetId) || targetKind < 1 || targetKind > 2 || !targetId))
                 throw std::runtime_error("Traversal spell target invalid");
         }
         if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
@@ -495,10 +498,20 @@ namespace TES3MP::OpenMWAdapter
             if (wm->isGuiMode() || !world->getPlayer().interceptRangedRelease(strength))
                 throw std::runtime_error("Traversal ranged release requires game focus and the desktop input hook");
         }
-        else if (action == "cast" || action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat")
+        else if (action == "cast" || action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict")
         {
+            if (mTraversalPendingSequence != sequence && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mTraversalPendingSequence = sequence;
+                mOutput << "{\"event\":\"traversal_cast_readiness\",\"sequence\":" << sequence
+                    << ",\"gui\":" << (wm->isGuiMode() ? "true" : "false")
+                    << ",\"source_supported\":" << (mPresentation.captureMagicUse(ESM::RefId::stringRefId(record), {}, {}) ? "true" : "false")
+                    << ",\"source\":" << std::quoted(record) << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
             MWWorld::Ptr target;
-            if (action == "castat")
+            if (action == "castat" || action == "castpredict")
             {
                 target = mPresentation.replicatedCombatTarget(uint8_t(targetKind), targetId);
                 if (target.isEmpty()) return;
@@ -530,7 +543,19 @@ namespace TES3MP::OpenMWAdapter
             // Joining/scene presentation may still be installing the normal
             // input hook. Keep this command pending until the desktop can act;
             // the external capture deadline bounds readiness retries.
-            if ((action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat") && (wm->isGuiMode()
+            if (action == "castpredict" && mTraversalPredictedSequence != sequence)
+            {
+                const auto source = ESM::RefId::stringRefId(record);
+                if (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(false, source, {}, {})) return;
+                // Exercise the stock controller's prediction/release hook pair.
+                // Automation supplies the target and drives presentation explicitly.
+                const auto* spell = world->getStore().get<ESM::Spell>().find(source);
+                MWMechanics::CastSpell cast(world->getPlayerPtr(), {});
+                cast.playSpellCastingEffects(spell);
+                cast.playSpellCastingHands(spell->mEffects.mList);
+                mTraversalPredictedSequence = sequence;
+            }
+            if ((action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict") && (wm->isGuiMode()
                     || !world->getPlayer().interceptMagicCast(true, ESM::RefId::stringRefId(record), {}, target)))
                 return;
             if (action == "cast" && (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(

@@ -1,4 +1,5 @@
 #include "spellcasting.hpp"
+#include "spellpresentationtrace.hpp"
 
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadmgef.hpp>
@@ -59,37 +60,8 @@ namespace MWMechanics
                 continue; // Don't play explosion for touch spells on non-activatable objects except when spell is from
                           // a projectile enchantment or ExplodeSpell
 
-            // Spawn the explosion orb effect
-            const ESM::Static* areaStatic;
-            if (!effect->mArea.empty())
-                areaStatic = world->getStore().get<ESM::Static>().find(effect->mArea);
-            else
-                areaStatic = world->getStore().get<ESM::Static>().find(ESM::RefId::stringRefId("VFX_DefaultArea"));
-
-            const std::string& texture = effect->mParticle;
-
-            if (effectInfo.mData.mArea <= 0)
-            {
-                if (effectInfo.mData.mRange == ESM::RT_Target)
-                    world->spawnEffect(
-                        Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(areaStatic->mModel)), texture,
-                        mHitPosition, 1.0f);
-                continue;
-            }
-            else
-                world->spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(areaStatic->mModel)),
-                    texture, mHitPosition, static_cast<float>(effectInfo.mData.mArea * 2));
-
-            // Play explosion sound (make sure to use NoTrack, since we will delete the projectile now)
-            {
-                MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();
-                if (!effect->mAreaSound.empty())
-                    sndMgr->playSound3D(mHitPosition, effect->mAreaSound, 1.0f, 1.0f);
-                else
-                    sndMgr->playSound3D(mHitPosition,
-                        world->getStore().get<ESM::Skill>().find(effect->mData.mSchool)->mSchool->mAreaSound, 1.0f,
-                        1.0f);
-            }
+            playSpellExplosion(effectInfo.mData, mHitPosition, !ignore.isEmpty() && ignore.getClass().isActor(), mFromProjectile);
+            if (effectInfo.mData.mArea <= 0) continue;
             // Get the actors in range of the effect
             std::vector<MWWorld::Ptr> objects;
             static const int unitsPerFoot = static_cast<int>(std::ceil(Constants::UnitsPerFoot));
@@ -413,10 +385,7 @@ namespace MWMechanics
 
                 if (fail)
                 {
-                    // Failure sound
-                    MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();
-                    const ESM::Skill* skill = MWBase::Environment::get().getESMStore()->get<ESM::Skill>().find(school);
-                    sndMgr->playSound3D(mCaster, skill->mSchool->mFailureSound, 1.0f, 1.0f);
+                    playSpellFailure(mCaster, school);
                     return false;
                 }
             }
@@ -483,6 +452,23 @@ namespace MWMechanics
         playSpellCastingEffects(spell->mEffects.mList);
     }
 
+    void CastSpell::playSpellCastingHands(const std::vector<ESM::IndexedENAMstruct>& effects) const
+    {
+        if (effects.empty() || mCaster.isEmpty()) return;
+        auto* animation = MWBase::Environment::get().getWorld()->getAnimation(mCaster);
+        if (!animation) return;
+        const auto& store = *MWBase::Environment::get().getESMStore();
+        const auto* effect = store.get<ESM::MagicEffect>().find(effects.back().mData.mEffectID);
+        const auto* hands = store.get<ESM::Static>().find(ESM::RefId::stringRefId("VFX_Hands"));
+        const auto model = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(hands->mModel));
+        for (const auto bone : {"Bip01 L Hand", "Bip01 R Hand"})
+            if (animation->getNode(bone))
+            {
+                animation->addEffect(model.value(), "", false, bone, effect->mParticle);
+                traceSpellPresentation("cast-hands-vfx", mCaster, model.value(), true);
+            }
+    }
+
     void CastSpell::playSpellCastingEffects(const std::vector<ESM::IndexedENAMstruct>& effects) const
     {
         const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
@@ -545,9 +531,12 @@ namespace MWMechanics
             if (animation && !mCaster.getClass().isActor())
                 animation->addSpellCastGlow(effect->getColor());
 
+            traceSpellPresentation("cast-vfx", mCaster, castStaticModel.value(), animation != nullptr);
             addedEffects.push_back(std::move(castStaticModel));
 
             MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();
+            traceSpellPresentation("cast-sound", mCaster, (effect->mCastSound.empty()
+                ? store.get<ESM::Skill>().find(effect->mData.mSchool)->mSchool->mCastSound : effect->mCastSound).serializeText(), true);
             if (!effect->mCastSound.empty())
                 sndMgr->playSound3D(mCaster, effect->mCastSound, 1.0f, 1.0f);
             else
@@ -556,11 +545,68 @@ namespace MWMechanics
         }
     }
 
-    void playEffects(const MWWorld::Ptr& target, const ESM::MagicEffect& magicEffect, bool playNonLooping)
+    void playSpellObjectGlow(const MWWorld::Ptr& target, const ESM::MagicEffect& effect)
+    {
+        auto* animation = MWBase::Environment::get().getWorld()->getAnimation(target);
+        if (animation) animation->addSpellCastGlow(effect.getColor());
+        traceSpellPresentation("object-glow", target, effect.mId.serializeText(), animation != nullptr);
+    }
+
+    void playSpellObjectSound(const MWWorld::Ptr& target, bool success)
+    {
+        MWBase::Environment::get().getSoundManager()->playSound3D(target,
+            ESM::RefId::stringRefId(success ? "Open Lock" : "Open Lock Fail"), 1.f, 1.f);
+        traceSpellPresentation("object-sound", target, success ? "Open Lock" : "Open Lock Fail", true);
+    }
+
+    void playSpellFailure(const MWWorld::Ptr& caster, ESM::RefId school)
+    {
+        const auto* skill = MWBase::Environment::get().getESMStore()->get<ESM::Skill>().find(school);
+        MWBase::Environment::get().getSoundManager()->playSound3D(caster, skill->mSchool->mFailureSound, 1.f, 1.f);
+        traceSpellPresentation("failure-sound", caster, skill->mSchool->mFailureSound.serializeText(), true);
+    }
+
+    void playSpellProtection(const MWWorld::Ptr& target, bool reflected)
+    {
+        const auto* model = MWBase::Environment::get().getESMStore()->get<ESM::Static>().find(
+            ESM::RefId::stringRefId(reflected ? "VFX_Reflect" : "VFX_Absorb"));
+        auto* animation = MWBase::Environment::get().getWorld()->getAnimation(target);
+        traceSpellPresentation(reflected ? "reflect-vfx" : "absorb-vfx", target, model->mModel, animation != nullptr);
+        if (animation && !model->mModel.empty())
+            animation->addEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(model->mModel)).value(),
+                (reflected ? ESM::MagicEffect::Reflect : ESM::MagicEffect::SpellAbsorption).getValue(), false);
+    }
+
+    void playSpellExplosion(const ESM::ENAMstruct& data, const osg::Vec3f& position,
+        bool actorHit, bool fromProjectile)
+    {
+        if (data.mArea <= 0 && (actorHit || fromProjectile)) return;
+        auto world = MWBase::Environment::get().getWorld();
+        const auto& store = world->getStore();
+        const auto* effect = store.get<ESM::MagicEffect>().find(data.mEffectID);
+        const auto* area = store.get<ESM::Static>().find(effect->mArea.empty()
+            ? ESM::RefId::stringRefId("VFX_DefaultArea") : effect->mArea);
+        if (data.mArea <= 0 && data.mRange != ESM::RT_Target) return;
+        MWBase::Environment::get().getWorld()->spawnEffect(
+            Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)), effect->mParticle,
+            position, data.mArea > 0 ? float(data.mArea) * 2.f : 1.f);
+        traceSpellPresentation("area-vfx", {}, area->mModel);
+        if (data.mArea > 0)
+            traceSpellPresentation("area-sound", {}, (effect->mAreaSound.empty()
+                ? store.get<ESM::Skill>().find(effect->mData.mSchool)->mSchool->mAreaSound : effect->mAreaSound).serializeText());
+        if (data.mArea > 0)
+            MWBase::Environment::get().getSoundManager()->playSound3D(position, effect->mAreaSound.empty()
+                ? store.get<ESM::Skill>().find(effect->mData.mSchool)->mSchool->mAreaSound : effect->mAreaSound, 1.f, 1.f);
+    }
+
+    void playEffects(const MWWorld::Ptr& target, const ESM::MagicEffect& magicEffect, bool playNonLooping,
+        bool playLooping, std::string_view visualId)
     {
         const auto& store = MWBase::Environment::get().getESMStore();
         if (playNonLooping)
         {
+            traceSpellPresentation("hit-sound", target, (magicEffect.mHitSound.empty()
+                ? store->get<ESM::Skill>().find(magicEffect.mData.mSchool)->mSchool->mHitSound : magicEffect.mHitSound).serializeText(), true);
             MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();
             if (!magicEffect.mHitSound.empty())
                 sndMgr->playSound3D(target, magicEffect.mHitSound, 1.0f, 1.0f);
@@ -581,12 +627,14 @@ namespace MWMechanics
         if (anim && !castStatic->mModel.empty())
         {
             // Don't play particle VFX unless the effect is new or it should be looping.
-            if (playNonLooping || loop)
+            if ((loop && playLooping) || (!loop && playNonLooping))
             {
                 const VFS::Path::Normalized castStaticModel
                     = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(castStatic->mModel));
                 anim->addEffect(
-                    castStaticModel.value(), magicEffect.mId.getRefIdString(), loop, {}, magicEffect.mParticle);
+                    castStaticModel.value(), visualId.empty() ? magicEffect.mId.getRefIdString() : visualId,
+                    loop, {}, magicEffect.mParticle);
+                traceSpellPresentation(loop ? "loop-vfx" : "hit-vfx", target, castStaticModel.value(), true);
             }
         }
     }

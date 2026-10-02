@@ -1606,24 +1606,7 @@ namespace MWMechanics
                         if (!effects->empty())
                         {
                             if (mCanCast)
-                            {
-                                const ESM::MagicEffect* effect = store.get<ESM::MagicEffect>().find(
-                                    effects->back().mData.mEffectID); // use last effect of list for color of VFX_Hands
-
-                                const ESM::Static* castStatic
-                                    = world->getStore().get<ESM::Static>().find(ESM::RefId::stringRefId("VFX_Hands"));
-
-                                const VFS::Path::Normalized castStaticModel
-                                    = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(castStatic->mModel));
-
-                                if (mAnimation->getNode("Bip01 L Hand"))
-                                    mAnimation->addEffect(
-                                        castStaticModel.value(), "", false, "Bip01 L Hand", effect->mParticle);
-
-                                if (mAnimation->getNode("Bip01 R Hand"))
-                                    mAnimation->addEffect(
-                                        castStaticModel.value(), "", false, "Bip01 R Hand", effect->mParticle);
-                            }
+                                cast.playSpellCastingHands(*effects);
                             // first effect used for casting animation
                             const ESM::ENAMstruct& firstEffect = effects->front().mData;
 

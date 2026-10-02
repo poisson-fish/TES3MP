@@ -39,7 +39,7 @@ namespace TES3MP::OpenMWAdapter
             nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
             nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(

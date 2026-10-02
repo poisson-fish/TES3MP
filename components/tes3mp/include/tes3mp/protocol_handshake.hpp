@@ -50,6 +50,7 @@ namespace TES3MP
     // Player cast events and actor presentation carry respawned player lives.
     inline constexpr std::uint32_t PlayerLifeReplicationCapabilityValue = 32;
     inline constexpr std::uint32_t CommittedDeathPresentationCapabilityValue = 33;
+    inline constexpr std::uint32_t SpellApplicationPresentationCapabilityValue = 34;
 
     class CapabilityId
     {
@@ -90,6 +91,8 @@ namespace TES3MP
     { return *CapabilityId::fromValue(PlayerLifeReplicationCapabilityValue); }
     inline constexpr CapabilityId committedDeathPresentationCapability() noexcept
     { return *CapabilityId::fromValue(CommittedDeathPresentationCapabilityValue); }
+    inline constexpr CapabilityId spellApplicationPresentationCapability() noexcept
+    { return *CapabilityId::fromValue(SpellApplicationPresentationCapabilityValue); }
 
     inline constexpr CapabilityId magicVisualReplicationCapability() noexcept
     { return *CapabilityId::fromValue(MagicVisualReplicationCapabilityValue); }

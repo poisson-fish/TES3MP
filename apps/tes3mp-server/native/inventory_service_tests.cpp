@@ -5590,7 +5590,10 @@ namespace TES3MP::Native::Testing
         const bool sneakDetection = effectFamily == "sneak-detection";
         const bool landingRecovery = effectFamily == "movement-fall";
         const bool jumpConsumers = landingRecovery || effectFamily == "movement-jumps";
-        const bool mixedPassives = effectFamily == "mixed-passives";
+        const bool harmfulPassives = effectFamily == "harmful-passives";
+        const bool passiveSelf = effectFamily == "passive-self";
+        const bool statPassives = effectFamily == "passive-stats";
+        const bool mixedPassives = passiveSelf || statPassives || harmfulPassives || effectFamily == "mixed-passives";
         if (sneakDetection) effectFamily = "concealment";
         if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
         const bool spellCompleteness = effectFamily == "spell-completeness";
@@ -5612,7 +5615,7 @@ namespace TES3MP::Native::Testing
             ESM::MagicEffect::BoundLongbow, ESM::MagicEffect::BoundCuirass, ESM::MagicEffect::BoundHelm,
             ESM::MagicEffect::BoundBoots, ESM::MagicEffect::BoundShield, ESM::MagicEffect::BoundGloves};
         std::array<bool, 11> boundBeastRestricted{};
-        const bool objectTravel = effectFamily == "object-travel";
+        const bool objectTravel = passiveSelf || effectFamily == "object-travel";
         const bool objectSpells = effectFamily == "object-spells";
         const bool objectSoul = effectFamily == "object-soul" || playerLives;
         if (objectSoul) effectFamily = "player-travel";
@@ -5688,6 +5691,36 @@ namespace TES3MP::Native::Testing
             const auto directory = config.string();
             const char* arguments[]{"npc-door-test", "--config", directory.c_str()};
             Loadout base(readLoadoutOptions(3, arguments));
+            if (passiveSelf)
+            {
+                MWWorld::ESMStore rules;
+                for (const auto& magic : base.store().get<ESM::MagicEffect>()) rules.insertStatic(magic);
+                unsigned stockEffects = 0;
+                for (int index = 0; index < ESM::MagicEffect::Length; ++index)
+                {
+                    const auto id = ESM::MagicEffect::indexToRefId(index);
+                    const auto* magic = rules.get<ESM::MagicEffect>().search(id);
+                    if (!magic) continue; // Empty stock selectors have no authored MGEF record.
+                    ++stockEffects;
+                    ESM::ENAMstruct entry{id, (magic->mData.mFlags & ESM::MagicEffect::TargetSkill) ? ESM::Skill::Alteration : ESM::RefId{},
+                        (magic->mData.mFlags & ESM::MagicEffect::TargetAttribute) ? ESM::Attribute::Willpower : ESM::RefId{},
+                        ESM::RT_Self, 7, 9, 2, 2};
+                    auto ignored = entry; ignored.mRange = ESM::RT_Target;
+                    ESM::Spell ability; ability.blank(); ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({ignored, entry});
+                    ESM::Enchantment constant; constant.blank(); constant.mData.mType = ESM::Enchantment::ConstantEffect;
+                    constant.mId = ESM::RefId::stringRefId("stock_passive_" + std::to_string(index)); constant.mEffects = ability.mEffects;
+                    rules.insertStatic(constant);
+                    const auto authored = preparePassiveActorEffects(ability, rules, true, true, true, true, true, true);
+                    const auto equipped = prepareConstantEffects(constant.mId, rules, true, true, true, true, true, true, true, true);
+                    require(authored && equipped && authored->effects.size() == 2 && equipped->effects.size() == 2
+                        && authored->effects[1].mEffectID == id && authored->effects[1].mDuration == 0 && authored->effects[1].mArea == 0,
+                        ("Stock passive behavior rejected: " + id.toDebugString()).c_str());
+                }
+                require(stockEffects >= 130, "Stock passive check lacks the base game's effect records");
+                std::cout << "stock passive admission=" << stockEffects << " authored IDs, ability+constant, ignored ordinal+Self normalization\n";
+            }
+
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
@@ -7138,7 +7171,25 @@ namespace TES3MP::Native::Testing
                 }
                 if (mixedPassives)
                 {
-                    const std::vector<ESM::ENAMstruct> family{
+                    const std::vector<ESM::ENAMstruct> family = passiveSelf ? std::vector<ESM::ENAMstruct>{
+                        {ESM::MagicEffect::AbsorbHealth, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::AbsorbMagicka, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::AbsorbFatigue, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::AbsorbAttribute, {}, ESM::Attribute::Willpower, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::AbsorbSkill, ESM::Skill::ShortBlade, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::Lock, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::Open, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::Vampirism, {}, {}, ESM::RT_Self, 7, 9, 0, 0}}
+                        : statPassives ? std::vector<ESM::ENAMstruct>{
+                        {ESM::MagicEffect::DamageAttribute, {}, ESM::Attribute::Willpower, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::RestoreAttribute, {}, ESM::Attribute::Willpower, ESM::RT_Self, 7, 9, 1, 1},
+                        {ESM::MagicEffect::DamageSkill, ESM::Skill::ShortBlade, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::RestoreSkill, ESM::Skill::ShortBlade, {}, ESM::RT_Self, 7, 9, 1, 1},
+                        {ESM::MagicEffect::DrainHealth, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                        {ESM::MagicEffect::DrainMagicka, {}, {}, ESM::RT_Self, 7, 9, 4, 4},
+                        {ESM::MagicEffect::DrainFatigue, {}, {}, ESM::RT_Self, 7, 9, 5, 5},
+                        {ESM::MagicEffect::StuntedMagicka, {}, {}, ESM::RT_Self, 7, 9, 0, 0}}
+                        : std::vector<ESM::ENAMstruct>{
                         {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 7, 9, 10, 20},
                         {ESM::MagicEffect::FortifySkill, ESM::Skill::Acrobatics, {}, ESM::RT_Self, 7, 9, 5, 10},
                         {ESM::MagicEffect::Jump, {}, {}, ESM::RT_Self, 7, 9, 10, 20},
@@ -7158,6 +7209,107 @@ namespace TES3MP::Native::Testing
                     shirt.mData.mType = ESM::Clothing::Shirt; shirt.mData.mValue = 100; shirt.mEnchant = constant.mId;
                     out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out); out.endRecord(ESM::Clothing::sRecordId);
                     npc.mInventory.mList.push_back({1, shirt.mId});
+                    if (passiveSelf)
+                    {
+                        female.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower)] = 0;
+                        female.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Luck)] = 0;
+                        female.mInventory.mList.push_back({1, shirt.mId});
+                        // Duplicate record instances exercise retained rolls and replacement identity.
+                        female.mInventory.mList.push_back({1, shirt.mId});
+                        for (const auto type : {ESM::Spell::ST_Disease, ESM::Spell::ST_Blight, ESM::Spell::ST_Curse})
+                        {
+                            ESM::Spell condition; condition.blank(); condition.mData.mType = type;
+                            condition.mId = ESM::RefId::stringRefId("passive_condition_" + std::to_string(type));
+                            condition.mEffects.populate({{ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Willpower,
+                                ESM::RT_Self, 0, 0, 1, 1}});
+                            out.startRecord(ESM::Spell::sRecordId, 0); condition.save(out); out.endRecord(ESM::Spell::sRecordId);
+                            female.mSpells.mList.push_back(condition.mId); npc.mSpells.mList.push_back(condition.mId);
+                        }
+                        ESM::Spell cures; cures.blank(); cures.mId = ESM::RefId::stringRefId("passive_whole_cures");
+                        cures.mData.mType = ESM::Spell::ST_Ability;
+                        cures.mEffects.populate({{ESM::MagicEffect::CureCommonDisease, {}, {}, ESM::RT_Self, 0, 0, 0, 0},
+                            {ESM::MagicEffect::CureBlightDisease, {}, {}, ESM::RT_Self, 0, 0, 0, 0},
+                            {ESM::MagicEffect::RemoveCurse, {}, {}, ESM::RT_Self, 0, 0, 1, 1}});
+                        out.startRecord(ESM::Spell::sRecordId, 0); cures.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        npc.mSpells.mList.push_back(cures.mId);
+                        const auto writeSource = [&](const char* name, int type,
+                            const std::vector<ESM::ENAMstruct>& entries, bool authored) {
+                            ability.mId = ESM::RefId::stringRefId(std::string(name) + "_ability"); ability.mEffects.populate(entries);
+                            out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                            if (authored) npc.mSpells.mList.push_back(ability.mId);
+                            constant.mId = ESM::RefId::stringRefId(std::string(name) + "_constant"); constant.mEffects.populate(entries);
+                            out.startRecord(ESM::Enchantment::sRecordId, 0); constant.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                            shirt.mId = ESM::RefId::stringRefId(name); shirt.mData.mType = type; shirt.mEnchant = constant.mId;
+                            out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                            female.mInventory.mList.push_back({1, shirt.mId});
+                        };
+                        writeSource("passive_clock_ring", ESM::Clothing::Ring, {
+                            {ESM::MagicEffect::Corprus, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Willpower, ESM::RT_Self, 7, 9, 3, 3},
+                            {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 7, 9, 2, 2}}, true);
+                        writeSource("passive_cure_amulet", ESM::Clothing::Amulet, {
+                            {ESM::MagicEffect::Poison, {}, {}, ESM::RT_Self, 7, 9, 1, 1},
+                            {ESM::MagicEffect::CurePoison, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::Paralyze, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::CureParalyzation, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::CureCorprusDisease, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::CureCommonDisease, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::CureBlightDisease, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::RemoveCurse, {}, {}, ESM::RT_Self, 7, 9, 1, 1}}, false);
+                        writeSource("passive_resist_ring", ESM::Clothing::Ring, {
+                            {ESM::MagicEffect::ResistMagicka, {}, {}, ESM::RT_Self, 7, 9, 100, 100}}, false);
+                        writeSource("passive_travel_ring", ESM::Clothing::Ring, {
+                            {ESM::MagicEffect::Mark, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::Recall, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::Dispel, {}, {}, ESM::RT_Self, 7, 9, 100, 100},
+                            {ESM::MagicEffect::ResistCorprusDisease, {}, {}, ESM::RT_Self, 7, 9, 20, 20},
+                            {ESM::MagicEffect::WeaknessToCorprusDisease, {}, {}, ESM::RT_Self, 7, 9, 10, 10},
+                            {ESM::MagicEffect::SunDamage, {}, {}, ESM::RT_Self, 7, 9, 2, 2},
+                            {ESM::MagicEffect::DivineIntervention, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                            {ESM::MagicEffect::AlmsiviIntervention, {}, {}, ESM::RT_Self, 7, 9, 0, 0}}, false);
+                        // The same ordered source also tests ability activation while dormant
+                        // and stock travel no-ops for an NPC recipient.
+                        female.mSpells.mList.push_back(ability.mId);
+                        npc.mSpells.mList.push_back(ability.mId);
+                        ESM::Spell probe; probe.blank(); probe.mId = ESM::RefId::stringRefId("passive_dispel_probe");
+                        probe.mData.mType = ESM::Spell::ST_Spell; probe.mData.mFlags = ESM::Spell::F_Always;
+                        probe.mEffects.populate({{ESM::MagicEffect::FortifySkill, ESM::Skill::ShortBlade, {}, ESM::RT_Self, 0, 60, 12, 12}});
+                        out.startRecord(ESM::Spell::sRecordId, 0); probe.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        female.mSpells.mList.push_back(probe.mId);
+                    }
+                    if (statPassives)
+                    {
+                        // A player constant exercises manual removal and stock rest;
+                        // the NPC also has the matching ability with its own life.
+                        female.mInventory.mList.push_back({1, shirt.mId});
+                        female.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
+                        const std::vector<ESM::ENAMstruct> wear{
+                            {ESM::MagicEffect::DisintegrateWeapon, {}, {}, ESM::RT_Self, 7, 9, 3, 3},
+                            {ESM::MagicEffect::DisintegrateArmor, {}, {}, ESM::RT_Self, 7, 9, 3, 3}};
+                        ability.mId = ESM::RefId::stringRefId("passive_wear_ability"); ability.mEffects.populate(wear);
+                        out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                        constant.mId = ESM::RefId::stringRefId("passive_wear_constant"); constant.mEffects.populate(wear);
+                        out.startRecord(ESM::Enchantment::sRecordId, 0); constant.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                        shirt.mId = ESM::RefId::stringRefId("passive_wear_ring"); shirt.mData.mType = ESM::Clothing::Ring;
+                        shirt.mEnchant = constant.mId;
+                        out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                        female.mInventory.mList.push_back({1, shirt.mId});
+                        female.mSpells.mList.push_back(ability.mId);
+                        auto armor = *base.store().get<ESM::Armor>().find(ESM::RefId::stringRefId("iron_cuirass"));
+                        armor.mId = ESM::RefId::stringRefId("passive_wear_cuirass"); armor.mScript = {}; armor.mEnchant = {};
+                        out.startRecord(ESM::Armor::sRecordId, 0); armor.save(out); out.endRecord(ESM::Armor::sRecordId);
+                        female.mInventory.mList.push_back({1, armor.mId});
+                    }
+                    if (harmfulPassives)
+                    {
+                        ability.mId = ESM::RefId::stringRefId("harmful_passive_ability");
+                        ability.mEffects.populate({
+                            {ESM::MagicEffect::DrainAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 0, 0, 3, 3},
+                            {ESM::MagicEffect::Blind, {}, {}, ESM::RT_Self, 0, 0, 2, 2},
+                            {ESM::MagicEffect::Silence, {}, {}, ESM::RT_Self, 0, 0, 0, 0},
+                            {ESM::MagicEffect::FireDamage, {}, {}, ESM::RT_Self, 0, 0, 1, 1}});
+                        out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    }
                 }
                 if (effectFamily == "constant-concealment")
                 {
@@ -7198,6 +7350,8 @@ namespace TES3MP::Native::Testing
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return !id.getRefIdString().starts_with("movement_");
                     });
+                else if (passiveSelf)
+                    std::erase_if(npc.mSpells.mList, [](auto id) { return !id.getRefIdString().starts_with("passive_"); });
                 else if (effectFamily == "player-travel")
                     std::erase_if(npc.mSpells.mList, [](auto id) {
                         return !id.getRefIdString().starts_with("travel_");
@@ -7230,6 +7384,8 @@ namespace TES3MP::Native::Testing
                 // Keep the door-magic observer from interrupting live player casts.
                 if (effectFamily == "door-magic") npc.mAiData.mFight = 0;
                 if (mixedPassives) npc.mSpells.mList.push_back(ESM::RefId::stringRefId("mixed_passive_ability"));
+                if (harmfulPassives) npc.mSpells.mList.push_back(ESM::RefId::stringRefId("harmful_passive_ability"));
+                if (statPassives || passiveSelf) npc.mNpdt.mAttributes[ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower)] = 40;
                 if (jumpConsumers)
                 {
                     ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("movement_jump_passive");
@@ -8881,7 +9037,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (spellCompleteness ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9588,7 +9744,313 @@ namespace TES3MP::Native::Testing
             }
             if (mixedPassives)
             {
-                fresh(); step({}, {}, true);
+                fresh();
+                if (passiveSelf)
+                {
+                    const std::array names{"mixed_passive_shirt", "passive_clock_ring", "passive_cure_amulet", "passive_travel_ring", "passive_resist_ring"};
+                    const auto clearSlot = [&](const auto& member) {
+                        equip(1, member.stackId, member.slot, false);
+                    };
+                    // Remove the cure before the first tick so authored conditions can be exercised.
+                    const auto startup = inventory(1);
+                    const auto amulet = std::ranges::find(startup.equipment, EquipmentSlot::Amulet, [](const auto& member) { return member.slot; });
+                    if (amulet != startup.equipment.end()) clearSlot(*amulet);
+                    else step({}, {}, true);
+                    const auto equipped = inventory(1);
+                    for (const auto& member : equipped.equipment)
+                        if (std::ranges::any_of(names, [&](const char* name) {
+                            const auto prototype = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name)));
+                            return std::ranges::any_of(equipped.stacks, [&](const auto& item) {
+                                return item.stackId == member.stackId && item.prototypeId == prototype;
+                            });
+                        })) clearSlot(member);
+                }
+                else step({}, {}, true);
+                if (passiveSelf)
+                {
+                    const auto initial = state(run->service());
+                    require(initial.combat->passiveSelf && initial.combat->passiveCorprus.size() == 1,
+                        "Passive Corprus ability did not install its clock");
+                    const auto validClockImage = image(run->service());
+                    auto malformed = validClockImage;
+                    malformed.at(32) = std::byte{0}; // Corrupt the first source kind before allocating its clocks.
+                    bool invalidClock = false;
+                    try { (void)readActorCampaign({reinterpret_cast<const char*>(malformed.data()), malformed.size()}); }
+                    catch (const std::exception&) { invalidClock = true; }
+                    require(invalidClock && image(run->service()) == validClockImage,
+                        "Unbound passive Corprus clock was admitted");
+                    const auto select = [&](const char* record, EquipmentSlot slot, bool on) {
+                        const auto view = inventory(1);
+                        const auto prototype = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(record)));
+                        const auto found = std::ranges::find(view.stacks, prototype, &CanonicalItemStack::prototypeId);
+                        require(found != view.stacks.end(), "Passive fixture item missing");
+                        const auto equipped = std::ranges::find_if(view.equipment, [&](const auto& member) {
+                            return member.slot == slot && std::ranges::any_of(view.stacks, [&](const auto& item) {
+                                return item.stackId == member.stackId && item.prototypeId == prototype;
+                            });
+                        });
+                        if ((on && equipped != view.equipment.end()) || (!on && equipped == view.equipment.end())) return;
+                        equip(1, on ? found->stackId : equipped->stackId, slot, on);
+                    };
+                    select("mixed_passive_shirt", EquipmentSlot::Shirt, true);
+                    const auto equipped = state(run->service());
+                    const auto absorb = std::ranges::find_if(equipped.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.sourceKind == 3 && effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::AbsorbAttribute));
+                    });
+                    require(absorb != equipped.timedEffects.end() && absorb->beneficiary == 1,
+                        "Passive Self Absorb lost its original self beneficiary");
+                    restart();
+                    for (unsigned i = 0; i < 30; ++i) step({}, {}, true);
+                    const auto elapsed = state(run->service());
+                    require(std::abs(elapsed.combat->actors[0][8][2] - equipped.combat->actors[0][8][2]) < .002f
+                        && std::abs(elapsed.combat->actors[0][9][2] - equipped.combat->actors[0][9][2]) < .002f,
+                        "Passive Self Absorb failed stock debit/credit cancellation");
+                    select("mixed_passive_shirt", EquipmentSlot::Shirt, false);
+                    const auto removed = state(run->service());
+                    require(removed.combat->actors[0][2] == initial.combat->actors[0][2],
+                        "Passive Absorb removal leaked stat overlays");
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, true);
+                    require(state(run->service()).combat->passiveCorprus.size() == 2,
+                        "Constant Corprus did not share the ability clock handler");
+                    require(std::ranges::count_if(initial.combat->conditions, [](const auto& condition) { return condition.actor == 0; }) == 3
+                        && std::ranges::none_of(initial.combat->conditions, [](const auto& condition) { return condition.actor == 2; }),
+                        "Ability whole-source cures did not remove authored diseases/blight/curse");
+                    const auto beforeWorsening = state(run->service());
+                    ++*worldTime.daysPassed;
+                    world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+                    step({}, {}, true);
+                    const auto worsened = state(run->service());
+                    require(std::ranges::all_of(worsened.combat->passiveCorprus, [](const auto& clock) {
+                        return clock.worsenings == 1;
+                    }) && std::abs(worsened.combat->actors[0][2][3] - beforeWorsening.combat->actors[0][2][3] - 3.f) < .002f,
+                        "Passive ability/constant Corprus did not share daily worsening");
+                    restart();
+                    select("passive_cure_amulet", EquipmentSlot::Amulet, true);
+                    const auto cured = state(run->service());
+                    require(std::ranges::none_of(cured.combat->conditions, [](const auto& condition) { return condition.actor == 0; }),
+                        "Constant whole-source cures did not share ability cleanup");
+                    for (const auto id : {ESM::MagicEffect::Poison, ESM::MagicEffect::Paralyze, ESM::MagicEffect::Corprus})
+                        require(std::ranges::any_of(cured.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 0 && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(id))
+                                && effect.magnitude == 0;
+                        }), "Passive cure did not retain a quenched ordinal witness");
+                    require(std::abs(cured.combat->actors[0][2][3] - beforeWorsening.combat->actors[0][2][3]) < .002f,
+                        "Passive Corprus cure retained worsened harmful stats");
+                    require(std::abs(cured.combat->actors[0][0][1] - beforeWorsening.combat->actors[0][0][1] - 2.f) < .002f
+                        && std::abs(worsened.combat->actors[2][0][0] - beforeWorsening.combat->actors[2][0][0] - 2.f) < .002f,
+                        ("Corprus beneficial/base mismatch: constant=" + std::to_string(cured.combat->actors[0][0][1])
+                            + "/" + std::to_string(beforeWorsening.combat->actors[0][0][1]) + " ability="
+                            + std::to_string(worsened.combat->actors[2][0][0]) + "/" + std::to_string(beforeWorsening.combat->actors[2][0][0])).c_str());
+                    restart(); step({}, {}, true);
+                    require(std::ranges::all_of(state(run->service()).combat->passiveCorprus, [](const auto& clock) {
+                        return clock.actor != 0 || !clock.nextMs;
+                    }), "Recovery reactivated cured passive Corprus");
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, false);
+                    select("passive_cure_amulet", EquipmentSlot::Amulet, false);
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, true);
+                    require(std::ranges::any_of(state(run->service()).combat->passiveCorprus, [](const auto& clock) {
+                        return clock.actor == 0 && clock.nextMs;
+                    }), "Replacement passive source did not install a fresh clock");
+                    const auto reinstalled = state(run->service());
+                    ++*worldTime.daysPassed;
+                    world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+                    step({}, {}, true);
+                    restart();
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, false);
+                    require(std::abs(state(run->service()).combat->actors[0][2][3] - reinstalled.combat->actors[0][2][3]) < .002f
+                        && std::abs(state(run->service()).combat->actors[0][0][1] - reinstalled.combat->actors[0][0][1] - 2.f) < .002f,
+                        "Corprus removal retained harmful stats or lost beneficial worsening");
+                    // A cure already equipped must also quench a newly installed source.
+                    select("passive_cure_amulet", EquipmentSlot::Amulet, true);
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, true);
+                    restart();
+                    require(std::ranges::all_of(state(run->service()).combat->passiveCorprus, [](const auto& clock) {
+                        return clock.actor != 0 || !clock.nextMs;
+                    }), "Earlier cure source failed to quench a replacement Corprus source");
+                    select("passive_clock_ring", EquipmentSlot::LeftRing, false);
+                    select("passive_cure_amulet", EquipmentSlot::Amulet, false);
+                    const auto hasProbe = [&] {
+                        return std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                            return effect.actor == 0 && effect.source == hash("passive_dispel_probe");
+                        });
+                    };
+                    cast(1, "passive_dispel_probe");
+                    require(hasProbe(), "Passive Dispel probe failed to install");
+                    select("passive_travel_ring", EquipmentSlot::LeftRing, true);
+                    require(!hasProbe(), "Constant Dispel failed to remove a temporary spell");
+                    const auto marked = state(run->service());
+                    require(marked.combat->players[0].mark.has_value(), "Passive Mark was not applied once");
+                    require(lastRelocations.size() == 1 && lastRelocations.front().second.cell() == CellId::interior(id<CellSpaceId>(8))
+                        && lastRelocations.front().second.position() == Position3(100 * 1024, -100 * 1024, 1024),
+                        "Passive Recall/interventions did not share ordered relocation");
+                    restart(); step({}, {}, true);
+                    require(lastRelocations.empty() && state(run->service()).combat->players[0].mark == marked.combat->players[0].mark,
+                        "Passive travel witness changed during recovery");
+                    cast(1, "passive_dispel_probe");
+                    const auto interiorHealth = state(run->service()).combat->actors[0][8][2];
+                    for (unsigned i = 0; i < 30; ++i) step({}, {}, true);
+                    require(hasProbe() && std::abs(state(run->service()).combat->actors[0][8][2] - interiorHealth) < .002f,
+                        "Applied-once Dispel repeated or interior passive SunDamage mutated health");
+                    restart(); require(hasProbe(), "Dispel replayed during recovery");
+                    select("passive_travel_ring", EquipmentSlot::LeftRing, false);
+                    select("passive_resist_ring", EquipmentSlot::LeftRing, true);
+                    select("mixed_passive_shirt", EquipmentSlot::Shirt, true);
+                    const auto resisted = state(run->service());
+                    require(std::ranges::all_of(resisted.timedEffects, [](const auto& effect) {
+                        const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                        return effect.actor != 0 || effect.sourceKind != 3
+                            || (id != ESM::MagicEffect::AbsorbAttribute && id != ESM::MagicEffect::AbsorbHealth)
+                            || (effect.resistance == 100.f && effect.magnitude == 0);
+                    }), "Constant Self Absorb bypassed stock resistance");
+                    restart();
+                    select("passive_resist_ring", EquipmentSlot::LeftRing, false);
+                    select("mixed_passive_shirt", EquipmentSlot::Shirt, false);
+                    select("mixed_passive_shirt", EquipmentSlot::Shirt, true);
+                    require(std::ranges::any_of(state(run->service()).timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.sourceKind == 3 && effect.magnitude == 3.f
+                            && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::AbsorbAttribute));
+                    }), "Replacement constant inherited a previously resisted source");
+                    const auto online = authority;
+                    authority = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+                    fresh(); step({}, {}, true);
+                    const auto dormant = state(run->service());
+                    require(!dormant.combat->players[0].mark && std::ranges::any_of(dormant.timedEffects, [](const auto& effect) {
+                        return effect.actor == 0 && effect.sourceKind == 5 && effect.effectIndex
+                            == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Mark));
+                    }) && std::ranges::none_of(dormant.combat->passiveApplications, [](const auto& application) {
+                        return application.actor == 0;
+                    }), "Dormant ability applied or lost its one-time source");
+                    restart();
+                    authority = online; run->service().synchronizeCells(authority);
+                    step({}, {}, true);
+                    const auto activated = state(run->service());
+                    require(activated.combat->players[0].mark && lastRelocations.size() == 1
+                        && std::ranges::any_of(activated.combat->passiveApplications, [](const auto& application) {
+                            return application.actor == 0 && application.kind == 5;
+                        }), "Recovered dormant ability failed first awake application");
+                    restart(); step({}, {}, true);
+                    require(lastRelocations.empty() && state(run->service()).combat->players[0].mark == activated.combat->players[0].mark,
+                        "Recovered ability replayed one-time travel");
+                    std::cout << "passive Self Absorb/no-ops/cures/Corprus/travel resistance/removal/replacement/dormancy/restart passed\n";
+                    return;
+                }
+                if (statPassives)
+                {
+                    const auto initial = state(run->service());
+                    for (const auto kind : {3ull, 5ull})
+                    {
+                        const auto member = std::ranges::find_if(initial.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.sourceKind == kind && effect.effectIndex
+                                == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                        });
+                        require(member != initial.timedEffects.end(), "Passive stat source omitted Stunted Magicka");
+                        require(std::ranges::count_if(initial.timedEffects, [&](const auto& effect) {
+                            return effect.actor == 2 && effect.sourceKind == kind
+                                && effect.source == member->source && effect.expiresTick == UINT64_MAX;
+                        }) == 8, "Passive stat source lost Self ordinals");
+                    }
+                    const auto& spawn = initial.life->spawnStats;
+                    require(initial.combat->actors[2][8][2] == spawn[8][2] - 6
+                        && initial.combat->actors[2][9][2] == spawn[9][2] - 8,
+                        "Passive drains did not apply once for both sources");
+                    const size_t willpower = size_t(ESM::Attribute::refIdToIndex(ESM::Attribute::Willpower));
+                    const size_t shortBlade = size_t(ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)) + 11;
+                    restart();
+                    for (unsigned i = 0; i < 30; ++i) step({}, {}, true);
+                    const auto elapsed = state(run->service());
+                    require(std::abs(elapsed.combat->actors[2][willpower][3]
+                            - initial.combat->actors[2][willpower][3] - 4.f) < .002f
+                        && std::abs(elapsed.combat->actors[2][shortBlade][0]
+                            - initial.combat->actors[2][shortBlade][0] + 3.f) < .002f
+                        && std::abs(elapsed.combat->actors[2][shortBlade][3]
+                            - initial.combat->actors[2][shortBlade][3] - 1.f) < .002f,
+                        "Passive stat elapsed writer lost stock ability/constant semantics");
+                    require(elapsed.combat->actors[2][8][2] == initial.combat->actors[2][8][2]
+                        && elapsed.combat->actors[2][9][2] == initial.combat->actors[2][9][2],
+                        "Retained passive drains applied more than once");
+                    const auto stack = [&](std::string_view name) {
+                        const auto view = inventory(1);
+                        const auto prototype = id<ItemPrototypeId>(MWWorld::inventoryRecordId(ESM::RefId::stringRefId(name)));
+                        const auto found = std::ranges::find(view.stacks, prototype, &CanonicalItemStack::prototypeId);
+                        require(found != view.stacks.end(), "Passive fixture stack missing");
+                        return *found;
+                    };
+                    const auto select = [&](ItemStackId item, EquipmentSlot slot, bool on) {
+                        const auto view = inventory(1);
+                        const bool selected = std::ranges::any_of(view.equipment, [&](const auto& member) {
+                            return member.slot == slot && member.stackId == item;
+                        });
+                        if (selected != on) equip(1, item, slot, on);
+                    };
+                    const auto shirt = stack("mixed_passive_shirt").stackId;
+                    select(shirt, EquipmentSlot::Shirt, true);
+                    const auto equipped = state(run->service());
+                    select(shirt, EquipmentSlot::Shirt, false);
+                    const auto removed = state(run->service());
+                    require(removed.combat->actors[0][8][2] == equipped.combat->actors[0][8][2] + 3
+                        && removed.combat->actors[0][9][2] == equipped.combat->actors[0][9][2] + 4
+                        && std::ranges::none_of(removed.timedEffects, [](const auto& effect) {
+                            return effect.actor == 0 && effect.sourceKind == 3
+                                && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::StuntedMagicka));
+                        }), "Passive constant removal lost drains or Stunted Magicka cleanup");
+                    select(normalWeapon(1), EquipmentSlot::CarriedRight, true);
+                    // Stock armor wear prioritizes the shield; expose the cuirass
+                    // after removing the inherited fixture's carried-left item.
+                    const auto equippedItems = inventory(1).equipment;
+                    for (const auto& member : equippedItems)
+                        if (member.slot == EquipmentSlot::CarriedLeft)
+                            select(member.stackId, member.slot, false);
+                    const auto cuirass = stack("passive_wear_cuirass").stackId;
+                    select(cuirass, EquipmentSlot::Cuirass, true);
+                    const auto ring = stack("passive_wear_ring").stackId;
+                    select(ring, EquipmentSlot::LeftRing, true);
+                    const auto weaponBefore = stack("iron shortsword").condition;
+                    const auto armorBefore = stack("passive_wear_cuirass").condition;
+                    restart();
+                    for (unsigned i = 0; i < 30; ++i) step({}, {}, true);
+                    const auto weaponLoss = weaponBefore - stack("iron shortsword").condition;
+                    const auto armorLoss = armorBefore - stack("passive_wear_cuirass").condition;
+                    require(weaponLoss == 6 && armorLoss == 6,
+                        ("Passive ability/constant wear mismatch: weapon=" + std::to_string(weaponLoss)
+                            + " armor=" + std::to_string(armorLoss)).c_str());
+                    const auto saved = image(run->service());
+                    InventoryHost recovered(descriptor, manifest, *registry, *crypto, saved);
+                    recovered.service().synchronizeCells(authority);
+                    step({}, {}, true);
+                    auto pending = dynamic_cast<InventoryService&>(recovered.service()).prepareNativeTick(
+                        authority, id<ServerTick>(tick), 1.f/30, {}, {}, &world);
+                    require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed && image(recovered.service()) == image(run->service()),
+                        "Passive stats/wear diverged after restart");
+                    fresh(); step({}, {}, true);
+                    select(stack("mixed_passive_shirt").stackId, EquipmentSlot::Shirt, true);
+                    const float stunted = state(run->service()).combat->actors[0][9][2];
+                    auto rest = run->service().prepareNativeScheduledTick(
+                        authority, id<ServerTick>(++tick), 1.f/30, {}, &world,
+                        std::get<WaitRestRequest>(WaitRestRequest::create(1, WaitRestMode::Rest)));
+                    const auto beforeRest = image(run->service());
+                    require(rest && rest->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                        == CanonicalDurabilityResult::Rejected && image(run->service()) == beforeRest
+                        && rest->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed
+                        && state(run->service()).combat->actors[0][9][2] == stunted,
+                        "Passive Stunted Magicka failed stock rest or atomic retry");
+                    std::cout << "passive stat/resource/wear ability+constant rollback/removal/restart passed\n";
+                    return;
+                }
+                if (harmfulPassives)
+                {
+                    const auto initial = state(run->service());
+                    const auto source = hash("harmful_passive_ability");
+                    require(std::ranges::count_if(initial.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 2 && effect.source == source && effect.sourceKind == 5;
+                    }) == 4, "Harmful passive ordinals did not reach the existing consumers");
+                    for (unsigned i = 0; i < 30; ++i) step({}, {}, true);
+                    const auto elapsed = state(run->service());
+                    require(std::abs(initial.combat->actors[2][8][2] - elapsed.combat->actors[2][8][2] - 1.f) < .002f,
+                        "Passive damage did not use the shared one-second resource consumer");
+                }
                 const auto current = state(run->service());
                 for (const auto [actor, kind] : {std::pair{2ull, 3ull}, {2ull, 5ull}})
                 {
@@ -10167,7 +10629,7 @@ namespace TES3MP::Native::Testing
                 word(value, cyclic ? ownedItem.item.mIndex : UINT64_MAX);
                 std::copy(value.begin(), value.end(), malformed.begin() + (at - durable.begin()) + (cyclic ? 8 : 0));
                 bool refused = false;
-                try { InventoryHost invalid(descriptor, manifest, *registry, *crypto, malformed); }
+                try { (void)readActorCampaign({reinterpret_cast<const char*>(malformed.data()), malformed.size()}); }
                 catch (const std::invalid_argument&) { refused = true; }
                 require(refused && image(run->service()) == durable, "Malformed bound ownership recovery was not atomic");
             }

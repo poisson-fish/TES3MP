@@ -257,10 +257,10 @@ namespace TES3MP::Native
     }
 
     bool InventoryService::stageDoorSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
-        uint64_t placement, ESM::RefId effect, int magnitude)
+        uint64_t placement, ESM::RefId effect, int magnitude, uint8_t* sound)
     {
         if (effect != ESM::MagicEffect::Lock && effect != ESM::MagicEffect::Open
-            || magnitude < 1 || magnitude > 1000) return false;
+            || magnitude < 0 || magnitude > 1000) return false;
         const auto found = std::ranges::find(mBinding.mDoors, placement,
             &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
         if (found == mBinding.mDoors.end()) return false;
@@ -277,6 +277,13 @@ namespace TES3MP::Native
             : OrdinaryDoor::LockMagic::Open;
         const auto change = mAreaDoors[index].binding.door().applyLockMagic(
             *transaction->states[index], kind, magnitude);
+        if (sound)
+        {
+            const auto& prior = transaction->states[index]->mRef;
+            *sound = effect == ESM::MagicEffect::Lock
+                ? uint8_t(MWMechanics::lockRaisesLevel(prior.mIsLocked ? prior.mLockLevel : 0, magnitude))
+                : !MWMechanics::openReachesLevel(prior.mIsLocked ? prior.mLockLevel : 0, magnitude) ? 2 : uint8_t(prior.mIsLocked);
+        }
         if (change.mState.mRef.mLockLevel != transaction->states[index]->mRef.mLockLevel
             || change.mState.mRef.mIsLocked != transaction->states[index]->mRef.mIsLocked)
         {
@@ -289,11 +296,11 @@ namespace TES3MP::Native
     }
 
     bool InventoryService::stageContainerSpell(std::unique_ptr<PreparedNativeInventory>& candidate,
-        uint64_t placement, ESM::RefId effect, int magnitude)
+        uint64_t placement, ESM::RefId effect, int magnitude, uint8_t* sound)
     {
         if (!mBinding.mContainerMagic
             || (effect != ESM::MagicEffect::Lock && effect != ESM::MagicEffect::Open)
-            || magnitude < 1 || magnitude > 1000) return false;
+            || magnitude < 0 || magnitude > 1000) return false;
         const auto found = std::ranges::find_if(mBinding.mContainers, [&](const auto& value) {
             return value.mId.value() == placement && value.mPlacement
                 && mRuntime.mStore.get<ESM::Container>().search(value.mBase);
@@ -311,6 +318,9 @@ namespace TES3MP::Native
         const auto next = effect == ESM::MagicEffect::Lock
             ? (MWMechanics::lockRaisesLevel(lock.level, magnitude) ? uint16_t(magnitude) : lock.level)
             : (MWMechanics::openReachesLevel(lock.level, magnitude) ? uint16_t(0) : lock.level);
+        if (sound)
+            *sound = effect == ESM::MagicEffect::Lock ? uint8_t(next != lock.level)
+                : !MWMechanics::openReachesLevel(lock.level, magnitude) ? 2 : uint8_t(lock.level != 0);
         if (next != lock.level)
         {
             if (lock.revision >= UINT64_MAX - 1) return false;

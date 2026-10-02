@@ -322,10 +322,10 @@ namespace MWMechanics
     }
 
     float getSpellSuccessChance(const ESM::Spell& spell, const NpcStats& actor,
-        const MWWorld::ESMStore& store, bool cap, bool checkMagicka)
+        const MWWorld::ESMStore& store, bool cap, bool checkMagicka, ESM::RefId* effectiveSchool)
     {
         const float base = spellBaseChance(spell, store, actor,
-            [&](ESM::RefId school) { return actor.getSkill(school).getModified(); }, nullptr);
+            [&](ESM::RefId school) { return actor.getSkill(school).getModified(); }, effectiveSchool);
         return spellChance(spell, store, actor, base, cap, checkMagicka);
     }
 

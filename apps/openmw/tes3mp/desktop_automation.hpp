@@ -11,6 +11,7 @@
 
 namespace TES3MP::OpenMWAdapter
 {
+    void requestStockSpellPresentationCast(float frameTime);
     class EngineCoordinator;
 
     enum class DesktopAutomationRole
@@ -125,6 +126,8 @@ namespace TES3MP::OpenMWAdapter
         std::size_t mMagicBoltFrames = 0;
         bool mMagicBoltScreenshotTaken = false;
         std::uint64_t mTraversalSequence = 0;
+        std::uint64_t mTraversalPendingSequence = 0;
+        std::uint64_t mTraversalPredictedSequence = 0;
         std::uint64_t mTraversalReconnectDelay = 0;
         std::optional<ReliableGroundItemBaseline> mTraversalGround;
         std::optional<PlayerId> mTraversalPeer;

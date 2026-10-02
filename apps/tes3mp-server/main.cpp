@@ -710,6 +710,7 @@ int main(int argc, char** argv)
         requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
         requiredCapabilities.push_back(TES3MP::playerLifeReplicationCapability());
         requiredCapabilities.push_back(TES3MP::committedDeathPresentationCapability());
+        optionalCapabilities.push_back(TES3MP::spellApplicationPresentationCapability());
         requiredCapabilities.push_back(TES3MP::actorCastLifecycleCapability());
         requiredCapabilities.push_back(TES3MP::playerSwingPresentationCapability());
         requiredCapabilities.push_back(TES3MP::knockoutPresentationCapability());

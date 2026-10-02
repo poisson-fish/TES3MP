@@ -28,6 +28,8 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/manualref.hpp"
+#include "../mwbase/environment.hpp"
+#include "../mwbase/soundmanager.hpp"
 
 #include <algorithm>
 #include <array>
@@ -791,7 +793,13 @@ namespace MWRender
                 throw BuildFailure(mCreateResult);
         }
 
-        ~Impl() { mRendering.getObjects().removeReplicatedActor(mPtr); }
+        ~Impl()
+        {
+            // Attached stock cast/hit sounds retain this ManualRef. Detach them
+            // before freeing it, including appearance replacement and cell unload.
+            MWBase::Environment::get().getSoundManager()->stopSound3D(mPtr);
+            mRendering.getObjects().removeReplicatedActor(mPtr);
+        }
 
         ReplicatedActorResult update(
             const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept

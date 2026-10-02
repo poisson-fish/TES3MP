@@ -307,6 +307,18 @@ Travel runs by recipient/effect ordinal inside the existing tick; staged relocat
 compose before canonical publication. Stock ignored target/range entries preserve
 other ordinals. Scripts and spellbook mutation remain M5.
 
+**Passive Self (V75).** Wrap V74 with bounded application witnesses/Corprus clocks;
+fresh campaigns preserve earlier layouts. Shared stock handlers retain resistance,
+base-stat rules and no-ops. Cures quench ordinals; removal undoes harmful worsening,
+preserving beneficial extras. Dormant actions wait; recovery never replays.
+Metadata/mutations commit together.
+
+**Spell presentation (capability 34).** Publish committed windup, failed school and
+ordinal results with caster/target lives. Reuse stock cast/hit/protection/object/area
+helpers; snapshots own continuous loops/cleanup. Admit bounded cue chunks atomically;
+gameplay events occur once. Reconnect restores loops without transient replay.
+Capability 33 retains legacy cues; presentation never enters saves.
+
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,
 identities, stale/retry rejection, bounded traffic and secret-free evidence.

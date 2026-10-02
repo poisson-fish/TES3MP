@@ -23,6 +23,7 @@
 #include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/security.hpp"
+#include "../mwmechanics/spellcasting.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwrender/vismask.hpp"
 #include "../mwrender/animation.hpp"
@@ -144,56 +145,48 @@ namespace TES3MP::OpenMWAdapter
             return "tes3mp-active-magic/" + std::to_string(effect);
         }
 
-        bool presentMagicImpact(MWBase::World& world, const MagicImpactCue& cue)
+        bool presentMagicImpact(MWBase::World& world, const MagicImpactCue& cue, const MWWorld::Ptr& target)
         {
             const auto& store = world.getStore();
             const auto* effects = magicVisualEffects(store, cue.sourceKind, cue.record);
             if (!effects) return false;
-            const osg::Vec3f point(cue.position[0], cue.position[1], cue.position[2]);
-            auto sounds = MWBase::Environment::get().getSoundManager();
-            std::set<std::string> castModels;
-            for (const auto& effect : effects->mList)
+            if (cue.presentation == 2)
             {
-                if (cue.range != 3 && effect.mData.mRange != cue.range) continue;
-                const auto* visual = store.get<ESM::MagicEffect>().search(effect.mData.mEffectID);
-                if (!visual) return false;
-                const auto staticId = cue.range == 3
-                    ? (visual->mCasting.empty() ? ESM::RefId::stringRefId("VFX_DefaultCast") : visual->mCasting)
-                    : (visual->mHit.empty() ? ESM::RefId::stringRefId("VFX_DefaultHit") : visual->mHit);
-                const auto* vfx = store.get<ESM::Static>().search(staticId);
-                if (!vfx) return false;
-                const auto model = vfx->mModel.empty() ? VFS::Path::Normalized{}
-                    : Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(vfx->mModel));
-                const bool playCast = cue.range != 3
-                    || castModels.insert(vfx->mModel.empty() ? std::string(staticId.getRefIdString())
-                        : std::string(model.value())).second;
-                if (!vfx->mModel.empty())
-                {
-                    if (playCast)
-                        world.spawnEffect(model, visual->mParticle, point, 1.f);
-                }
-                const auto* school = store.get<ESM::Skill>().search(visual->mData.mSchool);
-                if (!school || !school->mSchool) return false;
-                const auto soundId = cue.range == 3
-                    ? (visual->mCastSound.empty() ? school->mSchool->mCastSound : visual->mCastSound)
-                    : (visual->mHitSound.empty() ? school->mSchool->mHitSound : visual->mHitSound);
-                if (!soundId.empty() && playCast)
-                    sounds->playSound3D(point, soundId, 1.f, 1.f);
-                if (effect.mData.mArea > 0)
-                {
-                    if (cue.range == 3) continue;
-                    const auto areaId = visual->mArea.empty()
-                        ? ESM::RefId::stringRefId("VFX_DefaultArea") : visual->mArea;
-                    const auto* area = store.get<ESM::Static>().search(areaId);
-                    if (!area) return false;
-                    if (!area->mModel.empty())
-                        world.spawnEffect(Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(area->mModel)),
-                            visual->mParticle, point, float(effect.mData.mArea * 2));
-                    const auto areaSound = visual->mAreaSound.empty()
-                        ? school->mSchool->mAreaSound : visual->mAreaSound;
-                    if (!areaSound.empty()) sounds->playSound3D(point, areaSound, 1.f, 1.f);
-                }
+                if (!target.isEmpty()) MWMechanics::playSpellFailure(target, ESM::MagicSchool::indexToSkillRefId(cue.school));
+                return true;
             }
+            if (cue.range == 3)
+            {
+                if (target.isEmpty()) return true;
+                MWMechanics::CastSpell cast(target, {});
+                if (cue.sourceKind == 0) cast.playSpellCastingEffects(store.get<ESM::Spell>().find(ESM::RefId::stringRefId(cue.record)));
+                else cast.playSpellCastingEffects(store.get<ESM::Enchantment>().find(ESM::RefId::stringRefId(cue.record)));
+                cast.playSpellCastingHands(effects->mList);
+                return true;
+            }
+            if (cue.presentation == 1)
+            {
+                if (cue.ordinal >= effects->mList.size()) return false;
+                if (target.isEmpty() || cue.outcome == 1 || cue.outcome == 4) return true;
+                if (cue.outcome == 2 || cue.outcome == 3)
+                    MWMechanics::playSpellProtection(target, cue.outcome == 2);
+                else
+                {
+                    const auto* visual = store.get<ESM::MagicEffect>().find(effects->mList[cue.ordinal].mData.mEffectID);
+                    // Committed snapshots own continuous loops and their cleanup.
+                    MWMechanics::playEffects(target, *visual, true, false);
+                    if (cue.targetKind >= 3 && (visual->mId == ESM::MagicEffect::Lock || visual->mId == ESM::MagicEffect::Open))
+                    {
+                        MWMechanics::playSpellObjectGlow(target, *visual);
+                        if (cue.objectSound) MWMechanics::playSpellObjectSound(target, cue.objectSound == 1);
+                    }
+                }
+                return true;
+            }
+            const osg::Vec3f point(cue.position[0], cue.position[1], cue.position[2]);
+            for (const auto& effect : effects->mList)
+                if (effect.mData.mRange == cue.range)
+                    MWMechanics::playSpellExplosion(effect.mData, point, cue.actorHit, cue.fromProjectile);
             return true;
         }
 
@@ -627,6 +620,8 @@ namespace TES3MP::OpenMWAdapter
                     if (!presentation)
                         return false;
                     const bool supported = presentation->captureMagicUse(spell, item, {}).has_value();
+                    if (supported && !release)
+                        presentation->predictMagicCast(spell.empty() ? item.getClass().getEnchantment(item) : spell);
                     if (!supported || !release)
                         return supported;
                     auto capture = presentation->captureMagicUse(spell, item, target);
@@ -1102,10 +1097,15 @@ namespace TES3MP::OpenMWAdapter
         std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
         std::map<std::pair<uint8_t, uint64_t>, std::pair<uint64_t, std::vector<std::uint16_t>>> visualLoops;
         bool sessionBootstrapPending = true;
+        std::optional<std::string> predictedMagicSource;
+        using ReflectionKey = std::tuple<uint8_t, uint64_t, uint64_t, uint8_t, uint64_t, uint64_t, uint64_t, std::string>;
+        std::vector<ReflectionKey> presentedReflections;
 
         void clear() noexcept
         {
             sessionBootstrapPending = true;
+            predictedMagicSource.reset();
+            presentedReflections.clear();
             for (auto& [entity, remote] : remotes)
             {
                 (void)entity;
@@ -2422,9 +2422,31 @@ namespace TES3MP::OpenMWAdapter
                             return ProviderResult::PresentationFailed;
                     }
                 }
+                combatSnapshot = snapshot;
                 for (const auto& cue : batch.magicImpactCues())
-                    if (!presentMagicImpact(*world, cue))
-                        return ProviderResult::PresentationFailed;
+                {
+                    // Stock collects reflected ordinals into one reflected spell and
+                    // attaches its protection VFX once. Absorption remains per effect.
+                    if (cue.presentation == 1 && cue.outcome == 2)
+                    {
+                        ReflectionKey key{cue.targetKind, cue.target, cue.targetLife, cue.casterKind,
+                            cue.caster, cue.casterLife, cue.command, cue.record};
+                        if (std::ranges::find(presentedReflections, key) != presentedReflections.end()) continue;
+                        if (presentedReflections.size() == MaximumReplicatedMagicImpactCues)
+                            presentedReflections.erase(presentedReflections.begin());
+                        presentedReflections.push_back(std::move(key));
+                    }
+                    if (cue.range == 3 && cue.presentation != 2 && cue.casterKind == 1
+                        && cue.caster == snapshot.selfPlayerId().value() && predictedMagicSource == cue.record)
+                    {
+                        predictedMagicSource.reset();
+                        continue;
+                    }
+                    const auto target = cue.presentation == 1
+                        ? magicTarget(cue.targetKind, cue.target, cue.targetLife)
+                        : magicTarget(cue.casterKind, cue.caster, cue.casterLife);
+                    if (!presentMagicImpact(*world, cue, target)) return ProviderResult::PresentationFailed;
+                }
             }
             std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> confirmedEffects;
             for (const auto& effect : snapshot.activeEffects())
@@ -2433,6 +2455,35 @@ namespace TES3MP::OpenMWAdapter
             activeMagicEffects = std::move(confirmedEffects);
             combatSnapshot = snapshot;
             return ProviderResult::Accepted;
+        }
+
+        MWWorld::Ptr magicTarget(uint8_t kind, uint64_t id, uint64_t life) const
+        {
+            auto world = MWBase::Environment::get().getWorld();
+            if (kind <= 2)
+            {
+                if (!combatSnapshot || std::ranges::none_of(combatSnapshot->presentation(), [&](const auto& pose) {
+                        return pose.kind == kind && pose.id == id && pose.life == life;
+                    })) return {};
+                if (kind == 1 && id == combatSnapshot->selfPlayerId().value()) return world->getPlayerPtr();
+                if (kind == 1)
+                    for (const auto& [entity, remote] : remotes)
+                        if (remote.actor && remote.lastObserved && remote.lastObserved->playerId().value() == id)
+                            return remote.actor->ptr();
+                if (kind == 2)
+                {
+                    if (const auto found = nativeRemotes.find(id); found != nativeRemotes.end() && found->second.actor)
+                        return found->second.actor->ptr();
+                    for (const auto& [entity, remote] : actorRemotes)
+                        if (remote.actor && remote.lastObserved && remote.lastObserved->actorId().value() == id)
+                            return remote.actor->ptr();
+                }
+                return {};
+            }
+            const auto ref = MWWorld::localPlacedRef(id, world->getContentFiles());
+            if (!ref) return {};
+            return kind == 3 ? findActiveDoor(ref->mIndex, ref->mContentFile)
+                             : findActiveContainer(ref->mIndex, ref->mContentFile);
         }
 
         ProviderResult advance(MonotonicInstant now)
@@ -2662,14 +2713,7 @@ namespace TES3MP::OpenMWAdapter
                         const auto* visual = world->getStore().get<ESM::MagicEffect>().search(
                             ESM::MagicEffect::indexToRefId(effect));
                         if (!visual || !(visual->mData.mFlags & ESM::MagicEffect::ContinuousVfx)) return false;
-                        const auto staticId = visual->mHit.empty()
-                            ? ESM::RefId::stringRefId("VFX_DefaultHit") : visual->mHit;
-                        const auto* model = world->getStore().get<ESM::Static>().search(staticId);
-                        if (!model) return false;
-                        if (!model->mModel.empty())
-                            animation->addEffect(Misc::ResourceHelpers::correctMeshPath(
-                                VFS::Path::Normalized(model->mModel)).value(), continuousVisualId(effect),
-                                true, {}, visual->mParticle);
+                        MWMechanics::playEffects(ptr, *visual, false, true, continuousVisualId(effect));
                     }
                     previous = {pose.life, pose.visualEffects};
                     return true;
@@ -3884,6 +3928,9 @@ namespace TES3MP::OpenMWAdapter
         try { return mImpl->captureRangedAttack(attackStrength); }
         catch (...) { return std::nullopt; }
     }
+
+    void DesktopPresentation::predictMagicCast(const ESM::RefId& source) const
+    { mImpl->predictedMagicSource = source.serializeText(); }
 
     std::optional<MagicUseCapture> DesktopPresentation::captureMagicUse(
         const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const noexcept

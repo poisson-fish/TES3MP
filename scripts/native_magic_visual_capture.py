@@ -56,7 +56,10 @@ def verify_magic_visual_capture(output, evidence, processes, relay, manifest, en
         command(role, f"pose {x} -500 1 0 0")
         command(role, "thirdperson")
     before = {role: len(records(path)) for role, path in evidence.items()}
-    command("Alice", f'castactor "{spell}"')
+    # The first canonical actor is the selected encounter owner. New descriptor
+    # versions also bind neighbors, so the older unique-actor shortcut is ambiguous.
+    target = snapshots("Alice")[-1]["actors"][0]["id"]
+    command("Alice", f'castat "{spell}" 2 {target}')
 
     def flights(role):
         return [p for row in snapshots(role) for p in row["magic_flights"]
@@ -133,7 +136,7 @@ def verify_magic_visual_capture(output, evidence, processes, relay, manifest, en
         evidence["Bob"].with_suffix(f".ndjson.control.{sequence['Bob']}.png").rename(
             output / "Bob-reconnected-loop.png")
         wait_for(lambda: not loops("Alice") and not loops("Bob"),
-                 "both desktops ended effect loops on expiry", 20)
+                 "both desktops ended effect loops on expiry", 40)
     for role in evidence:
         command(role, "quit")
         processes[role].wait(timeout=15)

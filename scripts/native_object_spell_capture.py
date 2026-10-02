@@ -64,6 +64,16 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
     def samples(role):
         return rows(role, "native_combat_sample")
 
+    def focus_door():
+        command("Alice", "pose 0 -75 1 0 0")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            focused = command("Alice", "observe")
+            if focused["focus"] == "npc_door":
+                return
+            time.sleep(.2)
+        raise RuntimeError(f"Alice lost the door focus: {focused['focus']!r}")
+
     def spell_events(role, source):
         return [event for sample in samples(role) for event in sample["magic_events"]
                 if event["caster"] == 1 and event["source"] == source and event["success"]]
@@ -90,17 +100,15 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
                       "both desktops received Lock level 50 and contact revision")
     wait_for(lambda: all(len(spell_events(role, lock_id)) == 1 for role in evidence),
              "both desktops received one committed Lock event")
+    wait_for(lambda: samples("Alice")[-1]["magicka"] == initial_magicka - 5,
+             "Alice received the committed Lock cost")
     after_lock_magicka = samples("Alice")[-1]["magicka"]
     if after_lock_magicka != initial_magicka - 5:
         raise RuntimeError(f"Lock spell cost mismatch: {initial_magicka} -> {after_lock_magicka}")
     wait_for(lambda: any(cast["id"] == 1 and cast["cast_phase"] == 0
                          for cast in samples("Alice")[-1]["casts"]),
              "Alice completed Lock recovery")
-    command("Alice", "pose 0 -75 1 0 0")
-    time.sleep(.2)
-    focused = command("Alice", "observe")
-    if focused["focus"] != "npc_door":
-        raise RuntimeError(f"Alice lost the locked door focus: {focused['focus']!r}")
+    focus_door()
     command("Alice", 'activate "npc_door"')
     time.sleep(.75)
     blocked = {role: latest_door(role) for role in evidence}
@@ -114,17 +122,15 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
                         "both desktops received Open level 0 and contact revision")
     wait_for(lambda: all(len(spell_events(role, open_id)) == 1 for role in evidence),
              "both desktops received one committed Open event")
+    wait_for(lambda: samples("Alice")[-1]["magicka"] == initial_magicka - 10,
+             "Alice received the committed Open cost")
     paid_magicka = samples("Alice")[-1]["magicka"]
     if paid_magicka != initial_magicka - 10:
         raise RuntimeError("Open duplicated or missed spell cost")
     wait_for(lambda: any(cast["id"] == 1 and cast["cast_phase"] == 0
                          for cast in samples("Alice")[-1]["casts"]),
              "Alice completed Open recovery")
-    command("Alice", "pose 0 -75 1 0 0")
-    time.sleep(.2)
-    focused = command("Alice", "observe")
-    if focused["focus"] != "npc_door":
-        raise RuntimeError(f"Alice lost the unlocked door focus: {focused['focus']!r}")
+    focus_door()
     command("Alice", 'activate "npc_door"')
     opened = wait_for(lambda: {role: latest_door(role) for role in evidence}
                       if all(latest_door(role) and latest_door(role)["angle"] > baseline[role]["angle"]
@@ -136,6 +142,8 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
     wait_for(lambda: samples("Bob")[-1]["generation"] > generation
              and latest_door("Bob") and latest_door("Bob")["lock"] == 0,
              "Bob reconnected to the current unlocked door")
+    wait_for(lambda: latest_door("Bob")["contact_revision"] == latest_door("Alice")["contact_revision"],
+             "both desktops converged on the moving door contact revision")
     after = {role: latest_door(role) for role in evidence}
     if after["Bob"]["contact_revision"] != after["Alice"]["contact_revision"]:
         raise RuntimeError("Reconnect restored a stale door contact revision")
@@ -151,6 +159,15 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
            if event.get("event") == "native_combat_sample"
            and (event["magic_events"] or event["magic_casts"] or event["magic_impacts"])):
         raise RuntimeError("Reconnect replayed a spell event or cue")
+    presentation = {}
+    for role in evidence:
+        trace = output / (role + ".spell-presentation.ndjson")
+        dispatched = [json.loads(line) for line in trace.read_text().splitlines()]
+        glow = [r for r in dispatched if r["event"] == "object-glow" and r["target"] == "npc_door"]
+        sound = [r for r in dispatched if r["event"] == "object-sound" and r["target"] == "npc_door"]
+        if len(glow) != 2 or len(sound) != 2 or any(r["resource"] != "Open Lock" or not r["attached"] for r in sound):
+            raise RuntimeError(f"{role}: missing or duplicated stock Lock/Open glow or attached audio")
+        presentation[role] = dict(glow=glow, sound=sound)
     for role in evidence:
         command(role, "quit")
         processes[role].wait(timeout=15)
@@ -162,6 +179,7 @@ def verify_object_spell_capture(output, evidence, processes, relay, manifest):
                   unlocked=unlocked, opened=opened, reconnected=after,
                   magicka=[initial_magicka, after_lock_magicka, paid_magicka],
                   cast_cues=cue_commands,
+                  presentation=presentation,
                   relay=asdict(relay.stop()),
                   profile="100 ms one-way, +/-25 ms jitter, 10% loss, periodic 125 ms extra delay")
     output.joinpath("result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

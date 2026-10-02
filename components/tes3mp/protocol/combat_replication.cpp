@@ -360,7 +360,12 @@ namespace TES3MP
             const auto& cue = magicImpactCues[i];
             if (!cue.caster || !cue.casterLife || !cue.command
                 || (cue.casterKind != 1 && cue.casterKind != 2) || cue.sourceKind > 1 || cue.range > 3
-                || cue.record.empty() || cue.record.size() > 256 || cue.record.find('\0') != std::string::npos)
+                || cue.record.empty() || cue.record.size() > 256 || cue.record.find('\0') != std::string::npos
+                || cue.objectSound > 2 || (cue.objectSound && (cue.presentation != 1 || cue.targetKind < 3))
+                || cue.presentation > 3 || cue.outcome > 5 || cue.school > 5 || cue.ordinal >= 8
+                || (cue.presentation == 1 && (cue.targetKind < 1 || cue.targetKind > 4 || !cue.target || !cue.targetLife || cue.range > 2))
+                || (cue.presentation != 1 && (cue.targetKind || cue.target || cue.targetLife || cue.outcome || cue.ordinal))
+                || ((cue.presentation == 2 || cue.presentation == 3) && cue.range != 3))
                 return error(Code::InvalidIdentifier, 0, 0, i);
             for (const float v : cue.position)
                 if (!std::isfinite(v) || std::abs(v) > 1e7f)
@@ -493,7 +498,8 @@ namespace TES3MP
         for (const auto& cue : input.magicImpactCues())
             magicImpactCues.push_back(Event::CreateMagicImpactCue(builder, cue.casterKind, cue.sourceKind,
                 cue.caster, cue.casterLife, cue.command, builder.CreateString(cue.record),
-                cue.position[0], cue.position[1], cue.position[2], cue.range));
+                cue.position[0], cue.position[1], cue.position[2], cue.range, cue.presentation, cue.targetKind,
+                cue.outcome, cue.school, cue.target, cue.targetLife, cue.ordinal, cue.actorHit, cue.fromProjectile, cue.objectSound));
         const auto root = Event::CreateReliableCombatEventBatch(builder, header, builder.CreateVectorOfStructs(events),
             builder.CreateVectorOfStructs(actorEvents), builder.CreateVectorOfStructs(magicEvents),
             builder.CreateVectorOfStructs(magicEffectEvents), builder.CreateVector(magicImpactCues));
@@ -753,7 +759,7 @@ namespace TES3MP
         const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
         if (!Event::SizePrefixedReliableCombatEventBatchBufferHasIdentifier(bytes))
             return error(Code::InvalidIdentifier);
-        auto checked = verifier(payload, ReliableOperationMaximumPayloadBytes);
+        auto checked = verifier(payload, ReliableOperationMaximumPayloadBytes, 2 + MaximumReplicatedMagicImpactCues);
         if (!Event::VerifySizePrefixedReliableCombatEventBatchBuffer(checked))
             return error(Code::VerificationFailed);
         const auto* root = Event::GetSizePrefixedReliableCombatEventBatch(bytes);
@@ -903,7 +909,9 @@ namespace TES3MP
             if (!cue || !cue->record() || cue->record()->size() > 256)
                 return error(Code::InvalidIdentifier, 0, 256, i);
             magicImpactCues.push_back({cue->caster_kind(), cue->source_kind(), cue->caster(), cue->caster_life(),
-                cue->command(), cue->record()->str(), {cue->x(), cue->y(), cue->z()}, cue->range()});
+                cue->command(), cue->record()->str(), {cue->x(), cue->y(), cue->z()}, cue->range(),
+                cue->presentation(), cue->target_kind(), cue->outcome(), cue->school(),
+                cue->target(), cue->target_life(), cue->ordinal(), cue->actor_hit(), cue->from_projectile(), cue->object_sound()});
         }
         return ReliableCombatEventBatch::create(
             *value(session), *value(generation), *value(tick), *value(canonical), events, actorEvents, magicEvents,

@@ -5,16 +5,50 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/statemanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwbase/windowmanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
+#include "../mwmechanics/spellcasting.hpp"
+#include "../mwworld/esmstore.hpp"
+#include <components/esm3/loadspel.hpp>
+#include <cstdlib>
+#include <cstring>
 
 #include <components/debug/debuglog.hpp>
 
 #include <limits>
+#include <iomanip>
 #include <ranges>
 #include <thread>
 #include <osgDB/WriteFile>
 
 namespace TES3MP::OpenMWAdapter
 {
+    void requestStockSpellPresentationCast(float frameTime)
+    {
+        // In-scene stock resolver reference with an explicit target. Normal
+        // protection semantics apply; the script Cast opcode bypasses reflection.
+        static bool submitted = false;
+        static float elapsed = 0.f;
+        const char* source = std::getenv("TES3MP_STOCK_SPELL_PRESENTATION_CAST");
+        if (submitted || !source || !*source || std::strlen(source) > 64) return;
+        elapsed += frameTime;
+        if (elapsed < 1.f) return; // Let stock scene/controller initialization settle.
+        auto world = MWBase::Environment::get().getWorld();
+        auto caster = world->searchPtr(ESM::RefId::stringRefId("npc_witness_alarm"), true, false);
+        auto target = world->searchPtr(ESM::RefId::stringRefId("npc_door_actor"), true, false);
+        if (caster.isEmpty() || target.isEmpty()) return;
+        const auto* spell = world->getStore().get<ESM::Spell>().search(ESM::RefId::stringRefId(source));
+        if (!spell) { submitted = true; return; }
+        auto mechanics = MWBase::Environment::get().getMechanicsManager();
+        if (mechanics->isAIActive()) mechanics->toggleAI();
+        MWMechanics::CastSpell cast(caster, target);
+        cast.mHitPosition = target.getRefData().getPosition().asVec3();
+        cast.playSpellCastingEffects(spell);
+        cast.playSpellCastingHands(spell->mEffects.mList);
+        cast.cast(spell);
+        Log(Debug::Info) << "Stock spell comparison requested: " << source;
+        submitted = true;
+    }
     namespace
     {
         CellId firstCell(const ContentManifest& manifest, CellId::Kind kind)
@@ -756,6 +790,7 @@ namespace TES3MP::OpenMWAdapter
             const auto previousPlayerCount = mNativePlayerCount;
             const auto previousContainerCount = mNativeContainerCount;
             const auto previousContainerContact = mNativeContainerContact;
+            const auto previousInventoryRevision = mNativeRevision;
             if (mRole == DesktopAutomationRole::NativeTraversal)
             {
                 mTraversalGround = groundItems;
@@ -788,7 +823,7 @@ namespace TES3MP::OpenMWAdapter
                 mNativeInventoryAfterResume = true;
             if (mRole == DesktopAutomationRole::NativeTraversal
                 && (mNativePlayerCount != previousPlayerCount || mNativeContainerCount != previousContainerCount
-                    || mNativeContainerContact != previousContainerContact))
+                    || mNativeContainerContact != previousContainerContact || mNativeRevision != previousInventoryRevision))
                 writeNativeInventory("traversal_inventory");
             return applied;
         }
@@ -928,7 +963,8 @@ namespace TES3MP::OpenMWAdapter
             {
                 if (!first) mOutput << ',';
                 first = false;
-                mOutput << "{\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id << ",\"effects\":[";
+                mOutput << "{\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id
+                    << ",\"telekinesis\":" << pose.telekinesis << ",\"effects\":[";
                 for (size_t i = 0; i < pose.visibility.size(); ++i)
                 {
                     if (i) mOutput << ',';
@@ -1029,7 +1065,7 @@ namespace TES3MP::OpenMWAdapter
             first = true;
             for (const auto& batch : events)
                 for (const auto& cue : batch.magicImpactCues())
-                    if (cue.range == 3)
+                    if (cue.range == 3 && cue.presentation != 2)
                     {
                         if (!first) mOutput << ',';
                         first = false;
@@ -1041,13 +1077,26 @@ namespace TES3MP::OpenMWAdapter
             for (const auto& batch : events)
                 for (const auto& cue : batch.magicImpactCues())
                 {
-                    if (cue.range == 3) continue;
+                    if (cue.range == 3 || cue.presentation != 0) continue;
                     if (!first) mOutput << ',';
                     first = false;
                     mOutput << "{\"kind\":" << unsigned(cue.casterKind) << ",\"caster\":" << cue.caster
                         << ",\"life\":" << cue.casterLife << ",\"command\":" << cue.command
                         << ",\"range\":" << unsigned(cue.range) << ",\"position\":["
                         << cue.position[0] << ',' << cue.position[1] << ',' << cue.position[2] << "]}";
+                }
+            mOutput << "],\"spell_applications\":[";
+            first = true;
+            for (const auto& batch : events)
+                for (const auto& cue : batch.magicImpactCues())
+                {
+                    if (!cue.presentation) continue;
+                    if (!first) mOutput << ',';
+                    first = false;
+                    mOutput << "{\"kind\":" << unsigned(cue.presentation) << ",\"source\":" << std::quoted(cue.record)
+                        << ",\"caster\":" << cue.caster << ",\"target\":" << cue.target
+                        << ",\"target_kind\":" << unsigned(cue.targetKind) << ",\"target_life\":" << cue.targetLife
+                        << ",\"ordinal\":" << cue.ordinal << ",\"outcome\":" << unsigned(cue.outcome) << '}';
                 }
             mOutput << "]}\n";
             mOutput.flush();

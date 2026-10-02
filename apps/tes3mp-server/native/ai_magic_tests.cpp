@@ -958,6 +958,112 @@ namespace
         require(ignored && ignored->effects.front().mRange == ESM::RT_Target
             && !preparePassiveActorEffects(ability, store, true, true, true, false, true),
             "Stock ignored Target ability changed legacy range admission");
+        for (const auto effect : {ESM::MagicEffect::DrainAttribute, ESM::MagicEffect::DrainSkill,
+                ESM::MagicEffect::Blind, ESM::MagicEffect::Paralyze, ESM::MagicEffect::Silence,
+                ESM::MagicEffect::Sound, ESM::MagicEffect::DamageHealth, ESM::MagicEffect::FireDamage})
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mFlags = ESM::MagicEffect::Harmful;
+            if (effect == ESM::MagicEffect::Paralyze || effect == ESM::MagicEffect::Silence)
+                record.mData.mFlags |= ESM::MagicEffect::NoMagnitude;
+            store.overrideRecord(record);
+            ESM::ENAMstruct entry{effect, {}, {}, ESM::RT_Self, 0, 0, 0, 10};
+            if (effect == ESM::MagicEffect::DrainAttribute) entry.mAttribute = ESM::Attribute::Willpower;
+            if (effect == ESM::MagicEffect::DrainSkill) entry.mSkill = ESM::Skill::Alteration;
+            ability.mEffects.populate({entry});
+            constant.mId = id("harmful_constant_" + effect.toDebugString()); constant.mEffects = ability.mEffects;
+            store.insertStatic(constant);
+            require(preparePassiveActorEffects(ability, store, true, true, true, true, true)
+                && prepareConstantEffects(constant.mId, store, true, false, true, true, true, true, true),
+                "Supported passive consumer rejected harmful or zero-magnitude source");
+        }
+    }
+
+    void passiveStatRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        setting(store, "fNPCbaseMagickaMult", 1.f);
+        const std::array family{ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
+            ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::DrainHealth,
+            ESM::MagicEffect::DrainMagicka, ESM::MagicEffect::DrainFatigue, ESM::MagicEffect::StuntedMagicka,
+            ESM::MagicEffect::DisintegrateWeapon, ESM::MagicEffect::DisintegrateArmor};
+        for (const auto effect : family)
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            record.mData.mFlags = ESM::MagicEffect::Harmful;
+            if (effect == ESM::MagicEffect::StuntedMagicka)
+                record.mData.mFlags |= ESM::MagicEffect::NoMagnitude;
+            store.overrideRecord(record);
+            ESM::ENAMstruct entry{effect, {}, {}, ESM::RT_Self, 7, 9, 2, 2};
+            if (effect == ESM::MagicEffect::DamageAttribute || effect == ESM::MagicEffect::RestoreAttribute)
+                entry.mAttribute = ESM::Attribute::Willpower;
+            if (effect == ESM::MagicEffect::DamageSkill || effect == ESM::MagicEffect::RestoreSkill)
+                entry.mSkill = ESM::Skill::Alteration;
+            ESM::Spell ability; ability.blank(); ability.mData.mType = ESM::Spell::ST_Ability;
+            ability.mEffects.populate({entry});
+            ESM::Enchantment constant; constant.blank(); constant.mId = id("passive_stat_" + effect.toDebugString());
+            constant.mData.mType = ESM::Enchantment::ConstantEffect; constant.mEffects = ability.mEffects;
+            store.insertStatic(constant);
+            const auto plan = preparePassiveActorEffects(ability, store, true, true, true, true, true);
+            require(plan && plan->effects.front().mArea == 0 && plan->effects.front().mDuration == 0
+                && prepareConstantEffects(constant.mId, store, true, false, true, true, true, true, true)
+                && !prepareConstantEffects(constant.mId, store, false, false, true, true, true, true, true),
+                "Passive stat/wear family admission or normalization changed");
+            ability.mEffects.mList.front().mData.mMagnMax = 1001;
+            require(!preparePassiveActorEffects(ability, store, true, true, true, true, true),
+                "Passive stat family bypassed magnitude bounds");
+            ability.mEffects.mList.front().mData = entry;
+            if (!entry.mAttribute.empty()) ability.mEffects.mList.front().mData.mAttribute = {};
+            else if (!entry.mSkill.empty()) ability.mEffects.mList.front().mData.mSkill = {};
+            else ability.mEffects.mList.front().mData.mAttribute = ESM::Attribute::Luck;
+            require(!preparePassiveActorEffects(ability, store, true, true, true, true, true),
+                "Passive stat family bypassed argument validation");
+        }
+        MWMechanics::NpcStats ability(store), constant(store); initialize(ability); initialize(constant);
+        ESM::ENAMstruct entry{ESM::MagicEffect::DamageSkill, ESM::Skill::Alteration, {}, ESM::RT_Self, 0, 0, 2, 2};
+        applyPermanentStatEffect(ability, entry, 2, store, true);
+        applyPermanentStatEffect(constant, entry, 2, store);
+        near(ability.getSkill(entry.mSkill).getBase(), constant.getSkill(entry.mSkill).getBase() - 2,
+            "Ability Damage Skill did not share the stock base-value rule");
+        near(ability.getSkill(entry.mSkill).getDamage(), 0, "Ability Damage Skill added temporary damage");
+        entry.mEffectID = ESM::MagicEffect::RestoreSkill;
+        applyPermanentStatEffect(constant, entry, 1000, store);
+        near(constant.getSkill(entry.mSkill).getDamage(), 0, "Passive Restore Skill exceeded its damage floor");
+        entry.mEffectID = ESM::MagicEffect::DamageAttribute; entry.mSkill = {}; entry.mAttribute = ESM::Attribute::Willpower;
+        applyPermanentStatEffect(constant, entry, 2, store);
+        entry.mEffectID = ESM::MagicEffect::RestoreAttribute;
+        applyPermanentStatEffect(constant, entry, 1000, store);
+        near(constant.getAttribute(entry.mAttribute).getDamage(), 0, "Passive Restore Attribute exceeded its damage floor");
+    }
+
+    void passiveSelfRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        // All built-in IDs must have a connected passive handler, including ignored actor object effects.
+        for (int index = 0; index < ESM::MagicEffect::Length; ++index)
+        {
+            const auto id = ESM::MagicEffect::indexToRefId(index);
+            ESM::MagicEffect magic; magic.blank(); magic.mId = id;
+            const bool attribute = id == ESM::MagicEffect::FortifyAttribute || id == ESM::MagicEffect::DrainAttribute
+                || id == ESM::MagicEffect::DamageAttribute || id == ESM::MagicEffect::RestoreAttribute || id == ESM::MagicEffect::AbsorbAttribute;
+            const bool skill = id == ESM::MagicEffect::FortifySkill || id == ESM::MagicEffect::DrainSkill
+                || id == ESM::MagicEffect::DamageSkill || id == ESM::MagicEffect::RestoreSkill || id == ESM::MagicEffect::AbsorbSkill;
+            magic.mData.mFlags = (attribute ? ESM::MagicEffect::TargetAttribute : 0) | (skill ? ESM::MagicEffect::TargetSkill : 0);
+            store.overrideRecord(magic);
+            ESM::ENAMstruct entry{id, skill ? ESM::Skill::Alteration : ESM::RefId{},
+                attribute ? ESM::Attribute::Willpower : ESM::RefId{}, ESM::RT_Self, 7, 9, 2, 2};
+            ESM::Spell ability; ability.blank(); ability.mData.mType = ESM::Spell::ST_Ability;
+            ability.mEffects.populate({entry});
+            ESM::Enchantment constant; constant.blank(); constant.mId = ESM::RefId::stringRefId("passive_all_" + std::to_string(index));
+            constant.mData.mType = ESM::Enchantment::ConstantEffect; constant.mEffects = ability.mEffects; store.insertStatic(constant);
+            const auto prepared = preparePassiveActorEffects(ability, store, true, true, true, true, true, true);
+            const auto equipped = prepareConstantEffects(constant.mId, store, true, true, true, true, true, true, true, true);
+            require(prepared && equipped && prepared->effects.front().mEffectID == id
+                && prepared->effects.front().mDuration == 0 && prepared->effects.front().mArea == 0,
+                ("Passive built-in has no handler: " + id.toDebugString()).c_str());
+            ability.mEffects.mList.front().mData.mMagnMax = 1001;
+            require(!preparePassiveActorEffects(ability, store, true, true, true, true, true, true), "Passive bounds bypassed");
+        }
     }
 
     void records(const char* directory)
@@ -1017,6 +1123,8 @@ int main(int argc, char** argv)
         const std::string_view filter = argv[1];
         if (filter == "awareness-rules") awarenessRules();
         else if (filter == "mixed-passive-rules") mixedPassiveRules();
+        else if (filter == "passive-stat-rules") passiveStatRules();
+        else if (filter == "passive-self-rules") passiveSelfRules();
         else if (filter == "condition-rules") conditionRules();
         else if (filter == "ai-disposition-rules") aiDispositionRules();
         else if (filter == "effect-family-rules") effectFamilyRules();

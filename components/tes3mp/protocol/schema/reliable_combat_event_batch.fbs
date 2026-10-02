@@ -108,6 +108,16 @@ table MagicImpactCue {
   y:float;
   z:float;
   range:ubyte = 2; // 0..2 hit range; 3 committed cast.
+  presentation:ubyte;
+  target_kind:ubyte;
+  outcome:ubyte;
+  school:ubyte;
+  target:ulong;
+  target_life:ulong;
+  ordinal:ushort;
+  actor_hit:bool;
+  from_projectile:bool;
+  object_sound:ubyte;
 }
 
 table ReliableCombatEventBatch {

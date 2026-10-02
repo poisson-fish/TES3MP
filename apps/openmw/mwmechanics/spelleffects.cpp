@@ -272,14 +272,7 @@ namespace
         const MWWorld::Ptr& target)
     {
         const auto& esmStore = *MWBase::Environment::get().getESMStore();
-        const ESM::Static* absorbStatic = esmStore.get<ESM::Static>().find(ESM::RefId::stringRefId("VFX_Absorb"));
-        MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(target);
-        if (animation && !absorbStatic->mModel.empty())
-        {
-            const VFS::Path::Normalized absorbStaticModel
-                = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(absorbStatic->mModel));
-            animation->addEffect(absorbStaticModel.value(), ESM::MagicEffect::SpellAbsorption.getValue(), false);
-        }
+        MWMechanics::playSpellProtection(target, false);
 
         int spellCost = 0;
         if (const ESM::Spell* spell = esmStore.get<ESM::Spell>().search(spellParams.getSourceSpellId()))
@@ -400,9 +393,14 @@ namespace MWMechanics
             baseMagickaMultiplier);
     }
 
-    void applySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude)
+    void applySkillDamage(NpcStats& stats, ESM::RefId skill, float magnitude, bool affectsBase)
     {
-        modifySkillDamage(stats, skill, std::min(stats.getSkill(skill).getModified(), magnitude));
+        if (affectsBase)
+        {
+            auto& value = stats.getSkill(skill);
+            value.setBase(std::max(value.getBase() - magnitude, 0.f));
+        }
+        else modifySkillDamage(stats, skill, std::min(stats.getSkill(skill).getModified(), magnitude));
     }
     EffectProtection rollEffectProtection(ESM::RefId defense, float magnitude,
         bool canReflect, bool canAbsorb, Misc::Rng::Generator& rng)
@@ -728,12 +726,8 @@ namespace MWMechanics
                 {
                     // Damage Skill abilities reduce base skill :todd:
                     if (spellParams.hasFlag(ESM::ActiveSpells::Flag_AffectsBaseValues))
-                    {
-                        auto& npcStats = target.getClass().getNpcStats(target);
-                        SkillValue& skill = npcStats.getSkill(effect.getSkillOrAttribute());
-                        // Damage Skill abilities reduce base skill :todd:
-                        skill.setBase(std::max(skill.getBase() - effect.mMagnitude, 0.f));
-                    }
+                        MWMechanics::applySkillDamage(target.getClass().getNpcStats(target),
+                            effect.getSkillOrAttribute(), effect.mMagnitude, true);
                     else
                         damageSkill(target, effect, effect.mMagnitude);
                 }
@@ -1229,14 +1223,11 @@ namespace MWMechanics
         {
             if (target.getClass().canLock(target))
             {
-                MWRender::Animation* animation = world->getAnimation(target);
-                if (animation)
-                    animation->addSpellCastGlow(magicEffect->getColor());
+                playSpellObjectGlow(target, *magicEffect);
                 int magnitude = static_cast<int>(roll(effect));
                 if (MWMechanics::lockRaisesLevel(target.getCellRef().getLockLevel(), magnitude)) // If the door is not already locked to a higher value, lock it to spell magnitude
                 {
-                    MWBase::Environment::get().getSoundManager()->playSound3D(
-                        target, ESM::RefId::stringRefId("Open Lock"), 1.f, 1.f);
+                    playSpellObjectSound(target, true);
 
                     if (caster == getPlayer())
                         MWBase::Environment::get().getWindowManager()->messageBox("#{sMagicLockSuccess}");
@@ -1253,16 +1244,13 @@ namespace MWMechanics
                 // Use the player instead of the caster for vanilla crime compatibility
                 MWBase::Environment::get().getMechanicsManager()->unlockAttempted(getPlayer(), target);
 
-                MWRender::Animation* animation = world->getAnimation(target);
-                if (animation)
-                    animation->addSpellCastGlow(magicEffect->getColor());
+                playSpellObjectGlow(target, *magicEffect);
                 int magnitude = static_cast<int>(roll(effect));
                 if (MWMechanics::openReachesLevel(target.getCellRef().getLockLevel(), magnitude))
                 {
                     if (target.getCellRef().isLocked())
                     {
-                        MWBase::Environment::get().getSoundManager()->playSound3D(
-                            target, ESM::RefId::stringRefId("Open Lock"), 1.f, 1.f);
+                        playSpellObjectSound(target, true);
 
                         if (caster == getPlayer())
                             MWBase::Environment::get().getWindowManager()->messageBox("#{sMagicOpenSuccess}");
@@ -1271,8 +1259,7 @@ namespace MWMechanics
                 }
                 else
                 {
-                    MWBase::Environment::get().getSoundManager()->playSound3D(
-                        target, ESM::RefId::stringRefId("Open Lock Fail"), 1.f, 1.f);
+                    playSpellObjectSound(target, false);
                 }
             }
             else

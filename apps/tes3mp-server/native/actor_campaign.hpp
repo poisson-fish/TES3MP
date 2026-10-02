@@ -62,6 +62,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t SummonsActorSetMagic = 0x6350434154335354;
     inline constexpr uint64_t PlayerLivesCampaignMagic = 0x6450434154335354;
     inline constexpr uint64_t BodyCampaignMagic = 0x6550434154335354;
+    inline constexpr uint64_t PassiveCampaignMagic = 0x6750434154335354;
     inline constexpr uint64_t PowerCampaignMagic = 0x6650434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
     inline constexpr bool hasObjectTravel(uint64_t magic)
@@ -238,6 +239,20 @@ namespace TES3MP::Native
         uint64_t powerClockMs = 0;
         static constexpr size_t MaximumPowerUses = 1024;
         std::vector<PowerUse> powers;
+        bool passiveSelf = false;
+        struct PassiveCorprus
+        {
+            uint64_t actor = 0, source = 0, kind = 0;
+            uint64_t nextMs = 0, observedMs = 0, worsenings = 0;
+            bool operator==(const PassiveCorprus&) const = default;
+        };
+        std::vector<PassiveCorprus> passiveCorprus;
+        struct PassiveApplication
+        {
+            uint64_t actor = 0, source = 0, kind = 0, ordinal = 0, startTick = 0;
+            bool operator==(const PassiveApplication&) const = default;
+        };
+        std::vector<PassiveApplication> passiveApplications;
         struct ConditionSource
         {
             uint64_t actor = 0, source = 0;
@@ -360,6 +375,50 @@ namespace TES3MP::Native
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == PassiveCampaignMagic)
+        {
+            if (playerLives || dynamicDomain) throw std::invalid_argument("Nested passive envelope");
+            const auto count = getAreaWord(bytes, offset);
+            if (count > MaximumActorTimedEffects || count > (bytes.size() - offset) / 48)
+                throw std::invalid_argument("Native passive clock count invalid");
+            std::vector<ActorCampaignCombat::PassiveCorprus> clocks;
+            for (size_t i = 0; i < count; ++i)
+            {
+                ActorCampaignCombat::PassiveCorprus clock{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
+                    getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (!clock.source || (clock.kind != 3 && clock.kind != 5) || clock.worsenings > 100000
+                    || (clock.nextMs && (clock.nextMs <= clock.observedMs || clock.nextMs - clock.observedMs > 86400000))
+                    || std::ranges::any_of(clocks, [&](const auto& old) {
+                        return old.actor == clock.actor && old.source == clock.source && old.kind == clock.kind;
+                    })) throw std::invalid_argument("Native passive clock invalid");
+                clocks.push_back(clock);
+            }
+            const auto applicationsCount = getAreaWord(bytes, offset);
+            if (applicationsCount > MaximumActorTimedEffects || applicationsCount > (bytes.size() - offset) / 40)
+                throw std::invalid_argument("Native passive application count invalid");
+            std::vector<ActorCampaignCombat::PassiveApplication> applications;
+            for (size_t i = 0; i < applicationsCount; ++i)
+            {
+                ActorCampaignCombat::PassiveApplication application{getAreaWord(bytes, offset), getAreaWord(bytes, offset),
+                    getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (!application.source || (application.kind != 3 && application.kind != 5) || application.ordinal >= 8
+                    || std::ranges::find(applications, application) != applications.end())
+                    throw std::invalid_argument("Native passive application invalid");
+                applications.push_back(application);
+            }
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != PowerCampaignMagic) throw std::invalid_argument("Passives require power campaign");
+            auto result = readActorCampaign(bytes.subspan(offset));
+            for (const auto& clock : clocks)
+                if (clock.actor >= result.combat->actors.size()) throw std::invalid_argument("Native passive clock actor invalid");
+            for (const auto& application : applications)
+                if (application.actor >= result.combat->actors.size() || application.startTick > result.tick)
+                    throw std::invalid_argument("Native passive application actor or tick invalid");
+            result.combat->passiveSelf = true;
+            result.combat->passiveApplications = std::move(applications);
+            result.combat->passiveCorprus = std::move(clocks);
+            return result;
+        }
         if (magic == PowerCampaignMagic)
         {
             if (playerLives || dynamicDomain) throw std::invalid_argument("Nested power envelope");

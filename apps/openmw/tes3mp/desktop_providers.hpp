@@ -178,6 +178,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;
         std::optional<MeleeAttackCapture> captureRangedAttack(float attackStrength) const noexcept;
+        void predictMagicCast(const ESM::RefId& source) const;
         std::optional<MagicUseCapture> captureMagicUse(
             const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const noexcept;
         std::optional<ObjectInteractionCapture> captureSecurityAttempt(
