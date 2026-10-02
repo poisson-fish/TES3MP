@@ -56,6 +56,13 @@ KF phases and effects together; inactive areas pause, launch revalidates.
 combat. Rolls persist while equipped; replacement and respawn install new sources.
 Recovery validates them without rolling. Modifiers overlay detached stats.
 
+**Connected consumers.** Stock awareness receives explicit canonical sneak/facing
+context. Life-bound jump controls, inertia and accumulated falling persist in
+movement-enabled scene image 3; landing damage/death retains the grounded frame.
+Changed resource binding requires fresh campaigns. Abilities/constants share
+ordered source preparation, stat arguments and retained rolls; suppressing
+Invisibility preserves other ordinals. General script execution remains M5.
+
 **Combat latency.** Predict swing/cast presentation; the server owns consequences.
 Use server-time contacts pending measurements. Replicate reliable action/life
 events and latest-wins motion. V31 uses a 32-unit sphere until shared hulls bind.

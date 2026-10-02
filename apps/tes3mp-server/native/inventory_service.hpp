@@ -146,6 +146,7 @@ namespace TES3MP::Native
             CellId cell;
             Position3 position;
             ESM::RefId base;
+            float yaw = 0;
         };
         std::vector<CrimeWitness> mCrimeWitnesses; // Content placements; V60 moves the first neighbor too.
         std::array<BoundCastAnimations, 2> mPlayerCasts;
@@ -359,6 +360,7 @@ namespace TES3MP::Native
         struct MovementRuleScriptRequest
         {
             ESM::RefId script;
+            uint64_t actor = 0, life = 0; // Explicit matching life for actor controls; zero retains world rules only.
         };
         // Trusted gameplay results. The caller has already established script or
         // crime authority; no packet decoder may construct these actions.

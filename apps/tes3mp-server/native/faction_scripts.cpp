@@ -115,7 +115,7 @@ namespace TES3MP::Native
     }
 
     MovementRuleState runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& scriptId,
-        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules)
+        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules, bool allowActorControls)
     {
         if (scriptId.empty() || scriptId.serializeText().size() > 256 || actor.isEmpty())
             throw std::invalid_argument("Movement rule script context incomplete");
@@ -129,6 +129,13 @@ namespace TES3MP::Native
         {
             extensions.registerInstruction("disableteleporting", "", Compiler::Misc::opcodeDisableTeleporting);
             extensions.registerInstruction("enableteleporting", "", Compiler::Misc::opcodeEnableTeleporting);
+        }
+        if (allowActorControls)
+        {
+            extensions.registerInstruction("forcejump", "", Compiler::Control::opcodeForceJump);
+            extensions.registerInstruction("clearforcejump", "", Compiler::Control::opcodeClearForceJump);
+            extensions.registerInstruction("forcemovejump", "", Compiler::Control::opcodeForceMoveJump);
+            extensions.registerInstruction("clearforcemovejump", "", Compiler::Control::opcodeClearForceMoveJump);
         }
         FactionCompilerContext compilerContext;
         compilerContext.setExtensions(&extensions);
@@ -151,6 +158,13 @@ namespace TES3MP::Native
         {
             interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeDisableTeleporting, result.teleportingEnabled, false);
             interpreter.installSegment5<SetWorldRule>(Compiler::Misc::opcodeEnableTeleporting, result.teleportingEnabled, true);
+        }
+        if (allowActorControls)
+        {
+            interpreter.installSegment5<SetWorldRule>(Compiler::Control::opcodeForceJump, result.forceJump, true);
+            interpreter.installSegment5<SetWorldRule>(Compiler::Control::opcodeClearForceJump, result.forceJump, false);
+            interpreter.installSegment5<SetWorldRule>(Compiler::Control::opcodeForceMoveJump, result.forceMoveJump, true);
+            interpreter.installSegment5<SetWorldRule>(Compiler::Control::opcodeClearForceMoveJump, result.forceMoveJump, false);
         }
         interpreter.run(program, context, 256);
         return result;

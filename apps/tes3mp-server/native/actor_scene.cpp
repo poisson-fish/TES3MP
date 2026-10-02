@@ -1,3 +1,4 @@
+#include <apps/openmw/mwmechanics/jump.hpp>
 #include "actor_scene.hpp"
 #include "stock_actor_script.hpp"
 #include <components/sceneutil/animationkeys.hpp>
@@ -221,6 +222,8 @@ namespace TES3MP::Native
             Misc::Rng::Generator random;
             float breath = -1.f;
             bool drowning = false;
+            uint8_t jumpFlags = 0;
+            float fallHeight = 0, landingFall = 0;
         } mTravel;
         // Derived cache only. A rejected candidate may warm it; every query
         // synchronizes it to its own complete angle image before using it.
@@ -271,11 +274,42 @@ namespace TES3MP::Native
             return movement.walkSpeed;
         }
 
-        float jumpVelocity(const MWPhysics::ActorFrameData& frame, const ActorMovement& movement) const
+        void validateMovement(const ActorMovement& movement) const
         {
-            return movement.enabled && movement.jumpRequested && frame.mIsOnGround
-                && !movement.levitating && frame.mPosition.z() >= frame.mSwimLevel
-                ? movement.jumpSpeed : 0.f;
+            const auto speed = [](float value) { return std::isfinite(value) && value >= 0.f && value <= 4096.f; };
+            const auto fraction = [](float value) { return std::isfinite(value) && value >= 0.f && value <= 1.f; };
+            if (!speed(movement.walkSpeed) || (movement.enabled && (!speed(movement.swimSpeed)
+                    || !speed(movement.flySpeed) || !speed(movement.jumpSpeed)
+                    || !fraction(movement.slowFall) || !fraction(movement.airControl))))
+                throw std::invalid_argument("Actor movement outside bounds");
+        }
+
+        void move(MWPhysics::ActorFrameData& frame, std::vector<uint64_t>& contacts,
+            const osg::Vec3f& velocity, const ActorMovement& movement, Travel& travel)
+        {
+            const bool wasGrounded = frame.mIsOnGround;
+            const float oldHeight = frame.mPosition.z();
+            const bool swimming = frame.mPosition.z() < frame.mSwimLevel;
+            const bool requested = movement.jumpRequested || MWMechanics::forceJumpRequested(
+                travel.jumpFlags & 1, travel.jumpFlags & 2, velocity.x() != 0.f || velocity.y() != 0.f,
+                wasGrounded, swimming, frame.mFlying);
+            const auto input = movement.enabled ? MWMechanics::jumpMovement(velocity, movement.jumpSpeed,
+                requested, wasGrounded, swimming, frame.mFlying, false, movement.airControl) : velocity;
+            simulate(frame, contacts, {input.x(), input.y(), input.z()});
+            if (!movement.enabled) return;
+            // Stock MTPhysics resets fall height in water/flight/SlowFall; otherwise
+            // descending physics contributes until CharacterController lands.
+            if ((wasGrounded && frame.mIsOnGround) || frame.mFlying
+                || frame.mPosition.z() < frame.mSwimLevel || frame.mSlowFall < 1.f)
+                travel.fallHeight = 0.f;
+            else if (frame.mPosition.z() < oldHeight) travel.fallHeight += oldHeight - frame.mPosition.z();
+            if (!std::isfinite(travel.fallHeight) || travel.fallHeight > 1e7f)
+                throw std::invalid_argument("Actor fall height outside bounds");
+            if (!wasGrounded && frame.mIsOnGround)
+            {
+                travel.landingFall += travel.fallHeight;
+                travel.fallHeight = 0.f;
+            }
         }
 
         void updateBreath(const MWPhysics::ActorFrameData& frame, Travel& travel,
@@ -647,15 +681,14 @@ namespace TES3MP::Native
             contacts.swap(effects.mObjects);
         }
         void navigate(MWPhysics::ActorFrameData& frame, MWMechanics::PathFinder& path,
-            std::vector<uint64_t>& contacts, float speed, const ActorMovement& movement)
+            std::vector<uint64_t>& contacts, float speed, const ActorMovement& movement, Travel& travel)
         {
             if (!mNavigator || !std::isfinite(speed) || speed<0 || speed>4096)
                 throw std::invalid_argument("Interior navigation speed outside bounds");
             path.update(frame.mPosition, 8, 8, 0, mAgentBounds,
                 navigationFlags(), *mNavigator);
             if (path.isPathConstructed()) frame.mRotation.y()=path.getZAngleToNext(frame.mPosition.x(), frame.mPosition.y());
-            simulate(frame, contacts, {0, path.isPathConstructed() ? speed : 0,
-                jumpVelocity(frame, movement)});
+            move(frame, contacts, {0, path.isPathConstructed() ? speed : 0, 0}, movement, travel);
         }
         btTransform actorTransform(const MWPhysics::ActorFrameData& frame) const noexcept
         {
@@ -692,7 +725,7 @@ namespace TES3MP::Native
                     : std::atan2(delta.x(), delta.y());
                 frame.mRotation.x() = routed ? path.getXAngleToNext(frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z())
                     : -std::atan2(delta.z(), horizontal);
-                simulate(frame, contacts, {0, delta.length2() > 64.f ? speed : 0.f, 0});
+                move(frame, contacts, {0, delta.length2() > 64.f ? speed : 0.f, 0}, movement, travel);
                 updateBreath(frame, travel, movement);
                 return;
             }
@@ -707,8 +740,7 @@ namespace TES3MP::Native
                     const auto turn = MWMechanics::smoothTurnStep(frame.mRotation.y(), *angle, speed,
                         1.f / 60, mSmoothMovement, osg::DegreesToRadians(5.f));
                     frame.mRotation.y() += turn.mRotation;
-                    simulate(frame, contacts, {0, turn.mComplete ? speed : 0,
-                        jumpVelocity(frame, movement)});
+                    move(frame, contacts, {0, turn.mComplete ? speed : 0, 0}, movement, travel);
                     updateBreath(frame, travel, movement);
                     return;
                 }
@@ -716,14 +748,14 @@ namespace TES3MP::Native
                 travel.avoidance = {};
                 rebuildPath(path, frame.mPosition, travel);
             }
-            navigate(frame, path, contacts, speed, movement);
+            navigate(frame, path, contacts, speed, movement, travel);
             updateBreath(frame, travel, movement);
         }
 
         ActorSceneSnapshot snapshot() const
         {
             return {mActorId, {mActor->mPosition.x(), mActor->mPosition.y(), mActor->mPosition.z()},
-                mActor->mIsOnGround, mContacts, mActor->mRotation.y(), mTravel.drowning};
+                mActor->mIsOnGround, mContacts, mActor->mRotation.y(), mTravel.drowning, mTravel.jumpFlags, 0};
         }
     };
 
@@ -1164,6 +1196,7 @@ namespace TES3MP::Native
     {
         if (!mImpl || mImpl->mNavigator) throw std::logic_error("Actor movement binding must precede navigation");
         mImpl->mWaterNavigation = true;
+        mImpl->mFingerprint += "npc-jump-fall-1\n";
         if (mNeighbor) mNeighbor->enableMovementEffects();
     }
     bool InteriorActorScene::waterWalkingCastable(uint64_t actor) const
@@ -1527,7 +1560,8 @@ namespace TES3MP::Native
     {
         const auto& frame = *mState->frame;
         return {mState->actor, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
-            frame.mIsOnGround, mState->contacts, frame.mRotation.y(), mState->travel.drowning};
+            frame.mIsOnGround, mState->contacts, frame.mRotation.y(), mState->travel.drowning,
+            mState->travel.jumpFlags, mState->travel.landingFall};
     }
     std::optional<ActorSceneSnapshot> InteriorActorScene::Prepared::neighborSnapshot() const
     { return mNeighbor ? std::optional(mNeighbor->snapshot()) : std::nullopt; }
@@ -1618,7 +1652,7 @@ namespace TES3MP::Native
         const auto word = [&](uint64_t value) { putAreaWord(bytes, value); };
         const auto real = [&](float value) { word(std::bit_cast<uint32_t>(value)); };
         const auto vector = [&](const osg::Vec3f& value) { for (int i=0; i<3; ++i) real(value[i]); };
-        word(mAvoidanceEnabled ? 2 : 1); word(mActorId);
+        word(mWaterNavigation ? 3 : mAvoidanceEnabled ? 2 : 1); word(mActorId);
         vector(frame.mPosition); vector(frame.mInertia); vector(frame.mLastStuckPosition);
         real(frame.mRotation.x()); real(frame.mRotation.y()); real(frame.mOldHeight);
         word(frame.mStuckFrames); word(frame.mIsOnGround); word(frame.mIsOnSlope);
@@ -1635,7 +1669,10 @@ namespace TES3MP::Native
             word(travel.avoidance.mDirection);
             word(std::stoull(Misc::Rng::serialize(travel.random)));
         }
-        if (mWaterNavigation) real(travel.breath);
+        if (mWaterNavigation)
+        {
+            real(travel.breath); word(travel.jumpFlags); real(travel.fallHeight);
+        }
         return bytes;
     }
 
@@ -1671,7 +1708,7 @@ namespace TES3MP::Native
         const auto vector = [&]() { const auto x=real(), y=real(), z=real(); return osg::Vec3f(x,y,z); };
         const auto boolean = [&]() { const auto value=word(); if (value>1) throw std::invalid_argument("Invalid actor image boolean"); return bool(value); };
         const auto version = word(), actor = word();
-        if (version != (mImpl->mAvoidanceEnabled ? 2 : 1) || actor != mImpl->mActorId)
+        if (version != (mImpl->mWaterNavigation ? 3 : mImpl->mAvoidanceEnabled ? 2 : 1) || actor != mImpl->mActorId)
             throw std::invalid_argument("Actor image identity mismatch: version=" + std::to_string(version)
                 + " actor=" + std::to_string(actor) + " expected=" + std::to_string(mImpl->mActorId));
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
@@ -1733,15 +1770,18 @@ namespace TES3MP::Native
             travel.avoidance.mDirection = int(direction);
             Misc::Rng::deserialize(std::to_string(random), travel.random);
         }
-        // Earlier V56 images ended after avoidance. Restore those at full
-        // breath, then include the timer on the next committed frame.
-        if (mImpl->mWaterNavigation && offset < bytes.size())
+        if (mImpl->mWaterNavigation)
         {
             travel.breath = real();
             const float hold = mImpl->mStore.get<ESM::GameSetting>().find("fHoldBreathTime")->mValue.getFloat();
             if (!(hold > 0.f) || travel.breath < -1.f || travel.breath > hold)
                 throw std::invalid_argument("Actor breath timer outside stock bounds");
             travel.drowning = false;
+            const auto flags = word();
+            if (flags > 3) throw std::invalid_argument("Actor jump flags outside bounds");
+            travel.jumpFlags = uint8_t(flags);
+            travel.fallHeight = real();
+            if (travel.fallHeight < 0.f) throw std::invalid_argument("Actor fall height outside bounds");
         }
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         auto retained = removed.empty() ? std::vector<char>(bytes.begin(), bytes.end())
@@ -1767,19 +1807,19 @@ namespace TES3MP::Native
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         mImpl->validateDoors(doors);
-        if (!mImpl->mNavigator || !std::isfinite(movement.walkSpeed)
-            || movement.walkSpeed < 0 || movement.walkSpeed > 4096
-            || (movement.enabled && (!std::isfinite(movement.swimSpeed) || movement.swimSpeed < 0
-                || movement.swimSpeed > 4096 || !std::isfinite(movement.flySpeed)
-                || movement.flySpeed < 0 || movement.flySpeed > 4096
-                || !std::isfinite(movement.jumpSpeed) || movement.jumpSpeed < 0
-                || movement.jumpSpeed > 4096 || !std::isfinite(movement.slowFall)
-                || movement.slowFall < 0 || movement.slowFall > 1)))
-            throw std::invalid_argument("Interior navigation speed outside bounds");
+        if (!mImpl->mNavigator) throw std::logic_error("Actor navigation unavailable");
+        mImpl->validateMovement(movement);
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(movement.enabled
             ? mImpl->movementFrame(*mImpl->mActor, movement) : *mImpl->mActor);
         auto path = mImpl->mPath;
         auto travel = mImpl->mTravel;
+        travel.landingFall = 0.f;
+        if (movement.jumpFlags)
+        {
+            if (!mImpl->mWaterNavigation || *movement.jumpFlags > 3)
+                throw std::invalid_argument("Actor jump control outside movement domain");
+            travel.jumpFlags = *movement.jumpFlags;
+        }
         if (destination)
         {
             for (float value : *destination)
@@ -1912,12 +1952,18 @@ namespace TES3MP::Native
         for (float value : enemy)
             if (!std::isfinite(value) || std::abs(value) > 1e7f)
                 throw std::invalid_argument("Flee enemy position outside bounds");
-        if (!movement.enabled || !std::isfinite(movement.walkSpeed)
-            || movement.walkSpeed < 0 || movement.walkSpeed > 4096)
-            throw std::invalid_argument("Flee speed outside bounds");
+        if (!movement.enabled) throw std::invalid_argument("Flee movement disabled");
+        mImpl->validateMovement(movement);
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(mImpl->movementFrame(*mImpl->mActor, movement));
         auto path = mImpl->mPath;
         auto travel = mImpl->mTravel;
+        travel.landingFall = 0.f;
+        if (movement.jumpFlags)
+        {
+            if (!mImpl->mWaterNavigation || *movement.jumpFlags > 3)
+                throw std::invalid_argument("Actor jump control outside movement domain");
+            travel.jumpFlags = *movement.jumpFlags;
+        }
         std::vector<uint64_t> contacts;
         struct RestoreDoors
         {
@@ -1929,7 +1975,7 @@ namespace TES3MP::Native
         {
             frame->mRotation.y() = std::atan2(frame->mPosition.x() - enemy[0],
                 frame->mPosition.y() - enemy[1]);
-            mImpl->simulate(*frame, contacts, {0, mImpl->movementSpeed(*frame, movement), 0});
+            mImpl->move(*frame, contacts, {0, mImpl->movementSpeed(*frame, movement), 0}, movement, travel);
             mImpl->updateBreath(*frame, travel, movement);
         }
         auto bytes = mImpl->encode(*frame, path, contacts, travel);

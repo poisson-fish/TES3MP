@@ -18,6 +18,7 @@
  */
 
 #include "character.hpp"
+#include "jump.hpp"
 
 #include <array>
 #include <optional>
@@ -285,32 +286,11 @@ namespace
         MWBase::World* world = MWBase::Environment::get().getWorld();
         const MWWorld::Store<ESM::GameSetting>& store = world->getStore().get<ESM::GameSetting>();
 
-        const float fallDistanceMin = store.find("fFallDamageDistanceMin")->mValue.getFloat();
-
-        if (fallHeight >= fallDistanceMin)
-        {
-            const float acrobaticsSkill = static_cast<float>(ptr.getClass().getSkill(ptr, ESM::Skill::Acrobatics));
-            const float jumpSpellBonus = ptr.getClass()
-                                             .getCreatureStats(ptr)
-                                             .getMagicEffects()
-                                             .getOrDefault(ESM::MagicEffect::Jump)
-                                             .getMagnitude();
-            const float fallAcroBase = store.find("fFallAcroBase")->mValue.getFloat();
-            const float fallAcroMult = store.find("fFallAcroMult")->mValue.getFloat();
-            const float fallDistanceBase = store.find("fFallDistanceBase")->mValue.getFloat();
-            const float fallDistanceMult = store.find("fFallDistanceMult")->mValue.getFloat();
-
-            float x = fallHeight - fallDistanceMin;
-            x -= (1.5f * acrobaticsSkill) + jumpSpellBonus;
-            x = std::max(0.0f, x);
-
-            float a = fallAcroBase + fallAcroMult * (100 - acrobaticsSkill);
-            x = fallDistanceBase + fallDistanceMult * x;
-            x *= a;
-
-            return x;
-        }
-        return 0.f;
+        return MWMechanics::fallDamage(fallHeight, ptr.getClass().getSkill(ptr, ESM::Skill::Acrobatics),
+            ptr.getClass().getCreatureStats(ptr).getMagicEffects().getOrDefault(ESM::MagicEffect::Jump).getMagnitude(),
+            store.find("fFallDamageDistanceMin")->mValue.getFloat(), store.find("fFallAcroBase")->mValue.getFloat(),
+            store.find("fFallAcroMult")->mValue.getFloat(), store.find("fFallDistanceBase")->mValue.getFloat(),
+            store.find("fFallDistanceMult")->mValue.getFloat());
     }
 
     bool isRealWeapon(int weaponType)
@@ -2011,15 +1991,11 @@ namespace MWMechanics
 
             bool isMoving
                 = (std::abs(movementSettings.mPosition[0]) > .5 || std::abs(movementSettings.mPosition[1]) > .5);
-            if (!inwater && !flying)
-            {
-                // Force Jump
-                if (stats.getMovementFlag(MWMechanics::CreatureStats::Flag_ForceJump))
-                    movementSettings.mPosition[2] = onground ? 1.f : 0.f;
-                // Force Move Jump, only jump if they're otherwise moving
-                if (stats.getMovementFlag(MWMechanics::CreatureStats::Flag_ForceMoveJump) && isMoving)
-                    movementSettings.mPosition[2] = onground ? 1.f : 0.f;
-            }
+            if (!inwater && !flying && (stats.getMovementFlag(CreatureStats::Flag_ForceJump)
+                || (stats.getMovementFlag(CreatureStats::Flag_ForceMoveJump) && isMoving)))
+                movementSettings.mPosition[2] = forceJumpRequested(
+                    stats.getMovementFlag(CreatureStats::Flag_ForceJump),
+                    stats.getMovementFlag(CreatureStats::Flag_ForceMoveJump), isMoving, onground, inwater, flying) ? 1.f : 0.f;
 
             osg::Vec3f rot = cls.getRotationVector(mPtr);
             osg::Vec3f vec(movementSettings.asVec3());
@@ -2213,22 +2189,13 @@ namespace MWMechanics
                     float factor = fJumpMoveBase
                         + fJumpMoveMult * mPtr.getClass().getSkill(mPtr, ESM::Skill::Acrobatics) / 100.f;
                     factor = std::min(1.f, factor);
-                    vec.x() *= factor;
-                    vec.y() *= factor;
-                    vec.z() = 0.0f;
+                    vec = jumpMovement(vec, jumpHeight, false, false, inwater, flying, sneak, factor);
                 }
                 // Started a jump.
                 else if (mJumpState != JumpState_InAir && vec.z() > 0.f)
                 {
                     mInJump = true;
-                    if (vec.x() == 0 && vec.y() == 0)
-                        vec.z() = jumpHeight;
-                    else
-                    {
-                        osg::Vec3f lat(vec.x(), vec.y(), 0.0f);
-                        lat.normalize();
-                        vec = osg::Vec3f(lat.x(), lat.y(), 1.0f) * jumpHeight * 0.707f;
-                    }
+                    vec = jumpMovement(vec, jumpHeight, true, true, inwater, flying, sneak, 1.f);
                 }
             }
 

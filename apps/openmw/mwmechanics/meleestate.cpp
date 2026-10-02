@@ -15,6 +15,31 @@
 
 namespace MWMechanics
 {
+    float awarenessTarget(const MWWorld::ESMStore& store, const CreatureStats& target,
+        const CreatureStats& observer, const AwarenessContext& context)
+    {
+        const auto setting = [&](const char* id) { return store.get<ESM::GameSetting>().find(id)->mValue.getFloat(); };
+        const auto delta = context.targetPosition - context.observerPosition;
+        const float sneak = context.sneaking ? setting("fSneakSkillMult") * context.targetSneak
+            + .2f * target.getAttribute(ESM::Attribute::Agility).getModified()
+            + .1f * target.getAttribute(ESM::Attribute::Luck).getModified()
+            + context.bootWeight * setting("fSneakBootMult") : 0.f;
+        const float x = sneak * (setting("fSneakDistanceBase")
+            + setting("fSneakDistanceMultiplier") * delta.length()) * target.getFatigueTerm(store)
+            + magicConcealmentTarget(target);
+        float y = 0.f;
+        if (context.observerDirection)
+        {
+            const float term = context.observerSneak
+                + .2f * observer.getAttribute(ESM::Attribute::Agility).getModified()
+                + .1f * observer.getAttribute(ESM::Attribute::Luck).getModified()
+                - observer.getMagicEffects().getOrDefault(ESM::MagicEffect::Blind).getMagnitude();
+            y = term * observer.getFatigueTerm(store) * setting(
+                *context.observerDirection * delta < 0.f ? "fSneakNoViewMult" : "fSneakViewMult");
+        }
+        return x - y;
+    }
+
     float creatureAttackDamage(const ESM::Creature& creature, int type, float strength)
     {
         const auto offset = type == 0 ? 0 : type == 1 ? 2 : 4;

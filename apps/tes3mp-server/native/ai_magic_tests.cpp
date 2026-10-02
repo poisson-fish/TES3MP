@@ -859,6 +859,73 @@ namespace
         require(!prepareAiMagicCast(context, {}, items, store), "Unimplemented AI CastOnce selection was enabled");
     }
 
+    void awarenessRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        for (const auto [name, value] : {std::pair{"fSneakSkillMult", .5f}, {"fSneakBootMult", -1.f},
+                {"fSneakDistanceBase", 1.f}, {"fSneakDistanceMultiplier", .001f},
+                {"fSneakNoViewMult", .5f}, {"fSneakViewMult", 1.5f}}) setting(store, name, value);
+        MWMechanics::NpcStats target(store), observer(store); initialize(target); initialize(observer);
+        MWMechanics::AwarenessContext context;
+        context.targetSneak = 80.f; context.observerSneak = 20.f;
+        context.targetPosition = {0, 100, 0}; context.observerPosition = {0, 0, 0};
+        context.observerDirection = osg::Vec3f(0, 1, 0);
+        const float targetFatigue = target.getFatigueTerm(store), observerFatigue = observer.getFatigueTerm(store);
+        near(MWMechanics::awarenessTarget(store, target, observer, context), -32.f * observerFatigue * 1.5f,
+            "Visible standing target omitted observer stats or facing");
+        context.sneaking = true; context.bootWeight = 10.f;
+        near(MWMechanics::awarenessTarget(store, target, observer, context),
+            42.f * 1.1f * targetFatigue - 32.f * observerFatigue * 1.5f, "Sneak skill/boots/distance terms changed");
+        context.observerDirection = osg::Vec3f(0, -1, 0);
+        near(MWMechanics::awarenessTarget(store, target, observer, context),
+            42.f * 1.1f * targetFatigue - 32.f * observerFatigue * .5f, "Behind-observer term changed");
+        observer.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Blind), MWMechanics::EffectParam(30.f));
+        target.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Chameleon), MWMechanics::EffectParam(75.f));
+        near(MWMechanics::awarenessTarget(store, target, observer, context),
+            42.f * 1.1f * targetFatigue + 75.f - 2.f * observerFatigue * .5f, "Blind/concealment terms changed");
+        context.observerDirection.reset(); context.sneaking = false;
+        near(MWMechanics::awarenessTarget(store, target, observer, context), 75.f, "Absent-node stock context changed");
+        context.observerDirection = osg::Vec3f(0, 1, 0); context.targetPosition = {};
+        require(std::isfinite(MWMechanics::awarenessTarget(store, target, observer, context)), "Coincident awareness is nonfinite");
+        context.sneaking = true; context.targetPosition = {0, 100, 0};
+        const float rested = MWMechanics::awarenessTarget(store, target, observer, context);
+        auto fatigue = target.getFatigue(); fatigue.setCurrent(0.f); target.setFatigue(fatigue);
+        require(MWMechanics::awarenessTarget(store, target, observer, context) < rested, "Exhausted sneak kept rested concealment");
+    }
+
+    void mixedPassiveRules()
+    {
+        MWWorld::ESMStore store; content(store);
+        const std::array effects{ESM::MagicEffect::FortifyAttribute, ESM::MagicEffect::FortifySkill,
+            ESM::MagicEffect::Jump, ESM::MagicEffect::SlowFall, ESM::MagicEffect::RallyHumanoid,
+            ESM::MagicEffect::BoundDagger, ESM::MagicEffect::SummonScamp, ESM::MagicEffect::Invisibility};
+        ESM::Spell ability; ability.blank(); ability.mId = id("mixed_ability"); ability.mData.mType = ESM::Spell::ST_Ability;
+        for (const auto effect : effects)
+        {
+            ESM::MagicEffect record; record.blank(); record.mId = effect;
+            if (effect == ESM::MagicEffect::BoundDagger || effect == ESM::MagicEffect::SummonScamp
+                || effect == ESM::MagicEffect::Invisibility) record.mData.mFlags = ESM::MagicEffect::NoMagnitude;
+            store.insertStatic(record);
+            ESM::ENAMstruct entry{effect, {}, {}, ESM::RT_Self, 7, 9, 10, 20};
+            if (effect == ESM::MagicEffect::FortifyAttribute) entry.mAttribute = ESM::Attribute::Strength;
+            if (effect == ESM::MagicEffect::FortifySkill) entry.mSkill = ESM::Skill::Acrobatics;
+            ability.mEffects.mList.push_back({entry, uint32_t(ability.mEffects.mList.size())});
+        }
+        ESM::Enchantment constant; constant.blank(); constant.mId = id("mixed_constant");
+        constant.mData.mType = ESM::Enchantment::ConstantEffect; constant.mEffects = ability.mEffects; store.insertStatic(constant);
+        const auto passive = preparePassiveActorEffects(ability, store, true, true, true, true, true);
+        const auto equipped = prepareConstantEffects(constant.mId, store, true, false, true, true, true, true, true);
+        require(passive && equipped && passive->effects.size() == 8 && equipped->effects.size() == 8,
+            "Mixed ability and constant plans differ or reject shared families");
+        for (const auto& effect : passive->effects)
+            require(effect.mDuration == 0 && effect.mArea == 0 && effect.mRange == ESM::RT_Self, "Passive normalization changed");
+        require(!preparePassiveActorEffects(ability, store, false, true, true, true, true)
+            && !preparePassiveActorEffects(ability, store, true, false, true, true, true)
+            && !preparePassiveActorEffects(ability, store, true, true, true, true, false), "Mixed source crossed disabled family gate");
+        ability.mEffects.mList.back().mData.mRange = ESM::RT_Target;
+        require(!preparePassiveActorEffects(ability, store, true, true, true, true, true), "Mixed source accepted non-Self member");
+    }
+
     void records(const char* directory)
     {
         const std::string config = std::string("--config=") + directory;
@@ -914,7 +981,9 @@ int main(int argc, char** argv)
         { records(argv[2]); std::cout << "PASS records\n"; return 0; }
         if (argc != 2) throw std::invalid_argument("Select weapons, selection, rejection, launch, items or records <config>");
         const std::string_view filter = argv[1];
-        if (filter == "condition-rules") conditionRules();
+        if (filter == "awareness-rules") awarenessRules();
+        else if (filter == "mixed-passive-rules") mixedPassiveRules();
+        else if (filter == "condition-rules") conditionRules();
         else if (filter == "ai-disposition-rules") aiDispositionRules();
         else if (filter == "effect-family-rules") effectFamilyRules();
         else if (filter == "concealment") concealment();

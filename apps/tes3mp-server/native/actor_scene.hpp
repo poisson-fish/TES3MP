@@ -44,6 +44,8 @@ namespace TES3MP::Native
         std::vector<uint64_t> mContacts;
         float mYaw = 0;
         bool mDrowning = false;
+        uint8_t mJumpFlags = 0; // Stock ForceJump / ForceMoveJump.
+        float mLandingFall = 0; // Candidate-only landing consequence, never replayed on restore.
     };
     struct ActorMovement
     {
@@ -58,6 +60,8 @@ namespace TES3MP::Native
         bool waterBreathing = false;
         bool unconscious = false;
         bool jumpRequested = false;
+        float airControl = 1;
+        std::optional<uint8_t> jumpFlags; // Trusted script result; absence retains committed flags.
     };
     struct DynamicActorBody
     {

@@ -6763,6 +6763,8 @@ int main(int argc, char** argv)
             || std::string_view(argv[1]) == "fortify-resources" || std::string_view(argv[1]) == "condition-cures"
             || std::string_view(argv[1]) == "persistent-conditions" || std::string_view(argv[1]) == "special-conditions"
             || std::string_view(argv[1]) == "rest-recovery" || std::string_view(argv[1]) == "disintegration"
+            || std::string_view(argv[1]) == "sneak-detection"
+            || std::string_view(argv[1]) == "movement-jumps"
             || std::string_view(argv[1]) == "concealment" || std::string_view(argv[1]) == "visibility"
             || std::string_view(argv[1]) == "movement-effects" || std::string_view(argv[1]) == "movement-wet"
             || std::string_view(argv[1]) == "movement-deep"
@@ -6870,7 +6872,7 @@ int main(int argc, char** argv)
         if (argc == 5 && (std::string_view(argv[1]) == "bound-equipment"
                 || std::string_view(argv[1]) == "bound-equipment-lifecycle"
                 || std::string_view(argv[1]).starts_with("summons-integrated")
-                || std::string_view(argv[1]) == "player-lives"))
+                || std::string_view(argv[1]) == "player-lives" || std::string_view(argv[1]) == "mixed-passives"))
         {
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),

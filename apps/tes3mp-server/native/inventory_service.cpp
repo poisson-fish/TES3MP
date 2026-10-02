@@ -1,3 +1,4 @@
+#include <apps/openmw/mwmechanics/jump.hpp>
 #include "stock_actor_script.hpp"
 #include <apps/openmw/mwmechanics/aifollow.hpp>
 #include <apps/openmw/mwmechanics/objectmagic.hpp>
@@ -759,18 +760,10 @@ namespace TES3MP::Native
             {
                 const auto* spell = content.get<ESM::Spell>().search(id);
                 if (!spell || spell->mData.mType != ESM::Spell::ST_Ability) continue;
-                const bool relevant = std::ranges::any_of(spell->mEffects.mList, [&](const auto& entry) {
-                    return (aiEffects && aiDispositionEffect(entry.mData.mEffectID))
-                        || (movementEffects && movementEffect(entry.mData.mEffectID))
-                        || (objectEffects && entry.mData.mEffectID == ESM::MagicEffect::Telekinesis)
-                        || ((equipmentEffects && MWMechanics::equipmentMagicEffect(entry.mData.mEffectID))
-                        || (summonEffects && MWMechanics::isSummoningEffect(entry.mData.mEffectID)));
-                });
-                if (!relevant) continue;
                 const auto plan = preparePassiveActorEffects(*spell, content, movementEffects, aiEffects, objectEffects, equipmentEffects, summonEffects);
                 const uint64_t source = spellRecordId(id);
                 if (!plan || !source || spellBySource(content, source) != spell)
-                    throw std::invalid_argument("Native passive AI source unsupported or ambiguous");
+                    throw std::invalid_argument("Native passive source unsupported or ambiguous: " + id.serializeText());
                 for (size_t ordinal = 0; ordinal < plan->effects.size(); ++ordinal)
                 {
                     const auto& entry = plan->effects[ordinal];
@@ -780,9 +773,12 @@ namespace TES3MP::Native
                             actor < 2 || npcActor, actor < 2, undeadActor, true)) continue;
                     const bool noMagnitude = content.get<ESM::MagicEffect>().find(entry.mEffectID)->mData.mFlags
                         & ESM::MagicEffect::NoMagnitude;
+                    const uint64_t argument = !entry.mAttribute.empty()
+                        ? uint64_t(ESM::Attribute::refIdToIndex(entry.mAttribute) + 1)
+                        : !entry.mSkill.empty() ? uint64_t(ESM::Skill::refIdToIndex(entry.mSkill) + 9) : 0;
                     ActorCampaignTimedEffect effect{actor, 0.f, UINT64_MAX,
                         uint64_t(ESM::MagicEffect::refIdToIndex(entry.mEffectID)), caster.id,
-                        source, 5, 0.f, tick, 0, 0, ordinal, caster.kind, caster.life};
+                        source, 5, 0.f, tick, 0, argument, ordinal, caster.kind, caster.life};
                     const auto previous = std::ranges::find_if(effects, [&](const auto& active) {
                         return active.actor == actor && active.sourceKind == 5
                             && active.source == source && active.ordinal == ordinal;
@@ -792,11 +788,12 @@ namespace TES3MP::Native
                         if (previous->effectIndex != effect.effectIndex || previous->caster != caster.id
                             || previous->casterKind != caster.kind || previous->casterLife != caster.life
                             || previous->resistance != 0.f || previous->durationTicks != 0
-                            || previous->expiresTick != UINT64_MAX || previous->argument
-                            || (noMagnitude ? previous->magnitude != 1.f
+                            || previous->expiresTick != UINT64_MAX || previous->argument != argument
+                            || (noMagnitude ? (previous->magnitude != 1.f
+                                    && !(entry.mEffectID == ESM::MagicEffect::Invisibility && previous->magnitude == 0.f))
                                 : previous->magnitude < entry.mMagnMin || previous->magnitude > entry.mMagnMax)
                             || std::floor(previous->magnitude) != previous->magnitude)
-                            throw std::invalid_argument("Native passive AI effect disagrees with source");
+                            throw std::invalid_argument("Native passive effect disagrees with source");
                         effect = *previous;
                     }
                     else if (rng)
@@ -825,7 +822,7 @@ namespace TES3MP::Native
                 return effect.actor == actor && effect.sourceKind == 5;
             });
             if (effects.size() + desired.size() > MaximumActorTimedEffects)
-                throw std::invalid_argument("Native passive AI effect capacity exhausted");
+                throw std::invalid_argument("Native passive effect capacity exhausted");
             effects.insert(effects.end(), desired.begin(), desired.end());
             return true;
         }
@@ -3284,9 +3281,12 @@ namespace TES3MP::Native
                                 && effect.caster == (effect.actor >= 2
                                     ? recoveredPlacement(effect.actor)
                                     : mBinding.mPlayers[size_t(effect.actor)].value())
-                                && effect.resistance == 0.f && effect.argument == 0
+                                && effect.resistance == 0.f && effect.argument == (!entry.mAttribute.empty()
+                                    ? uint64_t(ESM::Attribute::refIdToIndex(entry.mAttribute) + 1)
+                                    : !entry.mSkill.empty() ? uint64_t(ESM::Skill::refIdToIndex(entry.mSkill) + 9) : 0)
                                 && effect.durationTicks == 0 && effect.expiresTick == UINT64_MAX
-                                && (noMagnitude ? effect.magnitude == 1.f
+                                && (noMagnitude ? (effect.magnitude == 1.f
+                                        || (id == ESM::MagicEffect::Invisibility && effect.magnitude == 0.f))
                                     : effect.magnitude >= entry.mMagnMin
                                         && effect.magnitude <= entry.mMagnMax);
                         }
@@ -4937,12 +4937,31 @@ namespace TES3MP::Native
                 if (!combat->playerLives[i].spawn)
                     if (const auto* player = players.findPlayer(mBinding.mPlayers[i]))
                         combat->playerLives[i].spawn = player->transform();
+        std::optional<std::pair<uint64_t, uint8_t>> jumpControl;
         if (movementRuleScript)
         {
             if (!mBinding.mScriptedMovementRules || !combat) return {};
+            auto source = before;
+            size_t sourceIndex = 2;
+            if (movementRuleScript->actor && movementRuleScript->actor != before.mActor)
+            {
+                const auto neighbors = mBinding.mNavigatingActor->neighborSnapshots();
+                const auto found = std::ranges::find(neighbors, movementRuleScript->actor, &ActorSceneSnapshot::mActor);
+                if (!mBinding.mNeighborCombat || found == neighbors.end()) return {};
+                sourceIndex = size_t(found - neighbors.begin()) + 3;
+                source = *found;
+            }
+            if (movementRuleScript->actor && (movementRuleScript->life !=
+                    (sourceIndex == 2 ? mLife->generation : mNeighborLives[sourceIndex - 3].generation)
+                || combat->actors[sourceIndex][8][2] <= 0.f)) return {};
+            if (!movementRuleScript->actor && movementRuleScript->life) return {};
             const auto rules = runMovementRuleScript(mRuntime.mStore,
-                movementRuleScript->script, mRuntime.ownerPtr(mCombatNpcOwner),
-                {combat->levitationEnabled, combat->teleportingEnabled}, mBinding.mScriptedTravelRules);
+                movementRuleScript->script, mRuntime.ownerPtr(combatOwner(sourceIndex)),
+                {combat->levitationEnabled, combat->teleportingEnabled,
+                    bool(source.mJumpFlags & 1), bool(source.mJumpFlags & 2)},
+                mBinding.mScriptedTravelRules, movementRuleScript->actor != 0);
+            if (movementRuleScript->actor)
+                jumpControl = {source.mActor, uint8_t(unsigned(rules.forceJump) | (unsigned(rules.forceMoveJump) << 1))};
             combat->levitationEnabled = rules.levitationEnabled;
             combat->teleportingEnabled = rules.teleportingEnabled;
             if (!combat->levitationEnabled)
@@ -4951,6 +4970,7 @@ namespace TES3MP::Native
                         ESM::MagicEffect::Levitate));
                 });
         }
+        if (jumpControl && !active) return {};
         const bool levitationEnabled = mBinding.mScriptedMovementRules
             ? combat->levitationEnabled : mBinding.mLevitationEnabled;
         const auto commandedDestination = [&](size_t index, const ActorSceneSnapshot& source,
@@ -5082,6 +5102,8 @@ namespace TES3MP::Native
                 setting("fJumpEncumbranceBase"), setting("fJumpEncumbranceMultiplier"),
                 setting("fJumpAcrobaticsBase"), setting("fJumpAcroMultiplier"),
                 setting("fJumpRunMultiplier"), Constants::GravityConst * Constants::UnitsPerMeter);
+            movement.airControl = std::clamp(setting("fJumpMoveBase") + setting("fJumpMoveMult") * acrobatics / 100.f, 0.f, 1.f);
+            if (jumpControl && jumpControl->first == before.mActor) movement.jumpFlags = jumpControl->second;
             movement.slowFall = MWClass::npcSlowFall(magnitude(ESM::MagicEffect::SlowFall));
             movement.levitating = magnitude(ESM::MagicEffect::Levitate) > 0.f;
             movement.waterWalking = magnitude(ESM::MagicEffect::WaterWalking) > 0.f;
@@ -5547,7 +5569,7 @@ namespace TES3MP::Native
             for (size_t i = 0; i < combat->actors.size(); ++i)
                 actorKinds.push_back(aiActorKind(mRuntime.ownerPtr(combatOwner(i))));
         }
-        const auto recordActorDeath = [&](size_t index, ActorCasterIdentity killer) {
+        const auto recordActorDeath = [&](size_t index, ActorCasterIdentity killer, bool retainMovement = false) {
             if (index < 2)
             {
                 if (!mBinding.mPlayerLifecycle) return;
@@ -5575,7 +5597,8 @@ namespace TES3MP::Native
             });
             if (index == 2)
             {
-                step.reset(); after = before; report.status = Diagnostics::Status::Idle;
+                if (!retainMovement) { step.reset(); after = before; }
+                report.status = Diagnostics::Status::Idle;
                 casting.reset();
             }
         };
@@ -5689,17 +5712,42 @@ namespace TES3MP::Native
                 transformedNow[index] = transformed;
                 saveCombatStats(combat->actors[index], stats, timedEffects, index);
             }
-        const auto npcDetects = [&](size_t index) {
+        const auto awarenessPlayer = [&](size_t index, const MWMechanics::NpcStats& observer,
+            const std::array<float, 3>& observerPosition, float yaw) {
+            const auto* player = players.findPlayer(mBinding.mPlayers[index]);
+            if (!player || observer.isDead()) return false;
             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
             addTimedResistance(victim, timedEffects, index);
-            if (!MWMechanics::isTargetMagicallyHidden(victim)) return true;
-            // Stock canFight rolls awareness for a magically hidden target. The
-            // detached server actor has no presentation node or sneak stance,
-            // leaving the shared magic term as its awareness threshold.
+            MWMechanics::AwarenessContext context;
+            context.sneaking = player->locomotionMode() == LocomotionMode::Sneak;
+            context.targetSneak = victim.getSkill(ESM::Skill::Sneak).getModified();
+            context.observerSneak = observer.getSkill(ESM::Skill::Sneak).getModified();
+            const auto position = player->transform().position();
+            context.targetPosition = {float(double(position.x()) / 1024),
+                float(double(position.y()) / 1024), float(double(position.z()) / 1024)};
+            context.observerPosition = {observerPosition[0], observerPosition[1], observerPosition[2]};
+            context.observerDirection = osg::Vec3f(std::sin(yaw), std::cos(yaw), 0.f);
+            if (context.sneaking)
+            {
+                // Canonical locomotion supplies the explicit sneak stance.
+                const auto equipment = candidateEquipmentValues(index);
+                const auto boots = equipment.mSlots[MWWorld::InventoryStore::Slot_Boots];
+                const auto item = std::ranges::find(equipment.mObjects, boots,
+                    [](const auto& value) { return value.mRef.mRefNum; });
+                if (boots.isSet() && item != equipment.mObjects.end())
+                    context.bootWeight = MWWorld::visitInventoryRecord(mRuntime.mStore, item->mRef.mRefID,
+                        [](const auto& record) { return record.mData.mWeight; });
+            }
             Misc::Rng::Generator rng{combat->rng};
-            const bool detected = Misc::Rng::roll0to99(rng) >= MWMechanics::magicConcealmentTarget(victim);
+            const bool detected = Misc::Rng::roll0to99(rng) >= MWMechanics::awarenessTarget(
+                mRuntime.mStore, victim, observer, context);
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             return detected;
+        };
+        const auto npcDetects = [&](size_t index, size_t observerIndex, const ActorSceneSnapshot& source) {
+            auto observer = loadCombatStats(mRuntime.mStore, combat->actors[observerIndex], timedEffects, observerIndex);
+            addTimedResistance(observer, timedEffects, observerIndex);
+            return awarenessPlayer(index, observer, source.mPosition, source.mYaw);
         };
         const auto crimeWitnesses = [&](size_t index, bool includeSelectedOutsideRadius,
             const auto& observe) {
@@ -5742,7 +5790,19 @@ namespace TES3MP::Native
                 for (size_t axis = 0; axis < 3; ++axis)
                     distance2 += (target[axis] - from[axis]) * (target[axis] - from[axis]);
                 if (distance2 > radius * radius && !(selected && includeSelectedOutsideRadius)) continue;
-                if (!mBinding.mNavigatingActor->lineOfSight(from, target) || !npcDetects(index)) continue;
+                if (!mBinding.mNavigatingActor->lineOfSight(from, target)) continue;
+                bool aware;
+                if (selected) aware = npcDetects(index, 2, before);
+                else if (simulatedNeighbor && mBinding.mNeighborCombat)
+                    aware = npcDetects(index, size_t(neighbor - neighbors.begin()) + 3, *neighbor);
+                else
+                {
+                    MWWorld::ManualRef reference(mRuntime.mStore, witness.base);
+                    const auto ptr = reference.getPtr();
+                    aware = awarenessPlayer(index, ptr.getClass().getNpcStats(ptr),
+                        {from[0], from[1], from[2] - 64.f}, witness.yaw);
+                }
+                if (!aware) continue;
                 observe(witness, *npc, selected, std::sqrt(distance2));
             }
         };
@@ -5771,12 +5831,12 @@ namespace TES3MP::Native
             const auto previous = timedEffects;
             const auto invisibility = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Invisibility));
             std::erase_if(timedEffects, [&](const auto& effect) {
-                return effect.actor == index && effect.sourceKind != 3 && effect.effectIndex == invisibility;
+                return effect.actor == index && effect.sourceKind != 3 && effect.sourceKind != 5 && effect.effectIndex == invisibility;
             });
-            // Stock purges the applied equipment effect while retaining its source
-            // spell. It cannot reapply until that item is unequipped and equipped.
+            // Stock purges the applied passive effect while retaining its source.
+            // Reconciliation must not reinstall it or reroll other source ordinals.
             for (auto& effect : timedEffects)
-                if (effect.actor == index && effect.sourceKind == 3 && effect.effectIndex == invisibility)
+                if (effect.actor == index && (effect.sourceKind == 3 || effect.sourceKind == 5) && effect.effectIndex == invisibility)
                     effect.magnitude = 0.f;
             if (timedEffects != previous)
                 updateResources(index, previous, timedEffects, mBinding.mKnockoutAnimation);
@@ -7425,7 +7485,7 @@ namespace TES3MP::Native
                 if (!mBinding.mNavigatingActor->lineOfSight(
                     {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 110.f},
                     {float(double(position.x()) / 1024), float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 110.f})) return {};
-                if (!npcDetects(actor(*playerId))) return {};
+                if (!npcDetects(actor(*playerId), 2, before)) return {};
             }
             std::optional<std::array<float, 3>> targetPosition;
             if (use.targetKind == MagicUseTargetKind::Actor)
@@ -7904,7 +7964,7 @@ namespace TES3MP::Native
                     {before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f},
                     {float(double(place.x()) / 1024), float(double(place.y()) / 1024),
                         float(double(place.z()) / 1024) + 110.f})) continue;
-                if (!npcDetects(actor(playerId))) continue;
+                if (!npcDetects(actor(playerId), 2, before)) continue;
                 if (distance < nearest || (distance == nearest && enemy && playerId < enemy->playerId()))
                 { enemy = player; nearest = distance; }
             }
@@ -8880,7 +8940,7 @@ namespace TES3MP::Native
                 return mBinding.mNavigatingActor->lineOfSight(
                     {after.mPosition[0], after.mPosition[1], after.mPosition[2] + 110.f},
                     {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
-                        float(double(position.z()) / 1024) + 110.f}) && npcDetects(index);
+                        float(double(position.z()) / 1024) + 110.f}) && npcDetects(index, 2, after);
             };
             if (combat->actors[2][8][2] <= 0 || combat->knockedDown[2] || hasParalysis(timedEffects, 2) || combat->hitRecoveryTicks[2]
                 || combat->actors[index][8][2] <= 0 || !victim || victim->transform().cell() != actorCell(after)
@@ -9366,7 +9426,7 @@ namespace TES3MP::Native
                             {neighbor.mPosition[0], neighbor.mPosition[1], neighbor.mPosition[2] + 110.f},
                             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
                                 float(double(position.z()) / 1024) + 110.f})) continue;
-                    if (mBinding.mNeighborCombat && !npcDetects(actor(playerId))) continue;
+                    if (mBinding.mNeighborCombat && !npcDetects(actor(playerId), i + 3, neighbor)) continue;
                     pursued = player;
                     nearest = distance;
                 }
@@ -9484,6 +9544,8 @@ namespace TES3MP::Native
                         setting("fJumpEncumbranceBase"), setting("fJumpEncumbranceMultiplier"),
                         setting("fJumpAcrobaticsBase"), setting("fJumpAcroMultiplier"),
                         setting("fJumpRunMultiplier"), Constants::GravityConst * Constants::UnitsPerMeter) : 0.f;
+                    adjacentMovement.airControl = std::clamp(setting("fJumpMoveBase") + setting("fJumpMoveMult") * acrobatics / 100.f, 0.f, 1.f);
+                    if (jumpControl && jumpControl->first == neighbor.mActor) adjacentMovement.jumpFlags = jumpControl->second;
                     adjacentMovement.slowFall = MWClass::npcSlowFall(magnitude(ESM::MagicEffect::SlowFall));
                     adjacentMovement.levitating = magnitude(ESM::MagicEffect::Levitate) > 0.f;
                     adjacentMovement.waterWalking = magnitude(ESM::MagicEffect::WaterWalking) > 0.f;
@@ -9520,6 +9582,38 @@ namespace TES3MP::Native
                 if (victim.getHealth().getCurrent() <= 0)
                     recordActorDeath(index, {adjacent[i].mActor, 2, neighborLives[i].generation});
             }
+        }
+        if (mBinding.mMovementEffects && combat && step)
+        {
+            const auto land = [&](size_t index, const ActorSceneSnapshot& source) {
+                if (source.mLandingFall <= 0.f || combat->actors[index][8][2] <= 0.f) return;
+                auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+                const auto setting = [&](const char* name) {
+                    return mRuntime.mStore.get<ESM::GameSetting>().find(name)->mValue.getFloat();
+                };
+                float jumpBonus = 0.f;
+                for (const auto& effect : timedEffects)
+                    if (effect.actor == index && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Jump)))
+                        jumpBonus += effect.magnitude;
+                const float acrobatics = stats.getSkill(ESM::Skill::Acrobatics).getModified();
+                const float damage = MWMechanics::fallDamage(source.mLandingFall, acrobatics, jumpBonus,
+                    setting("fFallDamageDistanceMin"), setting("fFallAcroBase"), setting("fFallAcroMult"),
+                    setting("fFallDistanceBase"), setting("fFallDistanceMult"));
+                if (damage <= 0.f) return;
+                const float fatigue = stats.getFatigueTerm(mRuntime.mStore);
+                const MWWorld::TimeStamp deathTime{};
+                MWMechanics::adjustDynamicStatValue(stats, 0, -damage * (1.f - .25f * fatigue), false, false, &deathTime);
+                saveCombatStats(combat->actors[index], stats, timedEffects, index);
+                if (stats.getHealth().getCurrent() <= 0.f)
+                    recordActorDeath(index, {source.mActor, 2, index == 2 ? life->generation : neighborLives[index - 3].generation}, true);
+                else if (damage > acrobatics * fatigue) combat->knockedDown[index] = true;
+            };
+            // Landing consequences and the grounded frame share the actor commit.
+            const auto primary = step->snapshot();
+            const auto neighbors = step->neighborSnapshots();
+            land(2, primary);
+            if (mBinding.mNeighborCombat)
+                for (size_t i = 0; i < neighbors.size(); ++i) land(i + 3, neighbors[i]);
         }
         if (mBinding.mNeighborCombat && combat && step)
         {

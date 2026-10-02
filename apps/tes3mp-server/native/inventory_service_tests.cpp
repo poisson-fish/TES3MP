@@ -5587,8 +5587,13 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
+        const bool sneakDetection = effectFamily == "sneak-detection";
+        const bool jumpConsumers = effectFamily == "movement-jumps";
+        const bool mixedPassives = effectFamily == "mixed-passives";
+        if (sneakDetection) effectFamily = "concealment";
+        if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
         const bool playerLives = effectFamily == "player-lives";
-        const bool summons = playerLives || effectFamily.starts_with("summons-integrated");
+        const bool summons = mixedPassives || playerLives || effectFamily.starts_with("summons-integrated");
         const auto summonProfile = effectFamily;
         const auto summonEffect = summonProfile == "summons-integrated-quadruped" ? ESM::MagicEffect::SummonClannfear
             : summonProfile == "summons-integrated-flying" ? ESM::MagicEffect::SummonWingedTwilight
@@ -5638,7 +5643,7 @@ namespace TES3MP::Native::Testing
             ESM::MagicEffect::FrostShield, ESM::MagicEffect::DamageAttribute, ESM::MagicEffect::RestoreAttribute,
             ESM::MagicEffect::DamageSkill, ESM::MagicEffect::RestoreSkill, ESM::MagicEffect::FortifyHealth,
             ESM::MagicEffect::FortifyMagicka, ESM::MagicEffect::FortifyFatigue, ESM::MagicEffect::FortifyMaximumMagicka};
-        writePlacementFixtureModels(scratch, summons ? 1000.f : 500.f);
+        writePlacementFixtureModels(scratch, jumpConsumers ? 3000.f : summons ? 1000.f : 500.f);
         writeDoorFixtureModel(scratch);
         auto actorSettings = settings;
         if (interruptedCasts)
@@ -6448,7 +6453,6 @@ namespace TES3MP::Native::Testing
                             effect(ESM::MagicEffect::AbsorbHealth, ESM::RT_Touch, 30, 1)});
                         spell("life_kill", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 1000)});
                     }
-
                     auto creature = *base.store().get<ESM::Creature>().find(MWMechanics::getSummonedCreature(summonEffect, base.store()));
                     creature.mId = ESM::RefId::stringRefId("summon_lifecycle_body");
                     if (summonProfile != "summons-integrated-disease") creature.mScript = {};
@@ -7087,6 +7091,29 @@ namespace TES3MP::Native::Testing
                             out.endRecord(ESM::Script::sRecordId);
                         }
                 }
+                if (mixedPassives)
+                {
+                    const std::vector<ESM::ENAMstruct> family{
+                        {ESM::MagicEffect::FortifyAttribute, {}, ESM::Attribute::Strength, ESM::RT_Self, 7, 9, 10, 20},
+                        {ESM::MagicEffect::FortifySkill, ESM::Skill::Acrobatics, {}, ESM::RT_Self, 7, 9, 5, 10},
+                        {ESM::MagicEffect::Jump, {}, {}, ESM::RT_Self, 7, 9, 10, 20},
+                        {ESM::MagicEffect::SlowFall, {}, {}, ESM::RT_Self, 7, 9, 25, 30},
+                        {ESM::MagicEffect::RallyHumanoid, {}, {}, ESM::RT_Self, 7, 9, 30, 40},
+                        {ESM::MagicEffect::BoundDagger, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                        {ESM::MagicEffect::SummonScamp, {}, {}, ESM::RT_Self, 7, 9, 0, 0},
+                        {ESM::MagicEffect::Invisibility, {}, {}, ESM::RT_Self, 7, 9, 0, 0}};
+                    ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("mixed_passive_ability");
+                    ability.mData.mType = ESM::Spell::ST_Ability; ability.mEffects.populate(family);
+
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    ESM::Enchantment constant; constant.blank(); constant.mId = ESM::RefId::stringRefId("mixed_passive_constant");
+                    constant.mData.mType = ESM::Enchantment::ConstantEffect; constant.mEffects.populate(family);
+                    out.startRecord(ESM::Enchantment::sRecordId, 0); constant.save(out); out.endRecord(ESM::Enchantment::sRecordId);
+                    ESM::Clothing shirt; shirt.blank(); shirt.mId = ESM::RefId::stringRefId("mixed_passive_shirt");
+                    shirt.mData.mType = ESM::Clothing::Shirt; shirt.mData.mValue = 100; shirt.mEnchant = constant.mId;
+                    out.startRecord(ESM::Clothing::sRecordId, 0); shirt.save(out); out.endRecord(ESM::Clothing::sRecordId);
+                    npc.mInventory.mList.push_back({1, shirt.mId});
+                }
                 if (effectFamily == "constant-concealment")
                 {
                     ESM::Enchantment enchantment; enchantment.blank();
@@ -7157,6 +7184,16 @@ namespace TES3MP::Native::Testing
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Destruction)] = 0;
                 // Keep the door-magic observer from interrupting live player casts.
                 if (effectFamily == "door-magic") npc.mAiData.mFight = 0;
+                if (mixedPassives) npc.mSpells.mList.push_back(ESM::RefId::stringRefId("mixed_passive_ability"));
+                if (jumpConsumers)
+                {
+                    ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("movement_jump_passive");
+                    ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({{ESM::MagicEffect::Jump, {}, {}, ESM::RT_Self, 0, 0, 20, 20}});
+                    npc.mSpells.mList.clear(); npc.mSpells.mList.push_back(ability.mId);
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    npc.mNpdt.mHealth = 20;
+                }
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             }
             if (constantEffects)
@@ -7172,6 +7209,29 @@ namespace TES3MP::Native::Testing
                 out.startRecord(ESM::Armor::sRecordId, 0);
                 armor.save(out); out.endRecord(ESM::Armor::sRecordId);
             }
+            if (jumpConsumers)
+                for (const auto [name, body] : {std::pair{"consumer_force_jump", "ForceJump\n"},
+                        {"consumer_force_move_jump", "ForceMoveJump\n"},
+                        {"consumer_clear_jump", "ClearForceJump\nClearForceMoveJump\n"}})
+                {
+                    ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(name);
+                    script.mScriptText = "Begin " + std::string(name) + "\n" + body + "End " + name + "\n";
+                    out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
+                }
+            if (sneakDetection)
+                for (const auto [name, value] : {std::pair{"fSneakSkillMult", 100.f}, {"fSneakDistanceBase", 1.f},
+                        {"fSneakDistanceMultiplier", 0.f}})
+                {
+                    auto setting = *base.store().get<ESM::GameSetting>().find(name); setting.mValue.setFloat(value);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+                }
+            if (jumpConsumers)
+                for (const auto [name, value] : {std::pair{"fFallDamageDistanceMin", 1.f}, {"fFallAcroBase", 1.f},
+                        {"fFallAcroMult", 0.f}, {"fFallDistanceBase", 50.f}, {"fFallDistanceMult", 0.f}})
+                {
+                    auto setting = *base.store().get<ESM::GameSetting>().find(name); setting.mValue.setFloat(value);
+                    out.startRecord(ESM::GameSetting::sRecordId, 0); setting.save(out); out.endRecord(ESM::GameSetting::sRecordId);
+                }
             if (shield)
                 for (const auto name : {"iBlockMinChance", "iBlockMaxChance"})
                 {
@@ -9321,6 +9381,51 @@ namespace TES3MP::Native::Testing
                     if (effect.actor == actor && effect.source == source && effect.equipmentApplied) return effect;
                 return {};
             };
+            if (mixedPassives)
+            {
+                fresh(); step({}, {}, true);
+                const auto current = state(run->service());
+                for (const auto [actor, kind] : {std::pair{2ull, 3ull}, {2ull, 5ull}})
+                {
+                    const auto member = std::ranges::find_if(current.timedEffects, [&](const auto& effect) {
+                        return effect.actor == actor && effect.sourceKind == kind && effect.ordinal == 0
+                            && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::FortifyAttribute));
+                    });
+                    require(member != current.timedEffects.end(), ("Mixed source stat member missing: kind=" + std::to_string(kind)).c_str());
+                    std::vector<ActorCampaignTimedEffect> family;
+                    for (const auto& effect : current.timedEffects)
+                        if (effect.actor == actor && effect.sourceKind == kind && effect.source == member->source) family.push_back(effect);
+                    require(family.size() == 8, "Mixed source did not install every authored ordinal");
+                    for (size_t ordinal = 0; ordinal < family.size(); ++ordinal)
+                        require(family[ordinal].ordinal == ordinal && family[ordinal].expiresTick == UINT64_MAX,
+                            "Mixed passive source lost order or became temporary");
+                    require(family[0].argument == uint64_t(ESM::Attribute::refIdToIndex(ESM::Attribute::Strength) + 1)
+                        && family[1].argument == uint64_t(ESM::Skill::refIdToIndex(ESM::Skill::Acrobatics) + 9),
+                        "Mixed source lost stat arguments");
+                    require(family[5].equipmentApplied && family[5].boundItems[0].item.isSet(),
+                        "Mixed source did not reach equipment writer");
+                }
+                const auto bodies = DynamicActorSet::restore(current.dynamicActors);
+                require(bodies.bodies.size() == 2 && bodies.ownership.entries.size() == 2
+                    && bodies.ownership.entries[0].source.sourceKind != bodies.ownership.entries[1].source.sourceKind,
+                    "Mixed ability/constant summon ownership did not share source lifecycle");
+                for (const auto& pose : run->service().projectCombat(authority, id<SessionId>(1),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick))->presentation())
+                    if (pose.kind == 2 && pose.id == current.combat->npcPlacements[0])
+                        require(pose.movement[5] >= 10.f && pose.movement[7] >= 25.f, "Mixed source did not reach movement consumers");
+                const auto saved = image(run->service());
+                InventoryHost recovered(descriptor, manifest, *registry, *crypto, saved);
+                recovered.service().synchronizeCells(authority);
+                require(image(recovered.service()) == saved, "Mixed source recovery rerolled or recreated a source/body");
+                step({}, {}, true);
+                auto pending = dynamic_cast<InventoryService&>(recovered.service()).prepareNativeTick(authority,
+                    id<ServerTick>(tick), 1.f/30, {}, {}, &world);
+                require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed && image(recovered.service()) == image(run->service()),
+                    "Mixed source continuation diverged after restart");
+                std::cout << "mixed ability+constant stat/movement/AI/equipment/summon ordinals=stable rollback/restart=shared\n";
+                return;
+            }
             if (summons)
             {
                 fresh();
@@ -9376,7 +9481,7 @@ namespace TES3MP::Native::Testing
                     "Summon creation/stock inventory did not replicate");
                 const auto position = [&] {
                     const auto snapshot = view();
-                    const auto motion = std::ranges::find(snapshot.equipment->motions, summoned, &NativeActorMotion::placement);
+                    const auto motion = std::ranges::find(snapshot.equipment->motions, summoned, [](const auto& value) { return value.placement; });
                     require(motion != snapshot.equipment->motions.end(), "Summon body motion absent");
                     return motion->position;
                 };
@@ -9406,7 +9511,7 @@ namespace TES3MP::Native::Testing
                 replica = view();
                 const size_t victimIndex = 3;
                 const auto placement = state(run->service()).combat->npcPlacements.at(victimIndex - 2);
-                const auto enemy = std::ranges::find(replica.equipment->motions, placement, &NativeActorMotion::placement);
+                const auto enemy = std::ranges::find(replica.equipment->motions, placement, [](const auto& value) { return value.placement; });
                 require(enemy != replica.equipment->motions.end(), "Summon combat enemy motion absent");
                 moveOwner(Position3(int64_t((enemy->position[0] + 30) * 1024),
                     int64_t(enemy->position[1] * 1024), int64_t(enemy->position[2] * 1024)));
@@ -9498,7 +9603,7 @@ namespace TES3MP::Native::Testing
                             require(native.activeActorCollisionBodies() == collisionBodies + 1
                                 && image(native) == pausedBytes, "Summon collision reload lost membership");
                             const auto reloaded = view();
-                            const auto retained = std::ranges::find(reloaded.equipment->motions, summoned, &NativeActorMotion::placement);
+                            const auto retained = std::ranges::find(reloaded.equipment->motions, summoned, [](const auto& value) { return value.placement; });
                             require(retained != reloaded.equipment->motions.end(), "Reload changed summon identity");
                         }
                         restart(); restartedAttack = true;
@@ -9898,7 +10003,7 @@ namespace TES3MP::Native::Testing
                 const auto view = run->service().projectInventory(authority, id<SessionId>(1),
                     id<ServerTick>(tick), id<CanonicalRevision>(tick));
                 const auto placement = state(run->service()).combat->npcPlacements.front();
-                const auto motion = std::ranges::find(view->equipment->motions, placement, &NativeActorMotion::placement);
+                const auto motion = std::ranges::find(view->equipment->motions, placement, [](const auto& value) { return value.placement; });
                 require(motion != view->equipment->motions.end(), "Expiry attack actor motion missing");
                 std::vector<CanonicalPlayerEntityState> nearby(authority.players().begin(), authority.players().end());
                 const auto transform = nearby[0].transform();
@@ -11910,6 +12015,37 @@ namespace TES3MP::Native::Testing
                 std::cout << "constant invisibility=action suppression rejection restart exact\n";
                 return;
             }
+            if (sneakDetection)
+            {
+                const auto standing = authority;
+                auto players = std::vector(authority.players().begin(), authority.players().end());
+                players[0] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(players[0], id<ServerTick>(2),
+                    players[0].transform(), LinearVelocity3(0, 0, 0), LocomotionMode::Sneak));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(players, authority.activeSessions()));
+                auto hidden = make(); auto& runtime = hidden->service();
+                for (uint64_t tick = 1; tick <= 20; ++tick)
+                    require(commit(runtime, tick).melee->target != 1, "NPC acquired a sneaking player through stock awareness");
+                const auto saved = bytes(runtime);
+                InventoryHost restart(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restart.service().synchronizeCells(authority);
+                auto pending = advance(runtime, 21);
+                require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && bytes(runtime) == saved, "Rejected sneak awareness advanced canonical RNG");
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "Sneak detection retry failed");
+                (void)commit(restart.service(), 21);
+                require(bytes(runtime) == bytes(restart.service()), "Sneak awareness diverged after restart");
+                authority = standing;
+                bool acquired = false;
+                for (uint64_t tick = 22; tick <= 60; ++tick)
+                {
+                    acquired |= commit(runtime, tick).melee->target == 1;
+                    (void)commit(restart.service(), tick);
+                    require(bytes(runtime) == bytes(restart.service()), "Standing awareness changed RNG after restart");
+                }
+                require(acquired, "NPC did not reacquire the standing control target");
+                std::cout << "explicit sneak=hidden standing=acquired awareness RNG rollback/restart=shared\n";
+                return;
+            }
             if (effectFamily == "concealment")
             {
                 auto baseline = make(); baseline->service().synchronizeCells(authority);
@@ -11958,13 +12094,6 @@ namespace TES3MP::Native::Testing
                         ++tick; (void)commit(runtime, tick); (void)commit(restart.service(), tick);
                         require(bytes(runtime) == bytes(restart.service()),
                             "Concealment restart changed expiry or AI RNG");
-                        if (effectId == ESM::MagicEffect::Invisibility && active(runtime))
-                        {
-                            const auto image = bytes(runtime);
-                            const auto state = read(image);
-                            require(state.melee && state.melee->target != 1,
-                                "NPC acquired an invisible player through awareness");
-                        }
                     }
                     require(!active(runtime), "Concealment survived its expiry");
                     if (effectId == ESM::MagicEffect::Invisibility)
@@ -13628,6 +13757,68 @@ namespace TES3MP::Native::Testing
                 }
                 std::cout << "AI " << (creatureTarget ? "undead creature" : "NPC")
                     << " sources=typed stacking expiry rejection restart exact Follow=travel+return\n";
+                return;
+            }
+            if (jumpConsumers)
+            {
+                auto running = make(); auto& runtime = dynamic_cast<InventoryService&>(running->service());
+                (void)commit(runtime, 1);
+                const auto projection = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(1), id<CanonicalRevision>(1));
+                const auto primary = projection->equipment->motions.front();
+                const uint64_t npc = primary.placement;
+                const auto control = [&](InventoryService& owner, uint64_t tick, const char* script, uint64_t actor, uint64_t life) {
+                    const auto world = specialWorld();
+                    return owner.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, {}, &world, {}, {}, {},
+                        InventoryService::MovementRuleScriptRequest{ESM::RefId::stringRefId(script), actor, life});
+                };
+                require(!control(runtime, 2, "consumer_force_jump", npc, 2), "Jump control accepted stale actor life");
+                const auto previous = bytes(runtime);
+                auto pending = control(runtime, 2, "consumer_force_jump", npc, 1);
+                require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && bytes(runtime) == previous, "Rejected AI jump moved physics or installed flags");
+                require(pending->commit(accepted) == CanonicalDurabilityResult::Committed, "AI jump retry failed");
+                const auto saved = bytes(runtime);
+                InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, saved);
+                restarted.service().synchronizeCells(authority);
+                require(bytes(restarted.service()) == saved, "Mid-jump restart changed velocity or controls");
+                auto cleared = control(runtime, 3, "consumer_clear_jump", npc, 1);
+                require(cleared && cleared->commit(accepted) == CanonicalDurabilityResult::Committed, "Jump controls did not clear");
+                auto& recovery = dynamic_cast<InventoryService&>(restarted.service());
+                auto recoveredClear = control(recovery, 3, "consumer_clear_jump", npc, 1);
+                require(recoveredClear && recoveredClear->commit(accepted) == CanonicalDurabilityResult::Committed
+                    && bytes(runtime) == bytes(recovery), "Cleared jump controls diverged after restart");
+                float apex = primary.position[2];
+                bool airborne = false, landed = false;
+                for (uint64_t tick = 4; tick <= 180; ++tick)
+                {
+                    (void)commit(runtime, tick); (void)commit(restarted.service(), tick);
+                    require(bytes(runtime) == bytes(restarted.service()), "Jump/fall physics or landing diverged across restart");
+                    const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    const auto motion = std::ranges::find(view->equipment->motions, npc, [](const auto& value) { return value.placement; });
+                    require(motion != view->equipment->motions.end(), "Jumping NPC motion missing");
+                    const float height = motion->position[2];
+                    apex = std::max(apex, height); airborne |= height > 10.f;
+                    if (airborne && height < 4.f && motion->velocity[2] >= 0.f) { landed = true; break; }
+                }
+                if (!landed)
+                {
+                    const auto final = read(bytes(runtime));
+                    const auto view = runtime.projectInventory(authority, id<SessionId>(1), id<ServerTick>(final.tick), id<CanonicalRevision>(final.tick));
+                    const auto motion = std::ranges::find(view->equipment->motions, npc, [](const auto& value) { return value.placement; });
+                    std::cerr << "jump apex=" << apex << " x=" << motion->position[0] << " y=" << motion->position[1]
+                        << " z=" << motion->position[2] << " vz=" << motion->velocity[2]
+                        << " health=" << final.combat->actors[2][8][2] << " deadline=" << final.life->respawnTick << '\n';
+                }
+                require(airborne && landed && apex > 100.f, "Jump passive did not launch navigation and fall back to ground");
+                const auto landedHealth = read(bytes(runtime)).combat->actors[2][8][2];
+                require(landedHealth <= 0.f && read(bytes(runtime)).life->respawnTick,
+                    "Lethal landing did not apply stock fall damage and death to canonical state");
+                const auto now = read(bytes(runtime)).tick + 1;
+                (void)commit(runtime, now); (void)commit(recovery, now);
+                require(bytes(runtime) == bytes(recovery), "Committed landing diverged after restart");
+                require(read(bytes(runtime)).combat->actors[2][8][2] == landedHealth,
+                    "A committed landing applied fall damage again");
+                std::cout << "AI stock force controls Jump launch/fall controls+inertia+landing rollback/restart=shared\n";
                 return;
             }
             if (effectFamily == "movement-effects")

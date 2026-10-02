@@ -225,98 +225,91 @@ namespace TES3MP::Native
             [range](const auto& effect) { return effect.mRange == range; });
     }
 
+    namespace
+    {
+        std::optional<PreparedInstantEffects> preparePassiveEffects(const ESM::EffectList& effects,
+            const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects,
+            bool aiEffects, bool objectEffects, bool equipmentEffects, bool summonEffects)
+        {
+            if (effects.mList.empty() || effects.mList.size() > 8) return std::nullopt;
+            PreparedInstantEffects result;
+            for (const auto& entry : effects.mList)
+            {
+                auto effect = entry.mData;
+                // Stock ActiveSpells::addEffects ignores authored duration/area for
+                // constant Self effects. Vanilla bound-item enchantments use 1s.
+                if (equipmentEffects) { effect.mDuration = 0; effect.mArea = 0; }
+                const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
+                const bool attribute = effect.mEffectID == ESM::MagicEffect::FortifyAttribute;
+                const bool skill = effect.mEffectID == ESM::MagicEffect::FortifySkill;
+                const bool resistance = effect.mEffectID == ESM::MagicEffect::ResistMagicka
+                    || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
+                    || effect.mEffectID == ESM::MagicEffect::ResistFire
+                    || effect.mEffectID == ESM::MagicEffect::ResistFrost
+                    || effect.mEffectID == ESM::MagicEffect::ResistShock
+                    || effect.mEffectID == ESM::MagicEffect::ResistPoison
+                    || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::ResistCommonDisease
+                    || effect.mEffectID == ESM::MagicEffect::ResistBlightDisease
+                    || (specialConditions && effect.mEffectID == ESM::MagicEffect::ResistCorprusDisease)
+                    || effect.mEffectID == ESM::MagicEffect::ResistParalysis
+                    || effect.mEffectID == ESM::MagicEffect::Reflect
+                    || effect.mEffectID == ESM::MagicEffect::SpellAbsorption
+                    || effect.mEffectID == ESM::MagicEffect::FireShield
+                    || effect.mEffectID == ESM::MagicEffect::LightningShield
+                    || effect.mEffectID == ESM::MagicEffect::FrostShield
+                    || fortifyDynamicStat(effect.mEffectID) >= 0
+                    || effect.mEffectID == ESM::MagicEffect::Invisibility
+                    || effect.mEffectID == ESM::MagicEffect::Chameleon
+                    || effect.mEffectID == ESM::MagicEffect::Light
+                    || effect.mEffectID == ESM::MagicEffect::NightEye
+                    || effect.mEffectID == ESM::MagicEffect::DetectAnimal
+                    || effect.mEffectID == ESM::MagicEffect::DetectEnchantment
+                    || effect.mEffectID == ESM::MagicEffect::DetectKey
+                    || (objectEffects && effect.mEffectID == ESM::MagicEffect::Telekinesis)
+                    || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
+                    || (movementEffects && movementEffect(effect.mEffectID))));
+                const bool ai = aiEffects && aiDispositionEffect(effect.mEffectID);
+                if (!magic || (!attribute && !skill && !resistance && !ai
+                        && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
+                    || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID)))
+                        && !supportedCombatModifier(effect.mEffectID))
+                    || ((magic->mData.mFlags & ESM::MagicEffect::Harmful) && !ai
+                        && !(movementEffects && movementEffect(effect.mEffectID)))
+                    || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
+                        && effect.mEffectID != ESM::MagicEffect::Invisibility
+                        && effect.mEffectID != ESM::MagicEffect::WaterBreathing
+                        && effect.mEffectID != ESM::MagicEffect::WaterWalking
+                        && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
+                    || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID))))
+                    || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
+                    || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
+                    || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
+                    || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty()))
+                    return std::nullopt;
+                result.effects.push_back(effect);
+            }
+            return result;
+        }
+
+    }
+
     std::optional<PreparedInstantEffects> prepareConstantEffects(ESM::RefId id,
         const MWWorld::ESMStore& content, bool expandedEffects, bool specialConditions, bool movementEffects,
         bool aiEffects, bool objectEffects, bool equipmentEffects, bool summonEffects)
     {
-        const auto* enchantment = content.get<ESM::Enchantment>().search(id);
-        if (!enchantment || enchantment->mData.mType != ESM::Enchantment::ConstantEffect
-            || enchantment->mEffects.mList.empty() || enchantment->mEffects.mList.size() > 8)
-            return std::nullopt;
-        PreparedInstantEffects result;
-        for (const auto& entry : enchantment->mEffects.mList)
-        {
-            auto effect = entry.mData;
-            // Stock ActiveSpells::addEffects ignores authored duration/area for
-            // constant Self effects. Vanilla bound-item enchantments use 1s.
-            if (equipmentEffects) { effect.mDuration = 0; effect.mArea = 0; }
-            const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
-            const bool attribute = effect.mEffectID == ESM::MagicEffect::FortifyAttribute;
-            const bool skill = effect.mEffectID == ESM::MagicEffect::FortifySkill;
-            const bool resistance = effect.mEffectID == ESM::MagicEffect::ResistMagicka
-                || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
-                || effect.mEffectID == ESM::MagicEffect::ResistFire
-                || effect.mEffectID == ESM::MagicEffect::ResistFrost
-                || effect.mEffectID == ESM::MagicEffect::ResistShock
-                || effect.mEffectID == ESM::MagicEffect::ResistPoison
-                || (expandedEffects && (effect.mEffectID == ESM::MagicEffect::ResistCommonDisease
-                || effect.mEffectID == ESM::MagicEffect::ResistBlightDisease
-                || (specialConditions && effect.mEffectID == ESM::MagicEffect::ResistCorprusDisease)
-                || effect.mEffectID == ESM::MagicEffect::ResistParalysis
-                || effect.mEffectID == ESM::MagicEffect::Reflect
-                || effect.mEffectID == ESM::MagicEffect::SpellAbsorption
-                || effect.mEffectID == ESM::MagicEffect::FireShield
-                || effect.mEffectID == ESM::MagicEffect::LightningShield
-                || effect.mEffectID == ESM::MagicEffect::FrostShield
-                || fortifyDynamicStat(effect.mEffectID) >= 0
-                || effect.mEffectID == ESM::MagicEffect::Invisibility
-                || effect.mEffectID == ESM::MagicEffect::Chameleon
-                || effect.mEffectID == ESM::MagicEffect::Light
-                || effect.mEffectID == ESM::MagicEffect::NightEye
-                || effect.mEffectID == ESM::MagicEffect::DetectAnimal
-                || effect.mEffectID == ESM::MagicEffect::DetectEnchantment
-                || effect.mEffectID == ESM::MagicEffect::DetectKey
-                || (objectEffects && effect.mEffectID == ESM::MagicEffect::Telekinesis)
-                || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
-                || (movementEffects && movementEffect(effect.mEffectID))));
-            const bool ai = aiEffects && aiDispositionEffect(effect.mEffectID);
-            if (!magic || (!attribute && !skill && !resistance && !ai
-                    && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
-                || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID)))
-                    && !supportedCombatModifier(effect.mEffectID))
-                || ((magic->mData.mFlags & ESM::MagicEffect::Harmful) && !ai)
-                || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
-                    && effect.mEffectID != ESM::MagicEffect::Invisibility
-                    && effect.mEffectID != ESM::MagicEffect::WaterBreathing
-                    && effect.mEffectID != ESM::MagicEffect::WaterWalking
-                    && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
-                || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID))))
-                || effect.mRange != ESM::RT_Self || effect.mArea != 0 || effect.mDuration != 0
-                || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000
-                || (attribute ? ESM::Attribute::refIdToIndex(effect.mAttribute) < 0 : !effect.mAttribute.empty())
-                || (skill ? ESM::Skill::refIdToIndex(effect.mSkill) < 0 : !effect.mSkill.empty()))
-                return std::nullopt;
-            result.effects.push_back(effect);
-        }
-        return result;
+        const auto* source = content.get<ESM::Enchantment>().search(id);
+        if (!source || source->mData.mType != ESM::Enchantment::ConstantEffect) return std::nullopt;
+        return preparePassiveEffects(source->mEffects, content, expandedEffects, specialConditions,
+            movementEffects, aiEffects, objectEffects, equipmentEffects, summonEffects);
     }
 
     std::optional<PreparedInstantEffects> preparePassiveActorEffects(const ESM::Spell& spell,
-        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects, bool equipmentEffects, bool summonEffects)
+        const MWWorld::ESMStore& content, bool movementEffects, bool aiEffects, bool objectEffects,
+        bool equipmentEffects, bool summonEffects)
     {
-        if (spell.mData.mType != ESM::Spell::ST_Ability || spell.mEffects.mList.empty()
-            || spell.mEffects.mList.size() > 8) return std::nullopt;
-        PreparedInstantEffects result;
-        for (const auto& entry : spell.mEffects.mList)
-        {
-            auto effect = entry.mData;
-            // Passive Self sources use the same stock addEffects normalization
-            // as constant enchantments; authored duration/area are ignored.
-            if (equipmentEffects) { effect.mDuration = 0; effect.mArea = 0; }
-            const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
-            if (!(aiEffects && aiDispositionEffect(effect.mEffectID))
-                && !(movementEffects && movementEffect(effect.mEffectID))
-                && !(objectEffects && effect.mEffectID == ESM::MagicEffect::Telekinesis)
-                && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
-                || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID)))) return std::nullopt;
-            if (!magic
-                || effect.mRange != ESM::RT_Self || effect.mArea || effect.mDuration
-                || !effect.mAttribute.empty() || !effect.mSkill.empty()
-                || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax
-                || effect.mMagnMax > 1000) return std::nullopt;
-            result.effects.push_back(effect);
-        }
-        return result;
+        if (spell.mData.mType != ESM::Spell::ST_Ability) return std::nullopt;
+        return preparePassiveEffects(spell.mEffects, content, true, false, movementEffects, aiEffects,
+            objectEffects, equipmentEffects, summonEffects);
     }
 
     std::optional<PreparedInstantEffects> prepareInstantEffects(const ESM::EffectList& effects,

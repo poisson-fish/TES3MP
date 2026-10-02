@@ -18,9 +18,10 @@ namespace TES3MP::Native
     {
         bool levitationEnabled = true;
         bool teleportingEnabled = true;
+        bool forceJump = false, forceMoveJump = false;
     };
     MovementRuleState runMovementRuleScript(const MWWorld::ESMStore& content, const ESM::RefId& script,
-        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules);
+        const MWWorld::Ptr& actor, MovementRuleState before, bool allowTravelRules, bool allowActorControls = false);
 }
 
 #endif

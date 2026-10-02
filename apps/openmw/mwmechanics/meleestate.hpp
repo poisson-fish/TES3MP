@@ -19,8 +19,17 @@ namespace MWMechanics
 {
     class CreatureStats;
 
-    // The magic portion of the stock awareness target. Detached server actors
-    // have no presentation node or sneak stance during the movement migration.
+    // Explicit simulation context; facing is optional for stock actors without a node.
+    struct AwarenessContext
+    {
+        bool sneaking = false;
+        float targetSneak = 0, observerSneak = 0, bootWeight = 0;
+        osg::Vec3f targetPosition, observerPosition;
+        std::optional<osg::Vec3f> observerDirection;
+    };
+    float awarenessTarget(const MWWorld::ESMStore& store, const CreatureStats& target,
+        const CreatureStats& observer, const AwarenessContext& context);
+    // The magic portion of the stock awareness target.
     float magicConcealmentTarget(const CreatureStats& target);
     bool isTargetMagicallyHidden(const CreatureStats& target);
 

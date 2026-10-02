@@ -444,9 +444,9 @@ namespace TES3MP::Native
                             start.binding.mCrimeWitnesses.push_back({placed.mIdentity, wireCell,
                                 Position3(std::llround(double(p[0]) * 1024),
                                     std::llround(double(p[1]) * 1024),
-                                    std::llround(double(p[2]) * 1024)), placed.mRef.mRefID});
+                                    std::llround(double(p[2]) * 1024)), placed.mRef.mRefID, placed.mRef.mPos.rot[2]});
                             placement << "\nwitness:" << placed.mIdentity << ':' << placed.mRef.mRefID
-                                << ':' << p[0] << ':' << p[1] << ':' << p[2];
+                                << ':' << p[0] << ':' << p[1] << ':' << p[2] << ':' << placed.mRef.mPos.rot[2];
                         }
                     }
                     if (start.binding.mNeighborAi)

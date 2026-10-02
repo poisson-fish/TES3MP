@@ -1,3 +1,4 @@
+#include <apps/openmw/mwmechanics/jump.hpp>
 #include <apps/openmw/mwmechanics/dooravoidance.hpp>
 #include <apps/openmw/mwclass/npcmovement.hpp>
 #include <apps/openmw/mwmechanics/breathing.hpp>
@@ -350,6 +351,43 @@ namespace
             "Stock turning tolerance did not complete");
     }
 
+    void jumpFall()
+    {
+        using MWMechanics::forceJumpRequested;
+        require(forceJumpRequested(true, false, false, true, false, false)
+            && !forceJumpRequested(false, true, false, true, false, false)
+            && forceJumpRequested(false, true, true, true, false, false), "Stock force jump/move decisions changed");
+        require(!forceJumpRequested(true, true, true, false, false, false)
+            && !forceJumpRequested(true, true, true, true, true, false)
+            && !forceJumpRequested(true, true, true, true, false, true), "Stock air/water/flight jump gate changed");
+        const auto trajectory = [&](float launch, float slowFall) {
+            Scene scene; auto actor = scene.actor({0, 0, 1}, slowFall);
+            float apex = 1.f; bool descending = false, landed = false;
+            for (unsigned frame = 0; frame < 300; ++frame)
+            {
+                actor.mMovement = MWMechanics::jumpMovement({0, 100, 0}, launch, frame == 0,
+                    actor.mIsOnGround, false, false, false, .5f);
+                const float previous = actor.mPosition.z(); scene.step(actor);
+                apex = std::max(apex, actor.mPosition.z());
+                descending |= actor.mPosition.z() < previous;
+                if (descending && actor.mIsOnGround) { landed = true; break; }
+                if (frame == 40) require(actor.mPosition.y() > 0.f, "AI jump omitted horizontal navigation motion");
+            }
+            require(landed, "Stock jump/fall did not return to the ground");
+            return apex;
+        };
+        const float plain = trajectory(180.f, 1.f), boosted = trajectory(500.f, 1.f);
+        require(boosted > plain * 2.f, "Jump launch magnitude did not increase actual height");
+        Scene plainScene, slowScene;
+        auto plainFall = plainScene.actor({0, 0, 300}), slowFall = slowScene.actor({0, 0, 300}, .5f);
+        for (unsigned frame = 0; frame < 30; ++frame) { plainScene.step(plainFall); slowScene.step(slowFall); }
+        require(slowFall.mPosition.z() > plainFall.mPosition.z() + 20.f, "SlowFall did not slow actual descent");
+        const float hurt = MWMechanics::fallDamage(500.f, 20.f, 0.f, 100.f, 1.f, .01f, 0.f, .1f);
+        require(hurt > MWMechanics::fallDamage(500.f, 20.f, 30.f, 100.f, 1.f, .01f, 0.f, .1f)
+            && MWMechanics::fallDamage(99.f, 20.f, 0.f, 100.f, 1.f, .01f, 0.f, .1f) == 0.f,
+            "Stock Jump fall protection/minimum changed");
+    }
+
     void doorContact()
     {
         btDefaultCollisionConfiguration configuration;
@@ -388,7 +426,8 @@ int main(int argc, char** argv)
         if (argc != 2)
             throw std::invalid_argument("Select movement-collision, movement-environment or collision-effects");
         const std::string_view filter = argv[1];
-        if (filter == "movement-collision")
+        if (filter == "jump-fall") jumpFall();
+        else if (filter == "movement-collision")
             collision();
         else if (filter == "movement-environment")
             environment();

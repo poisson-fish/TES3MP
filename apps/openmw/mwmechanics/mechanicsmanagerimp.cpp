@@ -1621,64 +1621,24 @@ namespace MWMechanics
         if (observer.getClass().getCreatureStats(observer).isDead() || !observer.getRefData().isEnabled())
             return false;
 
-        const MWWorld::Store<ESM::GameSetting>& store
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-
-        CreatureStats& stats = ptr.getClass().getCreatureStats(ptr);
-
-        float sneakTerm = 0;
-        if (isSneaking(ptr))
+        const auto& store = *MWBase::Environment::get().getESMStore();
+        auto& stats = ptr.getClass().getCreatureStats(ptr);
+        auto& observerStats = observer.getClass().getCreatureStats(observer);
+        AwarenessContext context;
+        context.sneaking = isSneaking(ptr);
+        context.targetSneak = ptr.getClass().getSkill(ptr, ESM::Skill::Sneak);
+        context.observerSneak = observer.getClass().getSkill(observer, ESM::Skill::Sneak);
+        context.targetPosition = ptr.getRefData().getPosition().asVec3();
+        context.observerPosition = observer.getRefData().getPosition().asVec3();
+        if (context.sneaking && ptr.getClass().isNpc() && MWBase::Environment::get().getWorld()->isOnGround(ptr))
         {
-            static float fSneakSkillMult = store.find("fSneakSkillMult")->mValue.getFloat();
-            static float fSneakBootMult = store.find("fSneakBootMult")->mValue.getFloat();
-            float sneak = static_cast<float>(ptr.getClass().getSkill(ptr, ESM::Skill::Sneak));
-            float agility = stats.getAttribute(ESM::Attribute::Agility).getModified();
-            float luck = stats.getAttribute(ESM::Attribute::Luck).getModified();
-            float bootWeight = 0;
-            if (ptr.getClass().isNpc() && MWBase::Environment::get().getWorld()->isOnGround(ptr))
-            {
-                const MWWorld::InventoryStore& inv = ptr.getClass().getInventoryStore(ptr);
-                MWWorld::ConstContainerStoreIterator it = inv.getSlot(MWWorld::InventoryStore::Slot_Boots);
-                if (it != inv.end())
-                    bootWeight = it->getClass().getWeight(*it);
-            }
-            sneakTerm = fSneakSkillMult * sneak + 0.2f * agility + 0.1f * luck + bootWeight * fSneakBootMult;
+            const auto& inv = ptr.getClass().getInventoryStore(ptr);
+            const auto boots = inv.getSlot(MWWorld::InventoryStore::Slot_Boots);
+            if (boots != inv.end()) context.bootWeight = boots->getClass().getWeight(*boots);
         }
-
-        static float fSneakDistBase = store.find("fSneakDistanceBase")->mValue.getFloat();
-        static float fSneakDistMult = store.find("fSneakDistanceMultiplier")->mValue.getFloat();
-
-        osg::Vec3f pos1(ptr.getRefData().getPosition().asVec3());
-        osg::Vec3f pos2(observer.getRefData().getPosition().asVec3());
-        float distTerm = fSneakDistBase + fSneakDistMult * (pos1 - pos2).length();
-
-        float x = sneakTerm * distTerm * stats.getFatigueTerm() + magicConcealmentTarget(stats);
-
-        CreatureStats& observerStats = observer.getClass().getCreatureStats(observer);
-        float obsAgility = observerStats.getAttribute(ESM::Attribute::Agility).getModified();
-        float obsLuck = observerStats.getAttribute(ESM::Attribute::Luck).getModified();
-        float obsBlind = observerStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Blind).getMagnitude();
-        float obsSneak = observer.getClass().getSkill(observer, ESM::Skill::Sneak);
-
-        float obsTerm = obsSneak + 0.2f * obsAgility + 0.1f * obsLuck - obsBlind;
-
-        // is ptr behind the observer?
-        static float fSneakNoViewMult = store.find("fSneakNoViewMult")->mValue.getFloat();
-        static float fSneakViewMult = store.find("fSneakViewMult")->mValue.getFloat();
-        float y = 0;
-        osg::Vec3f vec = pos1 - pos2;
         if (observer.getRefData().getBaseNode())
-        {
-            osg::Vec3f observerDir = (observer.getRefData().getBaseNode()->getAttitude() * osg::Vec3f(0, 1, 0));
-
-            float angleRadians = std::acos(observerDir * vec / (observerDir.length() * vec.length()));
-            if (angleRadians > osg::DegreesToRadians(90.f))
-                y = obsTerm * observerStats.getFatigueTerm() * fSneakNoViewMult;
-            else
-                y = obsTerm * observerStats.getFatigueTerm() * fSneakViewMult;
-        }
-
-        float target = x - y;
+            context.observerDirection = observer.getRefData().getBaseNode()->getAttitude() * osg::Vec3f(0, 1, 0);
+        const float target = awarenessTarget(store, stats, observerStats, context);
         if (useCache)
             return observerStats.getAwarenessRoll() >= target;
         auto& prng = MWBase::Environment::get().getWorld()->getPrng();
