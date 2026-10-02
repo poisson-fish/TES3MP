@@ -727,7 +727,10 @@ namespace TES3MP::Native
                     return scene;
                 };
                 auto scene = createScene();
-                if (start.binding.mSummons) start.binding.mCreateActorSet = createScene;
+                start.binding.mCreateActorSet = createScene;
+                for (const auto* domain : start.binding.worldDomains())
+                    if (start.binding.mTravelerNeighborhood || domain->mCell == start.wireCell)
+                        start.binding.mCollisionCells.push_back(domain->mCell);
                 start.binding.mTravelDestination = start.navigation->destination;
                 start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
                 start.binding.mOnlyAppropriateAmmunitionBypassesResistance
@@ -838,7 +841,7 @@ namespace TES3MP::Native
                             if (start.binding.mPlacementCombat)
                                 for (const auto& adjacent : neighborOwners) actors.push_back(adjacent.mBase);
                             return actors;
-                        }()](bool active, const DynamicActorSet& actors) {
+                        }()](bool active, const DynamicActorSet& actors, const ActorSceneWorld& world) {
                         if (active && !scene->loaded())
                         {
                             std::vector<DynamicActorBody> bodies;
@@ -875,6 +878,7 @@ namespace TES3MP::Native
                                         throw std::invalid_argument("Summon cast clock changed after unloading");
                                 }
                             }
+                            fresh->replaceWorld(world);
                             scene->reload(*fresh);
                         }
                         else if (!active) scene->unload();

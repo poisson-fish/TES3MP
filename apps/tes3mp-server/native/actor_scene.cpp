@@ -146,6 +146,7 @@ namespace TES3MP::Native
         std::shared_ptr<const char> mLifetime = std::make_shared<const char>(0);
         struct Body
         {
+            uint64_t mId = 0;
             btCollisionWorld& mWorld;
             osg::ref_ptr<Resource::BulletShapeInstance> mResource;
             std::unique_ptr<btConvexShape> mHull;
@@ -477,6 +478,7 @@ namespace TES3MP::Native
                 if (!actorBody && shape->isAnimated())
                     throw std::invalid_argument("Animated collision requires CPU evaluation: " + model.value());
                 auto body = std::make_unique<Body>(mWorld);
+                body->mId = id;
                 body->mResource = shape;
                 const auto rotation = Misc::Convert::makeOsgQuat(position);
                 if (actorBody)
@@ -808,6 +810,76 @@ namespace TES3MP::Native
         mImpl.swap(candidate.mImpl);
         mNeighbor.swap(candidate.mNeighbor);
         mDormant.swap(candidate.mDormant);
+    }
+    void InteriorActorScene::replaceWorld(const ActorSceneWorld& world)
+    {
+        if (!mImpl || world.placements.size() > MaxBodies || world.objects.size() > MaxBodies)
+            throw std::invalid_argument("Collision world image outside bounds");
+        auto& scene = *mImpl;
+        const std::set<uint64_t> placements(world.placements.begin(), world.placements.end());
+        if (placements.size() != world.placements.size() || placements.contains(0))
+            throw std::invalid_argument("Ground collision placement domain invalid");
+        std::set<uint64_t> live;
+        for (size_t i = scene.mBodies.size(); i-- > 0;)
+        {
+            auto* object = scene.mBodies[i]->mObject.get();
+            if (!placements.contains(scene.mBodies[i]->mId)) continue;
+            if (scene.mBodies[i]->mHull || scene.mOrdinaryDoors.contains(scene.mBodies[i]->mId))
+                throw std::invalid_argument("Ground collision domain contains actor/door");
+            if (scene.mNavigator) scene.mNavigator->removeObject(DetourNavigator::ObjectId(object), nullptr);
+            scene.mIdentities.erase(object);
+            scene.mBodies.erase(scene.mBodies.begin() + i);
+            scene.mTransforms.erase(scene.mTransforms.begin() + i);
+            for (auto& [id, index] : scene.mOrdinaryDoors) if (index > i) --index;
+        }
+        for (const auto& [id, state] : world.objects)
+        {
+            if (!id || !live.insert(id).second || state.mRef.mCount <= 0
+                || scene.mBodies.size() == MaxBodies || (!scene.mSharedParent
+                    && std::ranges::any_of(scene.mIdentities, [id](const auto& entry) { return entry.second == id; })))
+                throw std::invalid_argument("Ground collision identity/count outside bounds");
+            validatePosition(state.mPosition, state.mRef.mScale);
+            MWWorld::ManualRef reference(scene.mStore, state.mRef.mRefID);
+            const auto ptr = reference.getPtr();
+            const auto model = ptr.getClass().getCorrectedModel(ptr);
+            if (model.empty()) continue;
+            if (!scene.mVfs.exists(model)) throw std::invalid_argument("Missing ground collision model");
+            auto shape = scene.mShapes->getInstance(model);
+            if (!shape || !shape->mCollisionShape) continue;
+            if (shape->isAnimated()) throw std::invalid_argument("Animated ground collision requires CPU evaluation");
+            auto body = std::make_unique<Impl::Body>(scene.mWorld);
+            body->mId = id;
+            body->mResource = shape;
+            shape->setLocalScaling(btVector3(state.mRef.mScale, state.mRef.mScale, state.mRef.mScale));
+            body->mObject = BulletHelpers::makeCollisionObject(shape->mCollisionShape.get(),
+                Misc::Convert::toBullet(state.mPosition.asVec3()),
+                Misc::Convert::toBullet(Misc::Convert::makeOsgQuat(state.mPosition)));
+            auto* object = body->mObject.get();
+            if (!scene.mSharedParent)
+                scene.mWorld.addCollisionObject(object, MWPhysics::CollisionType_World, MWPhysics::CollisionType_Actor);
+            scene.mIdentities.emplace(object, id);
+            scene.mTransforms.push_back({state.mPosition, state.mRef.mScale});
+            scene.mBodies.push_back(std::move(body));
+            if (scene.mNavigator) scene.mNavigator->addObject(DetourNavigator::ObjectId(object),
+                DetourNavigator::ObjectShapes(shape, scene.mTransforms.back()), object->getWorldTransform(), nullptr);
+        }
+        // Neighbor solvers query the parent's Bullet objects, using the parent's identity map.
+        if (scene.mSharedParent) scene.mIdentities = scene.mSharedParent->mIdentities;
+        if (scene.mNavigator)
+        {
+            scene.mNavigator->update(scene.mActor->mPosition, nullptr);
+            scene.mNavigator->wait(DetourNavigator::WaitConditionType::allJobsDone, nullptr);
+        }
+        if (mNeighbor) mNeighbor->replaceWorld(world);
+    }
+    void InteriorActorScene::rebuildTravel()
+    {
+        if (mImpl && mImpl->mTravel.hasDestination)
+        {
+            mImpl->syncNavigation(mImpl->mDoors);
+            mImpl->rebuildPath(mImpl->mPath, mImpl->mActor->mPosition, mImpl->mTravel);
+        }
+        if (mNeighbor) mNeighbor->rebuildTravel();
     }
     InteriorActorScene::~InteriorActorScene() = default;
     ActorSceneSnapshot InteriorActorScene::snapshot() const { return mImpl ? mImpl->snapshot() : mDormant->snapshot; }

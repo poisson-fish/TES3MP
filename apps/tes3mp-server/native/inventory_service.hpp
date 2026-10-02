@@ -135,6 +135,7 @@ namespace TES3MP::Native
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
         std::map<uint64_t, BoundCastAnimations> mDynamicCasts;
         std::function<std::shared_ptr<InteriorActorScene>(std::span<const DynamicActorBody>)> mCreateActorSet;
+        std::vector<CellId> mCollisionCells;
         bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
         std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;
         bool mScriptedTravelRules = false; // V68 persists stock Enable/DisableTeleporting results.
@@ -181,7 +182,7 @@ namespace TES3MP::Native
         bool mTravelerNeighborhood = false;
         size_t mTravelerCellBudget = 9;
         size_t mTravelerStepBudget = 2;
-        std::function<void(bool, const DynamicActorSet&)> mNavigationActivity;
+        std::function<void(bool, const DynamicActorSet&, const ActorSceneWorld&)> mNavigationActivity;
         std::vector<const WorldItems*> worldDomains() const
         {
             std::vector<const WorldItems*> result;
@@ -342,6 +343,11 @@ namespace TES3MP::Native
         uint8_t worldIndex(CellId cell) const;
         PlainEquipmentValues cellWorldValues(CellId cell,
             const EquipmentRuntime::PreparedWorldTransfer* prepared = nullptr) const;
+        ActorSceneWorld collisionWorld(const PlainEquipmentValues& values,
+            const std::optional<EquipmentSessionValues::WorldCells>& cells) const;
+        ActorSceneWorld collisionWorld(const EquipmentRuntime::PreparedWorldTransfer* prepared = nullptr) const;
+        std::shared_ptr<InteriorActorScene> prepareCollisionWorld(const ActorSceneWorld& world,
+            std::span<const char> image, std::span<const ActorSceneDoor> doors, bool replan = false) const;
         bool doorBlocked(const CanonicalServerState& players, ServerTick tick) const;
         size_t actor(PlayerId player) const;
         size_t container(std::optional<ContainerId> id) const;
@@ -439,6 +445,7 @@ namespace TES3MP::Native
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
         size_t activeActorCollisionBodies() const
         { return mBinding.mNavigatingActor ? mBinding.mNavigatingActor->bodyCount() : 0; }
+        const InteriorActorScene& actorCollisionScene() const { return *mBinding.mNavigatingActor; }
         std::optional<int> selectedNpcWeaponCondition() const
         {
             if (!mCombat) return {};

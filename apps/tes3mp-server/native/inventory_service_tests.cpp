@@ -5587,6 +5587,7 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
+        const bool worldCollision = effectFamily == "world-collision";
         const bool sneakDetection = effectFamily == "sneak-detection";
         const bool landingRecovery = effectFamily == "movement-fall";
         const bool jumpConsumers = landingRecovery || effectFamily == "movement-jumps";
@@ -6966,7 +6967,17 @@ namespace TES3MP::Native::Testing
                     << "\nmelee weapononehand\n";
             }
             if (encounterProfile == "bow-desktop-recycling-flight") npc.mNpdt.mHealth = 25;
-                if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
+            if (worldCollision)
+            {
+                ESM::Miscellaneous obstruction; obstruction.blank();
+                obstruction.mId = ESM::RefId::stringRefId("committed_obstruction");
+                obstruction.mModel = "placement-obstruction.osgt";
+                obstruction.mData.mWeight = 1;
+                out.startRecord(ESM::Miscellaneous::sRecordId, 0); obstruction.save(out);
+                out.endRecord(ESM::Miscellaneous::sRecordId);
+                npc.mInventory.mList.push_back({7, obstruction.mId});
+            }
+            if (effectFamily != "elemental-shields" && effectFamily != "fortify-resources"
                 && effectFamily != "persistent-conditions" && effectFamily != "disintegration"
                 && effectFamily != "concealment" && effectFamily != "visibility"
                 && effectFamily != "movement-effects" && !neighborPhysics
@@ -7595,7 +7606,9 @@ namespace TES3MP::Native::Testing
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                 // Leave the door clear for the two-desktop Touch capture.
-                if (record == placedActor) placed.mPos = effectFamily == "door-magic" && !objectSpells
+                if (record == placedActor) placed.mPos = worldCollision
+                    ? ESM::Position{{60, -70, 1}, {0, 0, 0}}
+                    : effectFamily == "door-magic" && !objectSpells
                     ? ESM::Position{{1000, 1000, 1}, {0, 0, 0}}
                     : ESM::Position{{60, -32, 1}, {0, 0, 0}};
                 placed.save(out);
@@ -9088,7 +9101,7 @@ namespace TES3MP::Native::Testing
                     ? "areas 2\ninterior \"NPC Door Recall Test\"\ncell interior:8\n" : "areas 1\n")
                 << "npc " << std::quoted(effectFamily == "ai-creature" ? "timeline_creature" : "npc_door_actor")
                 << ' ' << std::quoted(actorSettings.string())
-                << (melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
+                << (worldCollision ? "\ndestination 60 -70 1 120\n" : melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
                     : wetMovement ? "\ndestination 60 -500 1 120\n"
                     : "\ndestination 60 -240 1 120\n");
             if (melee) out << "processing 1 2\nmelee "
@@ -9134,6 +9147,114 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (worldCollision)
+        {
+            auto placed = std::vector(authority.players().begin(), authority.players().end());
+            for (auto& entity : placed)
+                entity = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(entity, id<ServerTick>(2),
+                    Transform(entity.transform().cell(), Position3(60*1024, -180*1024, 1024),
+                        entity.transform().orientation()), LinearVelocity3(0, 0, 0)));
+            authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
+            service.synchronizeCells(authority);
+            auto& native = dynamic_cast<InventoryService&>(service);
+            const auto image = [](const auto& owner) {
+                return std::vector(owner.inventoryImage().begin(), owner.inventoryImage().end());
+            };
+            CanonicalWorldTimeState worldTime;
+            worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            const auto globals = GlobalVariableCatalog::create({}).value();
+            const auto quests = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto factions = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+            const auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+            uint64_t tick = 3;
+            const auto view = [&] {
+                return *service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+            };
+            const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
+            const auto contact = [](const auto& owner) {
+                return dynamic_cast<const InventoryService&>(owner).actorCollisionScene().projectileContact(
+                    {-150, -180, 70}, {250, -180, 70});
+            };
+            const auto visible = [](const auto& owner) {
+                return dynamic_cast<const InventoryService&>(owner).actorCollisionScene().lineOfSight(
+                    {-150, -180, 70}, {250, -180, 70});
+            };
+            const auto route = [](const auto& owner) {
+                return dynamic_cast<const InventoryService&>(owner).actorCollisionScene().pathTo({60, -350, 1});
+            };
+            require(!contact(service) && visible(service), "Collision fixture's initial segment is obstructed");
+            const auto clearPath = route(service);
+            const auto initial = view();
+            const auto item = std::ranges::find_if(initial.playerInventory[0].stacks,
+                [](const auto& stack) { return stack.count == 7; });
+            require(item != initial.playerInventory[0].stacks.end(), "Collision fixture obstruction inventory missing");
+            ClientInventoryTransactionCommand drop{id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(tick), id<CanonicalRevision>(tick), InventoryTransactionKind::DropItem, {},
+                item->prototypeId, item->stackId, 1, {}, initial.playerInventory[0].revision, {}, {},
+                Position3(60*1024, -180*1024, 1024), placementTestView(60, 200, true)};
+            const auto before = image(service);
+            auto transfer = service.prepareInventory(authority, bind(authority, drop).proposal());
+            require(bool(transfer), "Bound actor scene still rejects ground drop");
+            auto staged = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(transfer), &world);
+            require(staged && service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick),
+                id<CanonicalRevision>(tick), staged.get()), "Collision drop lost composed projection");
+            require(staged->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                == CanonicalDurabilityResult::Rejected && image(service) == before
+                && !contact(service) && visible(service) && route(service) == clearPath,
+                "Rejected drop leaked inventory, collision or navigation");
+            require(staged->commit(accepted) == CanonicalDurabilityResult::Committed, "Collision drop commit failed");
+            const auto dropped = view().groundItems[0].items;
+            require(dropped.size() == 1 && contact(service) && contact(service)->object == dropped[0].stack.stackId.value()
+                && !visible(service) && route(service) != clearPath, "Dropped obstruction consumers disagree");
+            const auto droppedImage = image(service);
+            InventoryHost restarted(descriptor, manifest, *registry, *crypto, droppedImage);
+            restarted.service().synchronizeCells(authority);
+            require(image(restarted.service()) == droppedImage && contact(restarted.service())
+                && contact(restarted.service())->object == contact(service)->object
+                && contact(restarted.service())->position == contact(service)->position
+                && !visible(restarted.service()) && route(restarted.service()) == route(service),
+                "Restart did not rebuild committed collision membership/transform");
+            const auto empty = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            service.synchronizeCells(empty);
+            require(native.activeActorCollisionBodies() == 0, "Collision fixture failed to unload");
+            service.synchronizeCells(authority);
+            require(contact(service) && !visible(service) && route(service) == route(restarted.service()),
+                "Reload restored authored collision instead of committed membership");
+            // Isolated diagnostic scene uses the same stock solver and committed hull.
+            auto& physics = const_cast<InteriorActorScene&>(dynamic_cast<InventoryService&>(restarted.service()).actorCollisionScene());
+            for (unsigned step = 0; step < 120; ++step) physics.step({0, -120, 0});
+            const auto stopped = physics.snapshot();
+            require(stopped.mPosition[1] > -130 && std::ranges::find(stopped.mContacts,
+                dropped[0].stack.stackId.value()) != stopped.mContacts.end(),
+                "Stock actor physics passed through the committed obstruction");
+            ++tick;
+            const auto inventory = view().playerInventory[0];
+            const auto& ground = dropped[0];
+            ClientInventoryTransactionCommand pickup{id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(tick), id<CanonicalRevision>(tick), InventoryTransactionKind::PickupItem, {},
+                ground.stack.prototypeId, ground.stack.stackId, 1, {}, inventory.revision, {}, ground.revision,
+                Position3(60*1024, -180*1024, 1024)};
+            transfer = service.prepareInventory(authority, bind(authority, pickup).proposal());
+            require(bool(transfer), "Bound actor scene rejects pickup removal");
+            staged = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, std::move(transfer), &world);
+            const auto blockedPath = route(service);
+            require(staged && staged->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                == CanonicalDurabilityResult::Rejected && image(service) == droppedImage
+                && contact(service) && !visible(service) && route(service) == blockedPath,
+                "Rejected pickup removed committed collision");
+            require(staged->commit(accepted) == CanonicalDurabilityResult::Committed && !contact(service)
+                && visible(service) && view().groundItems[0].items.empty() && route(service) == clearPath,
+                "Pickup did not remove collision from all consumers");
+            InventoryHost pickedRestart(descriptor, manifest, *registry, *crypto, service.inventoryImage());
+            pickedRestart.service().synchronizeCells(authority);
+            require(!contact(pickedRestart.service()) && visible(pickedRestart.service())
+                && route(pickedRestart.service()) == clearPath, "Pickup collision reappeared after restart");
+            auto& clearPhysics = const_cast<InteriorActorScene&>(dynamic_cast<InventoryService&>(pickedRestart.service()).actorCollisionScene());
+            for (unsigned step = 0; step < 120; ++step) clearPhysics.step({0, -120, 0});
+            require(clearPhysics.snapshot().mPosition[1] < -240, "Pickup left a ghost obstruction in stock physics");
+            std::cout << "world collision: drop+pickup physics/projectile/visibility/navigation rollback unload/reload restart passed\n";
+            return;
+        }
         if (playerLives && !spellCompleteness)
         {
             // One real canonical file owns actor lives, inventories and spatial epochs.

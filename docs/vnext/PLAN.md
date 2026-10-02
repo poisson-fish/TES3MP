@@ -69,17 +69,15 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    Accept with 60-FPS video/frame traces on both desktops showing smooth progression
    and stock-speed recovery under loss/delay/jitter and reconnect/restart, without
    duplicate hits or premature recovery. Keep movement cutover separate.
-   Finish unarmed fatigue/health damage while down,
-   hit recovery, armor, block, resistances and wear. Complete the 143 built-in
-   effect IDs (remaining inventory in CURRENT), including stock ExtraSpell.
+   Finish unarmed damage while down, recovery, armor, block, resistances and wear.
+   Complete 143 built-in effects (CURRENT), including stock ExtraSpell.
    Cover applicable spells/powers/abilities/diseases/enchantments, AI and targets,
    ranges/areas/order, stacking, defenses/cures/expiry, derived stats, equipment,
    controls, visuals, life ownership, atomic retry and reconnect/restart.
-   Preserve stock restrictions; allowlisting alone is insufficient.
-   Implement behavior families through shared stock/server handlers and parameterized
-   lifecycle checks, not per-ID sessions. Start with elemental shields and stat/resource
-   effects; follow dependencies through conditions, concealment/detection, movement,
-   AI, objects/travel, bound equipment and summons. Summons require multi-actor ownership.
+   Preserve stock restrictions; admission alone is insufficient. Use shared stock/server
+   handlers and parameterized family lifecycle checks. Follow dependencies through
+   shields/stats/resources, conditions, concealment/detection, movement, AI,
+   objects/travel, bound equipment and multi-actor summons.
    Match all stock OpenMW combat visuals/audio: casts, composite bolts, bolt
    light/sound, hit/area effects, persistent loops, enchanted glow,
    visibility/lighting and animation timing. Use committed events/active snapshots;
@@ -102,9 +100,11 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    **Finish line:** both clients converge after reconnect/restart without duplicated
    ammunition costs, damage or loot. Focused acceptance may run incrementally;
    full M4 sign-off requires all implementation gaps and exit criteria closed.
-6. Switch player movement last, after unified collision/physics and smoothness
-   verification, meeting DECISIONS.md's prediction/reconciliation budgets.
-   Retain inherited movement until this cutover.
+6. Group pending V76 Target/destination/size/capability desktop checks with committed
+   collision: drop obstruction, pickup removal, physics/projectile/visibility/navigation,
+   rollback, reload/restart and smoothness under latency/jitter/loss. Then switch player
+   movement last using shared physics, meeting DECISIONS.md's prediction/reconciliation
+   budgets. Retain inherited movement until cutover.
 
 **Exit:** bounded slices are insufficient. All OpenMW-supported combat paths in
 the gameplay loadout work generically across actors, players, records and targets:

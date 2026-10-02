@@ -9,6 +9,7 @@
 #include <vector>
 #include <span>
 #include <components/esm/refid.hpp>
+#include <components/esm3/objectstate.hpp>
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
 #include "hit_animation.hpp"
@@ -70,6 +71,11 @@ namespace TES3MP::Native
         std::array<float, 3> position{};
         float yaw = 0;
     };
+    struct ActorSceneWorld
+    {
+        std::vector<uint64_t> placements;
+        std::vector<std::pair<uint64_t, ESM::ObjectState>> objects;
+    };
     struct BoundMeleeAnimation
     {
         MeleeAnimation mAnimation;
@@ -111,6 +117,10 @@ namespace TES3MP::Native
         // Both scenes are detached from the host during preparation. Commit can
         // install the complete collision membership without allocating.
         void installActorSet(InteriorActorScene& candidate) noexcept;
+        // Replace the ground-reference domain on a detached scene, before publication.
+        // Physics, contact queries and every neighbor's navigator use this image.
+        void replaceWorld(const ActorSceneWorld& world);
+        void rebuildTravel();
         bool contains(const std::array<float, 3>& position) const;
         bool pathUnavailable() const;
         ~InteriorActorScene();

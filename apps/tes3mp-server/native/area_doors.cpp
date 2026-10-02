@@ -156,22 +156,28 @@ namespace TES3MP::Native
         auto sealed = sealInventory(core, states, locks);
         if (!std::ranges::equal(sealed, bytes)) throw std::invalid_argument("Noncanonical native area image");
         std::unique_ptr<InteriorActorScene::Prepared> step;
+        std::shared_ptr<InteriorActorScene> collision;
+        std::vector<ActorSceneDoor> doors;
         if (mBinding.mNavigatingActor)
         {
-            std::vector<ActorSceneDoor> doors;
             for (size_t i = 0; i < states.size(); ++i)
                 if (mBinding.mTravelerNeighborhood || mBinding.mDoors[i].mCell == mBinding.mWorldItems->mCell)
                     doors.push_back({mBinding.mDoors[i].mId, states[i]->mPosition.rot[2], states[i]->mDoorState != 0});
-            step = mBinding.mNavigatingActor->prepareRestore(actor, doors);
+            if (!mBinding.mCreateActorSet) step = mBinding.mNavigatingActor->prepareRestore(actor, doors);
         }
         EquipmentBytes accepted(core.begin(), core.end()), restored;
         std::unique_ptr<const EquipmentSessionValues> values;
-        mRuntime.restoreSession(std::move(accepted), references, values, restored, validate);
+        mRuntime.restoreSession(std::move(accepted), references, values, restored, [&](const auto& candidate) {
+            if (validate) validate(candidate);
+            if (mBinding.mCreateActorSet && candidate.mWorldItems)
+                collision = prepareCollisionWorld(collisionWorld(*candidate.mWorldItems, candidate.mWorldCells), actor, doors);
+        });
         for (size_t i = 0; i < count; ++i) mAreaDoors[i].state.swap(states[i]);
         if (mBinding.mContainerMagic) mContainerLocks.swap(locks);
         mCoreImage.swap(restored);
         mImage.swap(sealed);
         if (step) mBinding.mNavigatingActor->install(*step);
+        if (collision) mBinding.mNavigatingActor->installActorSet(*collision);
     }
 
     class InventoryService::AreaDoorTransaction final : public PreparedNativeInventory

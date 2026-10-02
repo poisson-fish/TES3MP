@@ -1759,6 +1759,50 @@ namespace TES3MP::Native
         return result;
     }
 
+    ActorSceneWorld InventoryService::collisionWorld(const PlainEquipmentValues& values,
+        const std::optional<EquipmentSessionValues::WorldCells>& cells) const
+    {
+        ActorSceneWorld result;
+        const auto domains = mBinding.worldDomains();
+        for (const auto* domain : domains)
+            if (std::ranges::find(mBinding.mCollisionCells, domain->mCell) != mBinding.mCollisionCells.end())
+                for (const auto& [id, ref] : domain->mPlacements) result.placements.push_back(id);
+        for (const auto& state : values.mObjects)
+        {
+            const auto cell = cells ? cells->at(state.mRef.mRefNum) : uint8_t(0);
+            if (cell >= domains.size()) throw std::invalid_argument("Collision item cell outside bound domain");
+            if (std::ranges::find(mBinding.mCollisionCells, domains[cell]->mCell) != mBinding.mCollisionCells.end())
+                result.objects.emplace_back(worldId(state.mRef.mRefNum, *domains[cell]).value(), state);
+        }
+        return result;
+    }
+
+    ActorSceneWorld InventoryService::collisionWorld(const EquipmentRuntime::PreparedWorldTransfer* prepared) const
+    {
+        return collisionWorld(mRuntime.worldValues(prepared),
+            prepared ? mRuntime.preparedWorldCells(*prepared) : mRuntime.mWorldCells);
+    }
+
+    std::shared_ptr<InteriorActorScene> InventoryService::prepareCollisionWorld(const ActorSceneWorld& world,
+        std::span<const char> image, std::span<const ActorSceneDoor> doors, bool replan) const
+    {
+        std::vector<DynamicActorBody> bodies;
+        for (const auto& body : mBinding.mDynamicActors.bodies) bodies.push_back(body.collision);
+        auto fresh = mBinding.mCreateActorSet(bodies);
+        if (fresh->fingerprint() != mBinding.mNavigatingActor->fingerprint())
+            throw std::invalid_argument("Collision resources changed during world preparation");
+        fresh->replaceWorld(world);
+        auto removed = world.placements;
+        for (const auto& [id, state] : collisionWorld().objects) removed.push_back(id);
+        std::erase_if(removed, [&](uint64_t id) {
+            return std::ranges::any_of(world.objects, [id](const auto& entry) { return entry.first == id; });
+        });
+        auto restored = fresh->prepareRestore(image, doors, removed);
+        fresh->install(*restored);
+        if (replan) fresh->rebuildTravel();
+        return fresh;
+    }
+
     void InventoryService::synchronizeCells(const CanonicalServerState& players)
     {
         if (!mBinding.mSecondWorldItems && !mBinding.mStreamExteriors) return;
@@ -1799,7 +1843,7 @@ namespace TES3MP::Native
                 // Union admission happens once below, never once per cell.
                 if (navigationActive) std::fill(active.begin(), active.end(), true);
             }
-            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(navigationActive, mBinding.mDynamicActors);
+            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(navigationActive, mBinding.mDynamicActors, collisionWorld());
         }
         if (mBinding.mAreaActivity) mBinding.mAreaActivity(active);
         const std::array legacy{bool(active[0]), active.size() > 1 && active[1]};
@@ -1867,9 +1911,9 @@ namespace TES3MP::Native
         const uint32_t ReachQuanta = interactionReach(bound.player(), true);
         if (!bound.current(players)) throw std::invalid_argument("Inventory session binding is no longer current");
         const auto& command = bound.transaction();
-        if (mBinding.mNavigatingActor && (command.kind == InventoryTransactionKind::PickupItem
+        if (mBinding.mNavigatingActor && !mBinding.mCreateActorSet && (command.kind == InventoryTransactionKind::PickupItem
                 || command.kind == InventoryTransactionKind::DropItem))
-            throw std::invalid_argument("Frozen NPC interior does not support changing collision placements");
+            throw std::invalid_argument("Actor collision world factory is unavailable");
         (void)actor(bound.player());
         if (command.placement && (command.kind != InventoryTransactionKind::DropItem
             || !validDropPlacementView(*command.placement)))
@@ -4926,12 +4970,22 @@ namespace TES3MP::Native
         { if (respawn) respawnCore.assign(respawn->image().begin(), respawn->image().end()); }
         bool changesInventory() const noexcept override
         { return bool(command) || !wear.empty() || !charges.empty() || bool(respawn) || bool(loot); }
+        ActorSceneSnapshot snapshot() const
+        {
+            return actor && (!memberScene || memberScene->canInstall(*actor)) ? actor->snapshot()
+                : (memberScene ? memberScene : service.mBinding.mNavigatingActor)->snapshot();
+        }
+        std::vector<ActorSceneSnapshot> neighborSnapshots() const
+        {
+            return actor && (!memberScene || memberScene->canInstall(*actor)) ? actor->neighborSnapshots()
+                : (memberScene ? memberScene : service.mBinding.mNavigatingActor)->neighborSnapshots();
+        }
         std::span<const std::pair<PlayerId, Transform>> playerRelocations() const override
         { return relocations; }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
             if (consumed || service.inventoryImage().empty() || before != service.mActorImage
-                || (actor && !service.mBinding.mNavigatingActor->canInstall(*actor))
+                || (actor && !membership && !(memberScene ? memberScene : service.mBinding.mNavigatingActor)->canInstall(*actor))
                 || (loot && loot->beforeRevision() != service.mWorld.getPtrRegistryRevision()))
                 return CanonicalDurabilityResult::Rejected;
             try
@@ -4957,8 +5011,10 @@ namespace TES3MP::Native
                     else if (respawn) wornInventory = service.replaceAreaCore(candidate, respawn->image());
                     const auto selected = !wornInventory.empty() ? std::span<const char>(wornInventory) : candidate;
                     const auto memberImage = memberScene ? memberScene->image() : EquipmentBytes{};
+                    const auto frameImage = actor && (!memberScene || memberScene->canInstall(*actor))
+                        ? actor->image() : memberScene ? std::span<const char>(memberImage) : retained;
                     sealed = service.sealActor(selected,
-                        memberScene ? std::span<const char>(memberImage) : actor ? actor->image() : retained, tick, velocity, melee, target, contact, combat, life, neighborLives, projectiles,
+                        frameImage, tick, velocity, melee, target, contact, combat, life, neighborLives, projectiles,
                         timedEffects, casting, membership ? &membership->mDynamicActors : nullptr);
                     return persist(std::as_bytes(std::span(sealed)));
                 };
@@ -4990,7 +5046,8 @@ namespace TES3MP::Native
                         else service.mCoreImage.swap(wornCore);
                         service.mImage.swap(wornInventory);
                     }
-                    if (actor) service.mBinding.mNavigatingActor->install(*actor);
+                    if (actor && (!memberScene || memberScene->canInstall(*actor)))
+                        (memberScene ? memberScene : service.mBinding.mNavigatingActor)->install(*actor);
                     if (memberScene) service.mBinding.mNavigatingActor->installActorSet(*memberScene);
                     if (membership)
                     {
@@ -5068,6 +5125,21 @@ namespace TES3MP::Native
         if (!mBinding.mNavigatingActor) return command ? std::move(command) : prepareDoorStep(players, tick, seconds);
         if (!std::isfinite(seconds) || std::abs(seconds - 1.f/30.f) > 1e-6f || tick.value() <= mActorTick)
             throw std::invalid_argument("Native actor requires increasing 30 Hz durable ticks");
+        // All tick consumers query detached collision; publication follows durability.
+        struct RestoreScene
+        {
+            InventoryServiceBinding& binding;
+            std::shared_ptr<InteriorActorScene> previous;
+            ~RestoreScene() { binding.mNavigatingActor = std::move(previous); }
+        } restoreScene{mBinding, mBinding.mNavigatingActor};
+        std::shared_ptr<InteriorActorScene> worldScene;
+        const auto* worldTransfer = dynamic_cast<const WorldTransaction*>(areaDoorCommand(command.get()));
+        if (worldTransfer)
+        {
+            worldScene = prepareCollisionWorld(collisionWorld(&worldTransfer->prepared),
+                mBinding.mNavigatingActor->image(), actorDoorFrames(command.get()), true);
+            mBinding.mNavigatingActor = worldScene;
+        }
         const auto [aiNpc, aiUndead] = aiActorKind(mRuntime.ownerPtr(mCombatNpcOwner));
         // One scheduler admission: menu time changes effect/game clocks, never
         // authoritative action, respawn or simulation ticks.
@@ -10523,7 +10595,7 @@ namespace TES3MP::Native
             }
         }
         std::unique_ptr<InventoryServiceBinding> membership;
-        std::shared_ptr<InteriorActorScene> memberScene;
+        std::shared_ptr<InteriorActorScene> memberScene = worldScene;
         auto memberBaselines = mNeighborRespawnInventory;
         if (mBinding.mSummons && combat)
         {
@@ -10624,6 +10696,7 @@ namespace TES3MP::Native
                         for (const auto& prior : actors.bodies) collision.push_back(prior.collision);
                         collision.push_back(body.collision);
                         auto validation = mBinding.mCreateActorSet(collision);
+                        validation->replaceWorld(collisionWorld(worldTransfer ? &worldTransfer->prepared : nullptr));
                         const auto hitResources = validation->bindHitAnimations(base, mBinding.mKnockoutAnimation);
                         std::istringstream animation(hitResources.resourceIdentity);
                         body.animationResources = Files::getHash("native-summon-animation", animation);
@@ -10667,6 +10740,7 @@ namespace TES3MP::Native
                     std::vector<DynamicActorBody> collision;
                     for (const auto& body : actors.bodies) collision.push_back(body.collision);
                     memberScene = mBinding.mCreateActorSet(collision);
+                    memberScene->replaceWorld(collisionWorld(worldTransfer ? &worldTransfer->prepared : nullptr));
                     actors.collisionResources = DynamicActorSet::resources(*memberScene);
                     const auto selected = step ? step->selectedImage() : std::span<const char>(life->spawnActor);
                     // Current selected state is retained even when no navigation ran.
@@ -10854,7 +10928,8 @@ namespace TES3MP::Native
     {
         const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
         if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage
-            || (moving->actor && !mBinding.mNavigatingActor->canInstall(*moving->actor)))) return {};
+            || (moving->actor && !moving->membership
+                && !(moving->memberScene ? moving->memberScene : mBinding.mNavigatingActor)->canInstall(*moving->actor)))) return {};
         if (moving) candidate = moving->command.get();
         const auto* areaDoors = candidate;
         if (ownsAreaDoorCandidate(candidate)) candidate = areaDoorCommand(candidate);
@@ -10893,14 +10968,13 @@ namespace TES3MP::Native
         }
         if (result && result->equipment && mBinding.mNavigatingActor)
         {
-            const auto state = moving && moving->memberScene ? moving->memberScene->snapshot() : moving && moving->actor ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+            const auto state = moving ? moving->snapshot() : mBinding.mNavigatingActor->snapshot();
             if (std::ranges::any_of(result->equipment->actors, [&](const auto& owner) { return owner.actor.value() == state.mActor; }))
                 result->equipment->motions.push_back({state.mActor, moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
                     state.mPosition, moving ? moving->velocity : mActorVelocity, state.mYaw});
             if (mBinding.mNeighborAi)
             {
-                const auto neighbors = moving && moving->memberScene ? moving->memberScene->neighborSnapshots()
-                    : moving && moving->actor ? moving->actor->neighborSnapshots() : mBinding.mNavigatingActor->neighborSnapshots();
+                const auto neighbors = moving ? moving->neighborSnapshots() : mBinding.mNavigatingActor->neighborSnapshots();
                 const auto previous = mBinding.mNavigatingActor->neighborSnapshots();
                 for (size_t i = 0; i < neighbors.size(); ++i)
                 {
@@ -10990,7 +11064,7 @@ namespace TES3MP::Native
             }
         std::ranges::sort(swings, {}, &PlayerSwingSnapshot::playerId);
         std::vector<ActorCombatSnapshot> visible;
-        const auto scene = moving && moving->memberScene ? moving->memberScene->snapshot() : moving && moving->actor ? moving->actor->snapshot() : binding.mNavigatingActor->snapshot();
+        const auto scene = moving ? moving->snapshot() : binding.mNavigatingActor->snapshot();
         if (actorCell(scene) == player->transform().cell())
         {
             const auto npc = loadCombatStats(mRuntime.mStore, combat.actors[2], effects, 2);
@@ -11011,8 +11085,7 @@ namespace TES3MP::Native
             }
             if (combat.actors.size() > 3)
             {
-                const auto neighbors = moving && moving->memberScene ? moving->memberScene->neighborSnapshots()
-                    : moving && moving->actor ? moving->actor->neighborSnapshots() : binding.mNavigatingActor->neighborSnapshots();
+                const auto neighbors = moving ? moving->neighborSnapshots() : binding.mNavigatingActor->neighborSnapshots();
                 if (neighbors.size() + 1 != combat.npcPlacements.size())
                     throw std::invalid_argument("Native projected combat neighbor differs from placement");
                 for (size_t i = 0; i < neighbors.size(); ++i)

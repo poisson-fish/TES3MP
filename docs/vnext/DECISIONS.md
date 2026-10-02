@@ -44,6 +44,12 @@ Persist destinations/guards. Saturation pauses substeps; offline players freeze.
 loot, RNG and receipts; persist before publication. WhenUsed pays at launch;
 source identity survives movement. Door contact precedes physics. Persist avoidance.
 
+**Committed ground collision.** Inventory owns durable ground references. Detached
+membership/transforms drive shared physics, projectile/visibility queries and navigation
+before simulation. Durability swaps scenes without allocation. Recovery rebuilds from
+validated inventory, preserving actor frames; world changes replan travel. Animated
+ground hulls reject.
+
 **Casting authority.** Retain caster kind/ID/life through flight, effects and
 death. NPC respawn clears body effects; attribution survives. NPC commands never
 enter client input. Death cancels flights.

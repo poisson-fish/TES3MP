@@ -6871,16 +6871,17 @@ int main(int argc, char** argv)
                 "door-magic");
             std::cout << "PASS door-spell\n"; return 0;
         }
-        if (argc == 5 && (std::string_view(argv[1]) == "bound-equipment"
+        if (argc == 5 && (std::string_view(argv[1]) == "world-collision" || std::string_view(argv[1]) == "bound-equipment"
                 || std::string_view(argv[1]) == "bound-equipment-lifecycle"
                 || std::string_view(argv[1]).starts_with("summons-integrated")
                 || std::string_view(argv[1]) == "player-lives" || (std::string_view(argv[1]) == "actor-bodies" || std::string_view(argv[1]) == "spell-completeness" || std::string_view(argv[1]) == "target-recipients") || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives" || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
         {
+            const bool combat = std::string_view(argv[1]) != "world-collision";
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]),
-                true, true, true, true, true, true, true, true, false, false, true, false,
-                false, true, false, true, false, false, false, false, false, false, false, false,
-                {}, false, false, true, false, false, false, false, false, false, true, false,
+                true, true, combat, combat, combat, combat, combat, combat, false, false, combat, false,
+                false, combat, false, combat, false, false, false, false, false, false, false, false,
+                {}, false, false, combat, false, false, false, false, false, false, combat, false,
                 argv[1]);
             std::cout << "PASS " << argv[1] << '\n'; return 0;
         }
