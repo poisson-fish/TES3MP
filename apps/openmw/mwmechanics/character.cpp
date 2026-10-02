@@ -19,6 +19,7 @@
 
 #include "character.hpp"
 #include "jump.hpp"
+#include "deathanimation.hpp"
 
 #include <array>
 #include <optional>
@@ -882,6 +883,11 @@ namespace MWMechanics
 
     void CharacterController::playRandomDeath(float startpoint)
     {
+        if (mAnimation && mAnimation->committedBodyState() == 5)
+        {
+            mAnimation->restoreCommittedKnockout();
+            return;
+        }
         if (mPtr == getPlayer())
         {
             // The first-person animations do not include death, so we need to
@@ -889,13 +895,22 @@ namespace MWMechanics
             MWBase::Environment::get().getWorld()->useDeathCamera();
         }
 
-        mDeathState = hitStateToDeathState(mHitState);
-        if (mDeathState == CharState_None && MWBase::Environment::get().getWorld()->isSwimming(mPtr))
-            mDeathState = CharState_SwimDeath;
-
-        if (mDeathState == CharState_None
-            || (mAnimation && !mAnimation->hasAnimation(deathStateToAnimGroup(mDeathState))))
-            mDeathState = chooseRandomDeathState();
+        if (mAnimation)
+        {
+            const auto hitDeath = hitStateToDeathState(mHitState);
+            const auto selected = selectDeathAnimation(
+                hitDeath == CharState_DeathKnockOut || hitDeath == CharState_SwimDeathKnockOut,
+                hitDeath == CharState_DeathKnockDown || hitDeath == CharState_SwimDeathKnockDown,
+                hitDeath == CharState_SwimDeathKnockDown || hitDeath == CharState_SwimDeathKnockOut,
+                MWBase::Environment::get().getWorld()->isSwimming(mPtr),
+                [&](std::string_view group) { return mAnimation->hasAnimation(group); },
+                [&](unsigned count) { return unsigned(Misc::Rng::rollDice(int(count),
+                    MWBase::Environment::get().getWorld()->getPrng())); });
+            constexpr std::array states{CharState_Death1, CharState_Death2, CharState_Death3,
+                CharState_Death4, CharState_Death5, CharState_DeathKnockDown, CharState_DeathKnockOut,
+                CharState_SwimDeath, CharState_SwimDeathKnockDown, CharState_SwimDeathKnockOut};
+            mDeathState = selected ? states[selected - 1] : CharState_Death1;
+        }
 
         // Do not interrupt scripted animation by death
         if (!mAnimation || isScriptedAnimPlaying())
@@ -2743,6 +2758,17 @@ namespace MWMechanics
 
     CharacterController::KillResult CharacterController::kill()
     {
+        if (mAnimation && mAnimation->committedBodyState())
+        {
+            // The timeline may still be presenting the preceding living frame.
+            // A committed death freezes on starvation and finishes at its stop key.
+            if (!mAnimation->committedDeathFinished()) return Result_DeathAnimPlaying;
+            auto& stats = mPtr.getClass().getCreatureStats(mPtr);
+            // The server already owns death cleanup and respawn. Do not replay
+            // notifyDied, spell purging or the single-player load menu locally.
+            stats.setDeathAnimationFinished(true);
+            return Result_DeathAnimFinished;
+        }
         if (mDeathState == CharState_None)
         {
             playRandomDeath();

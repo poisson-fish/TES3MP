@@ -374,6 +374,8 @@ namespace TES3MP::OpenMWAdapter
         float x = 0, y = 0, z = 0, pitch = 0, yaw = 0;
         unsigned direction = ESM::Weapon::AT_Chop;
         float strength = 1.f;
+        unsigned targetKind = 2;
+        uint64_t targetId = 0;
         std::string record, trailing;
         if (action == "pose")
         {
@@ -383,11 +385,13 @@ namespace TES3MP::OpenMWAdapter
                 || std::abs(pitch) > 1.5f || std::abs(yaw) > 6.3f)
                 throw std::runtime_error("Traversal setup pose invalid");
         }
-        else if (action == "swing")
+        else if (action == "swing" || action == "swingat")
         {
             if (!(file >> direction >> strength) || direction > 2 || !std::isfinite(strength)
                 || strength < 0.f || strength > 1.f)
                 throw std::runtime_error("Traversal swing arguments invalid");
+            if (action == "swingat" && (!(file >> targetId) || !targetId))
+                throw std::runtime_error("Traversal swing target invalid");
         }
         else if (action == "shoot")
         {
@@ -395,11 +399,13 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
         else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
-            || action == "castdoor" || action == "castcontainer"
+            || action == "castdoor" || action == "castcontainer" || action == "castat"
             || action == "dialogue" || action == "dialoguestart")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
+            if (action == "castat" && (!(file >> targetKind >> targetId) || targetKind < 1 || targetKind > 2 || !targetId))
+                throw std::runtime_error("Traversal spell target invalid");
         }
         if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
         auto world = MWBase::Environment::get().getWorld();
@@ -473,11 +479,12 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal dialogue window is not open");
             wm->removeGuiMode(MWGui::GM_Dialogue);
         }
-        else if (action == "attack" || action == "swing")
+        else if (action == "attack" || action == "swing" || action == "swingat")
         {
             if (wm->isGuiMode()) throw std::runtime_error("Traversal attack requires game focus");
             std::vector<MWWorld::Ptr> targets;
-            mPresentation.appendMeleeTargets(targets);
+            if (action == "swingat") targets.push_back(mPresentation.replicatedCombatTarget(2, targetId));
+            else mPresentation.appendMeleeTargets(targets);
             if ((targets.size() != 1 || targets.front().isEmpty()
                     || !world->getPlayer().interceptMeleeHit(strength, direction, targets.front()))
                 && (!mNativeContainerCount || *mNativeContainerCount == 0))
@@ -488,9 +495,14 @@ namespace TES3MP::OpenMWAdapter
             if (wm->isGuiMode() || !world->getPlayer().interceptRangedRelease(strength))
                 throw std::runtime_error("Traversal ranged release requires game focus and the desktop input hook");
         }
-        else if (action == "cast" || action == "castactor" || action == "castdoor" || action == "castcontainer")
+        else if (action == "cast" || action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat")
         {
             MWWorld::Ptr target;
+            if (action == "castat")
+            {
+                target = mPresentation.replicatedCombatTarget(uint8_t(targetKind), targetId);
+                if (target.isEmpty()) return;
+            }
             if (action == "castactor")
             {
                 std::vector<MWWorld::Ptr> targets;
@@ -518,12 +530,12 @@ namespace TES3MP::OpenMWAdapter
             // Joining/scene presentation may still be installing the normal
             // input hook. Keep this command pending until the desktop can act;
             // the external capture deadline bounds readiness retries.
-            if ((action == "castactor" || action == "castdoor" || action == "castcontainer") && (wm->isGuiMode()
+            if ((action == "castactor" || action == "castdoor" || action == "castcontainer" || action == "castat") && (wm->isGuiMode()
                     || !world->getPlayer().interceptMagicCast(true, ESM::RefId::stringRefId(record), {}, target)))
                 return;
             if (action == "cast" && (wm->isGuiMode() || !world->getPlayer().interceptMagicCast(
                     true, ESM::RefId::stringRefId(record), {}, target)))
-                throw std::runtime_error("Traversal cast has no mapped spell release");
+                return;
         }
         else if (action == "open")
         {

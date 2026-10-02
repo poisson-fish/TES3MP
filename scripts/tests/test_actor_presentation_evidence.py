@@ -2,11 +2,30 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
+from unittest.mock import patch
 
 from scripts.verify_actor_presentation import verify
 
 
 class ActorPresentationEvidenceTests(unittest.TestCase):
+    def test_capture_reader_preserves_flushed_tail_and_restarts(self):
+        with patch.object(sys, "path", [str(Path(__file__).resolve().parents[1]), *sys.path]):
+            from scripts.run_native_navigation_capture import records
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "Alice.ndjson"
+            path.write_bytes(b'{"tick":1}\n{"tick":')
+            self.assertEqual(records(path), [{"tick": 1}])
+            with path.open("ab") as stream:
+                stream.write(b'2}\n')
+            self.assertEqual(records(path), [{"tick": 1}, {"tick": 2}])
+            self.assertEqual(records(path), [{"tick": 1}, {"tick": 2}])
+            path.rename(path.with_name("Alice-before.ndjson"))
+            path.write_bytes(b'{"tick":3}\n')
+            self.assertEqual(records(path), [{"tick": 3}])
+            path.write_bytes(b'{}\n')
+            self.assertEqual(records(path), [{}])
+
     def test_cast_clock_requires_fractional_release_recovery_and_restart(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -18,7 +37,7 @@ class ActorPresentationEvidenceTests(unittest.TestCase):
                                 body_action=0, body=1, group="", frame=0,
                                 cast=1, cast_phase=3 if frame < 30 else 5,
                                 cast_frame=frame, cast_release=30, cast_stop=60,
-                                clip_time=frame / 30 * speed)
+                                clip_time=(frame if frame < 30 else frame - 30) / 30 * speed)
                     rows.extend([dict(event="native_combat_sample", tick=i),
                                  dict(event="actor_presentation_frame", time_ns=round((i + 1) * 1e9 / 120),
                                       actors=([dict(pose, kind=1, id=1)] + ([] if missing else [dict(pose, kind=1, id=2)]))

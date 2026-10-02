@@ -136,6 +136,8 @@ namespace TES3MP::Native
             const std::array<float, 3>& to, uint64_t door) const;
         // Stock underwater cast gate against the selected or bound neighbor hull.
         bool waterWalkingCastable(uint64_t actor) const;
+        bool isSwimming(uint64_t actor) const;
+        bool isSwimming(const std::array<float, 3>& position, ESM::RefId race, float scale, float water) const;
         bool waterWalkingCastable(const std::array<float, 3>& position, ESM::RefId race,
             float scale = 1.f) const;
         uint64_t actorId() const noexcept;

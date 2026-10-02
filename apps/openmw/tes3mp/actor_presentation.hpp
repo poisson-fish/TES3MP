@@ -114,7 +114,7 @@ namespace TES3MP::OpenMWAdapter
             auto result = *lower;
             if (lo + 1 == mFrames.size()) return result;
             const auto* upper = find(mFrames[lo + 1]);
-            if (!upper || upper->life != lower->life || lower->dead) return result;
+            if (!upper || upper->life != lower->life || upper->dead != lower->dead) return result;
             const double elapsed = mCursor - double(mFrames[lo].tick);
             const double span = double(mFrames[lo + 1].tick - mFrames[lo].tick);
             const float ratio = float(elapsed / span);
@@ -137,7 +137,8 @@ namespace TES3MP::OpenMWAdapter
                     result.completion = std::min(1.f, lower->completion + float(elapsed / 30.) * lower->rate);
             }
             if (lower->bodyAction && lower->bodyAction == upper->bodyAction && lower->bodyState == upper->bodyState
-                && lower->hitGroup == upper->hitGroup && lower->bodyStop == upper->bodyStop
+                && lower->hitGroup == upper->hitGroup && (!lower->dead || lower->group == upper->group)
+                && lower->bodyStop == upper->bodyStop
                 && lower->loopStart == upper->loopStart && lower->loopStop == upper->loopStop)
             {
                 if (upper->bodyFrame >= lower->bodyFrame)
@@ -152,6 +153,9 @@ namespace TES3MP::OpenMWAdapter
                         result.bodyFrame -= float(lower->loopStop - lower->loopStart);
                 }
             }
+            else if (!lower->dead && lower->bodyState >= 2 && upper->bodyState == 1
+                && lower->bodyAction == upper->bodyAction)
+                result.bodyFrame = std::min(float(lower->bodyStop), lower->bodyFrame + float(elapsed));
             return result;
         }
 

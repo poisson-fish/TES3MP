@@ -33,6 +33,7 @@ namespace MWWorld
         bool mStrikeOnly = false;
         bool mConstant = false;
         bool mWhenUsed = false;
+        bool mProjectileCastOnce = false;
     };
     inline InventoryItemRecord inventoryItemRecord(const ESMStore& store, ESM::RefId id)
     {
@@ -46,6 +47,9 @@ namespace MWWorld
         {
             const auto* enchantment = store.get<ESM::Enchantment>().search(result.mEnchant);
             result.mStrikeOnly = enchantment && enchantment->mData.mType == ESM::Enchantment::WhenStrikes;
+            const auto type = static_cast<const ESM::Weapon*>(result.mBase)->mData.mType;
+            result.mProjectileCastOnce = enchantment && enchantment->mData.mType == ESM::Enchantment::CastOnce
+                && (type == ESM::Weapon::MarksmanThrown || type == ESM::Weapon::Arrow || type == ESM::Weapon::Bolt);
         }
         if (!result.mEnchant.empty())
         {
@@ -70,7 +74,7 @@ namespace MWWorld
             if (identity == slots[slot])
             {
                 if (found || !record.mSlots.contains(slot) || count == 0 || (!record.mSlots.mStack && std::abs(count) != 1)
-                    || (!record.mStrikeOnly && !record.mConstant && !record.mWhenUsed && !record.mEnchant.empty()
+                    || (!record.mStrikeOnly && !record.mConstant && !record.mWhenUsed && !record.mProjectileCastOnce && !record.mEnchant.empty()
                         && slot != InventoryStore::Slot_Shirt)
                     || (!record.mScript.empty()
                         && !((slot == InventoryStore::Slot_Shirt && npcStats)

@@ -54,7 +54,8 @@ namespace TES3MP::OpenMWAdapter
                                     public ConnectionControlProvider
     {
     public:
-        static constexpr std::size_t MaximumEvidenceEvents = 16'384;
+        // Bounded test-build traces also cover grouped combat families on two desktops.
+        static constexpr std::size_t MaximumEvidenceEvents = 131'072;
 
         DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
             ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);

@@ -240,8 +240,26 @@ namespace TES3MP::Native
                 // constant Self effects. Vanilla bound-item enchantments use 1s.
                 if (equipmentEffects) { effect.mDuration = 0; effect.mArea = 0; }
                 const auto* magic = content.get<ESM::MagicEffect>().search(effect.mEffectID);
+                // Stock installs only Self entries from abilities/constants.
+                // Keep ignored entries as ordinal witnesses for later Self effects.
+                if (equipmentEffects && (effect.mRange == ESM::RT_Touch || effect.mRange == ESM::RT_Target))
+                {
+                    if (!magic || effect.mMagnMin < 0 || effect.mMagnMin > effect.mMagnMax || effect.mMagnMax > 1000)
+                        return std::nullopt;
+                    result.effects.push_back(effect);
+                    continue;
+                }
                 const bool attribute = effect.mEffectID == ESM::MagicEffect::FortifyAttribute;
                 const bool skill = effect.mEffectID == ESM::MagicEffect::FortifySkill;
+                const bool weakness = expandedEffects && (effect.mEffectID == ESM::MagicEffect::WeaknessToFire
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToFrost
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToShock
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToMagicka
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToPoison
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToNormalWeapons
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToCommonDisease
+                    || effect.mEffectID == ESM::MagicEffect::WeaknessToBlightDisease
+                    || (specialConditions && effect.mEffectID == ESM::MagicEffect::WeaknessToCorprusDisease));
                 const bool resistance = effect.mEffectID == ESM::MagicEffect::ResistMagicka
                     || effect.mEffectID == ESM::MagicEffect::ResistNormalWeapons
                     || effect.mEffectID == ESM::MagicEffect::ResistFire
@@ -257,6 +275,9 @@ namespace TES3MP::Native
                     || effect.mEffectID == ESM::MagicEffect::FireShield
                     || effect.mEffectID == ESM::MagicEffect::LightningShield
                     || effect.mEffectID == ESM::MagicEffect::FrostShield
+                    || effect.mEffectID == ESM::MagicEffect::RestoreHealth
+                    || effect.mEffectID == ESM::MagicEffect::RestoreMagicka
+                    || effect.mEffectID == ESM::MagicEffect::RestoreFatigue
                     || fortifyDynamicStat(effect.mEffectID) >= 0
                     || effect.mEffectID == ESM::MagicEffect::Invisibility
                     || effect.mEffectID == ESM::MagicEffect::Chameleon
@@ -269,11 +290,11 @@ namespace TES3MP::Native
                     || effect.mEffectID == ESM::MagicEffect::FortifyMaximumMagicka
                     || (movementEffects && movementEffect(effect.mEffectID))));
                 const bool ai = aiEffects && aiDispositionEffect(effect.mEffectID);
-                if (!magic || (!attribute && !skill && !resistance && !ai
+                if (!magic || (!attribute && !skill && !resistance && !weakness && !ai
                         && !((equipmentEffects && MWMechanics::equipmentMagicEffect(effect.mEffectID))
                     || (summonEffects && MWMechanics::isSummoningEffect(effect.mEffectID)))
                         && !supportedCombatModifier(effect.mEffectID))
-                    || ((magic->mData.mFlags & ESM::MagicEffect::Harmful) && !ai
+                    || ((magic->mData.mFlags & ESM::MagicEffect::Harmful) && !ai && !weakness
                         && !(movementEffects && movementEffect(effect.mEffectID)))
                     || ((magic->mData.mFlags & ESM::MagicEffect::NoMagnitude)
                         && effect.mEffectID != ESM::MagicEffect::Invisibility
@@ -394,9 +415,11 @@ namespace TES3MP::Native
 
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content, bool actorLifecycle, bool expandedEffects, bool specialConditions,
-        bool movementEffects, bool objectMagic, bool playerTravel, bool equipmentEffects, bool summonEffects)
+        bool movementEffects, bool objectMagic, bool playerTravel, bool equipmentEffects, bool summonEffects,
+        bool powerSources)
     {
-        if (spell.mData.mType != ESM::Spell::ST_Spell) return std::nullopt;
+        if (spell.mData.mType != ESM::Spell::ST_Spell
+            && !(powerSources && spell.mData.mType == ESM::Spell::ST_Power)) return std::nullopt;
         auto effects = prepareInstantEffects(spell.mEffects, content, actorLifecycle, expandedEffects,
             false, specialConditions, movementEffects, objectMagic, playerTravel, equipmentEffects, summonEffects);
         if (!effects) return std::nullopt;

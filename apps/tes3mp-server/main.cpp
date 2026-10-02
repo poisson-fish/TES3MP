@@ -709,6 +709,7 @@ int main(int argc, char** argv)
     {
         requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
         requiredCapabilities.push_back(TES3MP::playerLifeReplicationCapability());
+        requiredCapabilities.push_back(TES3MP::committedDeathPresentationCapability());
         requiredCapabilities.push_back(TES3MP::actorCastLifecycleCapability());
         requiredCapabilities.push_back(TES3MP::playerSwingPresentationCapability());
         requiredCapabilities.push_back(TES3MP::knockoutPresentationCapability());
@@ -718,6 +719,7 @@ int main(int argc, char** argv)
         requiredCapabilities.push_back(TES3MP::magicEffectVisualLoopsCapability());
     }
     std::ranges::sort(requiredCapabilities);
+    requiredCapabilities.erase(std::unique(requiredCapabilities.begin(), requiredCapabilities.end()), requiredCapabilities.end());
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,
         requiredCapabilities, config.contentManifest.id());
     std::vector<TES3MP::Transform> spawns;

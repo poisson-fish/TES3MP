@@ -373,7 +373,7 @@ namespace TES3MP::Native
                     {
                         const auto record = inventoryItemRecord(mStore, slot->getCellRef().getRefId());
                         const bool supportedConstant = mConstantEffects && record.mConstant;
-                        if (!record.mStrikeOnly && !record.mWhenUsed && !supportedConstant
+                        if (!record.mStrikeOnly && !record.mWhenUsed && !record.mProjectileCastOnce && !supportedConstant
                             && !scriptedRangedItem(record)
                             && (!record.mScript.empty() || !record.mEnchant.empty()))
                             throw std::invalid_argument("Starting equipment needs unavailable script/enchantment services");

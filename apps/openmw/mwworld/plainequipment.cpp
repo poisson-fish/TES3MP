@@ -767,7 +767,7 @@ namespace MWWorld
                 throw std::invalid_argument("Equipment item is stale, dormant or slot is invalid");
             const auto record = inventoryItemRecord(mContext.mStore, item->getCellRef().getRefId());
             if (!record.mSlots.contains(slot)
-                || (!record.mStrikeOnly && !record.mWhenUsed && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
+                || (!record.mStrikeOnly && !record.mWhenUsed && !record.mProjectileCastOnce && !(record.mConstant && mContext.mExternalEquipmentEffects) && !record.mEnchant.empty()
                     && slot != InventoryStore::Slot_Shirt)
                 || (!record.mScript.empty()
                     && !((slot == InventoryStore::Slot_Shirt && mContext.mNpcStats)

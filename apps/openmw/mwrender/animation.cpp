@@ -1,4 +1,5 @@
 #include "animation.hpp"
+#include "../mwmechanics/deathanimation.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -998,8 +999,8 @@ namespace MWRender
 
     bool Animation::setCommittedBody(unsigned pose, float frame, unsigned hitGroup)
     {
-        if (pose > 4 || !std::isfinite(frame) || frame < 0 || frame >= 1800 || (pose < 2 && frame)
-            || hitGroup > 16 || (pose == 4 && !hitGroup)) return false;
+        if (pose > 5 || !std::isfinite(frame) || frame < 0 || frame >= 1800 || (pose < 2 && frame)
+            || hitGroup > 16 || (pose == 4 && !hitGroup) || (pose == 5 && hitGroup > 10)) return false;
         struct RestoreCallbacks
         {
             Context& context;
@@ -1011,7 +1012,10 @@ namespace MWRender
         mContext = Context::ReplicatedActor;
         mTextKeyListener = nullptr;
         const std::string group = pose == 2 ? "knockout" : pose == 3 ? "knockdown"
-            : pose == 4 ? "hit" + std::to_string(hitGroup) : "";
+            : pose == 4 ? "hit" + std::to_string(hitGroup)
+            : pose == 5 && hitGroup ? std::string(MWMechanics::DeathAnimationGroups[hitGroup - 1]) : "";
+        if (pose == 5 && mCommittedKnockoutState != 5)
+            for (const auto death : MWMechanics::DeathAnimationGroups) disable(death);
         if (group != mCommittedKnockoutGroup)
         {
             if (!mCommittedKnockoutGroup.empty()) disable(mCommittedKnockoutGroup);
@@ -1028,7 +1032,8 @@ namespace MWRender
         if (mCommittedKnockoutGroup.empty() || !mStates.contains(group))
         {
             disable(group);
-            play(group, pose == 4 ? MWMechanics::Priority_Hit : MWMechanics::Priority_Knockdown, BlendMask_All, false, 0.f,
+            play(group, pose == 5 ? MWMechanics::Priority_Death
+                    : pose == 4 ? MWMechanics::Priority_Hit : MWMechanics::Priority_Knockdown, BlendMask_All, false, 0.f,
                 "start", "stop", 0.f, 0, false);
             if (!getInfo(group)) return false;
             mCommittedKnockoutGroup = group;

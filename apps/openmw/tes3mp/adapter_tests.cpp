@@ -1128,18 +1128,31 @@ int main(int argc, char** argv)
         pose.bodyState = 1; pose.bodyAction = 0; pose.bodyFrame = 0; pose.bodyStop = 0;
         pose.loopStart = pose.loopStop = 0; observe(144); advance(3'400'000'000);
         require(sample().bodyState == 1);
+        pose.dead = true; pose.phase = 0; pose.action = 0; pose.group = "death2";
+        pose.bodyAction = 145; pose.bodyStop = 45;
+        observe(148); advance(3'600'000'000);
+        pose.bodyFrame = 4; observe(152); advance(3'650'000'000);
+        require(sample().dead && std::abs(sample().bodyFrame - 1.5f) < .0001f);
+        advance(4'000'000'000);
+        require(sample().bodyFrame == 4); // Death starvation holds its committed pose.
+        observe(156); advance(4'050'000'000);
+        require(sample().bodyFrame == 4); // Inactive bodies cannot run a local death clock.
+        pose.dead = false; pose.group = "weapononehand";
         pose.life = 2; pose.bodyState = 2; pose.bodyAction = 200; pose.bodyFrame = 8;
         pose.bodyStop = 90; observe(150, 2);
         require(sample().life == 2 && sample().bodyState == 2 && sample().bodyFrame == 8);
-        std::cout << "PASS body-timeline: four actors, attack modes, hit, fall, loop, get-up, loss, reconnect\n";
+        std::cout << "PASS body-timeline: four actors, attack modes, hit, fall, loop, get-up, death, loss, reconnect\n";
         return 0;
     }
     if (argc == 2 && std::string_view(argv[1]) == "native-capabilities")
     {
-        const std::array required{ nativeDoorCapability(), nativeStreamingCapability(),
+        std::vector required{ nativeDoorCapability(), nativeStreamingCapability(),
             nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(),
+            committedDeathPresentationCapability() };
+        std::ranges::sort(required);
+        required.erase(std::unique(required.begin(), required.end()), required.end());
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
             versions, {}, required, testContentManifestId()));

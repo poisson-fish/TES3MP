@@ -220,7 +220,7 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
             time.sleep(.025)
         raise RuntimeError(f"timed out: {description}")
 
-    def command(role, action):
+    def command(role, action, wait=True):
         sequence[role] += 1
         control = evidence[role].with_suffix(".ndjson.control")
         temporary = control.with_suffix(".tmp")
@@ -235,9 +235,10 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
                 if attempt == 99:
                     raise
                 time.sleep(.01)
-        wait_for(lambda: any(r.get("sequence") == sequence[role]
-                            and r.get("event") == "traversal_" + action.split()[0]
-                            for r in records(evidence[role])), f"{role}: {action}")
+        if wait:
+            wait_for(lambda: any(r.get("sequence") == sequence[role]
+                                and r.get("event") == "traversal_" + action.split()[0]
+                                for r in records(evidence[role])), f"{role}: {action}")
 
     def screenshot(role, label):
         before = samples(role)[-1]
@@ -245,6 +246,19 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         name = f"{role}-{label}.png"
         evidence[role].with_suffix(f".ndjson.control.{sequence[role]}.png").rename(output / name)
         captures[name] = dict(before=before, after=samples(role)[-1])
+
+    def screenshot_group(label):
+        before = {role: samples(role)[-1] for role in evidence}
+        for role in evidence:
+            command(role, "screenshot", wait=False)
+        wait_for(lambda: all(any(row.get("sequence") == sequence[role]
+                                and row.get("event") == "traversal_screenshot"
+                                for row in records(evidence[role])) for role in evidence),
+                 "both desktops capture the restored physical clip")
+        for role in evidence:
+            name = f"{role}-{label}.png"
+            evidence[role].with_suffix(f".ndjson.control.{sequence[role]}.png").rename(output / name)
+            captures[name] = dict(before=before[role], after=samples(role)[-1])
 
     identities = (1, 2)
 
@@ -384,10 +398,12 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
                     time.sleep(.025)
             raise RuntimeError("no shared physical knockdown from sword hits")
 
-        def physical_recovery(label):
+        def physical_recovery(label, restored=False):
             # Capture the late authored clip separately from the upright commit.
             # Images must be inspected; frame progress alone is not rendered-body proof.
-            pending = set(evidence)
+            if restored:
+                screenshot_group(label + "-restored")
+            pending = set() if restored else set(evidence)
             while pending:
                 def ready():
                     candidates = [(p["knockout"]["frame"], role) for role in pending
@@ -455,8 +471,13 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         else:
             raise RuntimeError("reconnect never returned within the physical clip capture window")
         reconnected = {r: samples(r)[-1] for r in evidence}
-        frame_subjects()
-        physical_recovery("physical-reconnect")
+        # A creature's short remaining clip may be consumed by camera commands.
+        # Capture its restored body first; frame the following upright scene.
+        if not (npc and actor_melee):
+            frame_subjects()
+        physical_recovery("physical-reconnect", restored=npc and actor_melee)
+        if npc and actor_melee:
+            frame_subjects()
         # A hit event may arrive after disconnect and need not replay. The
         # rejoining baseline must retain its health loss and advancing body clock.
         reconnect_validation = validate([
@@ -529,6 +550,9 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
                 raise RuntimeError("final player health/pose failed to converge")
             retarget_validation["final_players"] = states[0]
         capture_actor_melee("restored")
+        wait_for(lambda: all(sum(row.get("event") == "actor_presentation_frame"
+                                 for row in records(path)) >= 120 for path in evidence.values()),
+                 "both restored body traces contain 120 render frames")
         after = {r: samples(r) for r in evidence}
         validation = validate([before, after])
         if actor_melee:
@@ -594,6 +618,9 @@ def verify_knockout_encounter(output, evidence, processes, relay, manifest, rest
         screenshot(role, "restored")
     recover("restart")
     capture_actor_melee("restored")
+    wait_for(lambda: all(sum(row.get("event") == "actor_presentation_frame"
+                             for row in records(path)) >= 120 for path in evidence.values()),
+             "both restored body traces contain 120 render frames")
     after = {r: samples(r) for r in evidence}
     validation = validate_observations([before, after], npc)
     if actor_melee:

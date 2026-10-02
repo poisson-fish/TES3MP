@@ -807,6 +807,17 @@ namespace
         const auto failed = launchInstantSpell(*prepared, caster, store, rng, false, false);
         require(!failed.succeeded, "Impossible spell chance unexpectedly succeeded");
         near(caster.getMagicka().getCurrent(), 0.f, "Failed cast did not retain shared prescribed cost");
+        source.mData.mType = ESM::Spell::ST_Power; source.mData.mCost = 5;
+        magicka.setCurrent(100.f); caster.setMagicka(magicka);
+        const auto power = prepareInstantSpell(source, store, true, false, false, false, false, false, false, false, true);
+        require(power && !prepareInstantSpell(source, store, true), "Power bypassed its campaign gate");
+        require(launchInstantSpell(*power, caster, store, rng, false, false).succeeded,
+            "Power used ordinary skill failure instead of stock success");
+        near(caster.getMagicka().getCurrent(), 95.f, "Power ignored its authored stock cost");
+        caster.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Silence), MWMechanics::EffectParam(1.f));
+        require(!launchInstantSpell(*power, caster, store, rng, false, false).succeeded,
+            "Power bypassed stock Silence");
+        require(!prepareAiMagicCast({caster, &enemy}, spells, {}, store), "Stock AI selected a power");
     }
 
     void items()
@@ -919,11 +930,34 @@ namespace
             "Mixed ability and constant plans differ or reject shared families");
         for (const auto& effect : passive->effects)
             require(effect.mDuration == 0 && effect.mArea == 0 && effect.mRange == ESM::RT_Self, "Passive normalization changed");
+        auto mixedRanges = ability;
+        mixedRanges.mEffects.mList[0].mData.mRange = ESM::RT_Touch;
+        auto rangedConstant = constant; rangedConstant.mId = id("mixed_range_constant");
+        rangedConstant.mEffects = mixedRanges.mEffects; store.insertStatic(rangedConstant);
+        const auto ranges = preparePassiveActorEffects(mixedRanges, store, true, true, true, true, true);
+        const auto constantRanges = prepareConstantEffects(rangedConstant.mId, store, true, false, true, true, true, true, true);
+        require(ranges && constantRanges && ranges->effects.size() == 8 && constantRanges->effects.size() == 8
+            && ranges->effects[0].mRange == ESM::RT_Touch && ranges->effects[1].mSkill == ESM::Skill::Acrobatics,
+            "Passive range no-op rejected the source or changed later ordinals");
         require(!preparePassiveActorEffects(ability, store, false, true, true, true, true)
             && !preparePassiveActorEffects(ability, store, true, false, true, true, true)
             && !preparePassiveActorEffects(ability, store, true, true, true, true, false), "Mixed source crossed disabled family gate");
+        ESM::MagicEffect weakness; weakness.blank(); weakness.mId = ESM::MagicEffect::WeaknessToFrost;
+        weakness.mData.mFlags = ESM::MagicEffect::Harmful; store.insertStatic(weakness);
+        ability.mEffects.populate({{weakness.mId, {}, {}, ESM::RT_Self, 0, 0, 60, 60}});
+        constant.mId = id("stock_weakness_constant"); constant.mEffects = ability.mEffects; store.insertStatic(constant);
+        require(preparePassiveActorEffects(ability, store, true, true, true, true, true)
+            && prepareConstantEffects(constant.mId, store, true, false, true, true, true, true, true)
+            && !prepareConstantEffects(constant.mId, store, false, false, true, true, true, true, true),
+            "Stock Atronach weakness rejected or crossed expanded-effect gate");
+        ability.mEffects.populate({{ESM::MagicEffect::RestoreHealth, {}, {}, ESM::RT_Self, 0, 0, 6, 6}});
+        require(preparePassiveActorEffects(ability, store, true, true, true, true, true).has_value(),
+            "Stock Bear regeneration ability rejected");
         ability.mEffects.mList.back().mData.mRange = ESM::RT_Target;
-        require(!preparePassiveActorEffects(ability, store, true, true, true, true, true), "Mixed source accepted non-Self member");
+        const auto ignored = preparePassiveActorEffects(ability, store, true, true, true, true, true);
+        require(ignored && ignored->effects.front().mRange == ESM::RT_Target
+            && !preparePassiveActorEffects(ability, store, true, true, true, false, true),
+            "Stock ignored Target ability changed legacy range admission");
     }
 
     void records(const char* directory)

@@ -30,7 +30,7 @@ namespace TES3MP::OpenMWAdapter
     ClientHello makeClientHello(ContentManifestId contentManifest)
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
-        const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
+        std::vector optional{ vrPoseCapability(), actorReplicationCapability(),
             interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
             combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
             weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
@@ -39,7 +39,9 @@ namespace TES3MP::OpenMWAdapter
             nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
             nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability() };
+        std::ranges::sort(optional);
+        optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(
             CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         return ClientHello::fromOffer(std::move(offer));
@@ -396,6 +398,9 @@ namespace TES3MP::OpenMWAdapter
                     }
                     mResuming = false;
                     mReady = true;
+                    const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                    mOwnsPlayerLives = hello && std::ranges::binary_search(
+                        hello->negotiatedCapabilities(), playerLifeReplicationCapability());
                     if (!retryDialogueChoice())
                     {
                         closeTerminal(ConnectionStatus::TransportFailed);
@@ -417,6 +422,9 @@ namespace TES3MP::OpenMWAdapter
                     mContinuity = std::move(current);
                     mAttemptGeneration = snapshot->header().targetSessionGeneration();
                     mReady = true;
+                    const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                    mOwnsPlayerLives = hello && std::ranges::binary_search(
+                        hello->negotiatedCapabilities(), playerLifeReplicationCapability());
                     mPresentationBootstrapPending = true;
                 }
                 if (!mResuming && mReady && snapshot)
@@ -881,6 +889,8 @@ namespace TES3MP::OpenMWAdapter
                 return mReady ? MultiplayerState::Ready : MultiplayerState::Connecting;
             }
 
+            bool ownsPlayerLives() const noexcept override { return mOwnsPlayerLives && !mClosed; }
+
             bool gameStartRequested() const noexcept override { return mReady && !mGameRunning; }
 
             CharacterLifecycle characterLifecycle() const noexcept override
@@ -1231,6 +1241,7 @@ namespace TES3MP::OpenMWAdapter
             std::optional<PendingDialogueChoice> mPendingDialogueChoice;
             std::optional<DialogueChoiceResolution> mDialogueChoiceResolution;
             bool mReady = false;
+            bool mOwnsPlayerLives = false;
             bool mGameRunning = true;
             bool mPresentationBootstrapPending = false;
             bool mResuming = false;

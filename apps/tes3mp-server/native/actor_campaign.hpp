@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_ACTOR_CAMPAIGN_HPP
 #include "actor_spawns.hpp"
 #include <apps/openmw/mwmechanics/boundequipment.hpp>
+#include <apps/openmw/mwmechanics/powercooldown.hpp>
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
 #include <tes3mp/spatial_types.hpp>
@@ -60,6 +61,8 @@ namespace TES3MP::Native
     inline constexpr uint64_t ObjectTravelCampaignMagic = 0x6050434154335354;
     inline constexpr uint64_t SummonsActorSetMagic = 0x6350434154335354;
     inline constexpr uint64_t PlayerLivesCampaignMagic = 0x6450434154335354;
+    inline constexpr uint64_t BodyCampaignMagic = 0x6550434154335354;
+    inline constexpr uint64_t PowerCampaignMagic = 0x6650434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
     inline constexpr bool hasObjectTravel(uint64_t magic)
     { return magic == ObjectTravelCampaignMagic || magic == EquipmentFamilyCampaignMagic; }
@@ -226,6 +229,15 @@ namespace TES3MP::Native
             bool operator==(const PlayerAi&) const = default;
         };
         std::array<PlayerAi, 2> players;
+        struct PowerUse
+        {
+            uint64_t actor = 0, source = 0, expiresMs = 0;
+            bool operator==(const PowerUse&) const = default;
+        };
+        bool powerSources = false;
+        uint64_t powerClockMs = 0;
+        static constexpr size_t MaximumPowerUses = 1024;
+        std::vector<PowerUse> powers;
         struct ConditionSource
         {
             uint64_t actor = 0, source = 0;
@@ -268,6 +280,13 @@ namespace TES3MP::Native
         uint64_t fleeTarget = 0, fleeUntil = 0;
         std::array<float, 3> fleeDestination{};
         std::vector<uint64_t> bodyAction = std::vector<uint64_t>(3), hitGroup = std::vector<uint64_t>(3);
+        struct DeathBody
+        {
+            uint64_t action = 0;
+            uint32_t group = 0, frame = 0;
+            bool operator==(const DeathBody&) const = default;
+        };
+        std::vector<DeathBody> deathBodies;
         bool operator==(const ActorCampaignCombat&) const = default;
     };
     struct ActorCampaignMelee
@@ -341,6 +360,57 @@ namespace TES3MP::Native
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == PowerCampaignMagic)
+        {
+            if (playerLives || dynamicDomain) throw std::invalid_argument("Nested power envelope");
+            const auto clock = getAreaWord(bytes, offset), count = getAreaWord(bytes, offset);
+            if (count > ActorCampaignCombat::MaximumPowerUses || count > (bytes.size() - offset) / 24)
+                throw std::invalid_argument("Native power count invalid");
+            std::vector<ActorCampaignCombat::PowerUse> powers;
+            for (size_t i = 0; i < count; ++i)
+            {
+                ActorCampaignCombat::PowerUse use{getAreaWord(bytes, offset), getAreaWord(bytes, offset), getAreaWord(bytes, offset)};
+                if (!use.source || use.expiresMs <= clock || use.expiresMs - clock > MWMechanics::PowerCooldownMilliseconds
+                    || std::ranges::any_of(powers, [&](const auto& old) { return old.actor == use.actor && old.source == use.source; }))
+                    throw std::invalid_argument("Native power cooldown invalid");
+                powers.push_back(use);
+            }
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != BodyCampaignMagic) throw std::invalid_argument("Powers require body campaign");
+            auto result = readActorCampaign(bytes.subspan(offset));
+            for (const auto& use : powers)
+                if (use.actor >= result.combat->actors.size()) throw std::invalid_argument("Native power actor invalid");
+            result.combat->powerSources = true;
+            result.combat->powerClockMs = clock;
+            result.combat->powers = std::move(powers);
+            return result;
+        }
+        if (magic == BodyCampaignMagic)
+        {
+            if (playerLives || dynamicDomain) throw std::invalid_argument("Nested body envelope");
+            const auto count = getAreaWord(bytes, offset);
+            if (count < 3 || count > 162 || count > (bytes.size() - offset) / 24)
+                throw std::invalid_argument("Native death body count invalid");
+            std::vector<ActorCampaignCombat::DeathBody> bodies;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto action = getAreaWord(bytes, offset), group = getAreaWord(bytes, offset), frame = getAreaWord(bytes, offset);
+                if (group > 10 || frame >= 1800 || (!action && (group || frame)) || (!group && frame))
+                    throw std::invalid_argument("Native death body recipe invalid");
+                bodies.push_back({action, uint32_t(group), uint32_t(frame)});
+            }
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != PlayerLivesCampaignMagic)
+                throw std::invalid_argument("Native death bodies require player lives");
+            auto result = readActorCampaign(bytes.subspan(offset));
+            if (!result.combat || result.combat->actors.size() != bodies.size())
+                throw std::invalid_argument("Native death body domain invalid");
+            for (size_t i = 0; i < bodies.size(); ++i)
+                if (bodies[i].action > result.tick || (bodies[i].action && result.combat->actors[i][8][2] > 0))
+                    throw std::invalid_argument("Native death body chronology invalid");
+            result.combat->deathBodies = std::move(bodies);
+            return result;
+        }
         if (magic == PlayerLivesCampaignMagic)
         {
             if (playerLives || dynamicDomain) throw std::invalid_argument("Nested player life envelope");

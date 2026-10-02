@@ -88,7 +88,14 @@ def verify_swing_encounter(output, evidence, processes, relay, manifest, content
         control = evidence[role].with_suffix(".ndjson.control")
         temporary = control.with_suffix(".tmp")
         temporary.write_text(f"{sequence[role]} {action}\n", encoding="ascii")
-        temporary.replace(control)
+        for attempt in range(30):
+            try:
+                temporary.replace(control)
+                break
+            except PermissionError:
+                if attempt == 29:
+                    raise
+                time.sleep(.03)
         return wait_for(lambda: any(r.get("sequence") == sequence[role]
                                    and r.get("event") == "traversal_" + action.split()[0]
                                    for r in records(evidence[role])), f"{role}: {action}")

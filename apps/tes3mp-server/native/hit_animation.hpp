@@ -36,6 +36,8 @@ namespace TES3MP::Native
         HitAnimations animations;
         std::string resourceIdentity;
         KnockoutAnimation knockout, knockdown;
+        std::array<unsigned, 10> deaths{};
     };
+    std::array<unsigned, 10> readDeathAnimations(std::span<const SceneUtil::TextKeyMap* const> sources);
 }
 #endif

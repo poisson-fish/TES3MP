@@ -173,6 +173,7 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyWorldTime(
             const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
+        MWWorld::Ptr replicatedCombatTarget(uint8_t kind, uint64_t id) const;
         bool activateReplicatedNpc(const MWWorld::Ptr& target, const MWWorld::Ptr& player) const noexcept;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;

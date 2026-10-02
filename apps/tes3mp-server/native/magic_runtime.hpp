@@ -86,7 +86,8 @@ namespace TES3MP::Native
     std::optional<PreparedInstantSpell> prepareInstantSpell(const ESM::Spell& spell,
         const MWWorld::ESMStore& content, bool actorLifecycle = false, bool expandedEffects = false,
         bool specialConditions = false, bool movementEffects = false, bool objectMagic = false,
-        bool playerTravel = false, bool equipmentEffects = false, bool summonEffects = false);
+        bool playerTravel = false, bool equipmentEffects = false, bool summonEffects = false,
+        bool powerSources = false);
     InstantSpellResult applyInstantEffects(const PreparedInstantEffects& effects, int range,
         MWMechanics::CreatureStats& target, Misc::Rng::Generator* rng = nullptr,
         const MWWorld::ESMStore* content = nullptr, bool uncappedDamageFatigue = false);

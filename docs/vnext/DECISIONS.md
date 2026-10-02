@@ -10,9 +10,9 @@ Keep baseline 0.51.0; mod support requires evidence.
 An app-local runtime may share gameplay with stock OpenMW. Preserve dependency
 checks.
 
-**One gameplay loadout.** OpenMW resolves content. Bind plugins,
-scripts, settings and resources to campaign identity. Python packages and hashes,
-never reinterprets ESM. Unsupported behavior rejects.
+**One gameplay loadout.** OpenMW resolves content. Bind plugins/scripts/settings/
+resources to campaign identity. Python packages/hashes, never reinterprets ESM.
+Unsupported behavior rejects.
 
 **One server authority.** The server owns actors, objects, resources, time and
 outcomes. Clients submit authenticated intent and present commits. Validate
@@ -23,9 +23,9 @@ have no client leases.
 bind session, placement, sequence and tick; expire after ten ticks and invalidate
 on reconnect/reversal. They supplement physics until movement cutover.
 
-**Presentation is separate.** Clients own UI, visuals and audio. Collision and
-script resources enter gameplay identity. MWScript/Lua use bounded context and
-semantic serialization. Never persist pointers, render objects or sessions.
+**Presentation is separate.** Clients own UI/visuals/audio. Collision/scripts bind
+gameplay identity. MWScript/Lua use bounded context/semantic serialization.
+Never persist pointers, render objects or sessions.
 
 ## M4 actor simulation
 
@@ -48,9 +48,9 @@ source identity survives movement. Door contact precedes physics. Persist avoida
 death. NPC respawn clears body effects; attribution survives. NPC commands never
 enter client input. Death cancels flights.
 
-Native player selection orders distance then ID; stock ratings reject unsupported
-plans. Persist source/life/target, payment, RNG,
-KF phases and effects together; inactive areas pause, launch revalidates.
+Native player selection orders distance then ID; stock ratings gate plans.
+Persist sources, lives, targets, payment, RNG, KF phases and effects together;
+inactive areas pause, launch revalidates.
 
 **Equipped passive sources.** Select constants by item and effect ordinal before
 combat. Rolls persist while equipped; replacement and respawn install new sources.
@@ -73,17 +73,16 @@ inactivity pauses, death clears, recovery never repeats equip. Breakage removes
 passives; fresh campaigns.
 
 **Actor presentation (V52/V53).** Clients sample committed motion/action;
-clips/lives persist, pauses hold. Player cast release/payment/interruption commit
-atomically; offline casts pause. T3C7/capability 25 and T3C8/capability 26 require
-fresh campaigns.
+clips/lives persist, pauses hold. Player release/payment/interruption commit
+atomically; offline casts pause. Fresh campaigns.
 
 **V64 physical aim.** T3MC carries bounded world aim. The server saves flight
 direction, charges at the authored key and sweeps contact. World misses use target
 life zero. Terminal receipts show skipped-flight endpoints; reconnect suppresses
 seen cues. Fresh campaign required.
 
-T3C9/capability 27 carries bounded aggregate visibility magnitudes with actor
-presentation. Clients feed stock Light, NightEye and Detect consumers; snapshots
+T3C9/capability 27 carries bounded visibility magnitudes. Clients feed stock
+Light, NightEye and Detect consumers; snapshots
 restore loops and expiry after reconnect. An action suppresses an equipped
 Invisibility effect without deleting its durable source or rerolling magnitude.
 
@@ -130,14 +129,11 @@ identities. Capture delay: 27,000 ticks. Wider spawn policy awaits evidence.
 | Character credit, choices, relationships and rewards | Personal; survives NPC revival. |
 | Placement identity and life generation | Server-owned; separates new deaths from replays. |
 
-Reset health/effects, AI and placement through engine behavior; preserve story locals.
-Never refill looted corpses or apply stale-life requests. Renewable loot and camping
-fairness need policies.
-
-[Stock NPC respawn](../../apps/openmw/mwclass/npc.cpp) restores actor data/placement;
-V25 uses a durable deadline. [Death counting](../../apps/openmw/mwmechanics/actors.cpp)
-aggregates by record ID; quests need personal participation history across revival.
-Define party, summon, environmental and pre-quest credit generically.
+Reset health/effects, AI and placement through [stock respawn](../../apps/openmw/mwclass/npc.cpp);
+preserve story locals. Never refill looted corpses or apply stale-life requests.
+Renewable loot/camping need policies. [Death counting](../../apps/openmw/mwmechanics/actors.cpp)
+aggregates record IDs; personal participation must distinguish party, summon,
+environmental and pre-quest credit across revival.
 
 ### Scripted quest execution contract
 
@@ -201,10 +197,9 @@ One inventory intent composes with actor tick/wear; later intents reject in ingr
 order. Fingerprints bind roles, placements/domain; IDs use record-plugin order.
 Recovery preserves identity/condition/light-time/charge, never rerolls or auto-equips.
 
-**Versioned domains.** V3–V13 retain their documented
-[meanings](../../apps/tes3mp-server/native/inventory_host.hpp). Descriptor changes
-require fresh campaigns or explicit migration; recovery never resets, rerolls loot
-or auto-equips.
+**Versioned domains.** Retain prior [layouts](../../apps/tes3mp-server/native/inventory_host.hpp).
+Descriptor changes require fresh campaigns or explicit migration; recovery never
+resets, rerolls loot or auto-equips.
 
 **Time/weather (v12+).** Stock calendar/REGN/fallbacks advance at most 4,096 regions
 at 30 Hz regardless of occupancy/menus. Bind RNG, clock/timers and transitions to
@@ -281,28 +276,36 @@ expired links; manual changes win. Effects/constants, wear, draw and counters jo
 the actor commit. Rejection installs nothing; failed permanent attempts remain
 dormant until source changes. Recovery validates ownership. General scripts remain M5.
 
-**Dynamic actors (V71).** Fresh wrapper; namespace 3 separates bounded dynamic
-actors. Native references share the inventory counter. Stage collision/inventory
-membership before durability. Owner/source/life forms an acyclic forest; removal
-deletes descendants without respawn. Recovery validates sources, selectors,
-identities, lives and animation hashes. Stock movement/combat shares payment,
-defense/death writers. The stock Bonewalker initializer uses the condition writer;
-script overrides/general execution remain M5. Collision follows active areas and
-reloads validated resources/committed images. Wait/rest composes elapsed effects,
-resources and cleanup with game time; action/respawn ticks stay unchanged.
-Desktop acceptance stays grouped.
+**Dynamic actors (V71).** Fresh wrapper; namespace 3 separates bounded actors.
+References share the inventory counter. Stage collision/inventory membership before
+durability. Owner/source/life forms an acyclic forest; removal deletes descendants
+without respawn. Recovery validates sources, selectors, identities, lives and animation
+hashes. Stock movement/combat/conditions share existing writers; script overrides remain
+M5. Collision follows active areas and validated committed images. Wait/rest composes
+effects/resources/cleanup with game time, preserving action/respawn ticks.
 
-**Player lives (V72).** Wrap V71 without changing older campaigns. Bound player
-ID/generation/birth, spawn and complete attributed deaths persist for M5; zero
-killer identity denotes environmental player death. Death clears body/owned
-sources and pending actions; historical effects on other actors retain attribution.
-Command, Absorb benefits and Soultrap require the living matching caster life.
-Respawn restores configured stats at the first bound position, preserves ordinary
-inventory/social/Mark, and increments generation on authoritative ticks while
-online. Cleanup, RNG, membership and canonical relocation/zero velocity/epoch
-share durability. Recovery validates history/baselines; old-life combat timestamps
-reject within retry windows. Capability 32 gates player cast/event life semantics.
+**Player lives (V72).** Wrap V71 unchanged. Persist ID/generation/birth, spawn and
+attributed deaths for M5; zero killer means environmental death. Death clears body/
+owned sources/actions; effects elsewhere retain attribution. Command/Absorb/Soultrap
+require living matching caster life. Online respawn restores configured stats at the
+first bound position, preserves ordinary inventory/social/Mark and increments generation.
+Cleanup/RNG/membership/relocation/zero velocity/epoch share durability. Recovery validates
+history/baselines; old-life timestamps reject. Capability 32 gates player life semantics.
 Quest credit and wider spawn policy remain M5.
+
+**Committed bodies (V73).** Wrap V72 with bounded durable death action/group/frame;
+older layouts stay unchanged. Select stock groups once with durable RNG and sample
+committed active clocks. Clip stop completes presentation without local death
+cleanup; negotiated lives retain server-owned respawn. Capability 33 gates recipes;
+published capability-30 aliases appear once. Recover projectiles according to
+WhenStrikes application; preserve non-strike consumption/state in the existing transaction.
+
+**Spell sources (V74).** Wrap V73 with bounded per-actor/source power deadlines on
+canonical game time; share stock 24-hour eligibility and preserve older layouts.
+Reuse authored/racial/stock-autocalculated sources, launch rules and Dispel immunity.
+Travel runs by recipient/effect ordinal inside the existing tick; staged relocations
+compose before canonical publication. Stock ignored target/range entries preserve
+other ordinals. Scripts and spellbook mutation remain M5.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

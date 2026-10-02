@@ -77,7 +77,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 72; ++candidate)
+            for (unsigned candidate = 3; candidate <= 74; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -299,6 +299,8 @@ namespace TES3MP::Native
                 binding.mEquipmentFamily = descriptorVersion >= 70;
                 binding.mSummons = descriptorVersion >= 71;
                 binding.mPlayerLifecycle = descriptorVersion >= 72;
+                binding.mCommittedDeath = descriptorVersion >= 73;
+                binding.mPowerSources = descriptorVersion >= 74;
                 binding.mAiDecisions = descriptorVersion >= 57;
                 binding.mPlayerAi = descriptorVersion >= 58;
                 binding.mSocialLifecycle = descriptorVersion >= 59;
@@ -558,6 +560,11 @@ namespace TES3MP::Native
                     }
                     else world = &start.binding.mAdditionalWorldItems.emplace_back(InventoryServiceBinding::WorldItems{wireCell, {}});
                     const auto* resolvedCell = loadout.store().get<ESM::Cell>().find(cell);
+                    if (resolvedCell->isExterior() || resolvedCell->hasWater())
+                    {
+                        if (!std::isfinite(resolvedCell->mWater)) throw std::invalid_argument("Native cell water invalid");
+                        world->mWaterLevel = resolvedCell->mWater;
+                    }
                     world->mSunExposed = resolvedCell->isExterior()
                         || (resolvedCell->mData.mFlags & ESM::Cell::QuasiEx);
                     world->mSunRegion = resolvedCell->mRegion;
@@ -846,7 +853,8 @@ namespace TES3MP::Native
                                     const auto rebound = fresh->bindHitAnimations(participants[i], knockout);
                                     if (rebound.resourceIdentity != (*hits)[i].resourceIdentity
                                         || rebound.animations != (*hits)[i].animations
-                                        || rebound.knockout != (*hits)[i].knockout || rebound.knockdown != (*hits)[i].knockdown)
+                                        || rebound.knockout != (*hits)[i].knockout || rebound.knockdown != (*hits)[i].knockdown
+                                        || rebound.deaths != (*hits)[i].deaths)
                                         throw std::invalid_argument("Native hit resource changed after binding");
                                 }
                             for (const auto& body : actors.bodies)

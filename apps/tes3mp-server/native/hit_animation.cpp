@@ -1,4 +1,5 @@
 #include "hit_animation.hpp"
+#include <apps/openmw/mwmechanics/deathanimation.hpp>
 #include <components/sceneutil/animationkeys.hpp>
 #include <algorithm>
 #include <cmath>
@@ -6,6 +7,26 @@
 
 namespace TES3MP::Native
 {
+    std::array<unsigned, 10> readDeathAnimations(std::span<const SceneUtil::TextKeyMap* const> sources)
+    {
+        (void)readHitAnimations(sources);
+        std::array<unsigned, 10> result{};
+        for (size_t i = 0; i < result.size(); ++i)
+        {
+            const auto group = MWMechanics::DeathAnimationGroups[i];
+            const auto source = std::find_if(sources.rbegin(), sources.rend(), [group](const auto* keys) {
+                return keys->hasGroupStart(group);
+            });
+            if (source == sources.rend()) continue;
+            SceneUtil::AnimationKeys range;
+            if (!SceneUtil::findAnimationKeys(**source, group, "start", "stop", range)
+                || range.mStop->first - range.mStart->first >= 60)
+                throw std::invalid_argument("Native death clip incomplete or too long");
+            result[i] = std::max(1u, unsigned(std::ceil((range.mStop->first - range.mStart->first) * 30.f)));
+            if (result[i] >= 1800) throw std::invalid_argument("Native death clip exceeds frame budget");
+        }
+        return result;
+    }
     unsigned KnockoutAnimation::advance(unsigned frame, bool exhausted) const
     {
         if (frame >= stop) throw std::invalid_argument("Native knockout frame outside resource");

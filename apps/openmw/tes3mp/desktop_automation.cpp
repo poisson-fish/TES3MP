@@ -469,6 +469,7 @@ namespace TES3MP::OpenMWAdapter
                             << ",\"completion\":" << p.completion << ",\"group\":\"" << p.group
                             << "\",\"body_action\":" << p.bodyAction << ",\"body\":" << unsigned(p.bodyState)
                             << ",\"frame\":" << p.bodyFrame << ",\"clip_time\":" << rendered.clipTime
+                            << ",\"dead\":" << (p.dead ? "true" : "false") << ",\"body_stop\":" << p.bodyStop
                             << ",\"cast\":" << p.cast << ",\"cast_phase\":" << unsigned(p.castPhase)
                             << ",\"cast_range\":" << unsigned(p.castRange) << ",\"cast_frame\":" << p.castFrame
                             << ",\"cast_release\":" << p.castRelease << ",\"cast_stop\":" << p.castStop << '}';

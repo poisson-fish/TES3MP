@@ -29,12 +29,29 @@ class NavigationImpairment:
         return now + 0.1 + (n % 5 - 2) * 0.0125 + (0.125 if n % 23 == 0 else 0)
 
 
+_record_cache = {}
+
+
 def records(path):
     if not path.exists():
+        _record_cache.pop(path, None)
         return []
-    # The writer flushes complete events; ignore a concurrently written tail.
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    return [json.loads(line) for line in lines if line.endswith("\n")]
+    # Parse each flushed event once. Re-reading long render traces can consume
+    # a short get-up clip before the capture driver publishes its next command.
+    stat = path.stat()
+    identity = (stat.st_dev, stat.st_ino)
+    cached = _record_cache.get(path)
+    if cached is None or cached[0] != identity or stat.st_size < cached[1]:
+        cached = [identity, 0, []]
+        _record_cache[path] = cached
+    with path.open("rb") as stream:
+        stream.seek(cached[1])
+        data = stream.read()
+    end = data.rfind(b"\n") + 1
+    if end:
+        cached[2].extend(json.loads(line) for line in data[:end].splitlines())
+        cached[1] += end
+    return cached[2]
 
 
 def poses(path):
@@ -722,13 +739,21 @@ def run(args):
     output.mkdir(parents=True, exist_ok=False)  # Never overwrite a campaign.
     binary = args.build.resolve()
     config = args.content_config.resolve()
+    family_content = None
+    if args.combat_families:
+        from native_combat_families_capture import prepare_fixture
+        config, family_content = prepare_fixture(config, output / "content")
+        if args.combat_summon is not None:
+            family_content.update(selectors=[args.combat_summon], equipment=False)
     if args.player_travel:
         from native_player_travel_capture import prepare_fixture
         config = prepare_fixture(config, output / "content")
     settings = root / "files/settings-default.cfg"
     movement_capture = args.movement or args.movement_deep
-    spell_capture = args.player_travel or args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or args.object_magic or args.container_magic or movement_capture
+    spell_capture = args.combat_families or args.player_travel or args.instant_spell or args.actor_effects or args.actor_effects_restart or args.npc_casting or args.magic_visual or args.player_swings or args.ranged or args.knockout or args.visibility or args.ai_charm or args.object_magic or args.container_magic or movement_capture
     encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines()) if args.npc_casting or args.magic_visual or args.player_swings or args.physical_knockdown or args.creature or args.custom_body else {}
+    if (args.object_magic or args.container_magic) and config.parent.joinpath("encounter.txt").exists():
+        encounter = dict(line.split(" ", 1) for line in config.parent.joinpath("encounter.txt").read_text().splitlines())
     if args.custom_body and "custom" not in encounter:
         raise ValueError("Custom body capture requires an authored custom NPC fixture")
     spell_name = "npc_slow_restore" if args.actor_effects_restart else "npc_timed_restore" if args.actor_effects else "npc_instant_restore"
@@ -737,17 +762,21 @@ def run(args):
     cell = "NPC Door Contact Test" if spell_capture else "Vivec, Redoran Records" if args.doors else "Seyda Neen, Arrille's Tradehouse"
     version = "56c" if args.container_magic else 66 if args.neighbor_many else 64 if args.ranged else 57 if args.ai_charm else 56 if args.object_magic or movement_capture else 55 if args.visibility else 53 if args.npc_casting or args.magic_visual else 52 if args.knockout or args.player_swings else 35 if args.actor_effects or args.actor_effects_restart else 26 if args.instant_spell else 25 if args.life_encounter or args.unarmed_effect else 24 if args.combat else 20 if args.traveler else 18 if args.doors else 16
     if args.player_travel: version = 68
+    if args.descriptor_version: version = args.descriptor_version
+    if args.combat_families: version = 73
     npc = "npc_door_actor" if spell_capture else "hlavora sadas" if args.doors else "raflod the braggart"
     if args.creature or args.custom_body: npc = encounter["actor"]
     player_actor = "npc_knockdown_observer" if args.physical_knockdown or args.creature or args.custom_body else npc if args.life_encounter or spell_capture else "player"
     player_actors = [player_actor, player_actor]
     if args.ranged:
         player_actors = ["npc_hit_female", "npc_hit_beast"]
-    if args.ai_charm:
+    if args.ai_charm or args.combat_families:
         player_actors = ["npc_hit_female", "npc_hit_beast"]
     if args.physical_knockdown and args.knockout_target == "players":
         player_actors[0] = npc
     destination = "60 -500 1 120" if args.movement_deep else "60 -240 1 120" if args.movement else "60 -32 1 120" if spell_capture else "-550 70 385 16" if args.traveler else "32 -320 -127 120" if args.doors else "-550 -245 385 40" if args.life_encounter or args.unarmed_effect else "-550 70 385 40"
+    if args.object_magic or args.container_magic:
+        destination = encounter.get("destination", destination)
     manifest = hashlib.sha256(f"native-navigation-capture-{version}".encode() + config.joinpath("openmw.cfg").read_bytes()
                               + settings.read_bytes()).hexdigest()
     password = output / "join-password.txt"
@@ -760,7 +789,7 @@ def run(args):
         + f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + (f'melee "{encounter.get("melee", "weapononehand")}" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
-        + ('respawn 27000\n' if args.life_encounter or args.unarmed_effect or spell_capture else ''), encoding="utf-8")
+        + ('respawn 180\n' if args.combat_families else 'respawn 27000\n' if args.life_encounter or args.unarmed_effect or spell_capture else ''), encoding="utf-8")
     common = dict(content_manifest_id=manifest, cell_spaces="interior:1", allowed_cells="interior:1",
                   spawn_cell="interior:1", spawn_positions="-81920:-204800:-128000" if args.doors else "-768000:-409600:394240", default_appearance_id="2",
                   movement_profile="sneak:1024;walk:4097;run:8192;jump:4096")
@@ -780,7 +809,7 @@ def run(args):
     if args.ranged:
         common["spawn_positions"] = "61440:-491520:1024"
     server_config = common | dict(native_inventory_file="native.txt", bind_address="127.0.0.1", port=port,
-                                 tick_interval_ms=33, disconnect_grace_ms=120000 if args.custom_body else 30000,
+                                 tick_interval_ms=33, disconnect_grace_ms=120000 if args.custom_body or args.combat_families else 30000,
                                  join_password_file="join-password.txt", player_identity_file="players.txt")
     output.joinpath("server.cfg").write_text("".join(f"{k}={v}\n" for k, v in server_config.items()), encoding="utf-8")
     template = next(line.split() for line in root.joinpath(
@@ -873,7 +902,11 @@ def run(args):
             if args.player_travel:
                 command.extend(("--tes3mp-content-cell-space-map=2=NPC Door Recall Test",
                                 "--tes3mp-content-cell-space-map=3=NPC Door Path Test"))
-            if spell_capture and not args.player_swings and not args.ranged and not args.physical_knockdown:
+            if args.combat_families:
+                from native_combat_families_capture import record_id
+                for mapped in family_content["spells"]:
+                    command.append(f"--tes3mp-content-spell-map={record_id(mapped)}={mapped}")
+            elif spell_capture and not args.player_swings and not args.ranged and not args.physical_knockdown:
                 spell_names = ["travel_mark", "travel_recall"] if args.player_travel else ["door_spell_lock", "door_spell_open"] if args.object_magic or args.container_magic else (
                     [f"movement_{index}" for index in range(12) if index < 3 or index >= 7]
                     + [f"movement_npc_{index}" for index in range(12) if index < 3 or index >= 7]) if movement_capture else (
@@ -885,6 +918,12 @@ def run(args):
                     command.append(f"--tes3mp-content-spell-map={spell_id}={mapped}")
             start(role, command)
             client_commands[role] = command
+        if args.combat_families:
+            from native_combat_families_capture import verify_combat_families
+            verify_combat_families(output, evidence, processes, relay, manifest, family_content,
+                {name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
+                 for name in ("openmw.exe", "tes3mp_server.exe")})
+            return
         if args.player_travel:
             from native_player_travel_capture import verify_player_travel_capture
             verify_player_travel_capture(output, evidence, processes, relay, manifest,
@@ -1067,6 +1106,9 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--combat-families", action="store_true", help="V73 bound equipment, all summon selectors and actor death/life presentation")
+    parser.add_argument("--combat-summon", type=int, help="Focus a combat-families repair on one summon selector and actor lives")
+    parser.add_argument("--descriptor-version", type=int, choices=(73, 74), help="Exercise an existing capture against the current campaign")
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--content-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -1106,6 +1148,10 @@ if __name__ == "__main__":
                         help="Keep Bob in melee reach during Alice's physical get-up; verify shared NPC retarget contacts")
     parser.add_argument("--attack-limit", type=int, default=40)
     args = parser.parse_args()
+    if args.combat_summon is not None:
+        from native_combat_families_capture import SUMMONS
+        if not args.combat_families or args.combat_summon not in SUMMONS:
+            parser.error("--combat-summon requires --combat-families and a stock summon selector")
     if args.custom_body and args.creature:
         parser.error("Choose one actor body fixture")
     if args.custom_body and (not args.knockout or args.knockout_target != "npc"):
@@ -1118,7 +1164,7 @@ if __name__ == "__main__":
         parser.error("--physical-knockdown requires --knockout")
     if args.retarget_getup and (not args.physical_knockdown or args.knockout_target != "players"):
         parser.error("--retarget-getup requires --physical-knockdown with player subjects")
-    if sum((args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
+    if sum((args.combat_families, args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
             args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.magic_visual, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.object_magic, args.container_magic, args.player_travel, args.movement, args.movement_deep)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
@@ -1127,6 +1173,6 @@ if __name__ == "__main__":
         parser.error("--neighbor-many requires --ranged")
     if args.neighbor_creature_damage and not args.neighbor_many:
         parser.error("--neighbor-creature-damage requires --ranged --neighbor-many")
-    if not args.player_travel and not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
+    if not args.combat_families and not args.player_travel and not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

@@ -1,4 +1,5 @@
 #include "spells.hpp"
+#include "powercooldown.hpp"
 
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loadspel.hpp>
@@ -202,7 +203,8 @@ namespace MWMechanics
     {
         const auto it = std::find_if(
             std::begin(mUsedPowers), std::end(mUsedPowers), [&](auto& pair) { return pair.first == spell; });
-        return it == mUsedPowers.end() || it->second + 24 <= MWBase::Environment::get().getWorld()->getTimeStamp();
+        return it == mUsedPowers.end()
+            || it->second + PowerCooldownHours <= MWBase::Environment::get().getWorld()->getTimeStamp();
     }
 
     void Spells::usePower(const ESM::Spell* spell)

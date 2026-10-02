@@ -55,6 +55,7 @@ namespace TES3MP::Native
             std::vector<NativeActorSpawn> mActorSpawns;
             ESM::RefId mSunRegion;
             bool mSunExposed = false;
+            std::optional<float> mWaterLevel;
         };
         std::optional<WorldItems> mWorldItems;
         std::optional<ESM::CellRef> mDoor;
@@ -126,6 +127,8 @@ namespace TES3MP::Native
         bool mEquipmentFamily = false; // V70 effect-owned bound equipment and stock ExtraSpell.
         bool mSummons = false;
         bool mPlayerLifecycle = false; // V72: life-owned consequences and respawn share the actor/spatial commit.
+        bool mCommittedDeath = false; // V73: durable body-bound death clocks, sampled by the shared timeline.
+        bool mPowerSources = false; // V74: stock powers with durable game-time cooldowns.
         DynamicActorSet mDynamicActors;
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
         std::map<uint64_t, BoundCastAnimations> mDynamicCasts;

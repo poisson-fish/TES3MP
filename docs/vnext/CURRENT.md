@@ -1,74 +1,62 @@
 # Current state and next action
 
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
-runs NPC/door substeps at 60 Hz, commits at 30 Hz.
+runs NPC/door substeps at 60 Hz and commits at 30 Hz.
 
-**Connected consumers:** shared stock awareness reads canonical Sneak, skills,
-fatigue, boots, distance, facing, Blind and concealment for detection/witnesses.
-Life-bound ForceJump/ForceMoveJump controls feed navigation, stock launch/air
-control and physics; Jump/SlowFall affect actual trajectories. Landing damage,
-death and grounded movement share durability. Mixed abilities/constants retain
-stat arguments and durable rolls through movement/AI, equipment and summon writers.
-Invisibility suppression preserves the remaining source ordinals.
+**Spell audit:** all 143 built-in IDs have explicit gameplay paths in
+[preparation](../../apps/tes3mp-server/native/magic_runtime.cpp),
+[resolution/consumers](../../apps/tes3mp-server/native/inventory_service.cpp) and shared
+equipment/summon handlers. Resource/stat/defense/condition, awareness/movement/AI,
+object/travel, equipment and summon families reach existing writers. This establishes
+handler coverage, not arbitrary source combinations or desktop parity.
 
-Focused synthetic checks: `build/logs/consumer-awareness-rules-01.log`,
-`build/logs/consumer-sneak-02.log`, `build/logs/consumer-jump-fall-rules-01.log`,
-`build/logs/consumer-jumps-08.log`, `build/logs/consumer-mixed-rules-02.log`,
-`build/logs/consumer-mixed-04.log`. Existing rejection/restart machinery checks
-canonical state and physics/source continuation. Movement-enabled scene image 3
-and changed resource binding require fresh campaigns; earlier non-movement layouts
-remain unchanged. General scripts remain M5; bounded controls require explicit actor/life.
-Desktop acceptance stays grouped.
+**Connected fixes (V74):** mixed travel resolves by ordinal on the receiving player;
+Recall followed by Mark uses the staged destination. Self-only sources follow players
+across bound cells and ignore desktop focus. Lock/Open on actors and travel on
+nonplayers are stock no-ops without suppressing valid ordinals. Object bolts retain
+object contact revisions. Authored/racial/stock-autocalculated spells share source
+lookup; powers retain stock cost/success/Silence and a durable 24-game-hour cooldown.
+Dispel leaves powers intact. Abilities/constants ignore non-Self ordinals without
+dropping Self entries. Fresh V74 campaigns; capability-33 clients remain compatible.
+Reused transaction/recovery checks pass: `build/logs/spell-completeness-08.log`,
+`spell-object-compatibility-02.log`, `spell-launch-01.log`, `spell-passive-ranges-02.log`,
+`spell-travel-regression-01.log`.
 
-Ranged/V64 aim passes loss (`build/logs/desktop-ranged-aim-live-01.log`).
-Neighbor combat/creature attribution passes loss/reconnect
-(`build/logs/desktop-neighbor-creature-damage-live-04.log`); reactions remain unverified.
-Magic bolts/loops/reconnect pass loss (`build/logs/magic-loop-live-02.log`);
-audio remains unverified. Enchanted ammo/general scripts and live bodies remain open.
+**Presentation audit:** [desktop path](../../apps/openmw/tes3mp/desktop_providers.cpp)
+consumes committed release/impact/area cues; bolts interpolate committed positions
+with looping sound. Persistent ContinuousVfx follows authoritative life/effect
+snapshots and cleanup; reconnect restores loops without replaying impacts. Local
+cast windup is predicted. Release cues use world anchors and record/range effects,
+without per-effect applied results; failed-cast events currently skip failure audio.
+Windup/release duplication, hit attachment and resisted/ignored-effect visuals need
+desktop comparison.
 
-**Object/travel (V69):** intervention, Telekinesis, ordered Target/area Lock/Open
-and smallest-gem Soultrap share existing writers. Search/relocation rollback/restart
-(`build/logs/object-travel-test-08.log`), reach/occlusion/expiry
-(`build/logs/object-spells-test-10.log`) and capture/death deduplication
-(`build/logs/object-soul-test-02.log`) pass. Fresh campaign/capability-30 clients.
-Scripted/keyed/trapped containers, unbound destinations and changing frozen NPC
-collision remain unsupported; travel is single-effect Self.
+**Restrictions:** stock AI excludes powers and uses equipped WhenUsed sources;
+passives apply Self only, travel requires players, Soultrap requires creatures, and
+two of 22 summon selectors are empty. Migration scaffolding still bounds effects
+(eight/source, area 64, duration 3,600s, magnitude 1,000), active effects and actors;
+magic requires a bound target, passive Self families remain restricted, interventions
+require bound destinations, and NPC collision is frozen. M5 owns learned/removed
+spellbook script state, scripted/keyed/trapped activation, summon overrides and
+story/quest consequences.
 
-**Bound equipment (V70):** all 11 effects/ExtraSpell share handlers, temporary
-identities/restoration, gloves and cleanup. Manual changes win; overlap preserves
-ordinary items; temporary items cannot stack/transfer. Failed permanent equips stay
-dormant. Synthetic lifecycle rollback/restart passes
-(`build/logs/bound-equipment-lifecycle-12.log`). Fresh V70 campaign;
-scripted bound records/general item scripts unsupported.
+**Migration base:** awareness, jump/air control/fall damage and passives share
+canonical writers. All 11 bound effects/ExtraSpell and 20 stock summons retain
+ownership/cleanup. Wait/rest expiry commits with game time. Player/NPC lives bind
+attribution; ordinary inventory/social/Mark survive respawn. V73 body clocks and
+stock death selection survive rollback/restart; non-strike enchanted ammunition
+preserves release consumption/recovery. Existing evidence: `actor-bodies-06.log`,
+`actor-fall-03.log`, `actor-body-timeline-01.log`, `actor-body-resources-01.log`,
+`summon-scheduling-final-04.log` under `build/logs`.
 
-**Mark/Recall (V68):** disabled/unmarked casts pay. Loss/reconnect
-(`build/logs/player-travel-desktop-live-14.log`), rollback/restart/epochs
-(`build/logs/player-travel-test-20.log`) and cross-cell resync pass.
+**One desktop acceptance pass:** retain the 16 V73 two-desktop cases
+(`build/combat-acceptance-16/result.json`: 100ms one-way delay, ±25ms jitter, 10% loss)
+as prior evidence. Run fresh V74 mixed travel/object/power/racial sources alongside
+the remaining 11 AI/disposition variants, Telekinesis, Soultrap and both interventions.
+Compare cast windup/release/failure, Touch/Target/areas, resisted effects, persistent
+VFX/equipment glow and complete cast/hit/area/bolt audio against stock, including
+expiry/death, rejected writes, reconnect/restart and cross-cell travel. Prior bolt
+looping-sound evidence does not establish full audio parity.
 
-**Summons (V71):** all 22 selectors, ownership, capacity/removal and recovery pass.
-Up to 32 bodies share collision, stock movement/combat, equipment/stats, RNG and
-membership. Quadrupeds, flight, melee/ranged/known-spell/WhenUsed choices and authored
-animation resources bind across 20 stock records; two selectors are placeholders.
-Bonewalker's exact stock disease initializer uses the condition writer; overrides
-remain unsupported. Fresh campaigns/complete bound-area resources required.
-Collision unload/reload, wait/rest, elapsed resources/effects and source/bound/summon
-expiry commit with game time, preserving action/respawn ticks
-(`build/logs/summon-scheduling-final-04.log`).
-
-**Player lives (V72):** attacks/casts/effects/Command/Soultrap/summons distinguish
-lives. Death cleanup, respawn, canonical motion/epochs and history commit together.
-Respawn restores first bound position/configured stats after the descriptor delay
-while online; ordinary inventory/social/Mark survive. Historical attribution cannot
-benefit/control new caster lives. Synthetic rollback/restart/stale-life and life-2
-ownership pass (`build/logs/player-lives-14.log`); codecs/negotiation and callers
-compile. Fresh V72 campaign/capability-32 clients; quest credit remains M5.
-
-**Next:** finish enchanted ammunition and remaining body reactions before grouped M4 desktop acceptance.
-
-60 M4 IDs still require acceptance or implementation:
-
-- Movement (8) and AI/disposition (12): implemented headlessly; acceptance remains.
-- Objects (4): Lock, Open, Telekinesis, Soultrap.
-- Travel (2): DivineIntervention, AlmsiviIntervention.
-- Equipment (12): 11 bound effects and stock ExtraSpell.
-- Summons (22): configured bodies/residency/time skips covered headlessly; acceptance remains.
+**Next:** finish the identified spell presentation/source limits and this acceptance
+pass before player movement cutover. M4 sign-off still requires PLAN's exit criteria.

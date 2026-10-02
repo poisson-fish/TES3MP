@@ -1118,7 +1118,7 @@ namespace TES3MP::Native
         for (const auto& source : owned) sources.push_back(source.get());
         return {readHitAnimations(sources), identity,
             knockout ? readKnockoutAnimation(sources) : KnockoutAnimation{},
-            knockout ? readKnockoutAnimation(sources, "knockdown") : KnockoutAnimation{}};
+            knockout ? readKnockoutAnimation(sources, "knockdown") : KnockoutAnimation{}, readDeathAnimations(sources)};
     }
 
 
@@ -1198,6 +1198,32 @@ namespace TES3MP::Native
         mImpl->mWaterNavigation = true;
         mImpl->mFingerprint += "npc-jump-fall-1\n";
         if (mNeighbor) mNeighbor->enableMovementEffects();
+    }
+    bool InteriorActorScene::isSwimming(uint64_t actor) const
+    {
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->mImpl && scene->mImpl->mActorId == actor)
+            {
+                const auto& frame = *scene->mImpl->mActor;
+                const float scale = scene->mImpl->mStore.get<ESM::GameSetting>().find("fSwimHeightScale")->mValue.getFloat();
+                return frame.mPosition.z() + 2.f * frame.mHalfExtentsZ * scale < scene->mImpl->waterAt(frame.mPosition);
+            }
+        throw std::invalid_argument("Swimming actor outside bound scene");
+    }
+    bool InteriorActorScene::isSwimming(const std::array<float, 3>& position, ESM::RefId race, float scale, float water) const
+    {
+        if (!mImpl || !std::isfinite(scale) || scale <= 0 || scale > 100
+            || std::ranges::any_of(position, [](float v) { return !std::isfinite(v) || std::abs(v) > 1e7f; })
+            || !std::isfinite(water)) throw std::invalid_argument("Swimming player context invalid");
+        const auto* record = mImpl->mStore.get<ESM::Race>().find(race);
+        auto model = VFS::Path::Normalized(MWClass::npcModel(*record, mImpl->mBaseAnimation, mImpl->mBeastAnimation));
+        model = Misc::ResourceHelpers::correctActorModelPath(model, &mImpl->mVfs);
+        const auto shape = mImpl->mShapes->getInstance(model);
+        const float halfHeight = shape->mCollisionBox.mExtents.z() * scale;
+        if (!std::isfinite(halfHeight) || halfHeight <= 0 || halfHeight > 10000)
+            throw std::invalid_argument("Swimming player hull invalid");
+        const float swimScale = mImpl->mStore.get<ESM::GameSetting>().find("fSwimHeightScale")->mValue.getFloat();
+        return position[2] + 2.f * halfHeight * swimScale < water;
     }
     bool InteriorActorScene::waterWalkingCastable(uint64_t actor) const
     {

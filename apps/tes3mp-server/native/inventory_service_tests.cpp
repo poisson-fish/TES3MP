@@ -5588,11 +5588,14 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         const bool sneakDetection = effectFamily == "sneak-detection";
-        const bool jumpConsumers = effectFamily == "movement-jumps";
+        const bool landingRecovery = effectFamily == "movement-fall";
+        const bool jumpConsumers = landingRecovery || effectFamily == "movement-jumps";
         const bool mixedPassives = effectFamily == "mixed-passives";
         if (sneakDetection) effectFamily = "concealment";
         if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
-        const bool playerLives = effectFamily == "player-lives";
+        const bool spellCompleteness = effectFamily == "spell-completeness";
+        const bool committedBodies = spellCompleteness || effectFamily == "actor-bodies";
+        const bool playerLives = effectFamily == "player-lives" || committedBodies;
         const bool summons = mixedPassives || playerLives || effectFamily.starts_with("summons-integrated");
         const auto summonProfile = effectFamily;
         const auto summonEffect = summonProfile == "summons-integrated-quadruped" ? ESM::MagicEffect::SummonClannfear
@@ -5619,7 +5622,9 @@ namespace TES3MP::Native::Testing
         const bool npcRanged = effectFamily == "npc-ranged";
         const bool neighborCreature = effectFamily == "neighbor-creature" || objectSoul;
         const bool manyNeighbors = objectSpells || effectFamily == "neighbor-many" || effectFamily == "player-travel" || neighborCreature;
-        const bool enchantedProjectile = npcRanged && encounterProfile.starts_with("npc-enchanted-");
+        const bool recoverableProjectile = npcRanged && encounterProfile.starts_with("recoverable-");
+        const bool enchantedProjectile = npcRanged && (encounterProfile.starts_with("npc-enchanted-") || recoverableProjectile);
+        const bool strikeProjectile = enchantedProjectile && !recoverableProjectile;
         const bool projectileNeighbors = npcRanged || effectFamily == "neighbor-projectiles"
             || effectFamily == "neighbor-expanded" || manyNeighbors;
         const bool neighborPhysics = effectFamily == "neighbor-physics"
@@ -6009,7 +6014,7 @@ namespace TES3MP::Native::Testing
                 require(encounterProfile == "npc-bow" || encounterProfile == "npc-crossbow"
                     || encounterProfile == "npc-thrown" || encounterProfile == "npc-enchanted-bow"
                     || encounterProfile == "npc-enchanted-crossbow"
-                    || encounterProfile == "npc-enchanted-thrown", "Unknown NPC ranged loadout");
+                    || encounterProfile == "npc-enchanted-thrown" || recoverableProjectile, "Unknown NPC ranged loadout");
                 const auto plain = [&](int wanted) {
                     if (wanted == ESM::Weapon::MarksmanThrown)
                     {
@@ -6033,13 +6038,19 @@ namespace TES3MP::Native::Testing
                 {
                     projectileEnchantment.blank();
                     projectileEnchantment.mId = ESM::RefId::stringRefId("ranged_impact_enchantment");
-                    projectileEnchantment.mData.mType = ESM::Enchantment::WhenStrikes;
+                    projectileEnchantment.mData.mType = !recoverableProjectile ? ESM::Enchantment::WhenStrikes
+                        : encounterProfile.find("once") != std::string_view::npos ? ESM::Enchantment::CastOnce
+                        : encounterProfile.find("constant") != std::string_view::npos ? ESM::Enchantment::ConstantEffect
+                        : ESM::Enchantment::WhenUsed;
                     projectileEnchantment.mData.mCost = 2;
                     projectileEnchantment.mData.mCharge = 20;
                     projectileEnchantment.mEffects.populate({
                         {ESM::MagicEffect::ResistFire, {}, {}, ESM::RT_Self, 0, 20, 4, 4},
                         {ESM::MagicEffect::ResistFrost, {}, {}, ESM::RT_Touch, 10, 20, 5, 5},
                         {ESM::MagicEffect::ResistShock, {}, {}, ESM::RT_Target, 0, 20, 6, 6}});
+                    if (projectileEnchantment.mData.mType == ESM::Enchantment::ConstantEffect)
+                        projectileEnchantment.mEffects.populate({
+                            {ESM::MagicEffect::ResistFire, {}, {}, ESM::RT_Self, 0, 0, 4, 4}});
                     projectileWeapon = *base.store().get<ESM::Weapon>().find(ammunition);
                     projectileWeapon.mId = ESM::RefId::stringRefId("ranged_impact_projectile");
                     projectileWeapon.mEnchant = projectileEnchantment.mId;
@@ -6387,8 +6398,9 @@ namespace TES3MP::Native::Testing
             {
                 const auto spell = [&](std::string_view name, std::vector<ESM::ENAMstruct> effects, bool item = false) {
                     ESM::Spell record; record.blank(); record.mId = ESM::RefId::stringRefId(name);
-                    record.mData.mType = ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
+                    record.mData.mType = name == "travel_power" ? ESM::Spell::ST_Power : ESM::Spell::ST_Spell; record.mData.mFlags = ESM::Spell::F_Always;
                     record.mData.mCost = movementEffects && effectFamily != "door-magic" ? 0 : 5;
+                    if (name == "travel_power") record.mData.mCost = 0;
                     record.mEffects.populate(effects);
                     npc.mSpells.mList.push_back(record.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); record.save(out); out.endRecord(ESM::Spell::sRecordId);
@@ -6423,10 +6435,11 @@ namespace TES3MP::Native::Testing
                     if (objectSpells)
                     {
                         spell("door_spell_lock", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 50),
-                            effect(ESM::MagicEffect::Telekinesis, ESM::RT_Self, 10, 20)});
+                            effect(ESM::MagicEffect::Telekinesis, ESM::RT_Self, 10, 20),
+                            effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                         spell("door_spell_open", {effect(ESM::MagicEffect::Open, ESM::RT_Target, 0, 50),
                             effect(ESM::MagicEffect::RestoreHealth, ESM::RT_Self, 0, 1)});
-                        spell("door_spell_unsupported_travel", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 50),
+                        spell("door_spell_mixed_travel", {effect(ESM::MagicEffect::Lock, ESM::RT_Target, 0, 50),
                             effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                         spell("door_spell_area", {{ESM::MagicEffect::Lock, {}, {}, ESM::RT_Target, 8, 0, 20, 20},
                             {ESM::MagicEffect::Open, {}, {}, ESM::RT_Target, 8, 0, 10, 10},
@@ -6452,6 +6465,11 @@ namespace TES3MP::Native::Testing
                             effect(ESM::MagicEffect::Soultrap, ESM::RT_Touch, 30, 0),
                             effect(ESM::MagicEffect::AbsorbHealth, ESM::RT_Touch, 30, 1)});
                         spell("life_kill", {effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 1000)});
+                        if (committedBodies)
+                        {
+                            auto area = effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 1000);
+                            area.mArea = 30; spell("body_area_kill", {area});
+                        }
                     }
                     auto creature = *base.store().get<ESM::Creature>().find(MWMechanics::getSummonedCreature(summonEffect, base.store()));
                     creature.mId = ESM::RefId::stringRefId("summon_lifecycle_body");
@@ -6524,6 +6542,18 @@ namespace TES3MP::Native::Testing
                     {
                         spell("travel_soul_kill", {effect(ESM::MagicEffect::Soultrap, ESM::RT_Touch, 30, 0),
                             effect(ESM::MagicEffect::DamageHealth, ESM::RT_Touch, 0, 20)});
+                    }
+                    spell("travel_mixed_mark", {effect(ESM::MagicEffect::Shield, ESM::RT_Self, 2, 9),
+                        effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
+                    spell("travel_recall_mark", {effect(ESM::MagicEffect::Recall, ESM::RT_Self, 0, 0),
+                        effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
+                    if (spellCompleteness)
+                    {
+                        spell("travel_power", {effect(ESM::MagicEffect::Shield, ESM::RT_Self, 4, 11)});
+                        spell("travel_absorb", {effect(ESM::MagicEffect::SpellAbsorption, ESM::RT_Self, 20, 100)});
+                        spell("travel_actor_noop", {effect(ESM::MagicEffect::Lock, ESM::RT_Touch, 0, 10),
+                            effect(ESM::MagicEffect::Mark, ESM::RT_Touch, 0, 0),
+                            effect(ESM::MagicEffect::Shield, ESM::RT_Touch, 2, 13)});
                     }
                     spell("travel_mark", {effect(ESM::MagicEffect::Mark, ESM::RT_Self, 0, 0)});
                     spell("travel_recall", {effect(ESM::MagicEffect::Recall, ESM::RT_Self, 0, 0)});
@@ -6980,6 +7010,20 @@ namespace TES3MP::Native::Testing
                         female.mInventory.mList.push_back({1, ESM::RefId::stringRefId("iron shortsword")});
                 }
                 beast.mRace = ESM::RefId::stringRefId("argonian"); beast.setIsMale(true);
+                if (spellCompleteness)
+                {
+                    auto race = *base.store().get<ESM::Race>().find(female.mRace);
+                    race.mId = ESM::RefId::stringRefId("completeness_race");
+                    ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("completeness_racial_ability");
+                    ability.mData.mType = ESM::Spell::ST_Ability;
+                    ability.mEffects.populate({{ESM::MagicEffect::FireDamage, {}, {}, ESM::RT_Touch, 0, 1, 10, 10},
+                        {ESM::MagicEffect::ResistFire, {}, {}, ESM::RT_Self, 0, 0, 17, 17}});
+                    race.mPowers.mList = {ESM::RefId::stringRefId("travel_power"), ability.mId};
+                    female.mRace = race.mId;
+                    std::erase(female.mSpells.mList, ESM::RefId::stringRefId("travel_power"));
+                    out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
+                    out.startRecord(ESM::Race::sRecordId, 0); race.save(out); out.endRecord(ESM::Race::sRecordId);
+                }
                 if (npcRanged || encounterProfile.ends_with("-release") || encounterProfile.ends_with("-flight"))
                 {
                     const int type = (npcRanged && encounterProfile.ends_with("crossbow"))
@@ -7012,7 +7056,8 @@ namespace TES3MP::Native::Testing
                         std::cout << "combined ranged=" << weapon << " melee=iron longsword\n";
                     for (auto* participant : {&female, &beast})
                     {
-                        const int ammunitionCount = npcRanged || encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
+                        const int ammunitionCount = recoverableProjectile ? 1
+                            : npcRanged || encounterProfile.find("recycling") != std::string::npos ? 20 : 2;
                         participant->mInventory.mList = {{type == ESM::Weapon::MarksmanThrown ? ammunitionCount : 1, weapon}};
                         if (type != ESM::Weapon::MarksmanThrown)
                             participant->mInventory.mList.push_back({ammunitionCount,
@@ -7192,7 +7237,8 @@ namespace TES3MP::Native::Testing
                     ability.mEffects.populate({{ESM::MagicEffect::Jump, {}, {}, ESM::RT_Self, 0, 0, 20, 20}});
                     npc.mSpells.mList.clear(); npc.mSpells.mList.push_back(ability.mId);
                     out.startRecord(ESM::Spell::sRecordId, 0); ability.save(out); out.endRecord(ESM::Spell::sRecordId);
-                    npc.mNpdt.mHealth = 20;
+                    npc.mNpdt.mHealth = landingRecovery ? 200 : 20;
+                    if (landingRecovery) npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::Acrobatics)] = 0;
                 }
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             }
@@ -8835,7 +8881,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (spellCompleteness ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -8905,7 +8951,7 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
-        if (playerLives)
+        if (playerLives && !spellCompleteness)
         {
             // One real canonical file owns actor lives, inventories and spatial epochs.
             auto nearby = std::vector(authority.players().begin(), authority.players().end());
@@ -9070,6 +9116,18 @@ namespace TES3MP::Native::Testing
             cast(reducer, native, 2, "life_kill", MagicUseTargetKind::Player, 1);
             const auto dead = state(native);
             const auto death = dead.combat->playerLives[0].deaths.back();
+            if (committedBodies)
+            {
+                const auto& body = dead.combat->deathBodies[0];
+                require(body.action == death.tick && body.group > 0,
+                    "Player death omitted durable body choice or clock");
+                const auto view = native.projectCombat(reducer.state(), id<SessionId>(2),
+                    id<ServerTick>(tick), reducer.canonicalRevision());
+                require(view && std::ranges::any_of(view->presentation(), [&](const auto& p) {
+                    return p.kind == 1 && p.id == 1 && p.dead && p.bodyAction == body.action
+                        && p.bodyFrame == float(body.frame) && p.group.starts_with("death");
+                }), "Player death pose diverged from its committed body");
+            }
             require(death.life == 1 && death.killer == 2 && death.killerKind == 1 && death.killerLife == 1
                 && dead.combat->playerLives[0].generation == 1 && dead.combat->playerLives[0].respawnTick
                 && !native.allowsPlayerMovement(id<PlayerId>(1))
@@ -9079,6 +9137,25 @@ namespace TES3MP::Native::Testing
                 && reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch() != beforeDeathEpoch,
                 "Player death split attribution, ownership, controls or authority");
             const auto deadBytes = image(native);
+            if (committedBodies)
+            {
+                const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(reducer.state().players(), {}));
+                for (bool online : {false, true})
+                {
+                    auto next = native.prepareNativeTick(online ? reducer.state() : offline,
+                        id<ServerTick>(tick + 1), 1.f/30, {}, &world);
+                    require(next && next->commit([&](auto candidate) {
+                        const auto proposed = readActorCampaign({reinterpret_cast<const char*>(candidate.data()), candidate.size()});
+                        const auto& body = proposed.combat->deathBodies[0];
+                        require(body.group == dead.combat->deathBodies[0].group
+                            && body.action == dead.combat->deathBodies[0].action
+                            && body.frame == dead.combat->deathBodies[0].frame + uint32_t(online),
+                            "Death clock ignored committed activity or changed its clip");
+                        return CanonicalDurabilityResult::Rejected;
+                    }) == CanonicalDurabilityResult::Rejected && image(native) == deadBytes,
+                        "Rejected death clock leaked a body pose");
+                }
+            }
             {
                 InventoryHost deadRestart(descriptor, manifest, *registry, *crypto, deadBytes);
                 require(image(deadRestart.service()) == deadBytes, "Dead-life recovery changed consequences");
@@ -9093,6 +9170,8 @@ namespace TES3MP::Native::Testing
                 "Respawn did not compose canonical relocation and zero velocity");
             commit(reducer, native, respawn, true);
             const auto alive = state(native);
+            if (committedBodies) require(alive.combat->deathBodies[0] == ActorCampaignCombat::DeathBody{},
+                "Respawn retained the previous life's death clip");
             require(alive.combat->playerLives[0].generation == 2 && !alive.combat->playerLives[0].respawnTick
                 && alive.combat->playerLives[0].deaths == dead.combat->playerLives[0].deaths
                 && alive.combat->actors[0][8][2] > 0 && native.allowsPlayerMovement(id<PlayerId>(1))
@@ -9178,6 +9257,22 @@ namespace TES3MP::Native::Testing
             require(std::ranges::any_of(newActors.ownership.entries, [](const auto& entry) {
                 return entry.source.owner == ActorCasterIdentity{1, 1, 2} && entry.source.caster == ActorCasterIdentity{1, 1, 2};
             }), "Respawn cast retained life-1 summon ownership");
+            if (committedBodies)
+            {
+                for (uint64_t end = tick + 30; state(restoredNative).combat->actors.back()[8][2] <= 0.f && tick < end;)
+                { auto next = prepare(continued); commit(continued, restoredNative, next); }
+                cast(continued, restoredNative, 2, "body_area_kill", MagicUseTargetKind::Actor, creature);
+                const auto corpses = state(restoredNative);
+                require(std::ranges::none_of(std::span(corpses.combat->actors).subspan(2),
+                    [](const auto& stats) { return stats[8][2] > 0.f; }), "Area death fixture retained a living native body");
+                for (unsigned i = 0; i < 3; ++i)
+                { auto next = prepare(continued); commit(continued, restoredNative, next); }
+                const auto progressed = state(restoredNative);
+                for (size_t i = 2; i < progressed.combat->deathBodies.size(); ++i)
+                    require(progressed.combat->deathBodies[i].action && progressed.combat->deathBodies[i].group
+                        && progressed.combat->deathBodies[i].frame > 0,
+                        "Last native actor death froze the active area's body clock");
+            }
             const auto finalBytes = image(restoredNative);
             {
                 InventoryHost finalRestart(descriptor, manifest, *registry, *crypto, finalBytes);
@@ -9186,7 +9281,7 @@ namespace TES3MP::Native::Testing
             for (uint64_t malformedGeneration : {uint64_t(0), uint64_t(UINT32_MAX)})
             {
                 auto malformed = finalBytes;
-                for (size_t byte = 0; byte < 8; ++byte) malformed[16 + byte] = std::byte((malformedGeneration >> (8 * byte)) & 255);
+                for (size_t byte = 0; byte < 8; ++byte) malformed[(committedBodies ? 16 + state(restoredNative).combat->deathBodies.size() * 24 : 0) + 16 + byte] = std::byte((malformedGeneration >> (8 * byte)) & 255);
                 bool rejected = false;
                 try { restoredNative.recover(malformed, {}); }
                 catch (const std::invalid_argument&) { rejected = true; }
@@ -9219,6 +9314,7 @@ namespace TES3MP::Native::Testing
             const auto seed = image(service);
             std::unique_ptr<InventoryHost> run;
             uint64_t tick = 0;
+            std::vector<std::pair<PlayerId, Transform>> lastRelocations;
             const auto fresh = [&] {
                 run = std::make_unique<InventoryHost>(descriptor, manifest, *registry, *crypto, seed);
                 run->service().synchronizeCells(authority); tick = 0;
@@ -9263,6 +9359,7 @@ namespace TES3MP::Native::Testing
                         == CanonicalDurabilityResult::Rejected && image(native) == before
                         && native.activeActorCollisionBodies() == bodies,
                         "Rejected equipment lifecycle leaked inventory, effects, resources or RNG");
+                lastRelocations.assign(pending->playerRelocations().begin(), pending->playerRelocations().end());
                 std::vector<MagicUseCombatEvent> cues;
                 if (const auto events = native.projectCombatEvents(authority, id<SessionId>(1),
                         id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get()))
@@ -9325,7 +9422,7 @@ namespace TES3MP::Native::Testing
                         return tick - admissionTick + 1;
                     cues = step({}, {}, true);
                 }
-                throw std::runtime_error("Bound-family spell did not release");
+                throw std::runtime_error("Bound-family spell did not release: " + std::string(name));
             };
             const auto inventory = [&](uint64_t player) {
                 const auto view = run->service().projectInventory(authority, id<SessionId>(player), id<ServerTick>(std::max<uint64_t>(1, tick)),
@@ -9381,6 +9478,114 @@ namespace TES3MP::Native::Testing
                     if (effect.actor == actor && effect.source == source && effect.equipmentApplied) return effect;
                 return {};
             };
+            if (spellCompleteness)
+            {
+                const auto hasEffect = [&](size_t actor, std::string_view source, float magnitude) {
+                    return std::ranges::any_of(state(run->service()).timedEffects, [&](const auto& effect) {
+                        return effect.actor == actor && effect.source == hash(source) && effect.magnitude == magnitude;
+                    });
+                };
+                fresh();
+                cast(1, "travel_mixed_mark");
+                const auto marked = state(run->service());
+                const auto mark = marked.combat->players[0].mark;
+                require(mark && hasEffect(0, "travel_mixed_mark", 9.f),
+                    "Mixed Mark dropped its ordinary effect or marker");
+                require(hasEffect(0, "completeness_racial_ability", 17.f), "Racial ability did not reach its consumer");
+                require(!hasEffect(0, "completeness_racial_ability", 10.f)
+                    && std::ranges::any_of(marked.timedEffects, [&](const auto& effect) {
+                        return effect.actor == 0 && effect.source == hash("completeness_racial_ability") && effect.ordinal == 1;
+                    }), "Ignored passive range changed Self ordinals or installed Touch damage");
+                restart();
+                std::vector<CanonicalPlayerEntityState> moved(authority.players().begin(), authority.players().end());
+                for (auto& player : moved) if (player.playerId() == id<PlayerId>(1))
+                    player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                        id<ServerTick>(tick), Transform(CellId::interior(id<CellSpaceId>(8)), Position3(100*1024, 0, 1024),
+                            player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(moved, authority.activeSessions()));
+                run->service().synchronizeCells(authority);
+                cast(1, "travel_recall_mark");
+                require(lastRelocations.size() == 1 && lastRelocations[0].second == *mark
+                    && state(run->service()).combat->players[0].mark == mark,
+                    "Ordered Recall/Mark used the pre-relocation transform");
+                restart();
+                const auto magicka = state(run->service()).combat->actors[0][9][2];
+                cast(1, "travel_power");
+                const auto powered = state(run->service());
+                require(powered.combat->powers.size() == 1 && powered.combat->powers[0].actor == 0
+                    && powered.combat->powers[0].source == hash("travel_power")
+                    && powered.combat->actors[0][9][2] == magicka,
+                    "Power charged magicka or failed to commit its cooldown");
+                const auto powerImage = image(run->service());
+                for (const auto [offset, value] : std::array<std::pair<size_t, uint64_t>, 4>{
+                        {{16, ActorCampaignCombat::MaximumPowerUses + 1}, {24, UINT64_MAX},
+                            {32, 0}, {40, powered.combat->powerClockMs}}})
+                {
+                    auto invalid = powerImage;
+                    for (size_t byte = 0; byte < 8; ++byte) invalid.at(offset + byte) = std::byte(value >> (8 * byte));
+                    bool denied = false;
+                    try { (void)readActorCampaign({reinterpret_cast<const char*>(invalid.data()), invalid.size()}); }
+                    catch (const std::invalid_argument&) { denied = true; }
+                    require(denied && image(run->service()) == powerImage, "Malformed power envelope was accepted or mutated state");
+                }
+                restart();
+                cast(1, "travel_bound_dispel");
+                require(hasEffect(0, "travel_power", 11.f) && state(run->service()).combat->powers.size() == 1,
+                    "Dispel removed a stock power or its cooldown");
+                for (unsigned i = 0; i < 80; ++i) step({}, {}, true);
+                require(!hasEffect(0, "travel_power", 11.f), "Power fixture did not expire before cooldown retry");
+                const auto cooldownRequest = [&] {
+                    const auto* player = authority.findPlayer(id<PlayerId>(1));
+                    ClientMagicUseCommand use{id<SessionId>(1), SessionGeneration::initial(), id<CommandSequence>(tick+1),
+                        id<CommandId>(tick+100), id<CanonicalRevision>(tick+1), MagicUseSourceKind::Spell,
+                        hash("travel_power"), MagicUseTargetKind::Self, 0, id<ServerTick>(tick+1),
+                        id<CombatRevision>(tick), id<CombatRevision>(tick)};
+                    return ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(), use.commandSequence,
+                        use.commandId, use.observedCanonicalRevision,
+                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()), MagicUseCommandProposal(use));
+                };
+                require(!run->service().prepareMagicUse(authority, cooldownRequest(), id<ServerTick>(tick+1)),
+                    "Restart or expiry of the effect reset the power cooldown");
+                worldTime.daysPassed = 43;
+                world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
+                step({}, {}, true);
+                require(state(run->service()).combat->powers.empty(), "24 game hours did not expire the power cooldown");
+                cast(1, "travel_power");
+                // Touch travel affects the receiving player; Lock is a stock
+                // no-op on that actor and must not suppress Shield or Mark.
+                moved.assign(authority.players().begin(), authority.players().end());
+                const auto peer = authority.findPlayer(id<PlayerId>(2))->transform();
+                for (auto& player : moved) if (player.playerId() == id<PlayerId>(1))
+                    player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                        id<ServerTick>(tick), Transform(peer.cell(),
+                            Position3(peer.position().x() + 60*1024, peer.position().y(), peer.position().z()),
+                            player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(moved, authority.activeSessions()));
+                run->service().synchronizeCells(authority);
+                cast(2, "travel_actor_noop", 0, 1);
+                require(state(run->service()).combat->players[0].mark == authority.findPlayer(id<PlayerId>(1))->transform()
+                    && hasEffect(0, "travel_actor_noop", 13.f),
+                    "Mixed actor target dropped valid ordinals");
+                restart();
+                const auto protectedMark = state(run->service()).combat->players[0].mark;
+                cast(1, "travel_absorb");
+                moved.assign(authority.players().begin(), authority.players().end());
+                for (auto& player : moved) if (player.playerId() == id<PlayerId>(1))
+                    player = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(player,
+                        id<ServerTick>(tick), Transform(player.transform().cell(),
+                            Position3(player.transform().position().x() + 5*1024,
+                                player.transform().position().y(), player.transform().position().z()),
+                            player.transform().orientation()), LinearVelocity3(0, 0, 0)));
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(moved, authority.activeSessions()));
+                run->service().synchronizeCells(authority);
+                cast(2, "travel_actor_noop", 0, 1);
+                require(state(run->service()).combat->players[0].mark == protectedMark
+                    && !hasEffect(0, "travel_actor_noop", 13.f),
+                    "Absorbed Touch source changed travel or ordinary effects");
+                restart();
+                std::cout << "spell completeness: mixed/ordered travel, cross-cell Self effects, stock target no-ops, powers/cooldown, rollback/retry/restart passed\n";
+                return;
+            }
             if (mixedPassives)
             {
                 fresh(); step({}, {}, true);
@@ -10608,9 +10813,9 @@ namespace TES3MP::Native::Testing
                 CombatRevision::fromValue(initialDoor.contactRevision).value(), InventoryRevision::initial()};
             if (objectSpells)
             {
-                auto mixedTravel = use; mixedTravel.sourceId = hash("door_spell_unsupported_travel");
-                require(!service.prepareMagicUse(authority, proposal(mixedTravel), id<ServerTick>(1)),
-                    "Unsupported travel/object combination silently dropped part of its plan");
+                auto mixedTravel = use; mixedTravel.sourceId = hash("door_spell_mixed_travel");
+                require(bool(service.prepareMagicUse(authority, proposal(mixedTravel), id<ServerTick>(1))),
+                    "Mixed travel/object plan was not admitted");
             }
             const auto decodedUse = decodeClientMagicUseCommand(encodeClientMagicUseCommand(use));
             require(std::holds_alternative<ClientMagicUseCommand>(decodedUse)
@@ -10667,6 +10872,8 @@ namespace TES3MP::Native::Testing
                         && doorView(service, 1, time).lockLevel == 50
                         && doorView(service, 2, time).lockLevel == 50,
                         "Lock cost and both observer states did not commit together");
+                    if (objectSpells) require(state.combat->players[0].mark == caster->transform(),
+                        "Mixed object Lock dropped its Self Mark ordinal");
                     wireDoor(service, 1, time, 50); wireDoor(service, 2, time, 50);
                     InventoryHost restarted(descriptor, testContentManifest(), *registry, *crypto, after);
                     restarted.service().synchronizeCells(authority);
@@ -11178,14 +11385,14 @@ namespace TES3MP::Native::Testing
                             if (arrow.terminal == 1 && state.combat->actors[0][8][2] < playerHealth)
                             {
                                 contacted = true;
-                                if (enchantedProjectile)
+                                if (strikeProjectile)
                                     require(std::ranges::count_if(state.timedEffects, [&](const auto& effect) {
                                         return effect.actor == 0 && effect.casterKind == 2
                                             && effect.caster == placement && effect.casterLife == arrow.casterLife
                                             && effect.sourceKind == 2
                                             && effect.source == source("ranged_impact_enchantment");
                                     }) == 3, "NPC projectile failed to commit all three stock impact ranges");
-                                if (enchantedProjectile)
+                                if (strikeProjectile)
                                     require(std::ranges::any_of(state.timedEffects, [&](const auto& effect) {
                                         return effect.actor == 1 && effect.caster == placement
                                             && effect.sourceKind == 2 && effect.ordinal == 1
@@ -11270,21 +11477,25 @@ namespace TES3MP::Native::Testing
                                     { ++copies; at += sizeof("ranged_impact_projectile") - 1; }
                                     return copies;
                                 };
-                                require(effects == 3 && areaNeighbor && state.combat->actors[2][8][2]
+                                require((strikeProjectile ? effects == 3 && areaNeighbor : effects == 0 && !areaNeighbor)
+                                        && state.combat->actors[2][8][2]
                                         < initialState.combat->actors[2][8][2]
                                         && projectileCopies({state.inventory.data(), state.inventory.size()})
-                                            == projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()}),
+                                            == projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()})
+                                                + size_t(recoverableProjectile),
                                     ("Enchanted impact mismatch: effects=" + std::to_string(effects)
                                         + " area=" + std::to_string(areaNeighbor)
                                         + " health=" + std::to_string(state.combat->actors[2][8][2])
                                         + " initial=" + std::to_string(initialState.combat->actors[2][8][2])
                                         + " copies=" + std::to_string(projectileCopies({state.inventory.data(), state.inventory.size()}))
                                         + " prior=" + std::to_string(projectileCopies({read(prior).inventory.data(), read(prior).inventory.size()}))).c_str());
-                                require(aliceVisual && bobVisual && aliceVisual->magicImpactCues().size() == 2
+                                require(aliceVisual && bobVisual && (recoverableProjectile
+                                    ? aliceVisual->magicImpactCues().empty() && bobVisual->magicImpactCues().empty()
+                                    : aliceVisual->magicImpactCues().size() == 2
                                     && std::ranges::equal(aliceVisual->magicImpactCues(), bobVisual->magicImpactCues())
                                     && aliceVisual->magicImpactCues()[0].record == "ranged_impact_enchantment"
                                     && aliceVisual->magicImpactCues()[0].range == ESM::RT_Touch
-                                    && aliceVisual->magicImpactCues()[1].range == ESM::RT_Target,
+                                    && aliceVisual->magicImpactCues()[1].range == ESM::RT_Target),
                                     "Enchanted physical impact lost two authored visual cues");
                                 impactTick = tick; command = arrow.command;
                                 break;
@@ -11311,7 +11522,9 @@ namespace TES3MP::Native::Testing
                         }), "Enchanted terminal receipt missing after restart");
                     }
                     std::cout << "enchanted-ranged impact=" << impactTick
-                        << " effects=3 recovery=none retry=atomic restart=stable clients=2\n";
+                        << " effects=" << (strikeProjectile ? 3 : 0)
+                        << " recovery=" << (recoverableProjectile ? "one-last-item" : "none")
+                        << " retry=atomic restart=stable clients=2\n";
                     return;
                 }
                 std::set<std::pair<uint64_t, uint64_t>> impacts;
@@ -13798,7 +14011,8 @@ namespace TES3MP::Native::Testing
                     require(motion != view->equipment->motions.end(), "Jumping NPC motion missing");
                     const float height = motion->position[2];
                     apex = std::max(apex, height); airborne |= height > 10.f;
-                    if (airborne && height < 4.f && motion->velocity[2] >= 0.f) { landed = true; break; }
+                    if (landingRecovery ? read(bytes(runtime)).combat->actors[2][8][2] < 200.f
+                        : airborne && height < 4.f && motion->velocity[2] >= 0.f) { landed = true; break; }
                 }
                 if (!landed)
                 {
@@ -13809,15 +14023,38 @@ namespace TES3MP::Native::Testing
                         << " z=" << motion->position[2] << " vz=" << motion->velocity[2]
                         << " health=" << final.combat->actors[2][8][2] << " deadline=" << final.life->respawnTick << '\n';
                 }
-                require(airborne && landed && apex > 100.f, "Jump passive did not launch navigation and fall back to ground");
+                require(airborne && landed && apex > (landingRecovery ? 10.f : 100.f), "Jump passive did not launch navigation and fall back to ground");
                 const auto landedHealth = read(bytes(runtime)).combat->actors[2][8][2];
-                require(landedHealth <= 0.f && read(bytes(runtime)).life->respawnTick,
+                const auto landing = read(bytes(runtime));
+                if (landingRecovery)
+                {
+                    require(landedHealth > 0.f && landedHealth < 200.f && landing.combat->knockedDown[2]
+                        && landing.combat->hitKnockdown[2] && landing.combat->knockoutFrame[2] == 0
+                        && landing.combat->bodyAction[2] == landing.tick,
+                        "Survived landing did not commit physical knockdown and its body clock");
+                    const auto view = runtime.projectCombat(authority, id<SessionId>(1), id<ServerTick>(landing.tick), id<CanonicalRevision>(landing.tick));
+                    require(view && std::ranges::any_of(view->presentation(), [&](const auto& pose) {
+                        return pose.kind == 2 && pose.id == npc && pose.bodyState == 3;
+                    }),
+                        "Landing did not project a physical fall recipe");
+                }
+                else require(landedHealth <= 0.f && landing.life->respawnTick,
                     "Lethal landing did not apply stock fall damage and death to canonical state");
                 const auto now = read(bytes(runtime)).tick + 1;
                 (void)commit(runtime, now); (void)commit(recovery, now);
                 require(bytes(runtime) == bytes(recovery), "Committed landing diverged after restart");
                 require(read(bytes(runtime)).combat->actors[2][8][2] == landedHealth,
                     "A committed landing applied fall damage again");
+                if (landingRecovery)
+                {
+                    for (unsigned count = 0; count < 180 && read(bytes(runtime)).combat->knockedDown[2]; ++count)
+                    {
+                        const auto at = read(bytes(runtime)).tick + 1;
+                        (void)commit(runtime, at); (void)commit(recovery, at);
+                        require(bytes(runtime) == bytes(recovery), "Physical fall/get-up diverged after restart");
+                    }
+                    require(!read(bytes(runtime)).combat->knockedDown[2], "Survived landing never completed stock get-up");
+                }
                 std::cout << "AI stock force controls Jump launch/fall controls+inertia+landing rollback/restart=shared\n";
                 return;
             }

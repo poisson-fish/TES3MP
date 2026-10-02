@@ -1,6 +1,7 @@
 #include "../mwworld/regionalweather.hpp"
 #include "desktop_providers.hpp"
 #include "actor_presentation.hpp"
+#include "../mwmechanics/deathanimation.hpp"
 #include <apps/openmw/mwclass/creaturelevlist.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include "movement_mapping.hpp"
@@ -1827,6 +1828,14 @@ namespace TES3MP::OpenMWAdapter
             result.expectedCasterRevision = combatSnapshot->selfCombatRevision();
             result.expectedTargetRevision = combatSnapshot->selfCombatRevision();
             result.expectedInventoryRevision = observedPlayerInventoryRevision.value_or(InventoryRevision::initial());
+            // A focus object does not turn a Self-only source into a targeted
+            // cast. Preserve the same source semantics for spells and items.
+            const auto& store = MWBase::Environment::get().getWorld()->getStore();
+            const auto source = spell.empty() ? item.getClass().getEnchantment(item) : spell;
+            const auto* effects = magicVisualEffects(store, uint8_t(result.sourceKind), source.serializeText());
+            if (effects && std::ranges::all_of(effects->mList,
+                    [](const auto& effect) { return effect.mData.mRange == ESM::RT_Self; }))
+                return result;
             if (target.isEmpty() || target == MWBase::Environment::get().getWorld()->getPlayerPtr())
                 return result;
 
@@ -2347,7 +2356,7 @@ namespace TES3MP::OpenMWAdapter
                                                                  && entry.second.lastObserved->actorId() == *target;
                                                          })
                                                    : actorRemotes.end();
-                        if (remote != actorRemotes.end()
+                        if (actorTimeline.empty() && remote != actorRemotes.end()
                             && !replicatedActorResultAccepted(
                                 remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                             return ProviderResult::PresentationFailed;
@@ -2387,7 +2396,7 @@ namespace TES3MP::OpenMWAdapter
                                                                  && entry.second.lastObserved->actorId() == *target;
                                                          })
                                                    : actorRemotes.end();
-                        if (remote != actorRemotes.end()
+                        if (actorTimeline.empty() && remote != actorRemotes.end()
                             && !replicatedActorResultAccepted(
                                 remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                             return ProviderResult::PresentationFailed;
@@ -2537,14 +2546,32 @@ namespace TES3MP::OpenMWAdapter
                     if (!pose || ptr.isEmpty()) return true;
                     if (!animation) return false;
                     const auto& p = *pose;
-                    const bool dead = ptr.getClass().getCreatureStats(ptr).isDead() || p.dead;
+                    const bool dead = p.dead;
+                    if (!dead && ptr.getClass().getCreatureStats(ptr).isDead())
+                        for (const auto group : MWMechanics::DeathAnimationGroups) animation->disable(group);
+                    unsigned deathGroup = 0;
+                    if (dead)
+                    {
+                        const auto found = std::ranges::find(MWMechanics::DeathAnimationGroups, p.group);
+                        if (found != MWMechanics::DeathAnimationGroups.end())
+                            deathGroup = unsigned(found - MWMechanics::DeathAnimationGroups.begin()) + 1;
+                        if (ptr == world->getPlayerPtr() && animation->committedBodyState() != 5)
+                        {
+                            world->useDeathCamera();
+                            animation = world->getAnimation(ptr);
+                            if (!animation) return false;
+                        }
+                    }
                     const bool casting = !dead && p.bodyState == 1 && p.castPhase >= 3;
                     if (!animation->setCommittedMelee(p.group, dead || p.bodyState >= 2 ? 0 : p.phase,
                             p.direction, p.strength, p.completion)
                         || !animation->setCommittedCast(casting, p.castRange, p.castFrame, p.castRelease, p.castStop)
-                        || !animation->setCommittedBody(dead ? 1 : p.bodyState,
-                            dead ? 0.f : p.bodyFrame, p.hitGroup)) return false;
-                    const auto group = p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
+                        || !animation->setCommittedBody(dead ? (deathGroup ? 5 : 0) : p.bodyState,
+                            p.bodyFrame, dead ? deathGroup : p.hitGroup)) return false;
+                    if (dead && !deathGroup && ptr != world->getPlayerPtr()
+                        && animation->hasAnimation("death1") && !animation->getInfo("death1"))
+                        animation->play("death1", 1, MWRender::BlendMask_All, false, 1.f, "start", "stop", 0.f, 0, false);
+                    const auto group = dead ? p.group : p.bodyState == 2 ? std::string("knockout") : p.bodyState == 3 ? std::string("knockdown")
                         : p.bodyState == 4 ? "hit" + std::to_string(p.hitGroup)
                         : casting ? (animation->hasAnimation("spellcast") ? "spellcast" : "attack1") : p.group;
                     const float clipTime = group.empty() ? -1.f : animation->getCurrentTime(group);
@@ -3820,6 +3847,23 @@ namespace TES3MP::OpenMWAdapter
             const auto* node = target.isEmpty() ? nullptr : target.getRefData().getBaseNode();
             return node && (node->getNodeMask() & MWRender::Mask_ReplicatedActor);
         }
+    }
+
+    MWWorld::Ptr DesktopPresentation::replicatedCombatTarget(uint8_t kind, uint64_t id) const
+    {
+        if (kind == 1)
+            for (const auto& [entity, remote] : mImpl->remotes)
+                if (remote.actor && remote.lastObserved && remote.lastObserved->playerId().value() == id)
+                    return remote.actor->ptr();
+        if (kind == 2)
+        {
+            if (const auto native = mImpl->nativeRemotes.find(id); native != mImpl->nativeRemotes.end() && native->second.actor)
+                return native->second.actor->ptr();
+            for (const auto& [entity, remote] : mImpl->actorRemotes)
+                if (remote.actor && remote.lastObserved && remote.lastObserved->actorId().value() == id)
+                    return remote.actor->ptr();
+        }
+        return {};
     }
 
     std::optional<MeleeAttackCapture> DesktopPresentation::captureMeleeAttack(

@@ -91,7 +91,16 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest, expect
                     if row["placement"] == creature)
         command("Alice", f"pose {pose['x']} {pose['y'] - 120} {pose['z']} 0 0")
         time.sleep(.7)
-        command("Alice", "shoot 1")
+        for attempt in range(3):
+            command("Alice", "shoot 1")
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and ammo("Alice") == 20:
+                time.sleep(.025)
+            if ammo("Alice") != 20:
+                break
+            print(f"No admitted creature shot; retry {attempt + 1}", flush=True)
+        if ammo("Alice") != 19:
+            raise RuntimeError("Creature shot did not consume exactly one arrow")
         def creature_hits(role):
             return [hit for row in rows(role, "native_combat_sample") for hit in row["player_hits"]
                     if hit["attacker"] == 1 and hit["target"] == creature]
@@ -101,6 +110,9 @@ def verify_ranged_encounter(output, evidence, processes, relay, manifest, expect
         if len(hits["Alice"]) != 1 or hits["Alice"] != hits["Bob"] or not hits["Alice"][0]["hit"]:
             raise RuntimeError("creature impact missed, diverged or duplicated")
         hit = hits["Alice"][0]
+        wait_for(lambda: all(any(shot["kind"] == 1 and shot["caster"] == 1 and shot["terminal"] == 1
+                    for row in rows(role, "native_combat_sample") for shot in row["projectiles"])
+                    for role in evidence), "both desktops received the committed arrow terminal")
         terminal = {role: next((shot for row in rows(role, "native_combat_sample")
                                 for shot in row["projectiles"]
                                 if shot["kind"] == 1 and shot["caster"] == 1

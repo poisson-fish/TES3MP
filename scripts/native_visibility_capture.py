@@ -106,7 +106,7 @@ def verify_visibility_capture(output, evidence, processes, relay, manifest):
         screenshot("Bob", f"detect-{name}")
 
     wait_for(lambda: all(visible(role, 1)[2] == 0 and visible(role, 1)[3] == 0
-                         and visible(role, 2)[4:] == [0, 0, 0] for role in evidence),
+                         and visible(role, 2)[4:7] == [0, 0, 0] for role in evidence),
              "Light, NightEye and Detect expire on both clients", 35)
     for role in evidence:
         screenshot(role, "expired")

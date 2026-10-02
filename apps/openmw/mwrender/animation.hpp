@@ -423,7 +423,9 @@ namespace MWRender
         // The general body sampler additionally accepts state 4 and a stock hit group (1..16).
         bool setCommittedBody(unsigned state, float frame, unsigned hitGroup = 0);
         unsigned committedBodyState() const { return mCommittedKnockoutState; }
-        unsigned committedKnockoutState() const { return mCommittedKnockoutState == 4 ? 1 : mCommittedKnockoutState; }
+        unsigned committedKnockoutState() const { return mCommittedKnockoutState >= 4 ? 1 : mCommittedKnockoutState; }
+        bool committedDeathFinished() const { return mCommittedKnockoutState == 5
+            && (mCommittedKnockoutGroup.empty() || !isPlaying(mCommittedKnockoutGroup)); }
         // Rebind the retained sample after animation resources or the POV skeleton change.
         bool restoreCommittedKnockout() { return setCommittedBody(mCommittedKnockoutState, mCommittedKnockoutFrame, mCommittedHitGroup); }
 

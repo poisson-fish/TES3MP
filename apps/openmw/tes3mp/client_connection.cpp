@@ -438,6 +438,7 @@ namespace TES3MP::OpenMWAdapter
             }
 
             MultiplayerState multiplayerState() const noexcept override { return mState; }
+            bool ownsPlayerLives() const noexcept override { return mSession && mSession->ownsPlayerLives(); }
 
             bool connect(std::string_view address) noexcept override
             try

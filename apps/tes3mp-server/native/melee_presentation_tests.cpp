@@ -1,4 +1,5 @@
 #include "actor_scene.hpp"
+#include <apps/openmw/mwmechanics/deathanimation.hpp>
 #include "loadout.hpp"
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
@@ -319,6 +320,29 @@ namespace TES3MP::Native::Testing
                 require(!local.setCommittedKnockout(4, 0) && !local.setCommittedKnockout(1, 1)
                     && !local.setCommittedKnockout(2, 1800) && local.committedKnockoutState() == 1,
                     "Invalid knockout mutated presentation");
+                for (unsigned death = 1; death <= MWMechanics::DeathAnimationGroups.size(); ++death)
+                {
+                    const auto group = MWMechanics::DeathAnimationGroups[death - 1];
+                    if (!local.hasAnimation(group)) continue;
+                    const float start = local.getTextKeyTime(std::string(group) + ": start");
+                    const float stop = local.getTextKeyTime(std::string(group) + ": stop");
+                    require(stop >= start && start >= 0, "Death keys missing");
+                    const auto frames = unsigned(std::ceil((stop - start) * 30));
+                    for (float frame : {0.f, float(frames) / 2 + .5f, float(frames)})
+                    {
+                        require(local.setCommittedBody(5, frame, death) && peer.setCommittedBody(5, frame, death),
+                            "Committed death rejected");
+                        const auto time = local.getCurrentTime(group);
+                        local.runAnimation(10); peer.runAnimation(.01f);
+                        require(std::abs(time - std::min(stop, start + frame / 30)) < .001f
+                            && local.getCurrentTime(group) == time && peer.getCurrentTime(group) == time,
+                            "Death pose advanced on the client clock");
+                        local.clearSources(); local.reloadSources(body);
+                        require(local.restoreCommittedKnockout() && local.getCurrentTime(group) == time
+                            && reconnect.setCommittedBody(5, frame, death) && reconnect.getCurrentTime(group) == time
+                            && listener.calls == 0, "Death rebuild/reconnect lost pose or replayed callbacks");
+                    }
+                }
                 require(local.setCommittedKnockout(0, 0) && !local.committedKnockoutState(),
                     "Disconnect retained knockout authority");
                 std::cout << "knockout+knockdown body=" << body << " committed=reconnect+rewind+getup callbacks=none\n";
