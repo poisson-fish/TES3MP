@@ -3,6 +3,22 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M4-014",
+      "slice": "committed ground collision on desktops",
+      "owner": "OpenMW scene physics and navigation",
+      "purpose": "Install replicated ground items through stock static Bullet and navigation consumers even when their stock item class omits physics. Retain renderer-local reference membership across cell unload and restore it during ordinary scene loading and postponed insertion. Baseline replacement and disconnect remove membership before normal object deletion; stock item insertion remains unchanged. Retain the existing scene visibility and replication hooks described by P8-004.",
+      "paths": [
+        "apps/openmw/mwworld/scene.cpp",
+        "apps/openmw/mwworld/scene.hpp"
+      ],
+      "tests": [
+        "scripts/run_native_navigation_capture.py --target-collision --descriptor-version 76",
+        "tes3mp_native_loadout_tests world-collision"
+      ],
+      "disposition": "shared scene consumers for committed inventory membership",
+      "removal_condition": "OpenMW supplies equivalent scene registration for authoritative ground collision"
+    },
+    {
       "id": "M4-013",
       "slice": "connected spell sources and ordered travel",
       "owner": "OpenMW spell rules and app-local actor transaction",
@@ -743,7 +759,6 @@
         "apps/openmw/mwrender/replicatedactor.hpp",
         "apps/openmw/mwrender/vismask.hpp",
         "apps/openmw/mwrender/water.cpp",
-        "apps/openmw/mwworld/scene.cpp",
         "apps/openmw/mwrender/effectmanager.cpp",
         "apps/openmw/mwrender/effectmanager.hpp"
       ],

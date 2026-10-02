@@ -741,6 +741,10 @@ def run(args):
     config = args.content_config.resolve()
     family_content = None
     presentation_content = None
+    if args.target_collision:
+        from native_target_collision_capture import prepare_fixture
+        config, presentation_content = prepare_fixture(config, output / "content", args.native_bootstrap, args.collision_fixture)
+        args.player_travel = True
     if args.spell_presentation:
         from native_spell_presentation_capture import prepare_fixture
         config, presentation_content = prepare_fixture(config, output / "content")
@@ -750,7 +754,7 @@ def run(args):
         config, family_content = prepare_fixture(config, output / "content")
         if args.combat_summon is not None:
             family_content.update(selectors=[args.combat_summon], equipment=False)
-    if args.player_travel and not args.spell_presentation:
+    if args.player_travel and not (args.spell_presentation or args.target_collision):
         from native_player_travel_capture import prepare_fixture
         config = prepare_fixture(config, output / "content")
     settings = root / "files/settings-default.cfg"
@@ -775,7 +779,7 @@ def run(args):
     player_actors = [player_actor, player_actor]
     if args.ranged:
         player_actors = ["npc_hit_female", "npc_hit_beast"]
-    if args.ai_charm or args.combat_families or args.spell_presentation:
+    if args.ai_charm or args.combat_families or args.spell_presentation or args.target_collision:
         player_actors = ["npc_hit_female", "npc_hit_beast"]
     if args.physical_knockdown and args.knockout_target == "players":
         player_actors[0] = npc
@@ -790,7 +794,7 @@ def run(args):
     output.joinpath("native.txt").write_text(
         f'native-inventory-{version}\nmanifest {manifest}\nconfig "{config.as_posix()}"\nplayers 1 2\n'
         f'actors "{player_actors[0]}" "{player_actors[1]}"\nloot 1 0\ninterior "{cell}"\ndoors auto\ncell interior:1\n'
-        + ('areas 3\ninterior "NPC Door Recall Test"\ncell interior:2\ninterior "NPC Door Path Test"\ncell interior:3\n' if args.player_travel else 'areas 1\n')
+        + (presentation_content["area_lines"] if args.target_collision else 'areas 3\ninterior "NPC Door Recall Test"\ncell interior:2\ninterior "NPC Door Path Test"\ncell interior:3\n' if args.player_travel else 'areas 1\n')
         + f'npc "{npc}" "{settings.as_posix()}"\ndestination {destination}\n'
         + ('processing 1 2\n' if args.traveler or args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
         + (f'melee "{encounter.get("melee", "weapononehand")}" "chop" 1\n' if args.combat or args.life_encounter or args.unarmed_effect or spell_capture else '')
@@ -844,7 +848,7 @@ def run(args):
         if args.object_magic or args.container_magic or args.player_travel:
             count = int(tokens[71])
             spell_ids = set(map(int, tokens[72:72 + count]))
-            for spell_name in (presentation_content["spells"] if args.spell_presentation else ("travel_mark", "travel_recall") if args.player_travel else ("door_spell_lock", "door_spell_open")):
+            for spell_name in (presentation_content["spells"] if presentation_content else ("travel_mark", "travel_recall") if args.player_travel else ("door_spell_lock", "door_spell_open")):
                 spell_id = 14695981039346656037
                 for byte in spell_name.encode("ascii"):
                     spell_id = ((spell_id ^ byte) * 1099511628211) & 0xffffffffffffffff
@@ -858,7 +862,7 @@ def run(args):
         shutil.copyfile(config / "openmw.cfg", user / "openmw.cfg")
         user.joinpath("settings.cfg").write_text(
             "[Video]\nresolution x = 1000\nresolution y = 700\nwindow mode = 2\nwindow border = true\n"
-            + f"minimize on focus loss = false\nframerate limit = {30 if args.player_travel else 120}\n"
+            + f"minimize on focus loss = false\nframerate limit = {120 if args.target_collision else 30 if args.player_travel else 120}\n"
             + ("[Camera]\nfield of view = 85\n" if args.physical_knockdown and args.knockout_target == "players" else "")
             + ("[Shaders]\nclassic falloff = false\nminimum interior brightness = 0.7\n" if args.knockout else ""),
             encoding="utf-8")
@@ -906,10 +910,13 @@ def run(args):
                        f"--tes3mp-content-cell-spaces={common['cell_spaces']}", f"--tes3mp-content-allowed-cells={common['allowed_cells']}",
                        f"--tes3mp-content-cell-space-map=1={cell}", f"--tes3mp-content-appearance-id={common['default_appearance_id']}",
                        "--tes3mp-content-appearance-record=player"]
-            if args.player_travel:
+            if args.target_collision:
+                command.extend(f"--tes3mp-content-cell-space-map={i}={name}"
+                    for i, name in presentation_content["cell_maps"].items() if i != 1)
+            elif args.player_travel:
                 command.extend(("--tes3mp-content-cell-space-map=2=NPC Door Recall Test",
                                 "--tes3mp-content-cell-space-map=3=NPC Door Path Test"))
-            if args.spell_presentation:
+            if args.spell_presentation or args.target_collision:
                 from native_combat_families_capture import record_id
                 command.extend(f"--tes3mp-content-spell-map={record_id(mapped)}={mapped}" for mapped in presentation_content["spells"])
             elif args.combat_families:
@@ -931,6 +938,12 @@ def run(args):
         if args.combat_families:
             from native_combat_families_capture import verify_combat_families
             verify_combat_families(output, evidence, processes, relay, manifest, family_content,
+                {name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
+                 for name in ("openmw.exe", "tes3mp_server.exe")})
+            return
+        if args.target_collision:
+            from native_target_collision_capture import verify_capture
+            verify_capture(output, evidence, processes, relay, manifest, presentation_content,
                 {name: hashlib.sha256((binary / name).read_bytes()).hexdigest()
                  for name in ("openmw.exe", "tes3mp_server.exe")})
             return
@@ -1122,6 +1135,9 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target-collision", action="store_true", help="Fresh V76 unbound Target, discovered destinations, extended sources and committed collision")
+    parser.add_argument("--native-bootstrap", type=Path, help="Owning native area discovery executable for --target-collision")
+    parser.add_argument("--collision-fixture", type=Path, help="Existing focused collision fixture directory")
     parser.add_argument("--spell-presentation", action="store_true", help="Fresh V74 per-effect outcomes, M4 variants, stock presentation comparison and reconnect")
     parser.add_argument("--combat-families", action="store_true", help="V73 bound equipment, all summon selectors and actor death/life presentation")
     parser.add_argument("--combat-summon", type=int, help="Focus a combat-families repair on one summon selector and actor lives")
@@ -1181,7 +1197,11 @@ if __name__ == "__main__":
         parser.error("--physical-knockdown requires --knockout")
     if args.retarget_getup and (not args.physical_knockdown or args.knockout_target != "players"):
         parser.error("--retarget-getup requires --physical-knockdown with player subjects")
-    if sum((args.spell_presentation, args.combat_families, args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
+    if args.target_collision and args.descriptor_version != 76:
+        parser.error("--target-collision requires --descriptor-version 76")
+    if args.target_collision and (not args.native_bootstrap or not args.collision_fixture):
+        parser.error("--target-collision requires --native-bootstrap and --collision-fixture")
+    if sum((args.target_collision, args.spell_presentation, args.combat_families, args.doors, args.traveler, args.combat, args.life_encounter, args.unarmed_effect,
             args.instant_spell, args.actor_effects, args.actor_effects_restart, args.npc_casting, args.magic_visual, args.player_swings, args.ranged, args.knockout, args.visibility, args.ai_charm, args.object_magic, args.container_magic, args.player_travel, args.movement, args.movement_deep)) > 1:
         parser.error("choose one capture mode")
     if args.immediate_reconnect and not args.combat:
@@ -1190,6 +1210,6 @@ if __name__ == "__main__":
         parser.error("--neighbor-many requires --ranged")
     if args.neighbor_creature_damage and not args.neighbor_many:
         parser.error("--neighbor-creature-damage requires --ranged --neighbor-many")
-    if not args.spell_presentation and not args.combat_families and not args.player_travel and not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
+    if not args.target_collision and not args.spell_presentation and not args.combat_families and not args.player_travel and not args.doors and not args.traveler and not args.combat and not args.life_encounter and not args.unarmed_effect and not args.instant_spell and not args.actor_effects and not args.actor_effects_restart and not args.npc_casting and not args.magic_visual and not args.player_swings and not args.ranged and not args.knockout and not args.visibility and not args.ai_charm and not args.object_magic and not args.container_magic and not args.movement and not args.movement_deep and not args.leave:
         parser.error("--leave is required for the V16 navigation capture")
     run(args)

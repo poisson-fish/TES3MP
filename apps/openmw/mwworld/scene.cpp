@@ -104,7 +104,7 @@ namespace
     static osg::ref_ptr<SceneUtil::PositionAttitudeTransform> pagedNode = new SceneUtil::PositionAttitudeTransform;
 
     void addObject(const MWWorld::Ptr& ptr, const MWWorld::World& world, const std::vector<ESM::RefNum>& pagedRefs,
-        MWPhysics::PhysicsSystem& physics, MWRender::RenderingManager& rendering)
+        MWPhysics::PhysicsSystem& physics, MWRender::RenderingManager& rendering, bool committedGround = false)
     {
         if (ptr.getRefData().getBaseNode() || physics.getActor(ptr))
         {
@@ -132,7 +132,11 @@ namespace
         world.applyLoopingParticles(ptr);
 
         if (!model.empty())
+        {
             ptr.getClass().insertObject(ptr, model, rotation, physics);
+            if (committedGround && !physics.getObject(ptr))
+                physics.addObject(ptr, model, rotation);
+        }
 
         MWBase::Environment::get().getLuaManager()->objectAddedToScene(ptr);
     }
@@ -536,6 +540,7 @@ namespace MWWorld
         navigatorUpdateGuard.reset();
         assert(mActiveCells.empty());
         mCurrentCell = nullptr;
+        mCommittedGroundCollision.clear();
         mLowestPoint = std::numeric_limits<float>::max();
 
         mPreloader->clear();
@@ -710,6 +715,12 @@ namespace MWWorld
                         {
                             const auto rotation = makeNodeRotation(ptr, RotationOrder::direct);
                             ptr.getClass().insertObjectPhysics(ptr, model, rotation, *mPhysics);
+                            if (mCommittedGroundCollision.contains(ptr.getCellRef().getRefNum())
+                                && !mPhysics->getObject(ptr))
+                            {
+                                mPhysics->addObject(ptr, model, rotation);
+                                addObject(ptr, mWorld, *mPhysics, mLowestPoint, !cell->isExterior(), mNavigator);
+                            }
                         }
                     }
                 }
@@ -1028,7 +1039,8 @@ namespace MWWorld
         InsertVisitor insertVisitor(cell, loadingListener);
         cell.forEach(insertVisitor);
         insertVisitor.insert(
-            [&](const MWWorld::Ptr& ptr) { addObject(ptr, mWorld, mPagedRefs, *mPhysics, mRendering); });
+            [&](const MWWorld::Ptr& ptr) { addObject(ptr, mWorld, mPagedRefs, *mPhysics, mRendering,
+                mCommittedGroundCollision.contains(ptr.getCellRef().getRefNum())); });
         insertVisitor.insert([&](const MWWorld::Ptr& ptr) {
             addObject(ptr, mWorld, *mPhysics, mLowestPoint, isInterior, mNavigator, navigatorUpdateGuard);
         });
@@ -1039,7 +1051,8 @@ namespace MWWorld
         const bool isInterior = mCurrentCell && !mCurrentCell->isExterior();
         try
         {
-            addObject(ptr, mWorld, mPagedRefs, *mPhysics, mRendering);
+            addObject(ptr, mWorld, mPagedRefs, *mPhysics, mRendering,
+                mCommittedGroundCollision.contains(ptr.getCellRef().getRefNum()));
             addObject(ptr, mWorld, *mPhysics, mLowestPoint, isInterior, mNavigator);
             mWorld.scaleObject(ptr, ptr.getCellRef().getScale());
         }
@@ -1047,6 +1060,25 @@ namespace MWWorld
         {
             Log(Debug::Error) << "failed to render '" << ptr.getCellRef().getRefId() << "': " << e.what();
         }
+    }
+
+    void Scene::setCommittedGroundCollision(const Ptr& ptr, bool enabled)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isItem(ptr) || ptr.getClass().isActor())
+            throw std::invalid_argument("Committed ground collision requires an item");
+        const auto identity = ptr.getCellRef().getRefNum();
+        if (!enabled)
+        {
+            mCommittedGroundCollision.erase(identity);
+            return;
+        }
+        mCommittedGroundCollision.insert(identity);
+        if (!isCellActive(*ptr.getCell()) || mPhysics->getObject(ptr)) return;
+        const auto model = getModel(ptr);
+        if (model.empty()) return;
+        mPhysics->addObject(ptr, model, makeDirectNodeRotation(ptr));
+        addObject(ptr, mWorld, *mPhysics, mLowestPoint, !ptr.getCell()->isExterior(), mNavigator);
+        mWorld.scaleObject(ptr, ptr.getCellRef().getScale());
     }
 
     void Scene::removeObjectFromScene(const Ptr& ptr, bool keepActive)

@@ -17,7 +17,8 @@ def verify(directory, actor=False, casting=False, player_casting=False, deaths=F
     if actor and content.get("custom") and "melee-speed" not in content:
         raise ValueError("Custom actor trace requires the native fixture's stock weapon speed")
     for path in sorted(directory.glob("*.ndjson")):
-        if not path.name.startswith(("Alice", "Bob")):
+        # Spell resource traces are auxiliary NDJSON, not per-render actor traces.
+        if not any(path.stem == role or path.stem.startswith(role + "-") for role in ("Alice", "Bob")):
             continue
         frames, snapshots, latest = [], [], 0
         for line in path.read_text(encoding="utf-8").splitlines():

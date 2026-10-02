@@ -18,6 +18,7 @@
 #include "../mwworld/manualref.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/spellcasting.hpp"
+#include "../mwphysics/raycasting.hpp"
 #include "../mwworld/esmstore.hpp"
 #include <cmath>
 #include <iomanip>
@@ -308,7 +309,9 @@ namespace TES3MP::OpenMWAdapter
             if (comma) mOutput << ',';
             comma = true;
             mOutput << "{\"stack\":" << item.stack.stackId.value() << ",\"item\":"
-                    << item.stack.prototypeId.value() << ",\"count\":" << item.stack.count << '}';
+                    << item.stack.prototypeId.value() << ",\"count\":" << item.stack.count
+                    << ",\"position\":[" << item.position.x() / 1024.f << ',' << item.position.y() / 1024.f
+                    << ',' << item.position.z() / 1024.f << "]}";
         }
         mOutput << "],\"visible_ground\":[";
         comma = false;
@@ -377,6 +380,7 @@ namespace TES3MP::OpenMWAdapter
         float x = 0, y = 0, z = 0, pitch = 0, yaw = 0;
         unsigned direction = ESM::Weapon::AT_Chop;
         float strength = 1.f;
+        float endX = 0, endY = 0, endZ = 0;
         unsigned targetKind = 2;
         uint64_t targetId = 0;
         std::string record, trailing;
@@ -401,7 +405,15 @@ namespace TES3MP::OpenMWAdapter
             if (!(file >> strength) || !std::isfinite(strength) || strength < 0.f || strength > 1.f)
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
-        else if (action == "activate" || action == "put" || action == "cast" || action == "castactor"
+        else if (action == "probe")
+        {
+            if (!(file >> x >> y >> z >> endX >> endY >> endZ))
+                throw std::runtime_error("Traversal probe coordinates missing");
+            for (const auto value : {x, y, z, endX, endY, endZ})
+                if (!std::isfinite(value) || std::abs(value) > 1048576)
+                    throw std::runtime_error("Traversal probe coordinates invalid");
+        }
+        else if (action == "activate" || action == "put" || action == "drop" || action == "cast" || action == "castactor"
             || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict"
             || action == "dialogue" || action == "dialoguestart")
         {
@@ -435,6 +447,41 @@ namespace TES3MP::OpenMWAdapter
             const auto dy = (*peer)[1] - position.pos[1];
             world->toggleVanityMode(false);
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(.1f, 0, std::atan2(dx, dy)));
+        }
+        else if (action == "probe")
+        {
+            const osg::Vec3f from(x, y, z), to(endX, endY, endZ);
+            const int mask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door;
+            const auto ray = world->getRayCasting()->castRay(from, to, mask);
+            const auto sphere = world->getRayCasting()->castSphere(from, to, 1.f, mask);
+            MWPhysics::RayCastingResult rendered{};
+            const bool renderHit = world->castRenderingRay(rendered, from, to, true, true);
+            mOutput << "{\"event\":\"traversal_collision_probe\",\"sequence\":" << sequence
+                << ",\"physics_hit\":" << (ray.mHit ? "true" : "false")
+                << ",\"projectile_hit\":" << (sphere.mHit ? "true" : "false")
+                << ",\"render_hit\":" << (renderHit ? "true" : "false")
+                << ",\"record\":" << std::quoted(ray.mHitObject.isEmpty() ? std::string{}
+                    : ray.mHitObject.getCellRef().getRefId().toString())
+                << ",\"position\":[" << (ray.mHit ? ray.mHitPos.x() : 0.f) << ','
+                << (ray.mHit ? ray.mHitPos.y() : 0.f) << ',' << (ray.mHit ? ray.mHitPos.z() : 0.f) << "]}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
+        else if (action == "drop")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal drop requires game focus");
+            const auto id = MWWorld::inventoryRecordId(ESM::RefId::stringRefId(record));
+            const auto found = std::ranges::find_if(mNativePlayerStacks,
+                [&](const auto& stack) { return stack.prototypeId.value() == id; });
+            if (found == mNativePlayerStacks.end()) throw std::runtime_error("Traversal drop item missing");
+            auto stack = *found;
+            stack.count = 1;
+            wm->pushGuiMode(MWGui::GM_Inventory);
+            MWGui::ItemView* view = nullptr;
+            wm->getInventoryWindow()->getWidget(view, "ItemView");
+            clickItem(*view, stack);
+            wm->getHud()->dropDraggedItem(.5f, .5f);
+            wm->removeGuiMode(MWGui::GM_Inventory);
         }
         else if (action == "activate")
         {

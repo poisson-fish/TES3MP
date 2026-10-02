@@ -1158,7 +1158,10 @@ namespace TES3MP::OpenMWAdapter
                     {
                         (void)stack;
                         if (!ptr.isEmpty())
+                        {
+                            MWBase::Environment::get().getWorldScene()->setCommittedGroundCollision(ptr, false);
                             world->deleteObject(ptr);
+                        }
                     }
                 }
             }
@@ -3258,7 +3261,10 @@ namespace TES3MP::OpenMWAdapter
                 {
                     (void)stack;
                     if (!ptr.isEmpty())
+                    {
+                        MWBase::Environment::get().getWorldScene()->setCommittedGroundCollision(ptr, false);
                         world->deleteObject(ptr);
+                    }
                 }
                 presentedGroundItems.clear();
                 std::erase_if(observedInventoryStacks, [](const auto& value) { return value.second.ground; });
@@ -3298,6 +3304,7 @@ namespace TES3MP::OpenMWAdapter
                         if (!local)
                             return ProviderResult::ContentMappingFailed;
                         auto ptr = *local;
+                        MWBase::Environment::get().getWorldScene()->setCommittedGroundCollision(ptr, true);
                         presentedGroundItems.emplace(member.stack.stackId, ptr);
                         if (!observedInventoryStacks
                                 .emplace(member.stack.stackId,

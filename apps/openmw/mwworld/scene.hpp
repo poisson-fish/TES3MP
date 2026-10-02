@@ -87,6 +87,9 @@ namespace MWWorld
 
         CellStore* mCurrentCell; // the cell the player is in
         CellStoreCollection mActiveCells;
+        // Renderer-local identities installed by committed ground baselines.
+        // Retained across cell unload; the baseline owner removes them on deletion.
+        std::set<ESM::RefNum> mCommittedGroundCollision;
         bool mCellChanged;
         bool mCellLoaded = false;
         MWWorld::World& mWorld;
@@ -182,6 +185,10 @@ namespace MWWorld
 
         void addObjectToScene(const Ptr& ptr);
         ///< Add an object that already exists in the world model to the scene.
+
+        void setCommittedGroundCollision(const Ptr& ptr, bool enabled);
+        ///< Install static ground collision through stock physics/navigation.
+        ///< Clearing membership precedes normal object deletion by its owner.
 
         void removeObjectFromScene(const Ptr& ptr, bool keepActive = false);
         ///< Remove an object from the scene, but not from the world model.
