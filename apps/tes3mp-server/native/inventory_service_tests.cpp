@@ -5587,6 +5587,7 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
+        const bool cellActors = effectFamily == "cell-actors";
         const bool worldCollision = effectFamily == "world-collision";
         const bool sneakDetection = effectFamily == "sneak-detection";
         const bool landingRecovery = effectFamily == "movement-fall";
@@ -5597,7 +5598,7 @@ namespace TES3MP::Native::Testing
         const bool mixedPassives = passiveSelf || statPassives || harmfulPassives || effectFamily == "mixed-passives";
         if (sneakDetection) effectFamily = "concealment";
         if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
-        const bool genericTargets = effectFamily == "target-recipients";
+        const bool genericTargets = effectFamily == "target-recipients" || cellActors;
         const bool spellCompleteness = genericTargets || effectFamily == "spell-completeness";
         const bool committedBodies = spellCompleteness || effectFamily == "actor-bodies";
         const bool playerLives = effectFamily == "player-lives" || committedBodies;
@@ -7424,6 +7425,23 @@ namespace TES3MP::Native::Testing
                 }
                 out.startRecord(ESM::NPC::sRecordId, 0); npc.save(out); out.endRecord(ESM::NPC::sRecordId);
             }
+            if (cellActors)
+            {
+                ESM::Spell spell; spell.blank(); spell.mId = ESM::RefId::stringRefId("cell_actor_spell");
+                spell.mData.mType = ESM::Spell::ST_Spell; spell.mData.mCost = 1;
+                spell.mEffects.populate({{ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 10, 3, 1, 1}});
+                out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
+                auto caster = npc; caster.mId = ESM::RefId::stringRefId("cell_actor_caster");
+                caster.mAiData.mFight = 100; caster.mAiData.mFlee = 0;
+                caster.mInventory.mList.clear(); caster.mSpells.mList = {spell.mId};
+                caster.mNpdt.mHealth = 1000; caster.mNpdt.mMana = 1000; caster.mNpdt.mFatigue = 1000;
+                for (auto& attribute : caster.mNpdt.mAttributes) attribute = 100;
+                for (auto& skill : caster.mNpdt.mSkills) skill = 100;
+                out.startRecord(ESM::NPC::sRecordId, 0); caster.save(out); out.endRecord(ESM::NPC::sRecordId);
+                auto fighter = caster; fighter.mId = ESM::RefId::stringRefId("cell_actor_fighter");
+                fighter.mSpells.mList.clear();
+                out.startRecord(ESM::NPC::sRecordId, 0); fighter.save(out); out.endRecord(ESM::NPC::sRecordId);
+            }
             if (constantEffects)
                 for (size_t i = 0; i < (generalConstants ? 4u : 2u); ++i)
                 {
@@ -7698,9 +7716,13 @@ namespace TES3MP::Native::Testing
             {
                 cell.mName = "NPC Door Recall Test"; cell.updateId();
                 out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
-                for (auto record : {floor.mId, door.mId})
+                const auto destinationActor = ESM::RefId::stringRefId("cell_actor_caster");
+                const auto destinationFighter = ESM::RefId::stringRefId("cell_actor_fighter");
+                for (auto record : (cellActors ? std::vector{floor.mId, door.mId, destinationActor, destinationFighter} : std::vector{floor.mId, door.mId}))
                 {
                     ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                    if (cellActors && record == destinationActor) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
+                    if (cellActors && record == destinationFighter) placed.mPos = {{-60, -100, 1}, {0, 0, 0}};
                     placed.save(out);
                 }
                 if (objectTravel)
@@ -7708,6 +7730,17 @@ namespace TES3MP::Native::Testing
                     ESM::CellRef marker; marker.blank(); marker.mRefNum = {++index, 0};
                     marker.mRefID = ESM::RefId::stringRefId("templemarker");
                     marker.mPos = {{100, -100, 1}, {0, 0, 0}}; marker.save(out);
+                }
+                out.endRecord(ESM::Cell::sRecordId);
+            }
+            if (cellActors)
+            {
+                cell.mName = "NPC Empty Interior Test"; cell.updateId();
+                out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                for (const auto record : {floor.mId, door.mId})
+                {
+                    ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                    placed.save(out);
                 }
                 out.endRecord(ESM::Cell::sRecordId);
             }
@@ -9077,7 +9110,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9098,13 +9131,15 @@ namespace TES3MP::Native::Testing
                 << "\nloot 1 0\n"
                 << "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\n"
                 << (effectFamily == "player-travel"
-                    ? "areas 2\ninterior \"NPC Door Recall Test\"\ncell interior:8\n" : "areas 1\n")
-                << "npc " << std::quoted(effectFamily == "ai-creature" ? "timeline_creature" : "npc_door_actor")
-                << ' ' << std::quoted(actorSettings.string())
-                << (worldCollision ? "\ndestination 60 -70 1 120\n" : melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
+                    ? (cellActors ? "areas 3\ninterior \"NPC Door Recall Test\"\ncell interior:8\ninterior \"NPC Empty Interior Test\"\ncell interior:9\n"
+                        : "areas 2\ninterior \"NPC Door Recall Test\"\ncell interior:8\n") : "areas 1\n")
+                << (cellActors ? "actors auto " : "npc ");
+            if (!cellActors) out << std::quoted(effectFamily == "ai-creature" ? "timeline_creature" : "npc_door_actor") << ' ';
+            out << std::quoted(actorSettings.string())
+                << (cellActors ? "\n" : worldCollision ? "\ndestination 60 -70 1 120\n" : melee && !movementEffects ? "\ndestination 60 -32 1 120\n"
                     : wetMovement ? "\ndestination 60 -500 1 120\n"
                     : "\ndestination 60 -240 1 120\n");
-            if (melee) out << "processing 1 2\nmelee "
+            if (melee && !cellActors) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
             if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
         }
@@ -9138,15 +9173,179 @@ namespace TES3MP::Native::Testing
         auto manifest = testContentManifest();
         if (effectFamily == "player-travel")
         {
-            const std::array spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+            std::vector spaces{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
                 CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior}};
-            const std::array cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+            std::vector cells{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8))};
+            if (cellActors) { spaces.push_back({id<CellSpaceId>(9), CellSpaceKind::Interior}); cells.push_back(CellId::interior(id<CellSpaceId>(9))); }
             manifest = ContentManifest::create(testContentManifestId(), spaces, cells,
                 id<AppearanceId>(1), testMovementProfile()).value();
         }
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (cellActors)
+        {
+            auto& native = dynamic_cast<InventoryService&>(service);
+            const auto firstCell = CellId::interior(id<CellSpaceId>(7));
+            const auto secondCell = CellId::interior(id<CellSpaceId>(8));
+            const auto firstEngine = ESM::RefId::stringRefId("NPC Door Contact Test");
+            const auto secondEngine = ESM::RefId::stringRefId("NPC Door Recall Test");
+            const auto firstId = native.actorCollisionScene().forCell(firstEngine).actorId();
+            const auto secondId = native.actorCollisionScene().forCell(secondEngine).actorId();
+            require(firstId != secondId, "Separate interiors reused an actor identity");
+            require(native.actorCollisionScene().forCell(firstEngine).bodyCount()
+                != native.actorCollisionScene().forCell(secondEngine).bodyCount(),
+                "Separate interiors share collision membership");
+            const auto image = [](const auto& owner) {
+                return std::vector(owner.inventoryImage().begin(), owner.inventoryImage().end());
+            };
+            CanonicalWorldTimeState worldTime; worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            const auto world = CanonicalWorldState::initial(worldTime, GlobalVariableCatalog::create({}).value(),
+                QuestJournalCatalog::create(testContentManifestId(), {}, {}).value(),
+                FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value()).value();
+            uint64_t tick = 2;
+            const auto occupy = [&](CellId a, CellId b, bool secondOnline = true) {
+                auto placed = std::vector(authority.players().begin(), authority.players().end());
+                for (size_t i = 0; i < placed.size(); ++i)
+                    placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(tick),
+                        Transform(i ? b : a, Position3((i ? 160 : -160)*1024, -400*1024, 1024),
+                            placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                auto sessions = std::vector(authority.activeSessions().begin(), authority.activeSessions().end());
+                if (!secondOnline) std::erase_if(sessions, [](const auto& session) { return session.playerId().value() == 2; });
+                authority = std::get<CanonicalServerState>(createCanonicalServerState(placed, sessions));
+                service.synchronizeCells(authority);
+            };
+            occupy(secondCell, secondCell);
+            const auto frozen = native.actorCollisionScene().forActor(firstId).selectedImage();
+            const auto initial = native.actorCollisionScene().forActor(secondId).selectedImage();
+            auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+            require(bool(pending), "Occupied destination failed to prepare NPC simulation");
+            const auto before = image(service);
+            require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && image(service) == before && native.actorCollisionScene().forActor(secondId).selectedImage() == initial,
+                "Rejected destination simulation leaked canonical state");
+            require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Destination NPC simulation did not commit");
+            require(native.actorCollisionScene().forActor(firstId).selectedImage() == frozen,
+                "Empty starting interior continued simulating");
+            require(native.actorCollisionScene().forActor(secondId).selectedImage() != initial,
+                "Destination NPC physics did not advance");
+            const auto saved = image(service);
+            InventoryHost replay(descriptor, manifest, *registry, *crypto, before);
+            replay.service().synchronizeCells(authority);
+            auto once = replay.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+            require(once && once->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                && image(replay.service()) == saved, "Two occupants advanced destination simulation twice");
+            for (auto session : {id<SessionId>(1), id<SessionId>(2)})
+            {
+                const auto baseline = service.projectCombat(authority, session, id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                require(baseline && baseline->actors().size() == 2 && baseline->actors()[0].actorId.value() == secondId,
+                    "Destination shared combat baseline missing or includes another interior");
+            }
+            ++tick; occupy(firstCell, secondCell);
+            auto split = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+            require(split && split->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Split interior simulation failed");
+            const auto splitImage = image(service);
+            InventoryHost restarted(descriptor, manifest, *registry, *crypto, splitImage);
+            restarted.service().synchronizeCells(authority);
+            require(image(restarted.service()) == splitImage, "Shared interior restart changed canonical state");
+            const auto secondFrame = native.actorCollisionScene().forActor(secondId).selectedImage();
+            const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            service.synchronizeCells(offline);
+            require(native.activeActorCollisionBodies() == 0, "Empty campaign retained actor collision scenes");
+            service.synchronizeCells(authority);
+            require(native.actorCollisionScene().forActor(secondId).selectedImage() == secondFrame,
+                "Reentry reset destination NPC state");
+            ++tick; occupy(secondCell, secondCell);
+            const auto quietFrame = native.actorCollisionScene().forActor(firstId).selectedImage();
+            bool windup = false, flight = false, applied = false, departedFlight = false, destinationMelee = false;
+            for (size_t i = 0; i < 200 && !(applied && destinationMelee); ++i, ++tick)
+            {
+                auto pending = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+                const auto hits = service.projectCombatEvents(authority, id<SessionId>(1),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick), pending.get());
+                if (hits) for (const auto& hit : hits->actorEvents())
+                    if (hit.attackerActorId.value() != secondId) destinationMelee = true;
+                require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed, "Destination NPC combat tick failed");
+                const auto bytes = image(service);
+                const auto state = readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                require(state.combat && state.combat->cellActors, "Cell actor save envelope absent");
+                for (const auto& cast : state.combat->neighborCasts)
+                    if (cast && cast->actor == secondId)
+                    {
+                        if (!windup)
+                        {
+                            InventoryHost resumed(descriptor, manifest, *registry, *crypto, bytes);
+                            require(image(resumed.service()) == bytes, "Destination NPC cast changed on restart");
+                        }
+                        windup = true;
+                    }
+                for (const auto& bolt : state.projectiles)
+                    if (bolt.caster == secondId)
+                    { require(bolt.cell == secondCell, "Destination bolt lost processing cell"); flight = true; }
+                for (const auto& effect : state.timedEffects)
+                    if (effect.caster == secondId && effect.actor < 2) applied = true;
+                const auto events = service.projectCombat(authority, id<SessionId>(1),
+                    id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                require(events && events->actors().size() == 2, "NPC casting hid shared destination presentation");
+                require(native.actorCollisionScene().forActor(firstId).selectedImage() == quietFrame,
+                    "Destination combat advanced another interior");
+                if (flight && !departedFlight)
+                {
+                    const auto casterFrame = native.actorCollisionScene().forActor(secondId).selectedImage();
+                    InventoryHost flightRestart(descriptor, manifest, *registry, *crypto, bytes);
+                    require(image(flightRestart.service()) == bytes, "Destination flight changed on restart");
+                    ++tick; occupy(CellId::interior(id<CellSpaceId>(9)), CellId::interior(id<CellSpaceId>(9)));
+                    auto departed = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+                    require(departed && departed->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed, "Flight could not resolve after its occupants left");
+                    require(native.actorCollisionScene().forActor(secondId).selectedImage() == casterFrame,
+                        "In-flight collision demand continued empty-interior NPC simulation");
+                    const auto departedView = service.projectCombat(authority, id<SessionId>(1),
+                        id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                    require(departedView && departedView->magicProjectiles().empty(),
+                        "Travel moved a launched bolt into the destination's presentation");
+                    ++tick; occupy(secondCell, secondCell);
+                    departedFlight = true;
+                }
+            }
+            require(windup && flight && applied && departedFlight && destinationMelee,
+                "Destination NPC pursuit/melee or native casting failed");
+            const auto emptyCell = CellId::interior(id<CellSpaceId>(9));
+            occupy(emptyCell, emptyCell);
+            const auto& emptyScene = native.actorCollisionScene().forCell(ESM::RefId::stringRefId("NPC Empty Interior Test"));
+            require(emptyScene.actorId() == 0 && emptyScene.projectileContact({60, -120, 70}, {60, 100, 70}),
+                "Unoccupied NPC domain lacks scenery collision");
+            auto emptyTick = service.prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+            require(emptyTick && emptyTick->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Empty interior could not commit shared world tick");
+            const auto emptyView = service.projectCombat(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+            require(emptyView && emptyView->actors().empty() && emptyView->magicProjectiles().empty(),
+                "Empty interior received another area's actors or flights");
+            std::ifstream descriptorInput(descriptor);
+            std::string singleText((std::istreambuf_iterator<char>(descriptorInput)), {});
+            const std::string from = "interior \"NPC Door Contact Test\"\ndoors auto\ncell interior:7\nareas 3\ninterior \"NPC Door Recall Test\"\ncell interior:8\n";
+            const auto offset = singleText.find(from);
+            require(offset != std::string::npos, "Cell actor fixture descriptor differs");
+            singleText.replace(offset, from.size(), "interior \"NPC Door Path Test\"\ndoors auto\ncell interior:8\nareas 2\n");
+            const auto singleDescriptor = scratch / "single-actor.txt";
+            { std::ofstream output(singleDescriptor); output << singleText; }
+            InventoryHost single(singleDescriptor, manifest, *registry, *crypto, {});
+            single.service().synchronizeCells(authority);
+            auto singleTick = single.service().prepareNativeTick(authority, id<ServerTick>(tick), 1.f/30, {}, &world);
+            require(singleTick && singleTick->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "One-NPC campaign requires a configured neighbor");
+            const auto singleImage = image(single.service());
+            const auto singleState = readActorCampaign({reinterpret_cast<const char*>(singleImage.data()), singleImage.size()});
+            require(singleState.combat && singleState.combat->npcPlacements.size() == 1,
+                "Single actor fixture contains extra NPCs");
+            InventoryHost singleRestart(singleDescriptor, manifest, *registry, *crypto, singleImage);
+            require(image(singleRestart.service()) == singleImage, "One-NPC campaign failed recovery");
+            std::cout << "cell actors: isolated interiors, occupancy union, split areas, rollback, restart and reload passed\n";
+            return;
+        }
         if (worldCollision)
         {
             auto placed = std::vector(authority.players().begin(), authority.players().end());
@@ -9168,7 +9367,9 @@ namespace TES3MP::Native::Testing
             const auto world = CanonicalWorldState::initial(worldTime, globals, quests, factions).value();
             uint64_t tick = 3;
             const auto view = [&] {
-                return *service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                auto value = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                require(bool(value), "Committed collision inventory baseline missing");
+                return *value;
             };
             const auto accepted = [](auto) { return CanonicalDurabilityResult::Committed; };
             const auto contact = [](const auto& owner) {

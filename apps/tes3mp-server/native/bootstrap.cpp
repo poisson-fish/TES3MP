@@ -130,9 +130,9 @@ try
         if (inspectArea) std::cout << "Read-only inspection at level 1, seed 0; runtime startup is still required.\n";
         return 0;
     }
-    if (argc < 6 || argc > 8)
+    if (argc < 6 || argc > 9)
     {
-        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z]\n"
+        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS]\n"
             "tes3mp_native_bootstrap --list-cells OPENMW_CONFIG_DIR NAME_FILTER (at most 64 results)\n"
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
             "START is an interior name or exterior:X:Y; exterior radius defaults to 1 (maximum 7).\n"
@@ -140,6 +140,8 @@ try
             "OpenMW discovers the area, connected interiors and intervention destinations. Outputs native-inventory-15 and matching\n"
             "server/client content settings, without fixture plugins or reference recipes.\n"
             "Spawn uses a discovered incoming door destination, or explicit OpenMW coordinates.\n"
+            "NAV_SETTINGS enables native-inventory-77 shared NPC simulation: at most 37 placed actors,\n"
+            "one exterior 3x3 and connected interiors; scripted/leveled actors require later services.\n"
             "Set the two established player IDs in native.txt; their registrations must bind manifest.txt.\n"
             "Add connection/password/player_identity_file settings to server-content.cfg before launch.\n";
         return argc == 2 && std::string_view(argv[1]) == "--help" ? 0 : 2;
@@ -159,7 +161,7 @@ try
     loadout.store().get<ESM::NPC>().find(actorA); loadout.store().get<ESM::NPC>().find(actorB);
     const auto cells = singleCell ? std::vector{start} : loadout.playerAreas(start, unsigned(radius), 256, true);
     std::optional<ESM::Position> spawnPosition;
-    if (argc == 8)
+    if (argc >= 8)
     {
         std::string point = argv[7];
         std::ranges::replace(point, ':', ' ');
@@ -171,7 +173,14 @@ try
     }
     spawnPosition = loadout.playerSpawn(start, cells, spawnPosition);
     std::ostringstream material;
-    material << "native-inventory-15\n" << loadout.contentFingerprint() << '\n' << actorA << '\n' << actorB << '\n';
+    const bool cellActors = argc == 9;
+    const auto version = cellActors ? "native-inventory-77" : "native-inventory-15";
+    const auto navigationSettings = cellActors ? std::filesystem::absolute(std::filesystem::u8path(argv[8]))
+        : std::filesystem::path{};
+    if (cellActors && (!std::filesystem::is_regular_file(navigationSettings) || radius > 1))
+        throw std::invalid_argument("NPC simulation requires existing NAV_SETTINGS and radius at most one");
+    material << version << '\n' << loadout.contentFingerprint() << '\n' << actorA << '\n' << actorB << '\n';
+    if (cellActors) material << navigationSettings.string() << '\n';
     for (const auto& cell : cells) material << selector(cell) << '\n';
     auto crypto = TES3MP::makeProductionCredentialCrypto();
     TES3MP::CredentialDigest digest;
@@ -187,7 +196,7 @@ try
         spaces << "exterior:1"; haveSpace = true;
         mappings << "tes3mp-content-cell-space-map=1=" << ESM::Cell::sDefaultWorldspaceId.getValue() << '\n';
     }
-    native << "native-inventory-15\nmanifest " << manifest << "\nconfig " << std::quoted(config.string())
+    native << version << "\nmanifest " << manifest << "\nconfig " << std::quoted(config.string())
         << "\nplayers 1 2\nactors " << std::quoted(std::string(actorA.getRefIdString())) << ' '
         << std::quoted(std::string(actorB.getRefIdString())) << "\nloot 1 0\n";
     std::string spawn;
@@ -211,6 +220,7 @@ try
         native << "cell " << wire.str() << '\n';
         if (!i) native << "areas " << cells.size() << '\n';
     }
+    if (cellActors) native << "actors auto " << std::quoted(navigationSettings.string()) << "\nrespawn 27000\n";
     std::ostringstream server, client;
     // Appearance IDs must be disjoint from every allocated cell-space ID.
     const auto appearance = nextInterior;

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -146,6 +147,17 @@ namespace TES3MP
         std::vector<SpellRecordId> spells;
     };
 
+    // App-owned gameplay construction. Implementations must be read-only and
+    // deterministic: preparation may repeat and cannot install actor state.
+    // Only owned network values cross this seam; no engine types are exposed.
+    class CharacterConstruction
+    {
+    public:
+        virtual ~CharacterConstruction() = default;
+        virtual std::optional<CharacterDerivedState> derive(const CharacterAppearance& appearance,
+            const CharacterClass& characterClass, BirthsignRecordId birthsign) const noexcept = 0;
+    };
+
     class CharacterContentCatalog
     {
     public:
@@ -162,6 +174,8 @@ namespace TES3MP
         const CharacterClassDefinition* find(ClassRecordId id) const noexcept;
         const CharacterBirthsignDefinition* find(BirthsignRecordId id) const noexcept;
         std::span<const StartingItem> startingInventory() const noexcept { return mStartingInventory; }
+        CharacterContentCatalog withConstruction(std::shared_ptr<const CharacterConstruction> construction) const;
+        const CharacterConstruction* construction() const noexcept { return mConstruction.get(); }
 
     private:
         CharacterContentCatalog(ContentManifestId manifest, Transform creationSpawn, Transform completionSpawn,
@@ -174,6 +188,7 @@ namespace TES3MP
         std::vector<CharacterClassDefinition> mClasses;
         std::vector<CharacterBirthsignDefinition> mBirthsigns;
         std::vector<StartingItem> mStartingInventory;
+        std::shared_ptr<const CharacterConstruction> mConstruction;
     };
 
     struct SetCharacterName { std::string name; friend bool operator==(const SetCharacterName&, const SetCharacterName&) = default; };

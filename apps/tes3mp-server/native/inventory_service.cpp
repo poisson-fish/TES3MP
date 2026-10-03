@@ -70,16 +70,28 @@ namespace TES3MP::Native
         binding.mContainers.erase(binding.mContainers.begin() + binding.mStaticContainers, binding.mContainers.end());
         binding.mNeighborMeleeSet.resize(binding.mStaticNeighbors);
         binding.mBoundHits->resize(3 + binding.mStaticNeighbors);
-        binding.mDynamicCasts.clear();
+        if (binding.mCellActors)
+            std::erase_if(binding.mDynamicCasts, [&](const auto& entry) {
+                return std::ranges::none_of(binding.mContainers, [&](const auto& owner) { return owner.mId.value() == entry.first; });
+            });
+        else binding.mDynamicCasts.clear();
         for (const auto& body : actors.bodies)
         {
+            auto processingCell = cell;
+            if (binding.mCellActors)
+            {
+                const auto found = std::ranges::find(binding.mEngineCells, body.collision.cell,
+                    [](const auto& entry) { return entry.second; });
+                if (found == binding.mEngineCells.end()) throw std::invalid_argument("Dynamic actor cell outside campaign");
+                processingCell = found->first;
+            }
             ESM::CellRef reference;
             reference.blank();
             reference.mRefNum = body.reference;
             reference.mRefID = body.collision.record;
             std::copy(body.collision.position.begin(), body.collision.position.end(), reference.mPos.pos);
             reference.mPos.rot[2] = body.collision.yaw;
-            binding.mContainers.push_back({ContainerId::fromValue(body.collision.actor).value(), cell,
+            binding.mContainers.push_back({ContainerId::fromValue(body.collision.actor).value(), processingCell,
                 Position3(std::llround(double(body.collision.position[0]) * 1024),
                     std::llround(double(body.collision.position[1]) * 1024),
                     std::llround(double(body.collision.position[2]) * 1024)), body.collision.record, reference});
@@ -1532,12 +1544,12 @@ namespace TES3MP::Native
             if (mBinding.mNeighborAi)
             {
                 const auto neighbors = mBinding.mNavigatingActor->neighborSnapshots();
-                if (neighbors.empty() || neighbors.size() > mBinding.mNeighborLimit)
+                if ((!mBinding.mCellActors && neighbors.empty()) || neighbors.size() > mBinding.mNeighborLimit)
                     throw std::invalid_argument("Native neighboring NPC count invalid");
                 for (const auto& neighbor : neighbors)
                     if (std::ranges::none_of(mBinding.mContainers, [&](const auto& value) {
                         return value.mId.value() == neighbor.mActor && value.mPlacement.has_value()
-                            && value.mCell == owner->mCell && value.mId != owner->mId;
+                            && (mBinding.mCellActors || value.mCell == owner->mCell) && value.mId != owner->mId;
                     })) throw std::invalid_argument("Native neighboring NPC has no authoritative placement");
             }
             const auto selected = mRuntime.ownerPtr(mCombatNpcOwner);
@@ -1576,6 +1588,8 @@ namespace TES3MP::Native
             mCombat->powerSources = mBinding.mPowerSources;
             mCombat->passiveSelf = mBinding.mPassiveSelf;
             mCombat->genericTargets = mBinding.mGenericTargets;
+            mCombat->cellActors = mBinding.mCellActors;
+            if (mBinding.mCellActors) mCombat->neighborCasts.resize(mBinding.mStaticNeighbors);
             if (mBinding.mPlayerLifecycle)
                 for (size_t i = 0; i < 2; ++i)
                 {
@@ -1772,7 +1786,11 @@ namespace TES3MP::Native
             const auto cell = cells ? cells->at(state.mRef.mRefNum) : uint8_t(0);
             if (cell >= domains.size()) throw std::invalid_argument("Collision item cell outside bound domain");
             if (std::ranges::find(mBinding.mCollisionCells, domains[cell]->mCell) != mBinding.mCollisionCells.end())
+            {
                 result.objects.emplace_back(worldId(state.mRef.mRefNum, *domains[cell]).value(), state);
+                if (mBinding.mCellActors) result.cells.emplace(result.objects.back().first,
+                    mBinding.mEngineCells.at(domains[cell]->mCell));
+            }
         }
         return result;
     }
@@ -1825,17 +1843,25 @@ namespace TES3MP::Native
                             active[i] = true;
             }
         }
-        if (mBinding.mRetainTraveler && mBinding.mNavigatingActor)
+        if ((mBinding.mRetainTraveler || mBinding.mCellActors) && mBinding.mNavigatingActor)
         {
+            if (mBinding.mCellActors)
+            {
+                for (const auto& flight : mProjectiles) if (flight.cell) active[worldIndex(*flight.cell)] = true;
+                if (mCombat) for (const auto& flight : mCombat->arrows)
+                    if (!flight.terminal && flight.cell) active[worldIndex(*flight.cell)] = true;
+            }
             const auto index = worldIndex(actorCell(mBinding.mNavigatingActor->snapshot()));
             // Demand is a union, not another simulation loop. An unavailable
             // path remains travel demand; only stock path completion releases it.
-            active[index] = active[index] || !mProjectiles.empty()
+            active[index] = active[index] || (mBinding.mRetainTraveler && (!mProjectiles.empty()
                 || (mBinding.mRangedFlight && mCombat && std::ranges::any_of(mCombat->arrows,
                     [](const auto& flight) { return !flight.terminal; }))
                 || (!mBinding.mNavigatingActor->arrived()
-                    && (!mCombat || mCombat->actors[2][8][2] > 0));
+                    && (!mCombat || mCombat->actors[2][8][2] > 0))));
             bool navigationActive = active[index];
+            if (mBinding.mCellActors)
+                navigationActive = std::ranges::any_of(active, [](bool value) { return value; });
             if (mBinding.mTravelerNeighborhood)
             {
                 navigationActive = navigationActive || std::ranges::any_of(active, [](bool value) { return value; });
@@ -1895,10 +1921,10 @@ namespace TES3MP::Native
     bool InventoryService::interactionVisible(const Transform& player, uint64_t object) const
     {
         if (!mBinding.mObjectTravelFamily || !mBinding.mNavigatingActor) return true;
-        const auto center = mBinding.mNavigatingActor->objectCenter(object);
+        const auto center = collisionScene(player.cell()).objectCenter(object);
         if (!center) return false;
         const auto position = player.position();
-        return mBinding.mNavigatingActor->lineOfSightToObject(
+        return collisionScene(player.cell()).lineOfSightToObject(
             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
                 float(double(position.z()) / 1024) + 64.f}, *center, object);
     }
@@ -2627,7 +2653,7 @@ namespace TES3MP::Native
                 for (size_t axis = 0; axis < 3; ++axis)
                     distance += (origin[axis] - endpoint[axis]) * (origin[axis] - endpoint[axis]);
                 return distance <= reach * reach
-                    && mBinding.mNavigatingActor->lineOfSightToDoor(origin, endpoint, use.targetId);
+                    && collisionScene(player->transform().cell()).lineOfSightToDoor(origin, endpoint, use.targetId);
             }();
         const bool validContainer = use.targetKind == MagicUseTargetKind::Container && mBinding.mContainerMagic && player
             && containerTarget != mBinding.mContainers.end() && mBinding.mStreamExteriors
@@ -2648,7 +2674,7 @@ namespace TES3MP::Native
                 float distance = 0;
                 for (size_t axis = 0; axis < 3; ++axis)
                     distance += (origin[axis] - endpoint[axis]) * (origin[axis] - endpoint[axis]);
-                return distance <= reach * reach && mBinding.mNavigatingActor->lineOfSight(origin, endpoint);
+                return distance <= reach * reach && collisionScene(player->transform().cell()).lineOfSight(origin, endpoint);
             }();
         if (!player || session->sessionGeneration() != proposal.sessionGeneration()
             || use.sessionId != proposal.sessionId() || use.sessionGeneration != proposal.sessionGeneration()
@@ -2685,7 +2711,7 @@ namespace TES3MP::Native
                             || std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) {
                                 const auto* target = players.findPlayer(id);
                                 return id.value() == use.targetId && target
-                                    && target->transform().cell() == actorCell(mBinding.mNavigatingActor->snapshot())
+                                    && target->transform().cell() == player->transform().cell()
                                     && std::ranges::any_of(players.activeSessions(), [&](const auto& active) {
                                         return active.playerId() == id;
                                     }) && mCombat->actors[actor(id)][8][2] > 0;
@@ -2720,7 +2746,7 @@ namespace TES3MP::Native
             const float reach = mRuntime.mStore.get<ESM::GameSetting>().find("fCombatDistance")->mValue.getFloat();
             if (distance > reach * reach) return {};
         }
-        if (player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot())
+        if (!mBinding.mCellActors && player->transform().cell() != actorCell(mBinding.mNavigatingActor->snapshot())
             && (!mBinding.mPlayerTravel || !prepared || !playerTravelEffects(prepared->spell.effects))) return {};
         return prepared;
     }
@@ -2996,6 +3022,16 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native NPC lifecycle campaign version differs from binding");
             if (mBinding.mGenericTargets != (decoded.combat && decoded.combat->genericTargets))
                 throw std::invalid_argument("Native Target campaign version differs from binding");
+            if (mBinding.mCellActors != (decoded.combat && decoded.combat->cellActors)
+                || (mBinding.mCellActors && decoded.combat->neighborCasts.size() != mBinding.mStaticNeighbors))
+                throw std::invalid_argument("Native cell actor domain differs from binding");
+            if (mBinding.mCellActors)
+            {
+                for (const auto& flight : decoded.projectiles)
+                    if (!flight.cell || !worldDomain(*flight.cell)) throw std::invalid_argument("Saved bolt cell outside campaign");
+                for (const auto& flight : decoded.combat->arrows)
+                    if (!flight.cell || !worldDomain(*flight.cell)) throw std::invalid_argument("Saved arrow cell outside campaign");
+            }
             if (mBinding.mPassiveSelf != (decoded.combat && decoded.combat->passiveSelf))
                 throw std::invalid_argument("Native passive envelope disagrees with campaign");
             if (mBinding.mPowerSources != (decoded.combat && decoded.combat->powerSources))
@@ -3946,6 +3982,14 @@ namespace TES3MP::Native
                             throw std::invalid_argument("Saved door cast source/target invalid");
                     }
                 const auto validateCast = [&](const ActorCampaignCast& cast, size_t index, size_t owner) {
+                if (mBinding.mCellActors && index >= 3 && index - 3 < mBinding.mStaticNeighbors)
+                {
+                    const auto timing = mBinding.mDynamicCasts.at(cast.actor).ranges.at(cast.range);
+                    if (cast.life != recoveredLife(index).generation || cast.elapsed >= timing.stopTicks
+                        || (cast.phase >= ActorCampaignCast::Released
+                            ? cast.elapsed < timing.releaseTicks : cast.elapsed >= timing.releaseTicks))
+                        throw std::invalid_argument("Saved cell actor cast clock/life invalid");
+                }
                 if (recoveredLife(index).respawnTick || decoded.combat->actors[index][8][2] <= 0
                     || hasParalysis(decoded.timedEffects, index)
                     || decoded.combat->knockedDown[index] || decoded.combat->hitRecoveryTicks[index]
@@ -3983,6 +4027,8 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native saved cast source/range invalid");
                 };
                 if (decoded.casting) validateCast(*decoded.casting, 2, mCombatNpcOwner);
+                if (decoded.combat) for (size_t i = 0; i < decoded.combat->neighborCasts.size(); ++i)
+                    if (decoded.combat->neighborCasts[i]) validateCast(*decoded.combat->neighborCasts[i], i + 3, combatOwner(i + 3));
                 for (const auto& body : mBinding.mDynamicActors.bodies)
                     if (body.casting)
                     {
@@ -4033,7 +4079,7 @@ namespace TES3MP::Native
             + (mBinding.mMeleeContact ? 7 : 5) * 8 : 0;
         const size_t actorSlots = combat ? combat->actors.size() : 0;
         if (combat && ((mBinding.mPlacementCombat
-                ? (actorSlots < 4 || actorSlots > (mBinding.mSummons ? 39u : 10u) || combat->npcPlacements.size() != actorSlots - 2
+                ? (actorSlots < (mBinding.mCellActors ? 3u : 4u) || actorSlots > (mBinding.mSummons ? 39u : 10u) || combat->npcPlacements.size() != actorSlots - 2
                     || combat->npcPlacements.front() != mBinding.mNavigatingActor->actorId())
                 : actorSlots != 3 || !combat->npcPlacements.empty())
             || combat->knockedDown.size() != actorSlots || combat->knockoutFrame.size() != actorSlots
@@ -4084,7 +4130,7 @@ namespace TES3MP::Native
             }
         }
         if (mBinding.mNeighborCombat && (!mBinding.mPlacementCombat
-            || !mBinding.mNeighborWeaponMelee || !mBinding.mNavigatingActor))
+            || (!mBinding.mCellActors && !mBinding.mNeighborWeaponMelee) || !mBinding.mNavigatingActor))
             throw std::invalid_argument("Neighbor combat requires placement, animation and scene bindings");
         const size_t projectileSize = mBinding.mMagicProjectile
             ? 8 + projectiles.size() * ((mBinding.mMagicItemUse ? 13 : 11) * 8
@@ -4584,6 +4630,34 @@ namespace TES3MP::Native
             putAreaWord(wrapped, TargetCampaignMagic);
             wrapped.insert(wrapped.end(), result.begin(), result.end()); result.swap(wrapped);
         }
+        if (mBinding.mCellActors)
+        {
+            EquipmentBytes wrapped;
+            putAreaWord(wrapped, CellActorsCampaignMagic);
+            putAreaWord(wrapped, combat->arrows.size());
+            for (const auto& arrow : combat->arrows)
+            {
+                if (!arrow.cell || !worldDomain(*arrow.cell)) throw std::invalid_argument("Arrow processing cell absent");
+                putActorProcessingCell(wrapped, *arrow.cell);
+            }
+            putAreaWord(wrapped, projectiles.size());
+            for (const auto& bolt : projectiles)
+            {
+                if (!bolt.cell || !worldDomain(*bolt.cell)) throw std::invalid_argument("Bolt processing cell absent");
+                putActorProcessingCell(wrapped, *bolt.cell);
+            }
+            putAreaWord(wrapped, combat->neighborCasts.size());
+            for (const auto& cast : combat->neighborCasts)
+            {
+                putAreaWord(wrapped, bool(cast));
+                if (cast) for (auto value : {cast->actor, cast->life, cast->cast, cast->sourceKind, cast->source,
+                    cast->targetKind, cast->target, cast->range, cast->elapsed, cast->phase, cast->targetLife})
+                    putAreaWord(wrapped, value);
+            }
+            if (wrapped.size() > MaximumNativeInventoryImageBytes || result.size() > MaximumNativeInventoryImageBytes - wrapped.size())
+                throw std::invalid_argument("Cell actor campaign exceeds image budget");
+            wrapped.insert(wrapped.end(), result.begin(), result.end()); result.swap(wrapped);
+        }
         (void)readActorCampaign(result);
         return result;
     }
@@ -4611,7 +4685,8 @@ namespace TES3MP::Native
     {
         const auto owner = std::ranges::find_if(mBinding.mContainers,
             [&](const auto& value) { return value.mId.value() == state.mActor; });
-        if (const auto* exterior = owner->mCell.asExterior(); mBinding.mTravelerNeighborhood && exterior)
+        if (owner == mBinding.mContainers.end()) throw std::invalid_argument("Actor has no canonical cell owner");
+        if (const auto* exterior = owner->mCell.asExterior(); (mBinding.mTravelerNeighborhood || mBinding.mCellActors) && exterior)
         {
             const auto x = std::floor(double(state.mPosition[0]) / 8192);
             const auto y = std::floor(double(state.mPosition[1]) / 8192);
@@ -4622,6 +4697,12 @@ namespace TES3MP::Native
             return cell;
         }
         return owner->mCell;
+    }
+
+    const InteriorActorScene& InventoryService::collisionScene(CellId cell) const
+    {
+        return mBinding.mCellActors ? mBinding.mNavigatingActor->forCell(mBinding.mEngineCells.at(cell))
+            : *mBinding.mNavigatingActor;
     }
 
     float InventoryService::meleeReach() const
@@ -5189,12 +5270,21 @@ namespace TES3MP::Native
             playerAttacker = attack->attacker;
             command.reset();
         }
-        const bool dueRespawn = mLife && mLife->respawnTick && tick.value() >= mLife->respawnTick && !command;
+        const auto occupiedNpc = [&](const ActorSceneSnapshot& frame) {
+            if (!mBinding.mCellActors) return true;
+            return std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                const auto* player = players.findPlayer(session.playerId());
+                return player && sharesCellNeighborhood(player->transform().cell(), actorCell(frame));
+            });
+        };
+        const bool dueRespawn = mLife && mLife->respawnTick && tick.value() >= mLife->respawnTick && !command
+            && occupiedNpc(mBinding.mNavigatingActor->snapshot());
         std::optional<size_t> dueNeighborRespawn;
         if (mBinding.mNeighborCombat && !dueRespawn && !command)
             for (size_t i = 0; i < mNeighborLives.size(); ++i)
                 if ((!mBinding.mSummons || i < mBinding.mStaticNeighbors)
-                    && mNeighborLives[i].respawnTick && tick.value() >= mNeighborLives[i].respawnTick)
+                    && mNeighborLives[i].respawnTick && tick.value() >= mNeighborLives[i].respawnTick
+                    && occupiedNpc(mBinding.mNavigatingActor->neighborSnapshots().at(i)))
                 { dueNeighborRespawn = i; break; }
         if (!dueRespawn && !dueNeighborRespawn)
         {
@@ -5202,12 +5292,32 @@ namespace TES3MP::Native
             else if (!command) command = prepareDoorStep(players, tick, seconds);
         }
         const auto before = mBinding.mNavigatingActor->snapshot();
+        const auto beforeNeighbors = mBinding.mNavigatingActor->neighborSnapshots();
         bool active = mBinding.mRetainTraveler && !mBinding.mNavigatingActor->arrived();
         for (const auto& session : players.activeSessions())
             if (const auto* player = players.findPlayer(session.playerId()); player
-                && (mBinding.mTravelerNeighborhood ? sharesCellNeighborhood(player->transform().cell(), actorCell(before))
+                && ((mBinding.mTravelerNeighborhood || (mBinding.mCellActors && actorCell(before).asExterior()))
+                    ? sharesCellNeighborhood(player->transform().cell(), actorCell(before))
                                                   : player->transform().cell() == actorCell(before))) active = true;
-        const bool bodyAreaActive = active;
+        const auto npcAreaActive = [&](size_t index) {
+            if (!mBinding.mCellActors) return active;
+            const auto& frame = index == 2 ? before : beforeNeighbors.at(index - 3);
+            return occupiedNpc(frame);
+        };
+        const bool anyNpcAreaActive = mBinding.mCellActors
+            ? std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                const auto* player = players.findPlayer(session.playerId());
+                return player && worldDomain(player->transform().cell());
+            }) : active;
+        const auto combatCell = [&](size_t index) {
+            return index < 2 ? players.findPlayer(mBinding.mPlayers[index])->transform().cell()
+                : actorCell(index == 2 ? before : beforeNeighbors.at(index - 3));
+        };
+        const auto sceneForIndex = [&](size_t index) -> const InteriorActorScene& {
+            if (index < 2) return collisionScene(players.findPlayer(mBinding.mPlayers[index])->transform().cell());
+            return mBinding.mNavigatingActor->forActor(index == 2 ? before.mActor
+                : beforeNeighbors.at(index - 3).mActor);
+        };
         if (mCombat && std::ranges::none_of(std::span(mCombat->actors).subspan(2),
                 [](const auto& stats) { return stats[8][2] > 0; })) active = false;
         using Diagnostics = ServerApp::NativeTravelDiagnostics;
@@ -5419,7 +5529,7 @@ namespace TES3MP::Native
         const std::function<float(size_t)> sunExposure = [&](size_t index) {
             if (!mBinding.mSpecialConditions || !world)
                 throw std::invalid_argument("Native SunDamage requires a world snapshot");
-            const auto cell = index >= 2 ? actorCell(after)
+            const auto cell = index >= 2 ? actorCell(index == 2 ? after : mBinding.mNavigatingActor->neighborSnapshots().at(index - 3))
                 : players.findPlayer(mBinding.mPlayers[index])->transform().cell();
             const auto* domain = worldDomain(cell);
             if (!domain) throw std::invalid_argument("Native SunDamage cell is not bound");
@@ -6119,7 +6229,7 @@ namespace TES3MP::Native
                 for (size_t axis = 0; axis < 3; ++axis)
                     distance2 += (target[axis] - from[axis]) * (target[axis] - from[axis]);
                 if (distance2 > radius * radius && !(selected && includeSelectedOutsideRadius)) continue;
-                if (!mBinding.mNavigatingActor->lineOfSight(from, target)) continue;
+                if (!collisionScene(witness.cell).lineOfSight(from, target)) continue;
                 bool aware;
                 if (selected) aware = npcDetects(index, 2, before);
                 else if (simulatedNeighbor && mBinding.mNeighborCombat)
@@ -6198,11 +6308,7 @@ namespace TES3MP::Native
         {
             for (size_t index = 0; index < combat->actors.size(); ++index)
             {
-                const bool awake = index == 2 ? active : index > 2
-                    ? std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
-                        const auto* player = players.findPlayer(session.playerId());
-                        return player && player->transform().cell() == actorCell(before);
-                    }) : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
+                const bool awake = index >= 2 ? npcAreaActive(index) : std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
                         return session.playerId() == mBinding.mPlayers[index];
                     });
                 if (!awake || combat->actors[index][8][2] <= 0) continue;
@@ -6271,7 +6377,7 @@ namespace TES3MP::Native
                 && id != ESM::MagicEffect::DisintegrateArmor && !(mBinding.mPowerSources && timedDamage(id))
                 && !(mBinding.mPassiveSelf && absorbDynamic(id) >= 0))
                 continue; // Equipped and authored passive sources are timeless overlays.
-            bool paused = effect.actor >= 2 && !active;
+            bool paused = effect.actor >= 2 && !npcAreaActive(size_t(effect.actor));
             if (effect.actor < mBinding.mPlayers.size())
                 paused = std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                     return session.playerId() == mBinding.mPlayers[size_t(effect.actor)];
@@ -6782,7 +6888,7 @@ namespace TES3MP::Native
                         if (index < 2)
                         {
                             const auto* player = players.findPlayer(mBinding.mPlayers[index]);
-                            if (!player || player->transform().cell() != actorCell(before)
+                            if (!player || player->transform().cell() != combatCell(victimIndex)
                                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                     return session.playerId() == player->playerId();
                                 })) continue;
@@ -6792,7 +6898,7 @@ namespace TES3MP::Native
                         }
                         else
                         {
-                            if (victimLife(index).respawnTick) continue;
+                            if (victimLife(index).respawnTick || combatCell(index) != combatCell(victimIndex)) continue;
                             const auto scene = victimScene(index);
                             position = {scene.mPosition[0], scene.mPosition[1], scene.mPosition[2] + 55.f};
                         }
@@ -7118,6 +7224,7 @@ namespace TES3MP::Native
         if (dueNeighborRespawn)
         {
             const size_t i = *dueNeighborRespawn, index = i + 3;
+            if (mBinding.mCellActors) combat->neighborCasts.at(i).reset();
             auto& adjacentLife = neighborLives.at(i);
             if (adjacentLife.generation == UINT32_MAX)
                 throw std::invalid_argument("Neighbor life generation exhausted");
@@ -7287,7 +7394,7 @@ namespace TES3MP::Native
                         const auto* peer = players.findPlayer(session.playerId());
                         return peer && peer->transform().cell() == actorCell(targetScene);
                     });
-                if (!active && !recoveryActive) continue;
+                if (!(victim ? npcAreaActive(victim) : anyNpcAreaActive) && !recoveryActive) continue;
                 if (std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                         return session.playerId() == mBinding.mPlayers[owner];
                     })) { swing.interruption = PlayerSwing::Disconnected; continue; }
@@ -7299,7 +7406,7 @@ namespace TES3MP::Native
                             || combat->actors[victim][8][2] <= 0)))
                     { swing.interruption = PlayerSwing::TargetLost; continue; }
                     const auto position = player->transform().position();
-                    if (!swing.ammunition && !mBinding.mNavigatingActor->lineOfSight(
+                    if (!swing.ammunition && !collisionScene(player->transform().cell()).lineOfSight(
                             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
                                 float(double(position.z()) / 1024) + 110.f},
                             {targetScene.mPosition[0], targetScene.mPosition[1], targetScene.mPosition[2] + 110.f}))
@@ -7351,6 +7458,7 @@ namespace TES3MP::Native
                         if (mBinding.mRangedFlight)
                         {
                             auto& arrow = combat->arrows.back();
+                            if (mBinding.mCellActors) arrow.cell = combatCell(owner);
                             const float speed = MWMechanics::projectileLaunchSpeed(mRuntime.mStore,
                                 weapon->mData.mType == ESM::Weapon::MarksmanThrown, swing.strength);
                             if (!std::isfinite(speed) || speed <= 0 || speed > 50000)
@@ -7408,7 +7516,7 @@ namespace TES3MP::Native
                         arrow.velocity[axis] = velocity[axis];
                         endpoint[axis] = arrow.position[axis] + velocity[axis] / 60;
                     }
-                    const auto hit = mBinding.mNavigatingActor->projectileContact(arrow.position, endpoint,
+                    const auto hit = (arrow.cell ? collisionScene(*arrow.cell) : *mBinding.mNavigatingActor).projectileContact(arrow.position, endpoint,
                         arrow.casterKind == 2 ? arrow.caster : 0);
                     std::optional<size_t> playerImpact;
                     std::array<float, 3> playerPosition{};
@@ -7423,7 +7531,7 @@ namespace TES3MP::Native
                             for (size_t index = 0; index < mBinding.mPlayers.size(); ++index)
                             {
                                 const auto* player = players.findPlayer(mBinding.mPlayers[index]);
-                                if (!player || player->transform().cell() != actorCell(before)
+                                if (!player || player->transform().cell() != arrow.cell.value_or(actorCell(before))
                                     || combat->actors[index][8][2] <= 0
                                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                         return session.playerId() == player->playerId();
@@ -7823,7 +7931,7 @@ namespace TES3MP::Native
         const auto playerPosition = [&](size_t index, bool travel = false) -> std::optional<std::array<float, 3>> {
             const auto* player = players.findPlayer(mBinding.mPlayers[index]);
             if (!player || (travel ? !worldDomain(player->transform().cell())
-                                  : player->transform().cell() != actorCell(before))
+                                  : (mBinding.mCellActors ? !worldDomain(player->transform().cell()) : player->transform().cell() != actorCell(before)))
                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                     return session.playerId() == player->playerId(); })) return {};
             const auto p = player->transform().position();
@@ -7841,6 +7949,7 @@ namespace TES3MP::Native
                 if (!victim || state.targetLife != victimLife(victim).generation
                     || victimLife(victim).respawnTick || combat->actors[victim][8][2] <= 0) return false;
                 const auto scene = victim == 2 ? before : victimScene(victim);
+                if (combatCell(victim) != combatCell(actor(PlayerId::fromValue(state.actor).value()))) return false;
                 endpoint = {scene.mPosition[0], scene.mPosition[1], scene.mPosition[2] + 55.f};
             }
             else if (state.targetKind == uint64_t(MagicUseTargetKind::Door))
@@ -7868,11 +7977,12 @@ namespace TES3MP::Native
             {
                 const auto index = actor(PlayerId::fromValue(state.target).value());
                 if (combat->actors[index][8][2] <= 0 || state.targetLife != combat->playerLives[index].generation) return false;
+                if (combatCell(index) != combatCell(actor(PlayerId::fromValue(state.actor).value()))) return false;
                 endpoint = playerPosition(index);
             }
             if (!endpoint || !(state.targetKind == uint64_t(MagicUseTargetKind::Door)
-                    ? mBinding.mNavigatingActor->lineOfSightToDoor(*origin, *endpoint, state.target)
-                    : mBinding.mNavigatingActor->lineOfSight(*origin, *endpoint))) return false;
+                    ? sceneForIndex(actor(PlayerId::fromValue(state.actor).value())).lineOfSightToDoor(*origin, *endpoint, state.target)
+                    : sceneForIndex(actor(PlayerId::fromValue(state.actor).value())).lineOfSight(*origin, *endpoint))) return false;
             float distance = 0;
             for (size_t axis = 0; axis < 3; ++axis) distance += ((*endpoint)[axis] - (*origin)[axis]) * ((*endpoint)[axis] - (*origin)[axis]);
             const float reach = effects.hasRange(ESM::RT_Target) ? 2048.f
@@ -7919,7 +8029,7 @@ namespace TES3MP::Native
                 const bool travel = pending->phase >= ActorCampaignCast::Released
                     || (mBinding.mPlayerTravel && candidate && playerTravelEffects(candidate->spell.effects));
                 const auto position = playerPosition(owner, travel);
-                const bool castActive = (travel && position) || active || (combat->actors[2][8][2] <= 0
+                const bool castActive = (travel && position) || anyNpcAreaActive || (combat->actors[2][8][2] <= 0
                     && (playerPosition(0) || playerPosition(1)));
                 if (!castActive) continue;
                 if (!position || (candidate && !playerTargetValid(*pending, candidate->spell.effects)))
@@ -7942,7 +8052,7 @@ namespace TES3MP::Native
             if (!mBinding.mDurableCasters || !mBinding.mMagicUse || !mBinding.mMagicProjectile
                 || !mBinding.mMagicPlayerTarget || !mBinding.mMagicProjectileCollection || !combat || !life
                 || use.life != actorLife.generation || actorLife.respawnTick
-                || !use.castId || !use.sourceId || !active || (index == 2 && respawn) || combat->actors[index][8][2] <= 0
+                || !use.castId || !use.sourceId || !npcAreaActive(index) || (index == 2 && respawn) || combat->actors[index][8][2] <= 0
                 || combat->knockedDown[index] || hasParalysis(timedEffects, index) || combat->hitRecoveryTicks[index]
                 || (use.targetKind != MagicUseTargetKind::Self && use.targetKind != MagicUseTargetKind::Player
                     && !(mBinding.mSummons && use.targetKind == MagicUseTargetKind::Actor))
@@ -7955,22 +8065,23 @@ namespace TES3MP::Native
             {
                 const auto playerId = PlayerId::fromValue(use.targetId);
                 const auto* victim = playerId ? players.findPlayer(*playerId) : nullptr;
-                if (!victim || victim->transform().cell() != actorCell(before)
+                if (!victim || victim->transform().cell() != actorCell(frame)
                     || combat->actors[actor(*playerId)][8][2] <= 0
                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) { return session.playerId() == *playerId; })) return {};
                 const auto position = victim->transform().position();
-                if (!mBinding.mNavigatingActor->lineOfSight(
+                if (!sceneForIndex(index).lineOfSight(
                     {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 110.f},
                     {float(double(position.x()) / 1024), float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 110.f})) return {};
-                if (!npcDetects(actor(*playerId), 2, before)) return {};
+                if (!npcDetects(actor(*playerId), index, frame)) return {};
             }
             std::optional<std::array<float, 3>> targetPosition;
             if (use.targetKind == MagicUseTargetKind::Actor)
             {
                 const auto victim = npcVictim(use.targetId);
                 if (!victim || victim == index || victimLife(victim).respawnTick || combat->actors[victim][8][2] <= 0) return {};
+                if (actorCell(victimScene(victim)) != actorCell(frame)) return {};
                 targetPosition = victimScene(victim).mPosition;
-                if (!mBinding.mNavigatingActor->lineOfSight(
+                if (!sceneForIndex(index).lineOfSight(
                     {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 55.f},
                     {(*targetPosition)[0], (*targetPosition)[1], (*targetPosition)[2] + 55.f})) return {};
             }
@@ -8052,160 +8163,6 @@ namespace TES3MP::Native
         // this is not cast animation timing. The committed tick anchors the cadence
         // across restart and rejected writes, without a second mutable clock.
         constexpr uint64_t reactionTicks = uint64_t(MWMechanics::AI_REACTION_TIME * 30.f + .999f);
-        if (mBinding.mSummons && active && combat)
-            for (auto& body : dynamicActors.bodies)
-            {
-                const auto index = npcVictim(body.collision.actor);
-                if (!index) throw std::invalid_argument("Dynamic caster placement absent");
-                const auto& timing = mBinding.mDynamicCasts.at(body.collision.actor);
-                const auto disposition = committedDisposition(mRuntime.mStore, body.collision.record, timedEffects, index);
-                const bool able = combat->actors[index][8][2] > 0 && !victimLife(index).respawnTick
-                    && !combat->knockedDown[index] && !hasParalysis(timedEffects, index)
-                    && !combat->hitRecoveryTicks[index] && !disposition.calm;
-                if (!able) { body.casting.reset(); continue; }
-                if (body.casting)
-                {
-                    auto& cast = *body.casting;
-                    std::optional<Cast> candidate;
-                    if (cast.phase < ActorCampaignCast::Released)
-                    {
-                        if (cast.targetKind)
-                        {
-                            const auto victim = cast.targetKind == uint64_t(MagicUseTargetKind::Actor)
-                                ? npcVictim(cast.target) : actor(PlayerId::fromValue(cast.target).value());
-                            if ((cast.targetKind == uint64_t(MagicUseTargetKind::Actor) && !victim) || (victim >= 2 && victimLife(victim).generation != cast.targetLife))
-                            { body.casting.reset(); continue; }
-                        }
-                        candidate = prepareNpcCast({cast.actor, cast.life, cast.cast, MagicUseSourceKind(cast.sourceKind),
-                            cast.source, MagicUseTargetKind(cast.targetKind), cast.target});
-                        if (!candidate || uint64_t(candidate->record.effects.effects.front().mRange) != cast.range)
-                        { body.casting.reset(); continue; }
-                        if (candidate->record.effects.hasRange(ESM::RT_Target)
-                            && projectiles.size() + casts.size() >= MaximumActorProjectiles) continue;
-                    }
-                    if (candidate) presentWindup(cast, candidate->effectSource, 2);
-                    if (advanceCast(cast, timing.ranges[cast.range])) casts.push_back(*candidate);
-                    if (cast.elapsed >= timing.ranges[cast.range].stopTicks) body.casting.reset();
-                    continue;
-                }
-                if (!body.enemy.id || tick.value() / reactionTicks == mActorTick / reactionTicks
-                    || combat->neighborAttacks.at(index - 3).target) continue;
-                const auto enemy = body.enemy.kind == 2 ? npcVictim(body.enemy.id)
-                    : actor(PlayerId::fromValue(body.enemy.id).value());
-                if ((body.enemy.kind == 2 && (!enemy || victimLife(enemy).generation != body.enemy.life))
-                    || combat->actors[enemy][8][2] <= 0) continue;
-                auto caster = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
-                auto victim = loadCombatStats(mRuntime.mStore, combat->actors[enemy], timedEffects, enemy);
-                addTimedResistance(caster, timedEffects, index); addTimedResistance(victim, timedEffects, enemy);
-                AiMagicContext selection{caster, &victim};
-                selection.expandedEffects = mBinding.mExpandedEffects;
-                selection.specialConditions = mBinding.mSpecialConditions;
-                selection.equipmentEffects = mBinding.mEquipmentFamily; selection.summonEffects = true;
-                const auto values = candidateEquipmentValues(combatOwner(index));
-                const ESM::ObjectState* winningWeapon = nullptr;
-                float arrow = 0, bolt = 0;
-                for (const auto& item : values.mObjects)
-                    if (item.mRef.mCount > 0)
-                        if (const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
-                            weapon && (weapon->mData.mType == ESM::Weapon::Arrow || weapon->mData.mType == ESM::Weapon::Bolt))
-                        {
-                            const auto rating = rateAiWeapon(selection, *weapon, 0, item.mRef.mEnchantmentCharge,
-                                mBinding.mEnchantedWeaponsAreMagical, mRuntime.mStore);
-                            auto& best = weapon->mData.mType == ESM::Weapon::Arrow ? arrow : bolt;
-                            if (rating) best = std::max(best, *rating);
-                        }
-                for (const auto& item : values.mObjects)
-                    if (item.mRef.mCount > 0)
-                        if (const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
-                            weapon && MWMechanics::getWeaponType(weapon->mData.mType)->mWeaponClass != ESM::WeaponType::Ammo)
-                        {
-                            const auto rating = rateAiWeapon(selection, *weapon,
-                                item.mRef.mChargeInt < 0 ? weapon->mData.mHealth : item.mRef.mChargeInt,
-                                item.mRef.mEnchantmentCharge, mBinding.mEnchantedWeaponsAreMagical,
-                                mRuntime.mStore, arrow, bolt);
-                            if (rating && (*rating > selection.weaponRating || (*rating > 0 && *rating == selection.weaponRating
-                                && item.mRef.mRefNum == values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])))
-                            { selection.weaponRating = *rating; winningWeapon = &item; }
-                        }
-                selection.enemyWerewolf = victim.isWerewolf();
-                for (const auto& effect : timedEffects)
-                {
-                    if (effect.durationTicks <= 90) continue;
-                    const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
-                    const bool harmful = mRuntime.mStore.get<ESM::MagicEffect>().find(id)->mData.mFlags & ESM::MagicEffect::Harmful;
-                    if (harmful && effect.actor == index)
-                    {
-                        if (id == ESM::MagicEffect::Poison) ++selection.selfCures[0];
-                        if (id == ESM::MagicEffect::Paralyze) ++selection.selfCures[1];
-                    }
-                    if (effect.sourceKind) continue;
-                    if (effect.actor == index) ++selection.selfDispel[harmful ? 1 : 0];
-                    if (effect.actor == enemy) ++selection.enemyDispel[harmful ? 1 : 0];
-                }
-                std::vector<AiMagicSpell> spells;
-                const auto activeOn = [&](size_t target, ESM::RefId source, uint64_t kind) {
-                    return std::ranges::any_of(timedEffects, [&](const auto& effect) {
-                        return effect.actor == target && effect.source == spellRecordId(source)
-                            && effect.sourceKind == kind && effect.caster == body.collision.actor && effect.casterLife == 1;
-                    });
-                };
-                const auto& known = actorSpells(mRuntime.ownerPtr(combatOwner(index)), mBinding.mPowerSources ? &mRuntime.mStore : nullptr).mList;
-                if (known.size() > 1024 || values.mObjects.size() > 4096)
-                    throw std::length_error("Dynamic actor combat choices exceed bounds");
-                for (const auto id : known)
-                    if (const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id))
-                        spells.push_back({spell, false, activeOn(index, id, 0), activeOn(enemy, id, 0)});
-                std::vector<AiMagicItem> items;
-                for (const auto& item : values.mObjects)
-                {
-                    if (item.mRef.mCount <= 0 || std::ranges::find(values.mSlots, item.mRef.mRefNum) == values.mSlots.end()) continue;
-                    const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
-                    if (record.mWhenUsed) items.push_back({item.mRef.mRefNum, record.mEnchant,
-                        item.mRef.mEnchantmentCharge, true, activeOn(index, record.mEnchant, 1), 0.f});
-                }
-                const auto selected = prepareAiMagicCast(selection, spells, items, mRuntime.mStore);
-                if (!selected)
-                {
-                    if (!winningWeapon) continue;
-                    const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(winningWeapon->mRef.mRefID);
-                    const auto equip = [&](ESM::RefNum item, int slot) {
-                        if (!equipmentValues)
-                        {
-                            equipmentValues.emplace();
-                            (void)stagedWeaponCore({}, command.get(), {}, respawn.get(), {}, &*equipmentValues);
-                        }
-                        flushEquipmentWear();
-                        if (!mRuntime.stageEquipmentSelection(*equipmentValues, combatOwner(index), item, slot))
-                            throw std::invalid_argument("Dynamic actor combat equipment selection failed");
-                    };
-                    if (winningWeapon->mRef.mRefNum != values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])
-                    {
-                        (void)mBinding.mNeighborMeleeSet[index - 3](weapon, rangedWeapon(weapon, mBinding.mRangedRelease) ? "shoot" : "chop");
-                        equip(winningWeapon->mRef.mRefNum, MWWorld::InventoryStore::Slot_CarriedRight);
-                    }
-                    if (rangedWeapon(weapon, mBinding.mRangedRelease) && !equippedAmmunition(values, mRuntime.mStore, *weapon, mBinding)
-                        && weapon->mData.mType != ESM::Weapon::MarksmanThrown)
-                        for (const auto& item : values.mObjects)
-                            if (item.mRef.mCount > 0)
-                                if (const auto* ammo = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
-                                    ammo && rangedSources(*weapon, *ammo, mRuntime.mStore, mBinding))
-                                { equip(item.mRef.mRefNum, MWWorld::InventoryStore::Slot_Ammunition); break; }
-                    continue;
-                }
-                const bool self = selected->spell.effects.onlyRange(ESM::RT_Self);
-                const ActorMagicCast use{body.collision.actor, 1, tick.value(),
-                    selected->payment ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell,
-                    selected->payment ? wireId(selected->payment->instance).value() : spellRecordId(selected->effectSource),
-                    self ? MagicUseTargetKind::Self : body.enemy.kind == 2 ? MagicUseTargetKind::Actor : MagicUseTargetKind::Player,
-                    self ? 0 : body.enemy.id};
-                if (const auto candidate = prepareNpcCast(use))
-                {
-                    body.casting = ActorCampaignCast{use.actorId, use.life, use.castId, uint64_t(use.sourceKind), use.sourceId,
-                        uint64_t(use.targetKind), use.targetId, uint64_t(candidate->record.effects.effects.front().mRange)};
-                    body.casting->targetLife = self ? 0 : body.enemy.life;
-                }
-            }
-
         bool automaticCast = bool(casting);
         if (casting)
         {
@@ -8417,6 +8374,196 @@ namespace TES3MP::Native
             }
         if (mBinding.mWeaponMelee && target && !npcMayAttack)
         { melee = mIdleMelee; target = 0; contact = false; }
+        if (mBinding.mSummons && anyNpcAreaActive && combat)
+        {
+            auto npcCasters = dynamicActors.bodies;
+            if (mBinding.mCellActors)
+                for (size_t i = 0; i < mBinding.mStaticNeighbors; ++i)
+                {
+                    const size_t index = i + 3;
+                    DynamicActorSet::Body body;
+                    const auto frame = victimScene(index);
+                    body.collision = {frame.mActor, mRuntime.ownerPtr(combatOwner(index)).getCellRef().getRefId(), frame.mPosition, frame.mYaw};
+                    body.casting = combat->neighborCasts.at(i);
+                    const auto disposition = committedDisposition(mRuntime.mStore, body.collision.record, timedEffects, index);
+                    float nearest = 2048.f * 2048.f;
+                    if (!disposition.calm && !commandedDestination(index, frame, victimLife(index).generation))
+                        for (const auto& session : players.activeSessions())
+                        {
+                            const auto* player = players.findPlayer(session.playerId());
+                            if (!player || player->transform().cell() != actorCell(frame)
+                                || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
+                                || combat->actors[actor(player->playerId())][8][2] <= 0) continue;
+                            const auto& p = player->transform().position();
+                            const std::array<float, 3> point{float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)};
+                            const auto distance = distanceSquared(frame.mPosition, point);
+                            if (distance >= nearest || !aggressiveAgainst({index, frame, victimLife(index).generation}, disposition, *player, 0)
+                                || !sceneForIndex(index).lineOfSight({frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 110},
+                                    {point[0], point[1], point[2] + 110}) || !npcDetects(actor(player->playerId()), index, frame)) continue;
+                            nearest = distance;
+                            body.enemy = {player->playerId().value(), 1, combat->playerLives[actor(player->playerId())].generation};
+                        }
+                    npcCasters.push_back(std::move(body));
+                }
+            for (auto& body : npcCasters)
+            {
+                const auto index = npcVictim(body.collision.actor);
+                if (!index) throw std::invalid_argument("Dynamic caster placement absent");
+                if (!npcAreaActive(index)) continue;
+                const auto& timing = mBinding.mDynamicCasts.at(body.collision.actor);
+                const auto disposition = committedDisposition(mRuntime.mStore, body.collision.record, timedEffects, index);
+                const bool able = combat->actors[index][8][2] > 0 && !victimLife(index).respawnTick
+                    && !combat->knockedDown[index] && !hasParalysis(timedEffects, index)
+                    && !combat->hitRecoveryTicks[index] && !disposition.calm;
+                if (!able) { body.casting.reset(); continue; }
+                if (body.casting)
+                {
+                    auto& cast = *body.casting;
+                    std::optional<Cast> candidate;
+                    if (cast.phase < ActorCampaignCast::Released)
+                    {
+                        if (cast.targetKind)
+                        {
+                            const auto victim = cast.targetKind == uint64_t(MagicUseTargetKind::Actor)
+                                ? npcVictim(cast.target) : actor(PlayerId::fromValue(cast.target).value());
+                            if ((cast.targetKind == uint64_t(MagicUseTargetKind::Actor) && !victim) || (victim >= 2 && victimLife(victim).generation != cast.targetLife))
+                            { body.casting.reset(); continue; }
+                        }
+                        candidate = prepareNpcCast({cast.actor, cast.life, cast.cast, MagicUseSourceKind(cast.sourceKind),
+                            cast.source, MagicUseTargetKind(cast.targetKind), cast.target});
+                        if (!candidate || uint64_t(candidate->record.effects.effects.front().mRange) != cast.range)
+                        { body.casting.reset(); continue; }
+                        if (candidate->record.effects.hasRange(ESM::RT_Target)
+                            && projectiles.size() + casts.size() >= MaximumActorProjectiles) continue;
+                    }
+                    if (candidate) presentWindup(cast, candidate->effectSource, 2);
+                    if (advanceCast(cast, timing.ranges[cast.range])) casts.push_back(*candidate);
+                    if (cast.elapsed >= timing.ranges[cast.range].stopTicks) body.casting.reset();
+                    continue;
+                }
+                if (!body.enemy.id || tick.value() / reactionTicks == mActorTick / reactionTicks
+                    || combat->neighborAttacks.at(index - 3).target) continue;
+                const auto enemy = body.enemy.kind == 2 ? npcVictim(body.enemy.id)
+                    : actor(PlayerId::fromValue(body.enemy.id).value());
+                if ((body.enemy.kind == 2 && (!enemy || victimLife(enemy).generation != body.enemy.life))
+                    || combat->actors[enemy][8][2] <= 0) continue;
+                auto caster = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index);
+                auto victim = loadCombatStats(mRuntime.mStore, combat->actors[enemy], timedEffects, enemy);
+                addTimedResistance(caster, timedEffects, index); addTimedResistance(victim, timedEffects, enemy);
+                AiMagicContext selection{caster, &victim};
+                selection.expandedEffects = mBinding.mExpandedEffects;
+                selection.specialConditions = mBinding.mSpecialConditions;
+                selection.equipmentEffects = mBinding.mEquipmentFamily; selection.summonEffects = true;
+                const auto values = candidateEquipmentValues(combatOwner(index));
+                const ESM::ObjectState* winningWeapon = nullptr;
+                float arrow = 0, bolt = 0;
+                for (const auto& item : values.mObjects)
+                    if (item.mRef.mCount > 0)
+                        if (const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
+                            weapon && (weapon->mData.mType == ESM::Weapon::Arrow || weapon->mData.mType == ESM::Weapon::Bolt))
+                        {
+                            const auto rating = rateAiWeapon(selection, *weapon, 0, item.mRef.mEnchantmentCharge,
+                                mBinding.mEnchantedWeaponsAreMagical, mRuntime.mStore);
+                            auto& best = weapon->mData.mType == ESM::Weapon::Arrow ? arrow : bolt;
+                            if (rating) best = std::max(best, *rating);
+                        }
+                for (const auto& item : values.mObjects)
+                    if (item.mRef.mCount > 0)
+                        if (const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
+                            weapon && MWMechanics::getWeaponType(weapon->mData.mType)->mWeaponClass != ESM::WeaponType::Ammo)
+                        {
+                            const auto rating = rateAiWeapon(selection, *weapon,
+                                item.mRef.mChargeInt < 0 ? weapon->mData.mHealth : item.mRef.mChargeInt,
+                                item.mRef.mEnchantmentCharge, mBinding.mEnchantedWeaponsAreMagical,
+                                mRuntime.mStore, arrow, bolt);
+                            if (rating && (*rating > selection.weaponRating || (*rating > 0 && *rating == selection.weaponRating
+                                && item.mRef.mRefNum == values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])))
+                            { selection.weaponRating = *rating; winningWeapon = &item; }
+                        }
+                selection.enemyWerewolf = victim.isWerewolf();
+                for (const auto& effect : timedEffects)
+                {
+                    if (effect.durationTicks <= 90) continue;
+                    const auto id = ESM::MagicEffect::indexToRefId(int(effect.effectIndex));
+                    const bool harmful = mRuntime.mStore.get<ESM::MagicEffect>().find(id)->mData.mFlags & ESM::MagicEffect::Harmful;
+                    if (harmful && effect.actor == index)
+                    {
+                        if (id == ESM::MagicEffect::Poison) ++selection.selfCures[0];
+                        if (id == ESM::MagicEffect::Paralyze) ++selection.selfCures[1];
+                    }
+                    if (effect.sourceKind) continue;
+                    if (effect.actor == index) ++selection.selfDispel[harmful ? 1 : 0];
+                    if (effect.actor == enemy) ++selection.enemyDispel[harmful ? 1 : 0];
+                }
+                std::vector<AiMagicSpell> spells;
+                const auto activeOn = [&](size_t target, ESM::RefId source, uint64_t kind) {
+                    return std::ranges::any_of(timedEffects, [&](const auto& effect) {
+                        return effect.actor == target && effect.source == spellRecordId(source)
+                            && effect.sourceKind == kind && effect.caster == body.collision.actor && effect.casterLife == victimLife(index).generation;
+                    });
+                };
+                const auto& known = actorSpells(mRuntime.ownerPtr(combatOwner(index)), mBinding.mPowerSources ? &mRuntime.mStore : nullptr).mList;
+                if (known.size() > 1024 || values.mObjects.size() > 4096)
+                    throw std::length_error("Dynamic actor combat choices exceed bounds");
+                for (const auto id : known)
+                    if (const auto* spell = mRuntime.mStore.get<ESM::Spell>().search(id))
+                        spells.push_back({spell, false, activeOn(index, id, 0), activeOn(enemy, id, 0)});
+                std::vector<AiMagicItem> items;
+                for (const auto& item : values.mObjects)
+                {
+                    if (item.mRef.mCount <= 0 || std::ranges::find(values.mSlots, item.mRef.mRefNum) == values.mSlots.end()) continue;
+                    const auto record = MWWorld::inventoryItemRecord(mRuntime.mStore, item.mRef.mRefID);
+                    if (record.mWhenUsed) items.push_back({item.mRef.mRefNum, record.mEnchant,
+                        item.mRef.mEnchantmentCharge, true, activeOn(index, record.mEnchant, 1), 0.f});
+                }
+                const auto selected = prepareAiMagicCast(selection, spells, items, mRuntime.mStore);
+                if (!selected)
+                {
+                    if (!winningWeapon) continue;
+                    const auto* weapon = mRuntime.mStore.get<ESM::Weapon>().find(winningWeapon->mRef.mRefID);
+                    const auto equip = [&](ESM::RefNum item, int slot) {
+                        if (!equipmentValues)
+                        {
+                            equipmentValues.emplace();
+                            (void)stagedWeaponCore({}, command.get(), {}, respawn.get(), {}, &*equipmentValues);
+                        }
+                        flushEquipmentWear();
+                        if (!mRuntime.stageEquipmentSelection(*equipmentValues, combatOwner(index), item, slot))
+                            throw std::invalid_argument("Dynamic actor combat equipment selection failed");
+                    };
+                    if (winningWeapon->mRef.mRefNum != values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight])
+                    {
+                        (void)mBinding.mNeighborMeleeSet[index - 3](weapon, rangedWeapon(weapon, mBinding.mRangedRelease) ? "shoot" : "chop");
+                        equip(winningWeapon->mRef.mRefNum, MWWorld::InventoryStore::Slot_CarriedRight);
+                    }
+                    if (rangedWeapon(weapon, mBinding.mRangedRelease) && !equippedAmmunition(values, mRuntime.mStore, *weapon, mBinding)
+                        && weapon->mData.mType != ESM::Weapon::MarksmanThrown)
+                        for (const auto& item : values.mObjects)
+                            if (item.mRef.mCount > 0)
+                                if (const auto* ammo = mRuntime.mStore.get<ESM::Weapon>().search(item.mRef.mRefID);
+                                    ammo && rangedSources(*weapon, *ammo, mRuntime.mStore, mBinding))
+                                { equip(item.mRef.mRefNum, MWWorld::InventoryStore::Slot_Ammunition); break; }
+                    continue;
+                }
+                const bool self = selected->spell.effects.onlyRange(ESM::RT_Self);
+                const ActorMagicCast use{body.collision.actor, victimLife(index).generation, tick.value(),
+                    selected->payment ? MagicUseSourceKind::EnchantedItem : MagicUseSourceKind::Spell,
+                    selected->payment ? wireId(selected->payment->instance).value() : spellRecordId(selected->effectSource),
+                    self ? MagicUseTargetKind::Self : body.enemy.kind == 2 ? MagicUseTargetKind::Actor : MagicUseTargetKind::Player,
+                    self ? 0 : body.enemy.id};
+                if (const auto candidate = prepareNpcCast(use))
+                {
+                    body.casting = ActorCampaignCast{use.actorId, use.life, use.castId, uint64_t(use.sourceKind), use.sourceId,
+                        uint64_t(use.targetKind), use.targetId, uint64_t(candidate->record.effects.effects.front().mRange)};
+                    body.casting->targetLife = self ? 0 : body.enemy.life;
+                }
+            }
+
+            for (size_t i = 0; i < npcCasters.size(); ++i)
+                if (i < dynamicActors.bodies.size()) dynamicActors.bodies[i].casting = npcCasters[i].casting;
+                else combat->neighborCasts.at(i - dynamicActors.bodies.size()) = npcCasters[i].casting;
+        }
+
         if (mBinding.mAutomaticNpcSpells && npcMayAttack && !automaticCast && !actorCast && step && active && !respawn && combat && life
             && !life->respawnTick && combat->actors[2][8][2] > 0
             && !combat->knockedDown[2] && !hasParalysis(timedEffects, 2) && !combat->hitRecoveryTicks[2]
@@ -8904,7 +9051,7 @@ namespace TES3MP::Native
             }
             const auto* player = players.findPlayer(mBinding.mPlayers[index]);
             if (!player || (travel ? !worldDomain(player->transform().cell())
-                                  : player->transform().cell() != actorCell(before))
+                                  : (mBinding.mCellActors ? !worldDomain(player->transform().cell()) : player->transform().cell() != actorCell(before)))
                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) { return session.playerId() == player->playerId(); })) return {};
             const auto position = player->transform().position();
             return std::array<float, 3>{float(double(position.x()) / 1024), float(double(position.y()) / 1024), float(double(position.z()) / 1024) + 64.f};
@@ -8920,7 +9067,8 @@ namespace TES3MP::Native
                 const bool hitVisual = mRuntime.mStore.get<ESM::MagicEffect>().find(effect.mEffectID)->mData.mFlags & ESM::MagicEffect::NoDuration;
                 if (!lockMagic && !hitVisual) continue;
                 const auto selected = [&](uint64_t id, CellId cell, const ESM::Position& position) {
-                    return cell == actorCell(before) && (id == hit || (mBinding.mMagicArea && effect.mArea > 0
+                    return cell == (flight && flight->cell ? *flight->cell : caster.kind == 2
+                        ? combatCell(npcVictim(caster.id)) : combatCell(actor(PlayerId::fromValue(caster.id).value()))) && (id == hit || (mBinding.mMagicArea && effect.mArea > 0
                         && distanceSquared(center, {position.pos[0], position.pos[1], position.pos[2]})
                             <= std::pow(effect.mArea * 22.f, 2)));
                 };
@@ -9097,8 +9245,8 @@ namespace TES3MP::Native
                 const bool touching = origin && endpoint && (objectTarget || victimIndex != owner)
                     && distanceSquared(*origin, *endpoint) <= reach * reach
                     && (cast.targetKind == MagicUseTargetKind::Door
-                        ? mBinding.mNavigatingActor->lineOfSightToDoor(*origin, *endpoint, cast.targetId)
-                        : mBinding.mNavigatingActor->lineOfSight(*origin, *endpoint));
+                        ? sceneForIndex(owner).lineOfSightToDoor(*origin, *endpoint, cast.targetId)
+                        : sceneForIndex(owner).lineOfSight(*origin, *endpoint));
                 for (const int range : {ESM::RT_Self, ESM::RT_Touch})
                 {
                     if (range == ESM::RT_Touch && !touching) continue;
@@ -9119,7 +9267,8 @@ namespace TES3MP::Native
                     }
                     for (size_t index = 0; index < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++index)
                     {
-                        if (index == owner || combat->actors[index][8][2] <= 0) continue;
+                        if (index == owner || combat->actors[index][8][2] <= 0
+                            || combatCell(index) != combatCell(owner)) continue;
                         const auto position = combatPosition(index);
                         if (!position) continue;
                         PreparedInstantEffects selected;
@@ -9164,7 +9313,7 @@ namespace TES3MP::Native
                 if (cast.targetKind == MagicUseTargetKind::Player)
                 {
                     const auto* victim = players.findPlayer(PlayerId::fromValue(cast.targetId).value());
-                    if (!victim || victim->transform().cell() != actorCell(before)
+                    if (!victim || victim->transform().cell() != combatCell(owner)
                         || combat->actors[actor(victim->playerId())][8][2] <= 0
                         || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                             return session.playerId() == victim->playerId();
@@ -9175,7 +9324,7 @@ namespace TES3MP::Native
                 }
                 if (cast.targetKind == MagicUseTargetKind::Door || cast.targetKind == MagicUseTargetKind::Container)
                 {
-                    const auto center = mBinding.mNavigatingActor->objectCenter(cast.targetId);
+                    const auto center = sceneForIndex(owner).objectCenter(cast.targetId);
                     if (!center) throw std::invalid_argument("Target object collision geometry missing");
                     destination = *center;
                 }
@@ -9218,6 +9367,7 @@ namespace TES3MP::Native
                     origin, direction, uint64_t(cast.targetKind),
                     mBinding.mMagicProjectileCollection ? cast.commandId : 0,
                     context.identity.kind, context.identity.life});
+                if (mBinding.mCellActors) projectiles.back().cell = combatCell(context.combatIndex);
             }
         }
         if (flyingCount && combat)
@@ -9230,7 +9380,7 @@ namespace TES3MP::Native
                 const size_t eventCount = spellCasts.size();
                 std::array<float, 3> endpoint;
                 for (size_t i = 0; i < 3; ++i) endpoint[i] = pending.position[i] + pending.step[i];
-                auto hit = mBinding.mNavigatingActor->projectileContact(pending.position, endpoint, pending.casterKind == 2 ? pending.caster : 0);
+                auto hit = (pending.cell ? collisionScene(*pending.cell) : *mBinding.mNavigatingActor).projectileContact(pending.position, endpoint, pending.casterKind == 2 ? pending.caster : 0);
                 size_t hitIndex = hit && hit->actor ? npcVictim(hit->actor) : combat->actors.size();
                 if (hit && hit->actor && !hitIndex) hitIndex = combat->actors.size();
                 if (mBinding.mMagicPlayerTarget)
@@ -9250,7 +9400,7 @@ namespace TES3MP::Native
                         const auto id = mBinding.mPlayers[index];
                         const auto* player = players.findPlayer(id);
                         if ((pending.casterKind != 2 && id.value() == pending.caster) || !player
-                            || player->transform().cell() != actorCell(before)
+                            || player->transform().cell() != pending.cell.value_or(actorCell(before))
                             || combat->actors[index][8][2] <= 0
                             || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                 return session.playerId() == id;
@@ -9364,7 +9514,7 @@ namespace TES3MP::Native
                                 const auto playerId = mBinding.mPlayers[index];
                                 const auto* player = players.findPlayer(playerId);
                                 if ((pending.casterKind != 2 && playerId.value() == pending.caster) || (directHit && index == hitIndex) || !player
-                                    || player->transform().cell() != actorCell(before)
+                                    || player->transform().cell() != pending.cell.value_or(actorCell(before))
                                     || !recipientCurrent(index)
                                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                         return session.playerId() == playerId;
@@ -9379,7 +9529,7 @@ namespace TES3MP::Native
                                 if ((pending.casterKind == 2 && pending.caster == (index == 2
                                         ? before.mActor : combat->npcPlacements.at(index - 2)))
                                     || (directHit && hitIndex == index)
-                                    || !recipientCurrent(index)) continue;
+                                    || !recipientCurrent(index) || (pending.cell && combatCell(index) != *pending.cell)) continue;
                                 if (nearby(victimScene(index).mPosition)) select(index);
                             }
                         }
@@ -9438,6 +9588,7 @@ namespace TES3MP::Native
                     (*destination)[1] - origin.y(), (*destination)[2] - origin.z());
                 if (direction.normalize() == 0) throw std::invalid_argument("NPC projectile direction invalid");
                 auto& arrow = combat->arrows.emplace_back();
+                if (mBinding.mCellActors) arrow.cell = combatCell(index);
                 arrow.caster = frame.mActor; arrow.casterKind = 2; arrow.casterLife = victimLife(index).generation;
                 arrow.command = action; arrow.source = wireId(held->mItem).value();
                 arrow.ammunition = wireId(ammo->mRef.mRefNum).value();
@@ -9811,12 +9962,13 @@ namespace TES3MP::Native
         };
         std::vector<bool> neighborFleeing(neighborTargets.size());
         std::vector<bool> neighborFollowing(neighborTargets.size());
-        if (mBinding.mNeighborAi && combat && active && !dueNeighborRespawn)
+        if (mBinding.mNeighborAi && combat && anyNpcAreaActive && !dueNeighborRespawn)
         {
             const auto neighbors = mBinding.mNavigatingActor->neighborSnapshots();
-            if (neighbors.empty() || (mBinding.mNeighborCombat
+            if ((!mBinding.mCellActors && neighbors.empty()) || (mBinding.mNeighborCombat
                     && neighbors.size() != combat->actors.size() - 3))
                 throw std::logic_error("Bound neighboring NPC body set absent");
+            std::vector<uint8_t> neighborActive(neighbors.size());
             std::vector<ActorMovement> movements(neighbors.size());
             std::vector<std::optional<std::array<float, 3>>> destinations(neighbors.size());
             std::vector<std::optional<std::array<float, 3>>> fleeEnemies(neighbors.size());
@@ -9825,6 +9977,9 @@ namespace TES3MP::Native
             {
                 const auto& neighbor = neighbors[i];
                 const size_t index = i + 3;
+                neighborActive[i] = npcAreaActive(index);
+                if (!neighborActive[i]) continue;
+                movingNeighbor = movingNeighbor || mBinding.mCellActors;
                 const AiActorContext source{index, neighbor,
                     mBinding.mNeighborCombat ? neighborLives[i].generation : 1};
                 const auto disposition = mBinding.mNeighborCombat
@@ -9958,7 +10113,7 @@ namespace TES3MP::Native
                     if (!engaged && !mBinding.mNeighborCombat) continue;
                     if (!aggressiveAgainst(source, disposition, *player,
                             engaged ? playerId.value() : 0)) continue;
-                    if (!mBinding.mNavigatingActor->lineOfSight(
+                    if (!sceneForIndex(index).lineOfSight(
                             {neighbor.mPosition[0], neighbor.mPosition[1], neighbor.mPosition[2] + 110.f},
                             {float(double(position.x()) / 1024), float(double(position.y()) / 1024),
                                 float(double(position.z()) / 1024) + 110.f})) continue;
@@ -10093,7 +10248,7 @@ namespace TES3MP::Native
             {
                 if (!step) step = mBinding.mNavigatingActor->prepareSelectedRestore(
                     mBinding.mNavigatingActor->selectedImage(), doors);
-                mBinding.mNavigatingActor->prepareNeighborNavigation(*step, movements, doors, destinations, fleeEnemies);
+                mBinding.mNavigatingActor->prepareNeighborNavigation(*step, movements, doors, destinations, fleeEnemies, neighborActive);
                 pendingNeighbors = step->neighborSnapshots();
             }
         }
@@ -10167,6 +10322,8 @@ namespace TES3MP::Native
             {
             const size_t index = i + 3;
             auto& attack = combat->neighborAttacks[i];
+            if (!npcAreaActive(index) || (mBinding.mCellActors && index - 3 < combat->neighborCasts.size()
+                && combat->neighborCasts[index - 3])) continue;
             const auto* adjacent = &adjacentSet[i];
             if (adjacent->mActor != combat->npcPlacements.at(i + 1))
                 throw std::invalid_argument("Native neighbor attack placement changed");
@@ -10209,17 +10366,18 @@ namespace TES3MP::Native
                     const std::array<float, 3> from{adjacent->mPosition[0], adjacent->mPosition[1], adjacent->mPosition[2] + 110.f};
                     const auto distance = distanceSquared(from, *endpoint);
                     return distance >= 64.f && distance <= 2048.f*2048.f
-                        && mBinding.mNavigatingActor->lineOfSight(from, *endpoint) ? requested : uint64_t(0);
+                        && mBinding.mNavigatingActor->forActor(adjacent->mActor).lineOfSight(from, *endpoint) ? requested : uint64_t(0);
                 }
                 if (victim < 2) return meleeContact(players, *adjacent, requested, reach);
                 const auto frame = actorFrame(victim);
+                if (actorCell(frame) != actorCell(*adjacent)) return uint64_t(0);
                 const auto& p = frame.mPosition;
                 const auto& from = adjacent->mPosition;
                 if (!MWMechanics::isInMeleeReach(osg::Vec3f(from[0], from[1], from[2]),
                     osg::Vec3f(p[0], p[1], p[2]),
                     mBinding.mNavigatingActor->actorHalfExtentY(adjacent->mActor),
                     mBinding.mNavigatingActor->actorHalfExtentY(frame.mActor), reach)) return uint64_t(0);
-                return mBinding.mNavigatingActor->lineOfSight({from[0], from[1], from[2] + 110},
+                return mBinding.mNavigatingActor->forActor(adjacent->mActor).lineOfSight({from[0], from[1], from[2] + 110},
                     {p[0], p[1], p[2] + 110}) ? requested : uint64_t(0);
             };
             const auto sourceSlot = values.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
@@ -10414,6 +10572,14 @@ namespace TES3MP::Native
             }
             }
         }
+        if (combat) for (size_t i = 0; i < combat->neighborCasts.size(); ++i)
+            if (auto& pending = combat->neighborCasts[i]; pending)
+            {
+                const size_t index = i + 3;
+                if (pending->life != victimLife(index).generation || victimLife(index).respawnTick
+                    || combat->actors[index][8][2] <= 0 || combat->knockedDown[index]
+                    || hasParalysis(timedEffects, index) || combat->hitRecoveryTicks[index]) pending.reset();
+            }
         for (auto& body : dynamicActors.bodies)
             if (body.casting)
             {
@@ -10672,7 +10838,8 @@ namespace TES3MP::Native
                         if (effect.actor < 2)
                         {
                             const auto* player = players.findPlayer(mBinding.mPlayers[effect.actor]);
-                            if (!player || player->transform().cell() != actorCell(before))
+                            if (!player || (mBinding.mCellActors ? !worldDomain(player->transform().cell())
+                                : player->transform().cell() != actorCell(before)))
                                 throw std::invalid_argument("Summon owner outside bound actor processing cell");
                             const auto& p = player->transform().position();
                             origin = {float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)};
@@ -10687,10 +10854,13 @@ namespace TES3MP::Native
                         }
                         const auto point = MWMechanics::summonSpawnPoint(osg::Vec3f(origin[0], origin[1], origin[2]),
                             yaw, 0, 120.f, true, [&](const osg::Vec3f& to, const osg::Vec3f& from) {
-                                return mBinding.mNavigatingActor->lineOfSight(
+                                return sceneForIndex(size_t(effect.actor)).lineOfSight(
                                     {from.x(), from.y(), from.z()}, {to.x(), to.y(), to.z()});
                             });
                         DynamicActorSet::Body body{{actor, base, {point.x(), point.y(), point.z()}, yaw}, inventory.mActor};
+                        if (mBinding.mCellActors) body.collision.cell = mBinding.mEngineCells.at(effect.actor < 2
+                            ? players.findPlayer(mBinding.mPlayers[size_t(effect.actor)])->transform().cell()
+                            : actorCell(effect.actor == 2 ? before : committedNeighbors.at(size_t(effect.actor) - 3)));
                         // Validate collision/animation resources before remembering a successful body.
                         std::vector<DynamicActorBody> collision;
                         for (const auto& prior : actors.bodies) collision.push_back(prior.collision);
@@ -10895,12 +11065,13 @@ namespace TES3MP::Native
                         }, [&](unsigned count) { return Misc::Rng::rollDice(count, rng); });
                     body.frame = 0;
                 }
-                else if (body.group && (index >= 2 ? bodyAreaActive : std::ranges::any_of(players.activeSessions(),
+                else if (body.group && (index >= 2 ? npcAreaActive(index) : std::ranges::any_of(players.activeSessions(),
                         [&](const auto& session) { return session.playerId() == mBinding.mPlayers[index]; })))
                     body.frame = std::min(body.frame + 1, (*bound.mBoundHits)[index].deaths[body.group - 1]);
             }
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
         }
+        if (step) (memberScene ? memberScene : mBinding.mNavigatingActor)->prepareSceneryDoors(*step, doors);
         auto transaction = std::make_unique<ActorTransaction>(*this, std::move(command), std::move(step),
             std::move(melee), target, contact, std::move(combat), std::move(life),
             std::move(neighborLives),
@@ -11065,8 +11236,10 @@ namespace TES3MP::Native
         std::ranges::sort(swings, {}, &PlayerSwingSnapshot::playerId);
         std::vector<ActorCombatSnapshot> visible;
         const auto scene = moving ? moving->snapshot() : binding.mNavigatingActor->snapshot();
-        if (actorCell(scene) == player->transform().cell())
+        if (binding.mCellActors || actorCell(scene) == player->transform().cell())
         {
+            if (actorCell(scene) == player->transform().cell())
+            {
             const auto npc = loadCombatStats(mRuntime.mStore, combat.actors[2], effects, 2);
             visible.push_back({ActorId::fromValue(scene.mActor).value(), combatRevision,
                 npc.getHealth().getCurrent(), npc.getHealth().getModified(),
@@ -11083,6 +11256,7 @@ namespace TES3MP::Native
                 projected.castRange = uint8_t(casting->range); projected.castElapsed = uint16_t(casting->elapsed);
                 projected.castRelease = uint16_t(timing.releaseTicks); projected.castStop = uint16_t(timing.stopTicks);
             }
+            }
             if (combat.actors.size() > 3)
             {
                 const auto neighbors = moving ? moving->neighborSnapshots() : binding.mNavigatingActor->neighborSnapshots();
@@ -11092,6 +11266,7 @@ namespace TES3MP::Native
                 {
                     if (combat.npcPlacements[i + 1] != neighbors[i].mActor)
                         throw std::invalid_argument("Native projected neighbor placement changed");
+                    if (actorCell(neighbors[i]) != player->transform().cell()) continue;
                     const auto stats = loadCombatStats(mRuntime.mStore, combat.actors[i + 3], effects, i + 3);
                     visible.push_back({ActorId::fromValue(neighbors[i].mActor).value(), combatRevision,
                         stats.getHealth().getCurrent(), stats.getHealth().getModified(),
@@ -11218,7 +11393,8 @@ namespace TES3MP::Native
                             [](const auto& body) { return body.collision.actor; }); body != binding.mDynamicActors.bodies.end())
                         dynamicCast = body->casting;
                 const auto& pending = index < 2 ? combat.playerCasts[index]
-                    : index == 2 ? (moving ? moving->casting : mNpcCast) : dynamicCast;
+                    : index == 2 ? (moving ? moving->casting : mNpcCast)
+                    : binding.mCellActors && index - 3 < combat.neighborCasts.size() ? combat.neighborCasts[index - 3] : dynamicCast;
                 if (pending && !p.dead && p.bodyState == 1)
                 {
                     const auto timing = (index < 2 ? binding.mPlayerCasts[index]
@@ -11247,10 +11423,11 @@ namespace TES3MP::Native
         }
         std::vector<PhysicalProjectileSnapshot> projectiles;
         std::vector<MagicProjectileSnapshot> magicProjectiles;
-        if (binding.mRangedFlight && actorCell(scene) == player->transform().cell())
+        if (binding.mRangedFlight && (binding.mCellActors || actorCell(scene) == player->transform().cell()))
         {
             projectiles.reserve(combat.arrows.size());
             for (const auto& arrow : combat.arrows)
+                if (!binding.mCellActors || arrow.cell == player->transform().cell())
                 projectiles.push_back({uint8_t(arrow.casterKind), uint8_t(arrow.terminal),
                     arrow.caster, arrow.casterLife, arrow.command, arrow.releaseTick, arrow.ammoRecord,
                     arrow.position, arrow.velocity});
@@ -11259,11 +11436,12 @@ namespace TES3MP::Native
                     < std::tuple(b.casterKind, b.caster, b.casterLife, b.command);
             });
         }
-        if (binding.mMagicProjectileCollection && actorCell(scene) == player->transform().cell())
+        if (binding.mMagicProjectileCollection && (binding.mCellActors || actorCell(scene) == player->transform().cell()))
         {
             const auto& flights = moving ? moving->projectiles : mProjectiles;
             magicProjectiles.reserve(flights.size());
             for (const auto& flight : flights)
+                if (!binding.mCellActors || flight.cell == player->transform().cell())
                 magicProjectiles.push_back({uint8_t(flight.casterKind == 2 ? 2 : 1), uint8_t(flight.sourceKind),
                     flight.caster, std::max<uint64_t>(1, flight.casterLife), flight.commandId,
                     magicVisualRecord(flight.sourceKind, flight.effectSource),
@@ -11306,18 +11484,43 @@ namespace TES3MP::Native
             return caster && (caster->playerId() == observer->playerId()
                 || caster->transform().cell() == observer->transform().cell());
         };
+        const auto npcVisible = [&](uint64_t id) {
+            if (!mBinding.mCellActors) return actorVisible;
+            if (id == scene.mActor) return observer->transform().cell() == actorCell(scene);
+            const auto frames = staged->actor ? staged->actor->neighborSnapshots()
+                : mBinding.mNavigatingActor->neighborSnapshots();
+            const auto frame = std::ranges::find(frames, id, &ActorSceneSnapshot::mActor);
+            return frame != frames.end() && observer->transform().cell() == actorCell(*frame);
+        };
         auto actorEvents = staged->actorHits;
         auto playerHits = staged->playerHits;
         auto magicEvents = staged->spellCasts;
         auto cues = staged->magicImpactCues;
         if (mBinding.mPlayerTravel)
         {
-            if (!actorVisible) { actorEvents.clear(); playerHits.clear(); }
+            if (mBinding.mCellActors)
+            {
+                std::erase_if(actorEvents, [&](const auto& event) {
+                    return !npcVisible(event.attackerActorId.value()) || !playerVisible(event.targetPlayerId.value());
+                });
+                std::erase_if(playerHits, [&](const auto& event) {
+                    return !npcVisible(event.targetActorId.value()) || !playerVisible(event.attackerPlayerId.value());
+                });
+            }
+            else if (!actorVisible) { actorEvents.clear(); playerHits.clear(); }
             std::erase_if(magicEvents, [&](const auto& event) {
-                return event.actorCaster() ? !actorVisible : !playerVisible(event.casterId());
+                return event.actorCaster() ? !npcVisible(event.casterId()) : !playerVisible(event.casterId());
             });
             std::erase_if(cues, [&](const auto& cue) {
-                return cue.casterKind == 2 ? !actorVisible : !playerVisible(cue.caster);
+                if (mBinding.mCellActors)
+                {
+                    for (const auto& flights : {std::span<const ActorCampaignProjectile>(mProjectiles),
+                            std::span<const ActorCampaignProjectile>(staged->projectiles)})
+                        for (const auto& flight : flights)
+                            if (flight.caster == cue.caster && flight.commandId == cue.command && flight.cell)
+                                return *flight.cell != observer->transform().cell();
+                }
+                return cue.casterKind == 2 ? !npcVisible(cue.caster) : !playerVisible(cue.caster);
             });
         }
         if (playerHits.empty() && actorEvents.empty() && magicEvents.empty() && cues.empty()) return {};

@@ -62,25 +62,17 @@ inactive areas pause, launch revalidates.
 combat. Rolls persist while equipped; replacement and respawn install new sources.
 Recovery validates them without rolling. Modifiers overlay detached stats.
 
-**Connected consumers.** Stock awareness receives explicit canonical sneak/facing
-context. Life-bound jump controls, inertia and accumulated falling persist in
-movement-enabled scene image 3; landing damage/death retains the grounded frame.
-Changed resource binding requires fresh campaigns. Abilities/constants share
-ordered source preparation, stat arguments and retained rolls; suppressing
-Invisibility preserves other ordinals. General script execution remains M5.
+**Connected consumers.** Stock awareness receives canonical sneak/facing context.
+Life-bound jump controls, inertia and falling persist in movement scene image 3;
+landing damage retains the grounded frame. Bind resources to fresh campaigns.
+Abilities/constants share ordered preparation and retained rolls; suppressing
+Invisibility preserves other ordinals. General scripts remain M5.
 
-**Combat latency.** Predict swing/cast presentation; the server owns consequences.
-Use server-time contacts pending measurements. Replicate reliable action/life
-events and latest-wins motion. V31 uses a 32-unit sphere until shared hulls bind.
-
-**Melee state.** Stock negative fatigue/health-hit rules govern damage and
-knockout/knockdown/get-up. Persist actor-bound clips, targets and clocks;
-inactivity pauses, death clears, recovery never repeats equip. Breakage removes
-passives; fresh campaigns.
-
-**Actor presentation (V52/V53).** Clients sample committed motion/action;
-clips/lives persist, pauses hold. Player release/payment/interruption commit
-atomically; offline casts pause. Fresh campaigns.
+**Combat latency/presentation.** Predict presentation; server commits consequences.
+Use server-time contacts, reliable action/life events and latest-wins motion.
+Stock damage/knockout/recovery rules and actor-bound clips/targets/clocks persist.
+Inactivity pauses; death clears. Recovery never repeats equipment; breakage removes
+passives. Player release/payment/interruption commit atomically; offline casts pause.
 
 **V64 physical aim.** T3MC carries bounded world aim. The server saves flight
 direction, charges at the authored key and sweeps contact. World misses use target
@@ -97,11 +89,9 @@ OpenMW player movement. The server owns source, caster and deadline.
 WaterBreathing's index zero differs from legacy ResistMagicka by source identity.
 Movement cutover still requires M4 collision/combat acceptance.
 
-**AI source navigation.** Stock target rules gate disposition effects per actor
-record. Command stages pursuit of its living player or bound actor caster only
-while caster life matches the source. Expiry restores authored travel in the same
-tick; rejected writes retain path and position. Combat aggression, flee routes
-and dialogue still need owning consumers.
+**AI source navigation.** Stock target rules gate disposition per record. Command
+pursues its living, life-matched caster. Expiry restores authored travel atomically;
+rejection preserves path/position. Dialogue retains its owning context.
 
 **Movement smoothness (target).** After unified collision, use stock physics,
 interpolation and bounded extrapolation. Restore acknowledged physics and replay
@@ -299,17 +289,14 @@ Cleanup/RNG/membership/relocation/zero velocity/epoch share durability. Recovery
 history/baselines; old-life timestamps reject. Capability 32 gates player life semantics.
 Quest credit and wider spawn policy remain M5.
 
-**Committed bodies (V73).** Wrap V72 with bounded durable death action/group/frame. Select stock groups once with durable RNG and sample
-committed active clocks. Clip stop completes presentation without local death
-cleanup; negotiated lives retain server-owned respawn. Capability 33 gates recipes;
-published capability-30 aliases appear once. Recover projectiles according to
-WhenStrikes application; preserve non-strike consumption/state in the existing transaction.
+**Committed bodies (V73).** Persist stock death action/group/frame and RNG. Sample
+active clocks without client death cleanup; capability 33 gates recipes. Publish
+capability-30 aliases once. Projectile WhenStrikes application and consumption
+remain in the inventory transaction.
 
-**Spell sources (V74).** Persist per-actor/source power deadlines on canonical game time with stock 24-hour eligibility.
-Reuse authored/racial/stock-autocalculated sources, launch rules and Dispel immunity.
-Travel runs by recipient/effect ordinal inside the existing tick; staged relocations
-compose before canonical publication. Stock ignored target/range entries preserve
-other ordinals. Scripts and spellbook mutation remain M5.
+**Spell sources (V74).** Persist canonical 24-hour power deadlines. Reuse stock
+sources/launch/Dispel rules. Travel composes recipient/ordinal relocations before
+publication; ignored entries preserve other ordinals. Scripts/spellbooks remain M5.
 
 **Passive Self (V75).** Wrap V74 with bounded application witnesses/Corprus clocks;
 shared stock handlers retain resistance,
@@ -330,6 +317,15 @@ ordinal results with caster/target lives. Reuse stock cast/hit/protection/object
 helpers; snapshots own continuous loops/cleanup. Admit bounded cue chunks atomically;
 gameplay events occur once. Reconnect restores loops without transient replay.
 Capability 33 retains legacy cues; presentation never enters saves.
+
+**Shared cell combat (V77).** Discover placed actors automatically within existing
+campaign capacity. Share physics/navigation within an interior or bounded exterior
+neighborhood; never share coordinate space between interiors. Occupancy is a union,
+not a per-player simulation. Retain one campaign transaction and canonical writer;
+freeze empty-cell actor clocks, retain collision for flights, and unload the graph
+when demand ends. V77 wraps V76 with flight cells and static cast clocks; dynamic
+actor metadata retains its spawn cell. Unsupported script/leveled/corpse services
+reject at startup rather than silently omitting NPCs. Full AI packages remain M5.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

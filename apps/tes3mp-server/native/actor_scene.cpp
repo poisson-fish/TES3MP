@@ -186,6 +186,14 @@ namespace TES3MP::Native
         };
         std::vector<std::unique_ptr<Terrain>> mTerrain;
         std::vector<ESM::RefId> mCells;
+        bool mMultipleDomains = false;
+        std::vector<ActorSceneDoor> localDoors(std::span<const ActorSceneDoor> doors) const
+        {
+            std::vector<ActorSceneDoor> result(doors.begin(), doors.end());
+            if (mMultipleDomains)
+                std::erase_if(result, [&](const auto& door) { return !mOrdinaryDoors.contains(door.mId); });
+            return result;
+        }
         std::map<const btCollisionObject*, uint64_t> mIdentities;
         std::map<uint64_t, btCollisionObject*> mActorObstacles;
         std::unique_ptr<MWPhysics::ActorFrameData> mActor;
@@ -374,7 +382,9 @@ namespace TES3MP::Native
 
         void validateDoors(std::span<const ActorSceneDoor> doors) const
         {
-            if (doors.size() != mDoors.size()) throw std::invalid_argument("Actor door domain mismatch");
+            if (doors.size() != mDoors.size()) throw std::invalid_argument("Actor door domain mismatch: actor="
+                + std::to_string(mActorId) + " received=" + std::to_string(doors.size())
+                + " expected=" + std::to_string(mDoors.size()));
             for (size_t i = 0; i < doors.size(); ++i)
             {
                 if (doors[i].mId != mDoors[i].mId) throw std::invalid_argument("Actor door identity mismatch");
@@ -403,7 +413,7 @@ namespace TES3MP::Native
 
         Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation, Impl* sharedParent = nullptr,
-            std::span<const DynamicActorBody> dynamic = {})
+            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false)
             : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
@@ -412,7 +422,7 @@ namespace TES3MP::Native
               mWorld(mCollision->world), mSharedParent(sharedParent), mActorId(actor),
               mBaseAnimation(baseAnimation), mBeastAnimation(beastAnimation)
         {
-            if (cells.empty() || cells.size() > 9 || !actor
+            if (cells.empty() || cells.size() > 9 || (!actor && !scenery)
                 || baseAnimation.empty() || baseAnimation.size() > 1024
                 || beastAnimation.empty() || beastAnimation.size() > 1024)
                 throw std::invalid_argument("Interior NPC binding outside bounds");
@@ -594,7 +604,7 @@ namespace TES3MP::Native
                 ptr.getRefData().setPosition(position);
                 addBody(ptr, value.actor);
             }
-            if (!mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
+            if (actor && !mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
             if (mSharedParent)
             {
                 const auto shared = mSharedParent->mActorObstacles.find(actor);
@@ -784,10 +794,10 @@ namespace TES3MP::Native
         : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation,
-        std::span<const uint64_t> neighbors, Impl* sharedParent, std::span<const DynamicActorBody> dynamic)
-        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent, dynamic))
+        std::span<const uint64_t> neighbors, Impl* sharedParent, std::span<const DynamicActorBody> dynamic, bool scenery)
+        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent, dynamic, scenery))
     {
-        if (!contains(snapshot().mPosition))
+        if (actor && !contains(snapshot().mPosition))
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
         if (!neighbors.empty())
         {
@@ -805,10 +815,65 @@ namespace TES3MP::Native
         std::span<const uint64_t> neighbors, std::span<const DynamicActorBody> dynamic)
         : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr, dynamic) {}
 
+    InteriorActorScene::InteriorActorScene(Loadout& loadout,
+        const std::vector<std::pair<uint64_t, std::vector<ESM::RefId>>>& actors,
+        const std::string& baseAnimation, const std::string& beastAnimation,
+        std::span<const DynamicActorBody> dynamic, std::span<const ESM::RefId> allCells)
+    {
+        if (actors.empty() || actors.size() > 37)
+            throw std::invalid_argument("Actor processing domain capacity exceeded");
+        std::set<uint64_t> identities;
+        std::map<std::vector<ESM::RefId>, Impl*> parents;
+        InteriorActorScene* previous = nullptr;
+        for (const auto& [id, cells] : actors)
+        {
+            if (!id || !identities.insert(id).second)
+                throw std::invalid_argument("Duplicate processing actor");
+            std::vector<DynamicActorBody> bodies;
+            for (const auto& body : dynamic)
+                if (std::ranges::find(cells, body.cell) != cells.end()) bodies.push_back(body);
+            auto next = std::unique_ptr<InteriorActorScene>(new InteriorActorScene(loadout, cells, id,
+                baseAnimation, beastAnimation, {}, parents[cells], bodies));
+            next->mImpl->mMultipleDomains = true;
+            next->mImpl->mDynamicDestination = previous != nullptr;
+            if (!parents[cells]) parents[cells] = next->mImpl.get();
+            if (!previous) { mImpl.swap(next->mImpl); previous = this; }
+            else { previous->mNeighbor = std::move(next); previous = previous->mNeighbor.get(); }
+        }
+        for (const auto cell : allCells)
+        {
+            if (std::ranges::any_of(actors, [&](const auto& domain) {
+                    return std::ranges::find(domain.second, cell) != domain.second.end(); })) continue;
+            auto scenery = std::unique_ptr<InteriorActorScene>(new InteriorActorScene(loadout,
+                std::array{cell}, 0, baseAnimation, beastAnimation, {}, nullptr, {}, true));
+            scenery->mImpl->mMultipleDomains = true;
+            mImpl->mFingerprint += scenery->fingerprint();
+            mScenery.push_back(std::move(scenery));
+        }
+    }
+
+    const InteriorActorScene& InteriorActorScene::forActor(uint64_t actor) const
+    {
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->actorId() == actor) return *scene;
+        throw std::invalid_argument("Collision actor outside processing domain");
+    }
+    InteriorActorScene& InteriorActorScene::forActor(uint64_t actor)
+    { return const_cast<InteriorActorScene&>(std::as_const(*this).forActor(actor)); }
+    const InteriorActorScene& InteriorActorScene::forCell(ESM::RefId cell) const
+    {
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->mImpl && std::ranges::find(scene->mImpl->mCells, cell) != scene->mImpl->mCells.end()) return *scene;
+        for (const auto& scene : mScenery)
+            if (std::ranges::find(scene->mImpl->mCells, cell) != scene->mImpl->mCells.end()) return *scene;
+        throw std::invalid_argument("Collision cell outside active processing domain");
+    }
+
     void InteriorActorScene::installActorSet(InteriorActorScene& candidate) noexcept
     {
         mImpl.swap(candidate.mImpl);
         mNeighbor.swap(candidate.mNeighbor);
+        mScenery.swap(candidate.mScenery);
         mDormant.swap(candidate.mDormant);
     }
     void InteriorActorScene::replaceWorld(const ActorSceneWorld& world)
@@ -834,6 +899,8 @@ namespace TES3MP::Native
         }
         for (const auto& [id, state] : world.objects)
         {
+            if (scene.mMultipleDomains && (!world.cells.contains(id)
+                || std::ranges::find(scene.mCells, world.cells.at(id)) == scene.mCells.end())) continue;
             if (!id || !live.insert(id).second || state.mRef.mCount <= 0
                 || scene.mBodies.size() == MaxBodies || (!scene.mSharedParent
                     && std::ranges::any_of(scene.mIdentities, [id](const auto& entry) { return entry.second == id; })))
@@ -871,6 +938,7 @@ namespace TES3MP::Native
             scene.mNavigator->wait(DetourNavigator::WaitConditionType::allJobsDone, nullptr);
         }
         if (mNeighbor) mNeighbor->replaceWorld(world);
+        for (const auto& scene : mScenery) scene->replaceWorld(world);
     }
     void InteriorActorScene::rebuildTravel()
     {
@@ -1010,9 +1078,8 @@ namespace TES3MP::Native
             bool needsCollision(btBroadphaseProxy* proxy) const override
             { return proxy->m_clientObject != ignored && ClosestConvexResultCallback::needsCollision(proxy); }
         } hit(start, end, [&]() -> const btCollisionObject* {
-            for (auto* scene = this; scene; scene = scene->mNeighbor.get())
-                if (scene->mImpl->mActorId == casterActor)
-                    return scene->mImpl->mActor->mCollisionObject;
+            for (const auto& [object, id] : mImpl->mIdentities)
+                if (id == casterActor) return object;
             return nullptr;
         }());
         hit.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
@@ -1025,9 +1092,9 @@ namespace TES3MP::Native
             if (!std::isfinite(point[axis]) || std::abs(point[axis]) > 1e7)
                 throw std::invalid_argument("Projectile impact position invalid");
         uint64_t actor = 0;
-        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
-            if (hit.m_hitCollisionObject == scene->mImpl->mActor->mCollisionObject)
-            { actor = scene->mImpl->mActorId; break; }
+        if (hit.m_hitCollisionObject->getBroadphaseHandle()->m_collisionFilterGroup == MWPhysics::CollisionType_Actor
+            && mImpl->mIdentities.contains(hit.m_hitCollisionObject))
+            actor = mImpl->mIdentities.at(hit.m_hitCollisionObject);
         return ActorProjectileContact{actor, {float(point.x()), float(point.y()), float(point.z())},
             mImpl->mIdentities.contains(hit.m_hitCollisionObject) && (mImpl->mIdentities.at(hit.m_hitCollisionObject) >> 63)
                 ? mImpl->mIdentities.at(hit.m_hitCollisionObject) : 0};
@@ -1240,13 +1307,26 @@ namespace TES3MP::Native
     void InteriorActorScene::unload()
     {
         if (!mImpl) return;
+        auto doors = mImpl->mDoors;
+        if (mImpl->mMultipleDomains)
+        {
+            for (const auto& scene : mScenery)
+                doors.insert(doors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+            for (auto* scene = mNeighbor.get(); scene; scene = scene->mNeighbor.get())
+                if (scene->mImpl) doors.insert(doors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+            std::ranges::sort(doors, {}, &ActorSceneDoor::mId);
+            doors.erase(std::unique(doors.begin(), doors.end(), [](const auto& a, const auto& b) {
+                return a.mId == b.mId;
+            }), doors.end());
+        }
         if (mNeighbor) mNeighbor->unload();
         auto dormant = std::make_unique<Dormant>(Dormant{
             snapshot(), transform(), fingerprint(),
             mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel),
-            mImpl->mDoors, arrived()});
+            std::move(doors), arrived()});
         mDormant.swap(dormant);
         mImpl.reset();
+        mScenery.clear();
     }
 
     void InteriorActorScene::reload(InteriorActorScene& fresh)
@@ -1262,6 +1342,7 @@ namespace TES3MP::Native
         mImpl.swap(fresh.mImpl);
         mDormant.swap(fresh.mDormant);
         mNeighbor.swap(fresh.mNeighbor);
+        mScenery.swap(fresh.mScenery);
     }
 
     void InteriorActorScene::enableMovementEffects()
@@ -1564,28 +1645,37 @@ namespace TES3MP::Native
     void InteriorActorScene::bindDoors(std::span<const uint64_t> doors, bool avoidance)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
-        if (mImpl->mNavigator || !mImpl->mDoors.empty() || (doors.empty() && !avoidance) || doors.size() > 128)
+        if (mImpl->mNavigator || !mImpl->mDoors.empty() || (doors.empty() && !avoidance)
+            || doors.size() > (mImpl->mMultipleDomains ? 4096 : 128))
             throw std::invalid_argument("Actor door binding outside startup bounds");
         std::vector<ActorSceneDoor> bound;
         auto fingerprint = mImpl->mFingerprint + (avoidance ? "npc-door-avoidance-1\n" : "npc-door-contact-1\n");
         for (auto id : doors)
         {
             const auto found = mImpl->mOrdinaryDoors.find(id);
+            if (mImpl->mMultipleDomains && found == mImpl->mOrdinaryDoors.end()) continue;
             if (found == mImpl->mOrdinaryDoors.end() || (!bound.empty() && bound.back().mId >= id))
                 throw std::invalid_argument("Actor door collision identity absent or unordered");
             bound.push_back({id, mImpl->mTransforms[found->second].mPosition.rot[2]});
+            if (bound.size() > 128) throw std::invalid_argument("Local actor door capacity exceeded");
             fingerprint += std::to_string(id) + '\n';
         }
         mImpl->mDoors.swap(bound);
         mImpl->mFingerprint.swap(fingerprint);
         mImpl->mAvoidanceEnabled = avoidance;
         if (mNeighbor) mNeighbor->bindDoors(doors, avoidance);
+        for (const auto& scene : mScenery) scene->bindDoors(doors, avoidance);
     }
 
     ActorDoorContact InteriorActorScene::doorContact(uint64_t door, float proposedAngle, float delta) const
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         const auto bound = std::ranges::find(mImpl->mDoors, door, &ActorSceneDoor::mId);
+        if (mImpl->mMultipleDomains && bound == mImpl->mDoors.end())
+            for (const auto& scene : mScenery)
+                if (scene->mImpl->mOrdinaryDoors.contains(door)) return scene->doorContact(door, proposedAngle, delta);
+        if (mImpl->mMultipleDomains && bound == mImpl->mDoors.end() && mNeighbor)
+            return mNeighbor->doorContact(door, proposedAngle, delta);
         if (bound == mImpl->mDoors.end() || !std::isfinite(delta) || std::abs(delta) > osg::PIf / 2)
             throw std::invalid_argument("Actor door query outside domain");
         const auto index = mImpl->mOrdinaryDoors.at(door);
@@ -1606,7 +1696,8 @@ namespace TES3MP::Native
             MWPhysics::DoorContactResult contact(&query, body->mObject.get(), position.asVec3(), delta);
             mImpl->mWorld.contactPairTest(&query, body->mObject.get(), contact);
             result.mBlocked |= contact.mBlocked;
-            result.mSelectedActor |= contact.mBlocked && body->mObject.get() == mImpl->mActor->mCollisionObject;
+            result.mSelectedActor |= contact.mBlocked && mImpl->mActor
+                && body->mObject.get() == mImpl->mActor->mCollisionObject;
         }
         return result;
     }
@@ -1651,9 +1742,21 @@ namespace TES3MP::Native
         std::vector<char> bytes;
         std::vector<ActorSceneDoor> doors;
         Impl::Travel travel;
+        std::vector<std::pair<std::shared_ptr<const char>, std::vector<ActorSceneDoor>>> sceneryDoors;
     };
     InteriorActorScene::Prepared::Prepared(std::unique_ptr<State> state) : mState(std::move(state)) {}
     InteriorActorScene::Prepared::~Prepared() = default;
+    void InteriorActorScene::prepareSceneryDoors(Prepared& prepared, std::span<const ActorSceneDoor> doors) const
+    {
+        auto& frames = prepared.mState->sceneryDoors;
+        frames.clear();
+        for (const auto& scene : mScenery)
+        {
+            auto local = scene->mImpl->localDoors(doors);
+            scene->mImpl->validateDoors(local);
+            frames.emplace_back(scene->mImpl->mLifetime, std::move(local));
+        }
+    }
     ActorSceneSnapshot InteriorActorScene::Prepared::snapshot() const
     {
         const auto& frame = *mState->frame;
@@ -1777,7 +1880,15 @@ namespace TES3MP::Native
     void InteriorActorScene::restore(std::span<const char> bytes)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
-        auto prepared = prepareRestore(bytes, mImpl->mDoors);
+        std::vector<ActorSceneDoor> doors;
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            doors.insert(doors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+        for (const auto& scene : mScenery)
+            doors.insert(doors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+        std::ranges::sort(doors, {}, &ActorSceneDoor::mId);
+        doors.erase(std::unique(doors.begin(), doors.end(), [](const auto& a, const auto& b) {
+            return a.mId == b.mId; }), doors.end());
+        auto prepared = prepareRestore(bytes, doors);
         install(*prepared);
     }
 
@@ -1785,6 +1896,7 @@ namespace TES3MP::Native
         std::span<const char> bytes, std::span<const ActorSceneDoor> doors, std::span<const uint64_t> removed)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        const auto allDoors = std::vector<ActorSceneDoor>(doors.begin(), doors.end());
         std::unique_ptr<Prepared> neighbor;
         if (mNeighbor)
         {
@@ -1792,6 +1904,8 @@ namespace TES3MP::Native
             neighbor = mNeighbor->prepareRestore(adjacent, doors, removed);
             bytes = primary;
         }
+        const auto localDoors = mImpl->localDoors(doors);
+        doors = localDoors;
         mImpl->validateDoors(doors);
         if (bytes.size() > 64 * 1024) throw std::invalid_argument("Actor image exceeds bound");
         size_t offset = 0;
@@ -1892,6 +2006,7 @@ namespace TES3MP::Native
             prepared->mState->bytes = joinActorImages(prepared->mState->bytes, neighbor->image());
             prepared->mNeighbor = std::move(neighbor);
         }
+        prepareSceneryDoors(*prepared, allDoors);
         return prepared;
     }
 
@@ -1904,6 +2019,8 @@ namespace TES3MP::Native
         std::optional<std::array<float, 3>> destination)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        const auto localDoors = mImpl->localDoors(doors);
+        doors = localDoors;
         mImpl->validateDoors(doors);
         if (!mImpl->mNavigator) throw std::logic_error("Actor navigation unavailable");
         mImpl->validateMovement(movement);
@@ -1994,34 +2111,37 @@ namespace TES3MP::Native
     void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
         std::span<const ActorSceneDoor> doors,
         std::span<const std::optional<std::array<float, 3>>> destinations,
-        std::span<const std::optional<std::array<float, 3>>> fleeEnemies)
+        std::span<const std::optional<std::array<float, 3>>> fleeEnemies, std::span<const uint8_t> active)
     {
         if (!mImpl || prepared.mState->lifetime != mImpl->mLifetime
             || movements.size() != destinations.size() || movements.size() != neighborSnapshots().size()
-            || (!fleeEnemies.empty() && fleeEnemies.size() != movements.size()))
+            || (!fleeEnemies.empty() && fleeEnemies.size() != movements.size())
+            || (!active.empty() && active.size() != movements.size()))
             throw std::invalid_argument("Neighbor set navigation binding invalid");
         std::vector<InteriorActorScene*> scenes{this};
         for (auto* next = mNeighbor.get(); next; next = next->mNeighbor.get()) scenes.push_back(next);
         struct RestoreBodies
         {
-            btCollisionWorld& world;
-            std::vector<std::pair<btCollisionObject*, btTransform>> bodies;
+            struct Body { btCollisionWorld* world; btCollisionObject* body; btTransform transform; };
+            std::vector<Body> bodies;
             ~RestoreBodies()
             {
-                for (auto& [body, transform] : bodies)
-                { body->setWorldTransform(transform); world.updateSingleAabb(body); }
+                for (auto& [world, body, transform] : bodies)
+                { body->setWorldTransform(transform); world->updateSingleAabb(body); }
             }
-        } restore{mImpl->mWorld};
+        } restore;
         Prepared* parent = &prepared;
         for (size_t i = 0; i < movements.size(); ++i)
         {
             auto* previous = scenes[i]->mImpl->mActor->mCollisionObject;
-            restore.bodies.emplace_back(previous, previous->getWorldTransform());
+            restore.bodies.push_back({&scenes[i]->mImpl->mWorld, previous, previous->getWorldTransform()});
             auto candidate = scenes[i]->mImpl->actorTransform(*parent->mState->frame);
             previous->setWorldTransform(candidate);
-            mImpl->mWorld.updateSingleAabb(previous);
-            parent->mNeighbor = scenes[i + 1]->prepareNavigation(movements[i], doors, destinations[i]);
-            if (!fleeEnemies.empty() && fleeEnemies[i]
+            scenes[i]->mImpl->mWorld.updateSingleAabb(previous);
+            parent->mNeighbor = !active.empty() && !active[i]
+                ? scenes[i + 1]->prepareRestore(scenes[i + 1]->image(), doors)
+                : scenes[i + 1]->prepareNavigation(movements[i], doors, destinations[i]);
+            if ((active.empty() || active[i]) && !fleeEnemies.empty() && fleeEnemies[i]
                 && (!destinations[i] || parent->mNeighbor->pathUnavailable()))
                 parent->mNeighbor = scenes[i + 1]->prepareBlindRun(movements[i], doors, *fleeEnemies[i]);
             parent = parent->mNeighbor.get();
@@ -2046,6 +2166,8 @@ namespace TES3MP::Native
         const std::array<float, 3>& enemy)
     {
         if (!mImpl || !mImpl->mNavigator) throw std::logic_error("Flee movement unavailable");
+        const auto localDoors = mImpl->localDoors(doors);
+        doors = localDoors;
         mImpl->validateDoors(doors);
         for (float value : enemy)
             if (!std::isfinite(value) || std::abs(value) > 1e7f)
@@ -2082,8 +2204,14 @@ namespace TES3MP::Native
             std::move(bytes), {doors.begin(), doors.end()}, std::move(travel)})));
     }
     bool InteriorActorScene::canInstall(const Prepared& prepared) const noexcept
-    { return mImpl && prepared.mState->lifetime == mImpl->mLifetime
-        && (!mNeighbor || (prepared.mNeighbor && mNeighbor->canInstall(*prepared.mNeighbor))); }
+    {
+        if (!mImpl || prepared.mState->lifetime != mImpl->mLifetime
+            || prepared.mState->sceneryDoors.size() != mScenery.size()
+            || (mNeighbor && (!prepared.mNeighbor || !mNeighbor->canInstall(*prepared.mNeighbor)))) return false;
+        for (size_t i = 0; i < mScenery.size(); ++i)
+            if (prepared.mState->sceneryDoors[i].first != mScenery[i]->mImpl->mLifetime) return false;
+        return true;
+    }
 
     void InteriorActorScene::install(Prepared& prepared) noexcept
     {
@@ -2095,6 +2223,12 @@ namespace TES3MP::Native
         mImpl->applyDoors(mImpl->mDoors);
         mImpl->updateTransform();
         if (mNeighbor) mNeighbor->install(*prepared.mNeighbor);
+        for (size_t i = 0; i < mScenery.size(); ++i)
+        {
+            auto& scene = *mScenery[i]->mImpl;
+            scene.mDoors.swap(state.sceneryDoors[i].second);
+            scene.applyDoors(scene.mDoors);
+        }
     }
 
 }

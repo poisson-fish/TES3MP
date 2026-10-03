@@ -129,6 +129,8 @@ namespace TES3MP::Native
         bool mPlayerLifecycle = false; // V72: life-owned consequences and respawn share the actor/spatial commit.
         bool mCommittedDeath = false; // V73: durable body-bound death clocks, sampled by the shared timeline.
         bool mGenericTargets = false; // V76: collision selects Target recipients.
+        bool mCellActors = false; // V77: all supported bound placements, with per-cell activity/collision.
+        std::map<CellId, ESM::RefId> mEngineCells;
         bool mPassiveSelf = false; // V75: complete passive Self lifecycle.
         bool mPowerSources = false; // V74: stock powers with durable game-time cooldowns.
         DynamicActorSet mDynamicActors;
@@ -288,6 +290,7 @@ namespace TES3MP::Native
             const DynamicActorSet* dynamicActors = nullptr) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
+        const InteriorActorScene& collisionScene(CellId cell) const;
         float meleeReach() const;
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
             uint64_t requested, float reach) const;

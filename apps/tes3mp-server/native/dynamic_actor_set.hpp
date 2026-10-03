@@ -92,6 +92,18 @@ namespace TES3MP::Native
                         putAreaWord(bytes, value);
                 }
             }
+            if (std::ranges::any_of(bodies, [](const auto& body) { return !body.collision.cell.empty(); }))
+            {
+                putAreaWord(bytes, 0x314c4c4543); // CELL1: explicit processing cells, V77.
+                for (const auto& body : bodies)
+                {
+                    if (body.collision.cell.empty()) throw std::invalid_argument("Dynamic actor cell missing");
+                    const auto cell = body.collision.cell.serializeText();
+                    if (cell.size() > 1024) throw std::invalid_argument("Dynamic actor cell too long");
+                    putAreaWord(bytes, cell.size());
+                    bytes.insert(bytes.end(), cell.begin(), cell.end());
+                }
+            }
             return bytes;
         }
         static DynamicActorSet restore(std::span<const char> bytes)
@@ -137,6 +149,20 @@ namespace TES3MP::Native
                     body.casting = cast;
                 }
                 result.bodies.push_back(body);
+            }
+            if (offset != bytes.size())
+            {
+                if (getAreaWord(bytes, offset) != 0x314c4c4543 || result.bodies.empty())
+                    throw std::invalid_argument("Dynamic actor cell image incompatible");
+                for (auto& body : result.bodies)
+                {
+                    const auto length = getAreaWord(bytes, offset);
+                    if (!length || length > 1024 || length > bytes.size() - offset)
+                        throw std::invalid_argument("Dynamic actor cell length invalid");
+                    body.collision.cell = ESM::RefId::deserializeText(std::string_view(bytes.data() + offset, size_t(length)));
+                    if (body.collision.cell.empty()) throw std::invalid_argument("Dynamic actor cell identity invalid");
+                    offset += size_t(length);
+                }
             }
             if (offset != bytes.size()) throw std::invalid_argument("Dynamic actor image trailing data");
             result.validate();

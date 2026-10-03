@@ -161,7 +161,7 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             for (size_t i = 0; i < states.size(); ++i)
-                if (mBinding.mTravelerNeighborhood || mBinding.mDoors[i].mCell == mBinding.mWorldItems->mCell)
+                if (mBinding.mCellActors || mBinding.mTravelerNeighborhood || mBinding.mDoors[i].mCell == mBinding.mWorldItems->mCell)
                     doors.push_back({mBinding.mDoors[i].mId, states[i]->mPosition.rot[2], states[i]->mDoorState != 0});
             if (!mBinding.mCreateActorSet) step = mBinding.mNavigatingActor->prepareRestore(actor, doors);
         }
@@ -370,7 +370,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Native door motion exhausted");
             auto next = activation ? door.binding.door().activate(state)
                 : door.binding.door().advance(state, seconds, [&](const auto& position, float delta) {
-                    if (mBinding.mNavigatingActor && (mBinding.mTravelerNeighborhood
+                    if (mBinding.mNavigatingActor && (mBinding.mCellActors || mBinding.mTravelerNeighborhood
                             || mBinding.mDoors[i].mCell == mBinding.mWorldItems->mCell))
                     {
                         const auto contact = mBinding.mNavigatingActor->doorContact(mBinding.mDoors[i].mId, position.rot[2], delta);
@@ -408,7 +408,7 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> result;
         for (size_t i = 0; i < mAreaDoors.size(); ++i)
         {
-            if (mBinding.mNavigatingActor && !mBinding.mTravelerNeighborhood
+            if (mBinding.mNavigatingActor && !mBinding.mCellActors && !mBinding.mTravelerNeighborhood
                 && mBinding.mDoors[i].mCell != mBinding.mWorldItems->mCell) continue;
             const auto& state = *(prepared ? prepared->states[i] : mAreaDoors[i].state);
             result.push_back({mBinding.mDoors[i].mId, state.mPosition.rot[2], state.mDoorState != 0,

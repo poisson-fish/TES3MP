@@ -12,6 +12,7 @@
 #include <sstream>
 #include <cmath>
 #include <numbers>
+#include <numeric>
 #include <stdexcept>
 #include <set>
 
@@ -77,7 +78,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 76; ++candidate)
+            for (unsigned candidate = 3; candidate <= 77; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -218,18 +219,27 @@ namespace TES3MP::Native
             }
             if (movingActor)
             {
-                key("npc"); Navigation nav;
+                Navigation nav;
                 nav.doors = traveler || version == "native-inventory-17" || version == "native-inventory-18";
                 nav.avoidance = traveler || version == "native-inventory-18";
-                in >> std::quoted(nav.record) >> std::quoted(nav.settings);
-                key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
-                if (neighborhood) { key("processing"); in >> nav.cells >> nav.steps; }
-                if (meleeCampaign)
+                if (descriptorVersion >= 77)
                 {
-                    key("melee"); in >> std::quoted(nav.meleeGroup) >> std::quoted(nav.meleeAttack) >> nav.meleeSpeed;
-                    if (!in || nav.meleeGroup.empty() || nav.meleeGroup.size() > 64
-                        || !std::isfinite(nav.meleeSpeed) || nav.meleeSpeed <= 0 || nav.meleeSpeed > 100)
-                        throw std::invalid_argument("Native melee descriptor invalid");
+                    key("actors"); key("auto"); in >> std::quoted(nav.settings);
+                    nav.destination = {};
+                    nav.meleeGroup = "handtohand"; nav.meleeAttack = "chop";
+                }
+                else
+                {
+                    key("npc"); in >> std::quoted(nav.record) >> std::quoted(nav.settings);
+                    key("destination"); in >> nav.destination[0] >> nav.destination[1] >> nav.destination[2] >> nav.speed;
+                    if (neighborhood) { key("processing"); in >> nav.cells >> nav.steps; }
+                    if (meleeCampaign)
+                    {
+                        key("melee"); in >> std::quoted(nav.meleeGroup) >> std::quoted(nav.meleeAttack) >> nav.meleeSpeed;
+                        if (!in || nav.meleeGroup.empty() || nav.meleeGroup.size() > 64
+                            || !std::isfinite(nav.meleeSpeed) || nav.meleeSpeed <= 0 || nav.meleeSpeed > 100)
+                            throw std::invalid_argument("Native melee descriptor invalid");
+                    }
                 }
                 if (descriptorVersion >= 25)
                 {
@@ -237,9 +247,9 @@ namespace TES3MP::Native
                     if (!in || !respawnDelayTicks || respawnDelayTicks > 30ull * 60 * 60 * 24)
                         throw std::invalid_argument("Native NPC respawn deadline invalid");
                 }
-                if (!in || nav.record.empty() || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
+                if (!in || (descriptorVersion < 77 && nav.record.empty()) || nav.record.size()>256 || nav.settings.empty() || nav.settings.size()>1024
                     || !std::isfinite(nav.speed) || nav.speed<=0 || nav.speed>4096
-                    || (neighborhood ? (areaCount > 9 || nav.cells > 9 || nav.steps > 2)
+                    || (neighborhood ? ((descriptorVersion < 77 && areaCount > 9) || nav.cells > 9 || nav.steps > 2)
                         : (cell.is<ESM::ESM3ExteriorCellRefId>() || areaCount != 1)))
                     throw std::invalid_argument("Native navigating NPC descriptor invalid");
                 for (float value : nav.destination) if (!std::isfinite(value) || std::abs(value)>1e7f)
@@ -269,6 +279,8 @@ namespace TES3MP::Native
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
             binding.mTravelerNeighborhood = neighborhood && cells->front().asExterior() != nullptr;
+            binding.mCellActors = descriptorVersion >= 77;
+            if (binding.mCellActors) binding.mRetainTraveler = binding.mTravelerNeighborhood = false;
             binding.mMeleeContact = version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
             binding.mCombatState = version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
             binding.mCombatResolution = version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
@@ -311,7 +323,7 @@ namespace TES3MP::Native
                 binding.mNeighborCombat = descriptorVersion >= 62;
                 binding.mAuthoritativeAim = descriptorVersion >= 64;
                 binding.mContainerMagic = version == "native-inventory-56c" || binding.mObjectTravelFamily;
-                binding.mNeighborLimit = descriptorVersion >= 66 ? 4
+                binding.mNeighborLimit = descriptorVersion >= 77 ? 36 : descriptorVersion >= 66 ? 4
                     : descriptorVersion >= 63 ? 3 : descriptorVersion >= 62 ? 2 : 1;
                 binding.mMeleeDefenseRules = descriptorVersion >= 34;
                 binding.mActorEffectLifecycle = descriptorVersion >= 35;
@@ -436,7 +448,7 @@ namespace TES3MP::Native
                     // frozen interior. Other inventory/door/script services are
                     // outside its domain, just as in the collision probe.
                     references = loadout.placedActors(cell);
-                    if (start.binding.mSocialLifecycle && cellIndex == 0)
+                    if (start.binding.mSocialLifecycle && (cellIndex == 0 || start.binding.mCellActors))
                     {
                         for (const auto& placed : references)
                         {
@@ -453,55 +465,66 @@ namespace TES3MP::Native
                                 << ':' << p[0] << ':' << p[1] << ':' << p[2] << ':' << placed.mRef.mPos.rot[2];
                         }
                     }
-                    if (start.binding.mNeighborAi)
-                        std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
-                    const auto selectedBase = ESM::RefId::stringRefId(start.navigation->record);
-                    const auto eligibleNpc = [&](const auto& ref) {
-                        return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
-                            && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
-                    };
-                    const auto eligibleCreature = [&](const auto& ref) {
-                        if (ref.mRef.mRefID == selectedBase || ref.mScripted || ref.mLeveled) return false;
-                        const auto* creature = loadout.store().get<ESM::Creature>().search(ref.mRef.mRefID);
-                        return creature && (creature->mFlags & ESM::Creature::Bipedal)
-                            && !(creature->mFlags & ESM::Creature::Flies);
-                    };
-                    const auto firstNeighbor = start.binding.mNeighborAi && cellIndex == 0
-                        ? std::ranges::find_if(references, eligibleNpc) : references.end();
-                    std::vector<uint64_t> neighborIds;
-                    if (firstNeighbor != references.end()) neighborIds.push_back(firstNeighbor->mIdentity);
-                    if (start.binding.mNeighborCombat)
-                        for (auto next = firstNeighbor == references.end() ? references.end() : firstNeighbor + 1;
-                            next != references.end() && neighborIds.size() < start.binding.mNeighborLimit; ++next)
-                            if (eligibleNpc(*next))
-                                neighborIds.push_back(next->mIdentity);
-                    if (start.binding.mNeighborLimit >= 4 && start.binding.mNeighborCombat && cellIndex == 0)
+                    if (start.binding.mCellActors)
                     {
-                        const auto creature = std::ranges::find_if(references, eligibleCreature);
-                        if (creature != references.end())
-                        {
-                            if (neighborIds.size() == start.binding.mNeighborLimit) neighborIds.pop_back();
-                            neighborIds.push_back(creature->mIdentity);
-                            std::ranges::sort(neighborIds);
-                        }
+                        for (const auto& ref : references)
+                            if (ref.mScripted || ref.mLeveled)
+                                throw std::invalid_argument("Cell actor requires unsupported script/leveled services");
+                        if (references.size() + std::accumulate(actorCounts.begin(), actorCounts.end(), size_t{}) > 37)
+                            throw std::invalid_argument("Cell actor campaign capacity exceeded");
                     }
-                    std::erase_if(references, [&](const auto& ref) {
-                        return ref.mRef.mRefID != selectedBase
-                            && std::ranges::find(neighborIds, ref.mIdentity) == neighborIds.end();
-                    });
-                    if (cellIndex != 0) references.clear();
-                    if (cellIndex == 0)
+                    else
                     {
-                        const auto selected = std::ranges::find_if(references, [&](const auto& ref) {
-                            return ref.mRef.mRefID == selectedBase;
+                        if (start.binding.mNeighborAi)
+                            std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
+                        const auto selectedBase = ESM::RefId::stringRefId(start.navigation->record);
+                        const auto eligibleNpc = [&](const auto& ref) {
+                            return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
+                                && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
+                        };
+                        const auto eligibleCreature = [&](const auto& ref) {
+                            if (ref.mRef.mRefID == selectedBase || ref.mScripted || ref.mLeveled) return false;
+                            const auto* creature = loadout.store().get<ESM::Creature>().search(ref.mRef.mRefID);
+                            return creature && (creature->mFlags & ESM::Creature::Bipedal)
+                                && !(creature->mFlags & ESM::Creature::Flies);
+                        };
+                        const auto firstNeighbor = start.binding.mNeighborAi && cellIndex == 0
+                            ? std::ranges::find_if(references, eligibleNpc) : references.end();
+                        std::vector<uint64_t> neighborIds;
+                        if (firstNeighbor != references.end()) neighborIds.push_back(firstNeighbor->mIdentity);
+                        if (start.binding.mNeighborCombat)
+                            for (auto next = firstNeighbor == references.end() ? references.end() : firstNeighbor + 1;
+                                next != references.end() && neighborIds.size() < start.binding.mNeighborLimit; ++next)
+                                if (eligibleNpc(*next))
+                                    neighborIds.push_back(next->mIdentity);
+                        if (start.binding.mNeighborLimit >= 4 && start.binding.mNeighborCombat && cellIndex == 0)
+                        {
+                            const auto creature = std::ranges::find_if(references, eligibleCreature);
+                            if (creature != references.end())
+                            {
+                                if (neighborIds.size() == start.binding.mNeighborLimit) neighborIds.pop_back();
+                                neighborIds.push_back(creature->mIdentity);
+                                std::ranges::sort(neighborIds);
+                            }
+                        }
+                        std::erase_if(references, [&](const auto& ref) {
+                            return ref.mRef.mRefID != selectedBase
+                                && std::ranges::find(neighborIds, ref.mIdentity) == neighborIds.end();
                         });
-                        if (references.size() != 1u + neighborIds.size()
-                            || (start.binding.mNeighborAi && neighborIds.empty())
-                            || std::ranges::count(references, selectedBase, [](const auto& ref) {
-                                return ref.mRef.mRefID;
-                            }) != 1 || selected == references.end()
-                            || selected->mScripted || selected->mLeveled)
-                            throw std::invalid_argument("Native navigating actor must be one unscripted placement");
+                        if (cellIndex != 0) references.clear();
+                        if (cellIndex == 0)
+                        {
+                            const auto selected = std::ranges::find_if(references, [&](const auto& ref) {
+                                return ref.mRef.mRefID == selectedBase;
+                            });
+                            if (references.size() != 1u + neighborIds.size()
+                                || (start.binding.mNeighborAi && neighborIds.empty())
+                                || std::ranges::count(references, selectedBase, [](const auto& ref) {
+                                    return ref.mRef.mRefID;
+                                }) != 1 || selected == references.end()
+                                || selected->mScripted || selected->mLeveled)
+                                throw std::invalid_argument("Native navigating actor must be one unscripted placement");
+                        }
                     }
                     actorCounts[cellIndex]=references.size();
                     if (start.binding.mContainerMagic && (cellIndex == 0 || start.binding.mObjectTravelFamily))
@@ -581,13 +604,14 @@ namespace TES3MP::Native
                                 world->mActorSpawns.push_back({marker.mIdentity, selected->mRecord});
                                 if (!selected->mRecord) ++actorCounts[cellIndex];
                             }
-                    if (!start.navigation) for (const auto& item : loadout.placedItems(cell, start.binding.mStreamExteriors ? MaximumGroundItemBaselineChunkItems : 64))
+                    if (!start.navigation || start.binding.mCellActors) for (const auto& item : loadout.placedItems(cell, start.binding.mStreamExteriors ? MaximumGroundItemBaselineChunkItems : 64))
                     {
                         world->mPlacements.emplace_back(item.mIdentity, item.mRef);
                         placement << "\nworld-item:" << item.mIdentity << ':' << item.mRef.mRefID;
                     }
                 }
-                if (start.stockPlacement && !start.navigation)
+                start.binding.mEngineCells.emplace(wireCell, cell);
+                if (start.stockPlacement && (!start.navigation || start.binding.mCellActors))
                 {
                     for (const auto& [id, ref] : world->mPlacements) domains[cellIndex].push_back(ref);
                     scenes[cellIndex] = std::make_unique<PlacementScene>(loadout, cell, domains[cellIndex]);
@@ -642,7 +666,7 @@ namespace TES3MP::Native
                     }
                 }
             }
-            if ((start.secondWireCell || start.binding.mStreamExteriors) && !start.navigation)
+            if ((start.secondWireCell || start.binding.mStreamExteriors) && (!start.navigation || start.binding.mCellActors))
             {
                 if (start.binding.mStreamExteriors)
                     for (const auto& cell : wireCells)
@@ -689,37 +713,88 @@ namespace TES3MP::Native
             if (start.navigation)
             {
                 const auto base = ESM::RefId::stringRefId(start.navigation->record);
-                const auto matching = [&](const auto& owner) { return owner.mCell == start.wireCell && owner.mBase == base; };
-                if (std::ranges::count_if(start.binding.mContainers, matching) != 1)
+                const auto matching = [&](const auto& owner) { return start.binding.mCellActors
+                    ? (loadout.store().get<ESM::NPC>().search(owner.mBase) || loadout.store().get<ESM::Creature>().search(owner.mBase))
+                    : owner.mCell == start.wireCell && owner.mBase == base; };
+                if (start.binding.mCellActors ? std::ranges::none_of(start.binding.mContainers, matching)
+                    : std::ranges::count_if(start.binding.mContainers, matching) != 1)
                     throw std::invalid_argument("Navigating NPC must resolve to one authoritative inventory owner");
                 const auto& owner = *std::ranges::find_if(start.binding.mContainers, matching);
+                if (start.binding.mCellActors)
+                {
+                    std::copy(std::begin(owner.mPlacement->mPos.pos), std::end(owner.mPlacement->mPos.pos),
+                        start.navigation->destination.begin());
+                }
                 std::ranges::sort(start.binding.mDoors, {}, &InventoryServiceBinding::OrdinaryDoorPlacement::mId);
                 std::vector<uint64_t> doors;
                 for (const auto& door : start.binding.mDoors)
-                    if (start.binding.mTravelerNeighborhood || door.mCell == start.wireCell)
+                    if (start.binding.mCellActors || start.binding.mTravelerNeighborhood || door.mCell == start.wireCell)
                         doors.push_back(door.mId);
                 std::ranges::sort(doors);
-                if (start.navigation->doors && !start.binding.mTravelerNeighborhood && doors.empty())
+                if (start.navigation->doors && !start.binding.mCellActors && !start.binding.mTravelerNeighborhood && doors.empty())
                     throw std::invalid_argument("V17-V19 require at least one ordinary door");
                 std::vector<InventoryContainerBinding> neighborOwners;
                 for (const auto& value : start.binding.mContainers)
-                    if (start.binding.mNeighborAi && value.mCell == start.wireCell
+                    if (start.binding.mNeighborAi && (start.binding.mCellActors || value.mCell == start.wireCell)
                         && value.mId != owner.mId
                         && (loadout.store().get<ESM::NPC>().search(value.mBase)
                             || loadout.store().get<ESM::Creature>().search(value.mBase))) neighborOwners.push_back(value);
                 std::ranges::sort(neighborOwners, {}, [](const auto& value) { return value.mId.value(); });
-                if (start.binding.mNeighborAi && neighborOwners.empty())
+                if (start.binding.mNeighborAi && !start.binding.mCellActors && neighborOwners.empty())
                     throw std::invalid_argument("Native neighbor witness has no inventory owner");
                 std::vector<uint64_t> neighborIds;
                 for (const auto& adjacent : neighborOwners) neighborIds.push_back(adjacent.mId.value());
+                std::vector<std::pair<uint64_t, std::vector<ESM::RefId>>> processing;
+                if (start.binding.mCellActors)
+                {
+                    std::vector<ESM::RefId> exteriors;
+                    for (const auto& name : names)
+                        if (name.is<ESM::ESM3ExteriorCellRefId>()) exteriors.push_back(name);
+                    if (exteriors.size() > 9)
+                        throw std::invalid_argument("Cell actor exterior neighborhood exceeds nine cells");
+                    if (!exteriors.empty())
+                    {
+                        const auto center = std::ranges::find_if(exteriors, [&](const auto& candidate) {
+                            const auto& anchor = *candidate.template getIf<ESM::ESM3ExteriorCellRefId>();
+                            return std::ranges::all_of(exteriors, [&](const auto& cell) {
+                                const auto& point = *cell.template getIf<ESM::ESM3ExteriorCellRefId>();
+                                return std::abs(point.getX() - anchor.getX()) <= 1
+                                    && std::abs(point.getY() - anchor.getY()) <= 1;
+                            });
+                        });
+                        if (center == exteriors.end()) throw std::invalid_argument("Cell actor exterior neighborhood lacks a center");
+                        std::iter_swap(exteriors.begin(), center);
+                    }
+                    const auto add = [&](const auto& actor) {
+                        std::vector<ESM::RefId> cells;
+                        if (actor.mCell.kind() == CellId::Kind::Exterior) cells = exteriors;
+                        else cells.push_back(names[std::ranges::find(wireCells, actor.mCell) - wireCells.begin()]);
+                        processing.emplace_back(actor.mId.value(), std::move(cells));
+                    };
+                    add(owner);
+                    for (const auto& adjacent : neighborOwners) add(adjacent);
+                    if (start.binding.mBoundHits) start.binding.mBoundHits->resize(processing.size() + 2);
+                }
                 const auto actorCells = start.binding.mTravelerNeighborhood ? names : std::vector{start.cell};
                 const auto createScene = [&loadout, actorCells, neighborhood = start.binding.mTravelerNeighborhood,
                     movementEffects = start.binding.mMovementEffects,
-                    id = owner.mId.value(), neighborIds, navigation = *start.navigation, doors](std::span<const DynamicActorBody> dynamic = {}) {
+                    id = owner.mId.value(), neighborIds, processing, names, navigation = *start.navigation, doors](std::span<const DynamicActorBody> dynamic = {}) {
                     auto actors = neighborIds;
                     for (const auto& body : dynamic) actors.push_back(body.actor);
-                    auto scene = std::make_shared<InteriorActorScene>(loadout, actorCells, id,
-                        "meshes/base_anim.nif", "meshes/base_animkna.nif", actors, dynamic);
+                    auto domains = processing;
+                    for (const auto& body : dynamic) if (!domains.empty())
+                    {
+                        auto cells = std::vector{body.cell};
+                        if (body.cell.is<ESM::ESM3ExteriorCellRefId>())
+                            for (const auto& domain : processing)
+                                if (std::ranges::find(domain.second, body.cell) != domain.second.end())
+                                { cells = domain.second; break; }
+                        domains.emplace_back(body.actor, std::move(cells));
+                    }
+                    auto scene = domains.empty() ? std::make_shared<InteriorActorScene>(loadout, actorCells, id,
+                        "meshes/base_anim.nif", "meshes/base_animkna.nif", actors, dynamic)
+                        : std::make_shared<InteriorActorScene>(loadout, domains,
+                            "meshes/base_anim.nif", "meshes/base_animkna.nif", dynamic, names);
                     if (navigation.doors) scene->bindDoors(doors, navigation.avoidance);
                     if (movementEffects) scene->enableMovementEffects();
                     scene->enableNavigation(navigation.settings);
@@ -729,7 +804,7 @@ namespace TES3MP::Native
                 auto scene = createScene();
                 start.binding.mCreateActorSet = createScene;
                 for (const auto* domain : start.binding.worldDomains())
-                    if (start.binding.mTravelerNeighborhood || domain->mCell == start.wireCell)
+                    if (start.binding.mCellActors || start.binding.mTravelerNeighborhood || domain->mCell == start.wireCell)
                         start.binding.mCollisionCells.push_back(domain->mCell);
                 start.binding.mTravelDestination = start.navigation->destination;
                 start.binding.mEnchantedWeaponsAreMagical = scene->enchantedWeaponsAreMagical();
@@ -792,6 +867,12 @@ namespace TES3MP::Native
                 {
                     for (const auto& adjacent : neighborOwners)
                     {
+                        if (start.binding.mCellActors)
+                        {
+                            const auto casts = scene->bindCastAnimations(adjacent.mBase);
+                            start.binding.mDynamicCasts.emplace(adjacent.mId.value(), casts);
+                            placement << "\ncell-caster:" << adjacent.mId.value() << ':' << casts.resourceIdentity;
+                        }
                         auto bound = [scene, actor = adjacent.mBase,
                             cache = std::map<std::pair<ESM::RefId, std::string>, MeleeAnimation>{}]
                             (const ESM::Weapon* weapon, std::string_view direction) mutable {
@@ -805,7 +886,7 @@ namespace TES3MP::Native
                         placement << "\nneighbor-melee:" << adjacent.mId.value() << ':' << bound(nullptr, "chop").identity();
                         start.binding.mNeighborMeleeSet.push_back(bound);
                     }
-                    start.binding.mNeighborWeaponMelee = start.binding.mNeighborMeleeSet.front();
+                    if (!start.binding.mNeighborMeleeSet.empty()) start.binding.mNeighborWeaponMelee = start.binding.mNeighborMeleeSet.front();
                 }
                 if (playerSwings)
                     for (size_t i = 0; i < start.binding.mPlayerMelee.size(); ++i)
@@ -825,7 +906,7 @@ namespace TES3MP::Native
                             return cache.emplace(key, scene->bindWeaponMeleeAnimation(actor, weapon, key.second)).first->second;
                         };
                     }
-                if (start.binding.mRetainTraveler)
+                if (start.binding.mRetainTraveler || start.binding.mCellActors)
                 {
                     const auto meleeIdentity = start.binding.mBoundMelee
                         ? start.binding.mBoundMelee->mResourceIdentity : std::string{};

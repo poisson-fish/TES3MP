@@ -26,6 +26,8 @@ namespace MWMechanics
 
     std::vector<ESM::RefId> autoCalcPlayerSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race);
+    std::vector<ESM::RefId> autoCalcPlayerSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
+        const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race, const MWWorld::ESMStore& store);
 
     // Helpers
 

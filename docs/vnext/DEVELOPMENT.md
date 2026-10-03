@@ -57,6 +57,15 @@ For C++, inspect the owning target/framework, build that target in an existing
 tree, then run one executable/filter. Add only required missing dependencies;
 never aggregate `_tests_run` targets. Record changed evidence in CURRENT.
 
+For shared NPC playtests, bootstrap with the optional final stock navigation settings:
+
+```text
+tes3mp_native_bootstrap CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B 1 X:Y:Z NAV_SETTINGS
+```
+
+This emits V77 with `actors auto`; startup validates actor/cell/resource bounds.
+Registrations must bind the new manifest.
+
 `build_windows.bat -Target server`, `client` and `desktop-evidence` initialize MSVC
 and log to `build/logs`; inspect build cost first. Builds do not prove gameplay.
 Wrappers `protocol`, `server-logic`, `adapter-tests`, `contracts`, `standalone` run
@@ -70,17 +79,9 @@ cannot prove new runtimes. Treat mod data as external input.
 
 ## Documentation contract
 
-Exactly five active Markdown files live directly under `docs/vnext`:
-
-| File | Responsibility |
-|---|---|
-| README.md | Stable product vision and navigation |
-| CURRENT.md | Implementation, limitations, evidence, next action; at most 850 words |
-| PLAN.md | Sole ordered roadmap and exit/removal criteria; at most 1,500 words |
-| DEVELOPMENT.md | Session, dependency, migration and verification workflow |
-| DECISIONS.md | Durable constraints and cooperative design, with proposals labeled |
-
-Combined ceiling: 5,000 words; existing dependency proofs are a fixed exception.
-No nested plans, diaries, reports, transcripts or duplicate trackers. Replace stale
-prose, preserve links, distinguish inherited/new evidence. Design changes alone
-do not change CURRENT's implementation status or next action.
+Keep exactly five active Markdown files directly under `docs/vnext`:
+README (vision), CURRENT (state/evidence/next action, at most 850 words), PLAN (sole
+roadmap, at most 1,500), DEVELOPMENT (workflow), DECISIONS (constraints/proposals).
+Combined ceiling: 5,000 words; dependency proofs are a fixed exception. Replace stale
+prose, preserve links and distinguish inherited/new evidence. No nested plans, diaries,
+reports, transcripts or duplicate trackers. Design alone does not change implementation status.

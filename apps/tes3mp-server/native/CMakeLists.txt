@@ -53,6 +53,25 @@ tes3mp_verify_target_dependencies(tes3mp_native_inventory_service
 tes3mp_verify_target_includes(tes3mp_native_inventory_service
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
+# Read-only chargen preparation shared with stock OpenMW. Native actor-image
+# installation remains a separate transaction seam in the inventory host.
+add_library(tes3mp_native_character_construction STATIC character_construction.cpp character_construction.hpp)
+target_compile_features(tes3mp_native_character_construction PUBLIC cxx_std_20)
+target_link_libraries(tes3mp_native_character_construction PUBLIC tes3mp_server_core PRIVATE openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_character_construction ALLOWED tes3mp_server_core openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_character_construction
+    FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+
+add_executable(tes3mp_native_character_tests character_construction_tests.cpp)
+target_compile_features(tes3mp_native_character_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_character_tests PRIVATE tes3mp_native_character_construction tes3mp_server_app openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_character_tests
+    ALLOWED tes3mp_native_character_construction tes3mp_server_app openmw-lib)
+tes3mp_verify_target_includes(tes3mp_native_character_tests
+    FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+set_target_properties(tes3mp_native_character_construction tes3mp_native_character_tests
+    PROPERTIES FOLDER "TES3MP/NativeProbe")
+
 add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp environment.cpp environment.hpp)
 target_compile_features(tes3mp_native_inventory_host PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_host PUBLIC tes3mp_native_inventory_service

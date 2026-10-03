@@ -100,9 +100,11 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    **Finish line:** both clients converge after reconnect/restart without duplicated
    ammunition costs, damage or loot. Focused acceptance may run incrementally;
    full M4 sign-off requires all implementation gaps and exit criteria closed.
-6. Group pending V76 Target/destination/size/capability desktop checks with committed
-   collision: drop obstruction, pickup removal, physics/projectile/visibility/navigation,
-   rollback, reload/restart and smoothness under latency/jitter/loss. Then switch player
+6. Accept V76 Target/destination/size/capability and committed collision on both
+   desktops: drop/pickup physics/projectile/visibility/navigation, rollback,
+   reload/restart and smoothness under latency/jitter/loss. Before player cutover,
+   accept V77 NPCs: door entry, two occupants, split interiors, combat,
+   flight isolation and state after reentry/reconnect/restart. Switch player
    movement last using shared physics, meeting DECISIONS.md's prediction/reconciliation
    budgets. Retain inherited movement until cutover.
 

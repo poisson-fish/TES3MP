@@ -145,9 +145,14 @@ namespace MWMechanics
     std::vector<ESM::RefId> autoCalcPlayerSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
         const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race)
     {
-        const MWWorld::ESMStore& esmStore = *MWBase::Environment::get().getESMStore();
+        return autoCalcPlayerSpells(actorSkills, actorAttributes, race, *MWBase::Environment::get().getESMStore());
+    }
 
-        static const float fPCbaseMagickaMult
+    std::vector<ESM::RefId> autoCalcPlayerSpells(const std::map<ESM::RefId, SkillValue>& actorSkills,
+        const std::map<ESM::RefId, AttributeValue>& actorAttributes, const ESM::Race* race, const MWWorld::ESMStore& esmStore)
+    {
+
+        const float fPCbaseMagickaMult
             = esmStore.get<ESM::GameSetting>().find("fPCbaseMagickaMult")->mValue.getFloat();
 
         float baseMagicka = fPCbaseMagickaMult * actorAttributes.at(ESM::Attribute::Intelligence).getBase();
@@ -165,7 +170,7 @@ namespace MWMechanics
             if (!(spell.mData.mFlags & ESM::Spell::F_PCStart))
                 continue;
 
-            int spellCost = MWMechanics::calcSpellCost(spell);
+            int spellCost = MWMechanics::calcSpellCost(spell, esmStore);
             if (reachedLimit && spellCost <= minCost)
                 continue;
             if (race
@@ -175,12 +180,12 @@ namespace MWMechanics
             if (baseMagicka < spellCost)
                 continue;
 
-            static const float fAutoPCSpellChance
+            const float fAutoPCSpellChance
                 = esmStore.get<ESM::GameSetting>().find("fAutoPCSpellChance")->mValue.getFloat();
-            if (calcAutoCastChance(&spell, actorSkills, actorAttributes, {}) < fAutoPCSpellChance)
+            if (calcAutoCastChance(&spell, actorSkills, actorAttributes, {}, esmStore) < fAutoPCSpellChance)
                 continue;
 
-            if (!attrSkillCheck(&spell, actorSkills, actorAttributes))
+            if (!attrSkillCheck(&spell, actorSkills, actorAttributes, esmStore))
                 continue;
 
             selectedSpells.push_back(spell.mId);
@@ -196,7 +201,7 @@ namespace MWMechanics
                 for (const ESM::RefId& testSpellName : selectedSpells)
                 {
                     const ESM::Spell* testSpell = esmStore.get<ESM::Spell>().find(testSpellName);
-                    int testSpellCost = MWMechanics::calcSpellCost(*testSpell);
+                    int testSpellCost = MWMechanics::calcSpellCost(*testSpell, esmStore);
                     if (testSpellCost < minCost)
                     {
                         minCost = testSpellCost;
@@ -209,9 +214,9 @@ namespace MWMechanics
                 if (spellCost < minCost)
                 {
                     weakestSpell = &spell;
-                    minCost = MWMechanics::calcSpellCost(*weakestSpell);
+                    minCost = MWMechanics::calcSpellCost(*weakestSpell, esmStore);
                 }
-                static const unsigned int iAutoPCSpellMax
+                const unsigned int iAutoPCSpellMax
                     = esmStore.get<ESM::GameSetting>().find("iAutoPCSpellMax")->mValue.getInteger();
                 if (selectedSpells.size() == iAutoPCSpellMax)
                     reachedLimit = true;

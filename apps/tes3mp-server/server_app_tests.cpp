@@ -1404,8 +1404,9 @@ int main(int argc, char** argv)
         && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3
         && worldContent->questJournal.quests().size() == 1 && worldContent->questJournal.journal().size() == 2
         && worldContent->factionDialogue.factions().size() == 1
-        && worldContent->factionDialogue.dialogueChoices().size() == 2 && worldContent->weather.weather().size() == 2
-        && worldContent->weather.regions().size() == 1 && worldContent->world.questJournalCatalog()
+        && worldContent->factionDialogue.dialogueChoices().size() == 2 && worldContent->weather
+        && worldContent->weather->weather().size() == 2
+        && worldContent->weather->regions().size() == 1 && worldContent->world.questJournalCatalog()
         && worldContent->world.factionDialogueCatalog()
         && *worldContent->world.questJournalCatalog() == worldContent->questJournal
         && *worldContent->world.factionDialogueCatalog() == worldContent->factionDialogue
@@ -2948,7 +2949,7 @@ int main(int argc, char** argv)
         auto packagedScriptsResult
             = loadScriptPackageContent(contentRoot / "vanilla-scripts.txt", packagedConfig.contentManifest);
         auto* packagedScripts = std::get_if<ScriptPackageContent>(&packagedScriptsResult);
-        assert(packagedCombat && packagedWorld && packagedScripts && packagedScripts->packages.size() == 1
+        assert(packagedCombat && packagedWorld && packagedWorld->weather && packagedScripts && packagedScripts->packages.size() == 1
             && packagedScripts->modules.size() == 1 && packagedScripts->stateCatalog.entries().size() == 1
             && packagedWorld->questJournal.quests().size() == 1 && packagedWorld->questJournal.journal().size() == 1
             && packagedWorld->factionDialogue.factions().size() == 1
@@ -2956,7 +2957,7 @@ int main(int argc, char** argv)
         DeterministicServerScriptRuntime packagedScriptRuntime;
         assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
         auto packagedModules = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts,
-            packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue, packagedWorld->weather,
+            packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue, *packagedWorld->weather,
             packagedScriptRuntime);
         assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
         assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 3);

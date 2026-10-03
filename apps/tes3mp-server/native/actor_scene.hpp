@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <span>
+#include <map>
 #include <components/esm/refid.hpp>
 #include <components/esm3/objectstate.hpp>
 #include "melee_animation.hpp"
@@ -70,11 +71,13 @@ namespace TES3MP::Native
         ESM::RefId record;
         std::array<float, 3> position{};
         float yaw = 0;
+        ESM::RefId cell;
     };
     struct ActorSceneWorld
     {
         std::vector<uint64_t> placements;
         std::vector<std::pair<uint64_t, ESM::ObjectState>> objects;
+        std::map<uint64_t, ESM::RefId> cells;
     };
     struct BoundMeleeAnimation
     {
@@ -95,10 +98,11 @@ namespace TES3MP::Native
         struct Dormant;
         std::unique_ptr<Dormant> mDormant;
         std::unique_ptr<InteriorActorScene> mNeighbor;
+        std::vector<std::unique_ptr<InteriorActorScene>> mScenery;
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, Impl* sharedParent,
-            std::span<const DynamicActorBody> dynamic = {});
+            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor);
     public:
@@ -114,6 +118,15 @@ namespace TES3MP::Native
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, std::span<const DynamicActorBody> dynamic);
+        // Each processing domain owns its collision world; actors in the same
+        // domain share bodies. The linked image still commits as one transaction.
+        InteriorActorScene(Loadout& loadout,
+            const std::vector<std::pair<uint64_t, std::vector<ESM::RefId>>>& actors,
+            const std::string& baseAnimation, const std::string& beastAnimation,
+            std::span<const DynamicActorBody> dynamic = {}, std::span<const ESM::RefId> cells = {});
+        InteriorActorScene& forActor(uint64_t actor);
+        const InteriorActorScene& forActor(uint64_t actor) const;
+        const InteriorActorScene& forCell(ESM::RefId cell) const;
         // Both scenes are detached from the host during preparation. Commit can
         // install the complete collision membership without allocating.
         void installActorSet(InteriorActorScene& candidate) noexcept;
@@ -221,11 +234,13 @@ namespace TES3MP::Native
         void prepareNeighborNavigation(Prepared& prepared, std::span<const ActorMovement> movements,
             std::span<const ActorSceneDoor> doors,
             std::span<const std::optional<std::array<float, 3>>> destinations,
-            std::span<const std::optional<std::array<float, 3>>> fleeEnemies = {});
+            std::span<const std::optional<std::array<float, 3>>> fleeEnemies = {},
+            std::span<const uint8_t> active = {});
         std::unique_ptr<Prepared> prepareBlindRun(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors, const std::array<float, 3>& enemy);
         void setFacing(Prepared& prepared, float yaw) const;
         bool canInstall(const Prepared& prepared) const noexcept;
+        void prepareSceneryDoors(Prepared& prepared, std::span<const ActorSceneDoor> doors) const;
         void install(Prepared& prepared) noexcept;
         std::vector<char> image() const;
         std::vector<char> selectedImage() const;

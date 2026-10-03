@@ -250,6 +250,14 @@ namespace TES3MP
 
     const CharacterRaceDefinition* CharacterContentCatalog::find(RaceRecordId id) const noexcept
     { const auto it = std::ranges::lower_bound(mRaces, id, {}, &CharacterRaceDefinition::id); return it != mRaces.end() && it->id == id ? &*it : nullptr; }
+
+    CharacterContentCatalog CharacterContentCatalog::withConstruction(
+        std::shared_ptr<const CharacterConstruction> construction) const
+    {
+        auto result = *this;
+        result.mConstruction = std::move(construction);
+        return result;
+    }
     const CharacterClassDefinition* CharacterContentCatalog::find(ClassRecordId id) const noexcept
     { const auto it = std::ranges::lower_bound(mClasses, id, {}, &CharacterClassDefinition::id); return it != mClasses.end() && it->id == id ? &*it : nullptr; }
     const CharacterBirthsignDefinition* CharacterContentCatalog::find(BirthsignRecordId id) const noexcept
@@ -319,7 +327,15 @@ namespace TES3MP
         std::vector<StartingItem> inventory;
         if (completeSelections(name, appearance, selectedClass, birthsign))
         {
-            derived = derive(catalog, *appearance, *selectedClass, *birthsign);
+            if (const auto* construction = catalog.construction())
+            {
+                auto native = construction->derive(*appearance, *selectedClass, *birthsign);
+                if (!native || native->startingSpells.size() > MaximumStartingSpells)
+                    return CharacterProfileError::InvalidInitialState;
+                derived = std::move(*native);
+            }
+            else
+                derived = derive(catalog, *appearance, *selectedClass, *birthsign);
             inventory.assign(catalog.startingInventory().begin(), catalog.startingInventory().end());
         }
         auto result = CharacterProfile::restore(completing ? CharacterLifecycle::EstablishedCharacter

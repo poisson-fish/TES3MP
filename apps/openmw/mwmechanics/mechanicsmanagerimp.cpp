@@ -41,6 +41,7 @@
 #include "airating.hpp"
 #include "aipursue.hpp"
 #include "autocalcspell.hpp"
+#include "playerconstruction.hpp"
 #include "combat.hpp"
 #include "crimeresult.hpp"
 #include "npcstats.hpp"
@@ -139,86 +140,22 @@ namespace MWMechanics
         creatureStats.getSpells().clear(true);
         creatureStats.getActiveSpells().clear(ptr);
 
-        for (size_t i = 0; i < player->mNpdt.mSkills.size(); ++i)
-            npcStats.getSkill(ESM::Skill::indexToRefId(static_cast<int>(i))).setBase(player->mNpdt.mSkills[i]);
-
-        for (size_t i = 0; i < player->mNpdt.mAttributes.size(); ++i)
-            npcStats.setAttribute(ESM::Attribute::indexToRefId(static_cast<int>(i)), player->mNpdt.mSkills[i]);
-
         const MWWorld::ESMStore& esmStore = *MWBase::Environment::get().getESMStore();
-
-        // race
-        if (mRaceSelected)
-        {
-            const ESM::Race* race = esmStore.get<ESM::Race>().find(player->mRace);
-
-            bool male = (player->mFlags & ESM::NPC::Female) == 0;
-
-            for (const ESM::Attribute& attribute : esmStore.get<ESM::Attribute>())
-                creatureStats.setAttribute(
-                    attribute.mId, static_cast<float>(race->mData.getAttribute(attribute.mId, male)));
-
-            for (const ESM::Skill& skill : esmStore.get<ESM::Skill>())
-            {
-                int bonus = 0;
-                int index = ESM::Skill::refIdToIndex(skill.mId);
-                auto bonusIt = std::find_if(race->mData.mBonus.begin(), race->mData.mBonus.end(),
-                    [&](const auto& v) { return v.mSkill == index; });
-                if (bonusIt != race->mData.mBonus.end())
-                    bonus = bonusIt->mBonus;
-
-                npcStats.getSkill(skill.mId).setBase(5.f + bonus);
-            }
-
-            for (const ESM::RefId& power : race->mPowers.mList)
-            {
+        const ESM::Race* selectedRace = mRaceSelected ? esmStore.get<ESM::Race>().find(player->mRace) : nullptr;
+        const ESM::Class* selectedClass = mClassSelected ? esmStore.get<ESM::Class>().find(player->mClass) : nullptr;
+        const auto constructed = buildPlayerStats(*player, selectedRace, selectedClass, esmStore);
+        for (const auto& [id, value] : constructed.mSkills)
+            npcStats.getSkill(id).setBase(value.getBase());
+        for (const auto& [id, value] : constructed.mAttributes)
+            creatureStats.setAttribute(id, value.getBase());
+        if (selectedRace)
+            for (const ESM::RefId& power : selectedRace->mPowers.mList)
                 creatureStats.getSpells().add(power);
-            }
-        }
 
-        // birthsign
         const ESM::RefId& signId = MWBase::Environment::get().getWorld()->getPlayer().getBirthSign();
-
         if (!signId.empty())
-        {
-            const ESM::BirthSign* sign = esmStore.get<ESM::BirthSign>().find(signId);
-
-            for (const ESM::RefId& power : sign->mPowers.mList)
-            {
+            for (const ESM::RefId& power : esmStore.get<ESM::BirthSign>().find(signId)->mPowers.mList)
                 creatureStats.getSpells().add(power);
-            }
-        }
-
-        // class
-        if (mClassSelected)
-        {
-            const ESM::Class* playerClass = esmStore.get<ESM::Class>().find(player->mClass);
-
-            for (int attribute : playerClass->mData.mAttribute)
-            {
-                ESM::RefId id = ESM::Attribute::indexToRefId(attribute);
-                if (!id.empty())
-                    creatureStats.setAttribute(id, creatureStats.getAttribute(id).getBase() + 10);
-            }
-
-            for (int i = 0; i < 2; ++i)
-            {
-                int bonus = i == 0 ? 10 : 25;
-
-                for (const auto& skills : playerClass->mData.mSkills)
-                {
-                    ESM::RefId id = ESM::Skill::indexToRefId(skills[i]);
-                    if (!id.empty())
-                        npcStats.getSkill(id).setBase(npcStats.getSkill(id).getBase() + bonus);
-                }
-            }
-
-            for (const ESM::Skill& skill : esmStore.get<ESM::Skill>())
-            {
-                if (skill.mData.mSpecialization == playerClass->mData.mSpecialization)
-                    npcStats.getSkill(skill.mId).setBase(npcStats.getSkill(skill.mId).getBase() + 5);
-            }
-        }
 
         // F_PCStart spells
         const ESM::Race* race = nullptr;

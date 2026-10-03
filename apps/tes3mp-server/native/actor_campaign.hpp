@@ -64,6 +64,28 @@ namespace TES3MP::Native
     inline constexpr uint64_t PlayerLivesCampaignMagic = 0x6450434154335354;
     inline constexpr uint64_t BodyCampaignMagic = 0x6550434154335354;
     inline constexpr uint64_t TargetCampaignMagic = 0x6850434154335354;
+    inline constexpr uint64_t CellActorsCampaignMagic = 0x6950434154335354;
+    inline void putActorProcessingCell(std::vector<char>& bytes, CellId cell)
+    {
+        putAreaWord(bytes, uint64_t(cell.kind()));
+        putAreaWord(bytes, cell.asInterior() ? cell.asInterior()->cellSpace().value() : cell.asExterior()->worldspace().value());
+        putAreaWord(bytes, cell.asExterior() ? uint32_t(cell.asExterior()->gridX()) : 0);
+        putAreaWord(bytes, cell.asExterior() ? uint32_t(cell.asExterior()->gridY()) : 0);
+    }
+    inline CellId getActorProcessingCell(std::span<const char> bytes, size_t& offset)
+    {
+        const auto kind = getAreaWord(bytes, offset), space = getAreaWord(bytes, offset);
+        const auto x = getAreaWord(bytes, offset), y = getAreaWord(bytes, offset);
+        const auto id = CellSpaceId::fromValue(space);
+        if (!id || x > UINT32_MAX || y > UINT32_MAX
+            || (kind == uint64_t(CellId::Kind::Interior) ? x || y : kind != uint64_t(CellId::Kind::Exterior)))
+            throw std::invalid_argument("Actor processing cell invalid");
+        if (kind == uint64_t(CellId::Kind::Interior)) return CellId::interior(*id);
+        const auto gx = std::bit_cast<int32_t>(uint32_t(x)), gy = std::bit_cast<int32_t>(uint32_t(y));
+        if (gx < -32768 || gx > 32767 || gy < -32768 || gy > 32767)
+            throw std::invalid_argument("Actor processing coordinates invalid");
+        return CellId::exterior(*id, gx, gy);
+    }
     inline constexpr uint64_t PassiveCampaignMagic = 0x6750434154335354;
     inline constexpr uint64_t PowerCampaignMagic = 0x6650434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
@@ -164,6 +186,7 @@ namespace TES3MP::Native
         uint64_t steps = 0, terminal = 0; // 0 flying, 1 collided, 2 expired.
         uint64_t casterKind = 1, casterLife = 1;
         uint64_t targetKind = 2; // Player targets use kind 1.
+        std::optional<CellId> cell;
         bool operator==(const BowProjectile&) const = default;
     };
     struct ActorCampaignCast
@@ -243,6 +266,8 @@ namespace TES3MP::Native
         std::vector<PowerUse> powers;
         bool passiveSelf = false;
         bool genericTargets = false;
+        bool cellActors = false;
+        std::vector<std::optional<ActorCampaignCast>> neighborCasts;
         struct PassiveCorprus
         {
             uint64_t actor = 0, source = 0, kind = 0;
@@ -334,6 +359,7 @@ namespace TES3MP::Native
         uint64_t targetKind = 2; // Older campaign images target the selected actor.
         uint64_t commandId = 0; // V32 identifies a pending cast across retries.
         uint64_t casterKind = 0, casterLife = 0;
+        std::optional<CellId> cell;
         bool operator==(const ActorCampaignProjectile&) const = default;
     };
     struct ActorCampaignTimedEffect
@@ -378,6 +404,55 @@ namespace TES3MP::Native
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == CellActorsCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested cell actor envelope");
+            const auto arrows = getAreaWord(bytes, offset);
+            if (arrows > 128 || arrows > (bytes.size() - offset) / 32)
+                throw std::invalid_argument("Cell actor arrow count invalid");
+            std::vector<CellId> arrowCells;
+            for (size_t i = 0; i < arrows; ++i) arrowCells.push_back(getActorProcessingCell(bytes, offset));
+            const auto bolts = getAreaWord(bytes, offset);
+            if (bolts > 128 || bolts > (bytes.size() - offset) / 32)
+                throw std::invalid_argument("Cell actor bolt count invalid");
+            std::vector<CellId> boltCells;
+            for (size_t i = 0; i < bolts; ++i) boltCells.push_back(getActorProcessingCell(bytes, offset));
+            const auto count = getAreaWord(bytes, offset);
+            if (count > 36 || count > (bytes.size() - offset) / 8)
+                throw std::invalid_argument("Cell actor cast count invalid");
+            std::vector<std::optional<ActorCampaignCast>> casts;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto present = getAreaWord(bytes, offset);
+                if (present > 1) throw std::invalid_argument("Cell actor cast presence invalid");
+                casts.emplace_back();
+                if (!present) continue;
+                ActorCampaignCast cast;
+                for (auto* value : {&cast.actor, &cast.life, &cast.cast, &cast.sourceKind, &cast.source,
+                    &cast.targetKind, &cast.target, &cast.range, &cast.elapsed, &cast.phase, &cast.targetLife})
+                    *value = getAreaWord(bytes, offset);
+                if (!cast.actor || !cast.life || !cast.cast || !cast.source || cast.sourceKind > 1
+                    || cast.targetKind > 2 || cast.range > 2 || cast.elapsed > 1800
+                    || cast.phase < ActorCampaignCast::Selected || cast.phase > ActorCampaignCast::Recovery
+                    || (cast.targetKind == 0 ? cast.target || cast.targetLife : !cast.target || !cast.targetLife))
+                    throw std::invalid_argument("Cell actor cast invalid");
+                casts.back() = cast;
+            }
+            size_t inner = offset;
+            if (getAreaWord(bytes, inner) != TargetCampaignMagic) throw std::invalid_argument("Cell actors require Target campaign");
+            auto result = readActorCampaign(bytes.subspan(offset));
+            if (result.combat->arrows.size() != arrowCells.size() || result.projectiles.size() != boltCells.size()
+                || casts.size() > result.combat->npcPlacements.size() - 1)
+                throw std::invalid_argument("Cell actor metadata domain differs from campaign");
+            for (size_t i = 0; i < casts.size(); ++i)
+                if (casts[i] && casts[i]->actor != result.combat->npcPlacements[i + 1])
+                    throw std::invalid_argument("Cell actor cast placement differs from campaign");
+            for (size_t i = 0; i < arrowCells.size(); ++i) result.combat->arrows[i].cell = arrowCells[i];
+            for (size_t i = 0; i < boltCells.size(); ++i) result.projectiles[i].cell = boltCells[i];
+            result.combat->cellActors = true;
+            result.combat->neighborCasts = std::move(casts);
+            return result;
+        }
         if (magic == TargetCampaignMagic)
         {
             if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested Target envelope");
