@@ -53,6 +53,8 @@ namespace TES3MP
         }
         const std::optional<CanonicalInventoryWorld>& candidateInventory() const noexcept { return mInventory; }
         const std::optional<CanonicalCombatWorld>& candidateCombat() const noexcept { return mCombat; }
+        const PreparedNativeInventory* candidateNativeInventory() const noexcept
+        { return mSafePoint ? mSafePoint->candidateNativeInventory() : nullptr; }
 
     private:
         friend class AuthenticatedJoinCoordinator;

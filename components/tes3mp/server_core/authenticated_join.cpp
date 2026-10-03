@@ -351,7 +351,9 @@ namespace TES3MP
         const CanonicalPlayerEntityState* checkpoint = nullptr;
         if (profile->lifecycle() == CharacterLifecycle::EstablishedCharacter)
         {
-            prepared.mSafePoint = mReducer.preparePlayerSafePoint(player, catalog.completionSpawn(), tick);
+            if (mReducer.nativeInventoryAuthority() && (inventory || combat))
+                return CharacterProfileError::InvalidInitialState;
+            prepared.mSafePoint = mReducer.prepareCharacterCompletion(player, catalog.completionSpawn(), *profile, tick);
             if (!prepared.mSafePoint)
                 return CharacterProfileError::InvalidInitialState;
             checkpoint = prepared.mSafePoint->candidateState().findPlayer(player);

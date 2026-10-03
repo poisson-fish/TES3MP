@@ -11,6 +11,13 @@ namespace TES3MP::Native
     // native construction additionally checks the actual winning records.
     CharacterContentCatalog withNativeCharacterConstruction(
         const CharacterContentCatalog& selections, const MWWorld::ESMStore& store);
+
+    // Discover selectable winning records, without a manual race/class catalog.
+    // Bounds or ambiguous IDs reject the complete catalog; never publish a subset.
+    // Spawns and starting items remain explicit campaign policy.
+    std::optional<CharacterContentCatalog> discoverNativeCharacterContent(ContentManifestId manifest,
+        Transform creationSpawn, Transform completionSpawn, std::span<const StartingItem> startingInventory,
+        const MWWorld::ESMStore& store) noexcept;
 }
 
 #endif

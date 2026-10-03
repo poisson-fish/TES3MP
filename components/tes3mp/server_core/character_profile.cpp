@@ -212,8 +212,9 @@ namespace TES3MP
         std::span<const StartingItem> startingInventory) noexcept
     try
     {
-        if (races.empty() || classes.empty() || birthsigns.empty() || races.size() > 256 || classes.size() > 256
-            || birthsigns.size() > 256 || startingInventory.size() > MaximumStartingItems)
+        if (races.empty() || classes.empty() || birthsigns.empty()
+            || races.size() > MaximumCharacterSelections || classes.size() > MaximumCharacterSelections
+            || birthsigns.size() > MaximumCharacterSelections || startingInventory.size() > MaximumStartingItems)
             return std::nullopt;
         auto raceValues = std::vector<CharacterRaceDefinition>(races.begin(), races.end());
         auto classValues = std::vector<CharacterClassDefinition>(classes.begin(), classes.end());
@@ -228,7 +229,7 @@ namespace TES3MP
             return std::nullopt;
         for (const auto& race : raceValues)
         {
-            if (race.appearances.empty() || race.appearances.size() > 1024
+            if (race.appearances.empty() || race.appearances.size() > MaximumRaceAppearances
                 || race.spells.size() > MaximumStartingSpells
                 || std::ranges::any_of(race.appearances, [&](const auto& value) { return value.race != race.id; }))
                 return std::nullopt;

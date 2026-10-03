@@ -9,6 +9,7 @@
 
 namespace TES3MP
 {
+    class CharacterProfile;
     // The engine implementation owns detached candidates and its existing image.
     // Only the reducer supplies this serialized durability callback. Committed
     // authorizes nonthrowing engine installation before canonical publication.
@@ -33,6 +34,11 @@ namespace TES3MP
         // Application composition keeps this service and its loaded content
         // alive until the reducer and all preparations have been destroyed.
         virtual ~NativeInventoryAuthority() = default;
+        // Completion must stage inventory, actor stats/spells and resource
+        // bindings together. A missing implementation rejects fresh characters;
+        // the profile/safe point must never commit against an unchanged image.
+        virtual std::unique_ptr<PreparedNativeInventory> prepareCharacterCompletion(
+            const CanonicalServerState&, PlayerId, const CharacterProfile&, ServerTick) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) = 0;
         virtual std::unique_ptr<PreparedNativeInventory> prepareMeleeAttack(

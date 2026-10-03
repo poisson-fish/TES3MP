@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 
 namespace TES3MP::Native
 {
@@ -147,4 +148,140 @@ namespace TES3MP::Native
     {
         return selections.withConstruction(std::make_shared<NativeCharacterConstruction>(store));
     }
+
+    std::optional<CharacterContentCatalog> discoverNativeCharacterContent(ContentManifestId manifest,
+        Transform creationSpawn, Transform completionSpawn, std::span<const StartingItem> startingInventory,
+        const MWWorld::ESMStore& store) noexcept
+    try
+    {
+        if (startingInventory.size() > MaximumStartingItems) return {};
+        // Bound external record scans as well as the selectable output. Body parts
+        // include non-player anatomy; rejecting overflow avoids an unbounded scan.
+        constexpr size_t MaximumScannedRecords = 65536;
+        if (store.get<ESM::Race>().getSize() > MaximumScannedRecords
+            || store.get<ESM::Class>().getSize() > MaximumScannedRecords
+            || store.get<ESM::BirthSign>().getSize() > MaximumScannedRecords
+            || store.get<ESM::BodyPart>().getSize() > MaximumScannedRecords
+            || store.get<ESM::Spell>().getSize() > MaximumScannedRecords) return {};
+        std::map<uint64_t, ESM::RefId> raceIds, classIds, signIds, partIds, spellIds;
+        const auto identify = [](auto& ids, const ESM::RefId& record) -> std::optional<uint64_t> {
+            const auto raw = characterRecordId(record.getRefIdString());
+            if (!raw) return {};
+            const auto [found, inserted] = ids.emplace(*raw, record);
+            if (!inserted && found->second != record) return {};
+            return raw;
+        };
+        for (const auto& entry : store.get<ESM::Spell>())
+            if (const auto* record = store.get<ESM::Spell>().search(entry.mId);
+                record && !identify(spellIds, record->mId)) return {};
+        const auto spells = [&](const ESM::SpellList& source) -> std::optional<std::vector<SpellRecordId>> {
+            if (source.mList.size() > MaximumStartingSpells) return {};
+            std::vector<SpellRecordId> result;
+            for (const auto& record : source.mList)
+            {
+                const auto raw = identify(spellIds, record);
+                if (!raw || !store.get<ESM::Spell>().search(record)) return {};
+                const auto id = SpellRecordId::fromValue(*raw);
+                if (!id) return {};
+                result.push_back(*id);
+            }
+            std::ranges::sort(result);
+            result.erase(std::unique(result.begin(), result.end()), result.end());
+            return result;
+        };
+        std::vector<CharacterRaceDefinition> races;
+        std::map<ESM::RefId, size_t> raceIndexes;
+        for (const auto& entry : store.get<ESM::Race>())
+        {
+            const auto* record = store.get<ESM::Race>().search(entry.mId);
+            if (!record || !(record->mData.mFlags & ESM::Race::Playable)
+                || raceIndexes.contains(record->mId)) continue;
+            if (races.size() == MaximumCharacterSelections) return {};
+            const auto raw = identify(raceIds, record->mId);
+            const auto powers = spells(record->mPowers);
+            if (!raw || !powers) return {};
+            CharacterRaceDefinition race{RaceRecordId::fromValue(*raw).value(), {}};
+            race.spells = *powers;
+            raceIndexes.emplace(record->mId, races.size());
+            races.push_back(std::move(race));
+        }
+        struct Parts { std::array<std::vector<uint64_t>, 2> heads, hair; };
+        std::vector<Parts> parts(races.size());
+        for (const auto& entry : store.get<ESM::BodyPart>())
+        {
+            const auto* record = store.get<ESM::BodyPart>().search(entry.mId);
+            if (!record || record->mData.mType != ESM::BodyPart::MT_Skin
+                || ESM::isFirstPersonBodyPart(*record)
+                || (record->mData.mFlags & ESM::BodyPart::BPF_NotPlayable)) continue;
+            const auto race = raceIndexes.find(record->mRace);
+            if (race == raceIndexes.end()) continue;
+            const bool head = record->mData.mPart == ESM::BodyPart::MP_Head;
+            if (!head && record->mData.mPart != ESM::BodyPart::MP_Hair) continue;
+            const auto raw = identify(partIds, record->mId);
+            if (!raw) return {};
+            const size_t sex = (record->mData.mFlags & ESM::BodyPart::BPF_Female) ? 0 : 1;
+            auto& ids = head ? parts[race->second].heads[sex] : parts[race->second].hair[sex];
+            if (std::ranges::find(ids, *raw) != ids.end()) continue;
+            if (ids.size() == MaximumRaceAppearances) return {};
+            ids.push_back(*raw);
+        }
+        for (size_t i = 0; i < races.size(); ++i)
+            for (size_t sex = 0; sex < 2; ++sex)
+            {
+                auto& heads = parts[i].heads[sex];
+                auto& hair = parts[i].hair[sex];
+                // Check the Cartesian product before constructing appearances.
+                const auto remaining = MaximumRaceAppearances - races[i].appearances.size();
+                if (!hair.empty() && heads.size() > remaining / hair.size()) return {};
+                std::ranges::sort(heads); std::ranges::sort(hair);
+                for (const auto head : heads) for (const auto style : hair)
+                    races[i].appearances.push_back({races[i].id, HeadRecordId::fromValue(head).value(),
+                        HairRecordId::fromValue(style).value(), static_cast<CharacterSex>(sex)});
+            }
+        // A playable record lacking usable head/hair cannot be faithfully offered.
+        if (std::ranges::any_of(races, [](const auto& race) { return race.appearances.empty(); })) return {};
+        std::vector<CharacterClassDefinition> classes;
+        for (const auto& entry : store.get<ESM::Class>())
+        {
+            const auto* record = store.get<ESM::Class>().search(entry.mId);
+            if (!record || !record->mData.mIsPlayable) continue;
+            const auto raw = identify(classIds, record->mId);
+            if (!raw) return {};
+            if (std::ranges::any_of(classes, [&](const auto& value) { return value.id.value() == *raw; })) continue;
+            if (classes.size() == MaximumCharacterSelections || record->mData.mSpecialization < 0
+                || record->mData.mSpecialization > 2) return {};
+            CharacterClassDefinition cls{ClassRecordId::fromValue(*raw).value(),
+                static_cast<ClassSpecialization>(record->mData.mSpecialization)};
+            for (size_t i = 0; i < cls.favoredAttributes.size(); ++i)
+            {
+                const auto value = record->mData.mAttribute[i];
+                if (value < 0 || value >= int(CharacterAttributeCount)) return {};
+                cls.favoredAttributes[i] = static_cast<uint8_t>(value);
+            }
+            for (size_t i = 0; i < cls.minorSkills.size(); ++i)
+            {
+                const auto minor = record->mData.mSkills[i][0], major = record->mData.mSkills[i][1];
+                if (minor < 0 || minor >= int(CharacterSkillCount) || major < 0 || major >= int(CharacterSkillCount)) return {};
+                cls.minorSkills[i] = static_cast<uint8_t>(minor); cls.majorSkills[i] = static_cast<uint8_t>(major);
+            }
+            classes.push_back(cls);
+        }
+        std::vector<CharacterBirthsignDefinition> signs;
+        for (const auto& entry : store.get<ESM::BirthSign>())
+        {
+            const auto* record = store.get<ESM::BirthSign>().search(entry.mId);
+            if (!record) continue;
+            const auto raw = identify(signIds, record->mId);
+            const auto powers = spells(record->mPowers);
+            if (!raw || !powers) return {};
+            if (std::ranges::any_of(signs, [&](const auto& value) { return value.id.value() == *raw; })) continue;
+            if (signs.size() == MaximumCharacterSelections) return {};
+            signs.push_back({BirthsignRecordId::fromValue(*raw).value(), *powers});
+        }
+        auto catalog = CharacterContentCatalog::create(manifest, creationSpawn, completionSpawn,
+            races, classes, signs, startingInventory);
+        if (!catalog) return {};
+        return withNativeCharacterConstruction(*catalog, store);
+    }
+    catch (...) { return {}; }
 }

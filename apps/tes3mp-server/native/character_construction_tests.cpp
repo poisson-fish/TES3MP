@@ -176,6 +176,56 @@ namespace
         require(unselected.mAttributes.at(ESM::Attribute::Strength).getBase() == 17,
             "stock pre-race fallback changed");
     }
+    void discovery()
+    {
+        Content content;
+        const auto discover = [&] {
+            return Native::discoverNativeCharacterContent(testContentManifestId(), spawn(10), spawn(100), {}, content.store);
+        };
+        auto catalog = discover();
+        require(catalog && catalog->construction(), "native selections not discovered");
+        require(catalog->find(content.female.race)->appearances == std::vector{content.female, content.male},
+            "sex-compatible appearances not discovered deterministically");
+        require(review(content, *catalog).derived() == review(content, content.catalog()).derived(),
+            "discovered native choices changed construction");
+        // Winning overrides, including playable flags and body-part sex/type, own discovery.
+        auto head = *content.store.get<ESM::BodyPart>().find(ref("female_head"));
+        head.mId = ref("extra_head"); content.store.insertStatic(head);
+        auto hidden = head; hidden.mId = ref("hidden_head"); hidden.mData.mFlags |= ESM::BodyPart::BPF_NotPlayable;
+        content.store.insertStatic(hidden);
+        auto firstPerson = head; firstPerson.mId = ref("first_person_head.1st"); content.store.insertStatic(firstPerson);
+        auto otherRace = content.race; otherRace.mId = ref("nonplayable"); otherRace.mData.mFlags = 0;
+        content.store.insertStatic(otherRace);
+        auto cls = content.characterClass; cls.mId = ref("hidden_class"); cls.mData.mIsPlayable = 0;
+        content.store.insertStatic(cls);
+        catalog = discover();
+        require(catalog && catalog->find(content.female.race)->appearances.size() == 3
+            && !catalog->find(recordId<RaceRecordId>("nonplayable"))
+            && !catalog->find(recordId<ClassRecordId>("hidden_class")), "nonplayable native records offered");
+        head.mData.mFlags |= ESM::BodyPart::BPF_NotPlayable; content.store.overrideRecord(head);
+        content.characterClass.mData.mSpecialization = ESM::Class::Magic;
+        content.store.overrideRecord(content.characterClass);
+        catalog = discover();
+        require(catalog && catalog->find(content.female.race)->appearances.size() == 2
+            && catalog->find(recordId<ClassRecordId>("class"))->specialization == ClassSpecialization::Magic,
+            "discovery used overridden records");
+        content.characterClass.mData.mSkills[0][0] = 256;
+        content.store.overrideRecord(content.characterClass);
+        require(!discover(), "invalid class index truncated during discovery");
+        content.characterClass.mData.mSkills[0][0] = 2; content.store.overrideRecord(content.characterClass);
+        auto hair = *content.store.get<ESM::BodyPart>().find(ref("female_hair"));
+        for (int i = 0; i < 32; ++i)
+        {
+            head.mId = ESM::RefId::stringRefId("head_" + std::to_string(i)); head.mData.mFlags = ESM::BodyPart::BPF_Female;
+            hair.mId = ESM::RefId::stringRefId("hair_" + std::to_string(i));
+            content.store.insertStatic(head); content.store.insertStatic(hair);
+        }
+        require(!discover(), "appearance Cartesian-product budget not enforced");
+        // Overflow publishes no partial selection catalog; another store is unaffected.
+        Content independent;
+        require(Native::discoverNativeCharacterContent(testContentManifestId(), spawn(10), spawn(100), {}, independent.store)
+            .has_value(), "failed discovery changed another content store");
+    }
     class FakeCrypto final : public CredentialCrypto
     {
         uint8_t mSeed = 1;
@@ -205,7 +255,66 @@ namespace
         require(std::holds_alternative<std::unique_ptr<ServerApp::PlayerIdentityFile>>(result), "identity file open failed");
         return std::get<std::unique_ptr<ServerApp::PlayerIdentityFile>>(std::move(result));
     }
-    void completion(const std::filesystem::path& path)
+    // Synthetic engine seam: exercises the real profile/reducer durability
+    // composition, without claiming native inventory or animation coverage.
+    struct SyntheticNative final : NativeInventoryAuthority
+    {
+        std::vector<std::byte> image{std::byte{1}, std::byte{0}, std::byte{0}};
+        std::array<std::shared_ptr<const CharacterProfile>, 2> profiles;
+        bool rejectResources = false;
+        unsigned preparations = 0;
+        struct Candidate final : PreparedNativeInventory
+        {
+            SyntheticNative& owner;
+            size_t index;
+            std::vector<std::byte> before, after;
+            std::shared_ptr<const CharacterProfile> profile;
+            bool consumed = false;
+            Candidate(SyntheticNative& value, size_t slot, const CharacterProfile& constructed)
+                : owner(value), index(slot), before(value.image), after(value.image),
+                  profile(std::make_shared<const CharacterProfile>(constructed))
+            { after[index + 1] = std::byte(constructed.derived().attributes[0]); }
+            CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+            {
+                if (consumed || before != owner.image) return CanonicalDurabilityResult::Rejected;
+                const auto result = persist(after);
+                if (result == CanonicalDurabilityResult::Committed)
+                {
+                    owner.image.swap(after); owner.profiles[index].swap(profile); consumed = true;
+                }
+                return result;
+            }
+        };
+        std::unique_ptr<PreparedNativeInventory> prepareInventory(
+            const CanonicalServerState&, const ServerCommandProposal&) override { return {}; }
+        std::span<const std::byte> inventoryImage() const noexcept override { return image; }
+        std::unique_ptr<PreparedNativeInventory> prepareCharacterCompletion(const CanonicalServerState& players,
+            PlayerId player, const CharacterProfile& profile, ServerTick) override
+        {
+            ++preparations;
+            if (rejectResources || player.value() > profiles.size() || profiles[player.value() - 1]) return {};
+            require(players.findPlayer(player)->transform() == spawn(100), "native completion did not stage safe point");
+            return std::make_unique<Candidate>(*this, size_t(player.value() - 1), profile);
+        }
+    };
+    struct CampaignPersistence final : CanonicalDurabilityPort
+    {
+        bool reject = false;
+        std::vector<std::byte> nativeImage;
+        std::shared_ptr<const CanonicalStatePublication> publication;
+        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
+            CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+            const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+            const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte> image) noexcept override
+        try
+        {
+            if (reject) return CanonicalDurabilityResult::Rejected;
+            nativeImage.assign(image.begin(), image.end()); publication = candidate;
+            return CanonicalDurabilityResult::Committed;
+        }
+        catch (...) { return CanonicalDurabilityResult::Failed; }
+    };
+    void completion(const std::filesystem::path& path, bool native = false)
     {
         require(!std::filesystem::exists(path), "completion scratch file must be fresh");
         Content content; const auto catalog = content.catalog();
@@ -214,12 +323,16 @@ namespace
         NullMetricSink metrics; NullStructuredEventSink events; Observability observation{metrics, events};
         CanonicalCommandReducer reducer(std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observation,
             testContentManifest());
+        SyntheticNative engine; CampaignPersistence campaign;
+        if (native) require(reducer.configureDurability(campaign, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &engine),
+            "native completion durability configuration failed");
         auto joins = AuthenticatedJoinCoordinator::create(spawn(10), testContentManifest(), id<SessionId>(1), *registry, reducer).value();
         const auto first = std::get<AuthenticatedJoinResult>(joins.join(id<PrincipalId>(1), SessionGeneration::initial(), id<ServerTick>(1)));
         const auto second = std::get<AuthenticatedJoinResult>(joins.join(id<PrincipalId>(2), SessionGeneration::initial(), id<ServerTick>(2)));
         auto choice = [&](PlayerId player, CharacterCreationChoice value) {
             const auto current = *registry->characterProfile(player);
-            const auto result = joins.applyCharacterCreation(player, catalog, {current.revision(), std::move(value)}, id<ServerTick>(3));
+            const auto result = joins.applyCharacterCreation(player, catalog, {current.revision(), std::move(value)},
+                id<ServerTick>(std::max<uint64_t>(3, reducer.checkpointTick().value())));
             require(std::holds_alternative<CharacterProfile>(result), "atomic native profile choice failed");
         };
         for (auto player : {first.player, second.player})
@@ -240,6 +353,48 @@ namespace
             && reducer.state().findPlayer(first.player)->transform() == spawn(10),
             "failed native construction reserved or installed a completion");
         content.setting("iAutoPCSpellMax", ESM::Variant(1));
+        if (native)
+        {
+            engine.rejectResources = true;
+            const auto unavailable = joins.prepareCharacterCreation(first.player, catalog,
+                {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
+            require(std::get<CharacterProfileError>(unavailable) == CharacterProfileError::InvalidInitialState
+                && !engine.profiles[0] && *registry->characterProfile(first.player) == reviewFirst,
+                "missing native resources completed a character");
+            engine.rejectResources = false;
+            auto cancelled = joins.prepareCharacterCreation(first.player, catalog,
+                {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
+            auto* abandoned = std::get_if<PreparedCharacterCreation>(&cancelled);
+            require(abandoned && joins.cancelCharacterCreation(std::move(*abandoned)) && !engine.profiles[0],
+                "cancelled native completion installed state or retained identity reservation");
+            auto stale = joins.prepareCharacterCreation(first.player, catalog,
+                {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
+            auto* old = std::get_if<PreparedCharacterCreation>(&stale);
+            auto concurrent = reducer.preparePlayerSafePoint(second.player, spawn(10), id<ServerTick>(4));
+            require(old && concurrent && reducer.commit(std::move(*concurrent)), "concurrent lifecycle could not advance");
+            const auto currentPublication = reducer.latestPublication();
+            require(!joins.commitCharacterCreation(std::move(*old)) && !engine.profiles[0]
+                && *registry->characterProfile(first.player) == reviewFirst
+                && reducer.latestPublication() == currentPublication
+                && open(path)->records()[0].characterProfile == CharacterProfile::fresh(),
+                "stale native completion installed a profile or candidate");
+            const auto before = engine.image;
+            const auto publication = reducer.latestPublication();
+            campaign.reject = true;
+            auto staged = joins.prepareCharacterCreation(first.player, catalog,
+                {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
+            auto* candidate = std::get_if<PreparedCharacterCreation>(&staged);
+            require(candidate && candidate->candidateNativeInventory() && !engine.profiles[0],
+                "native preparation installed state before durability");
+            require(!joins.commitCharacterCreation(std::move(*candidate)) && engine.image == before
+                && !engine.profiles[0] && *registry->characterProfile(first.player) == reviewFirst
+                && *registry->characterProfile(second.player) == reviewSecond
+                && reducer.latestPublication() == publication
+                && reducer.state().findPlayer(first.player)->transform() == spawn(10)
+                && open(path)->records()[0].characterProfile == CharacterProfile::fresh(),
+                "campaign rejection leaked native state, profile or safe point");
+            campaign.reject = false;
+        }
         persistence.reject = true;
         auto failed = joins.prepareCharacterCreation(first.player, catalog,
             {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
@@ -253,15 +408,23 @@ namespace
         choice(first.player, CompleteCharacterCreation{});
         require(*registry->characterProfile(second.player) == reviewSecond
             && reducer.state().findPlayer(second.player)->transform() == spawn(10), "first completion changed second player");
+        if (native) require(engine.profiles[0] && !engine.profiles[1] && campaign.nativeImage == engine.image
+            && engine.image[1] == std::byte{40} && engine.image[2] == std::byte{0},
+            "first native completion changed another owner or wrote installed image");
         choice(second.player, CompleteCharacterCreation{});
         const auto completedFirst = *registry->characterProfile(first.player);
         const auto completedSecond = *registry->characterProfile(second.player);
         require(completedFirst.derived().attributes[0] == 40 && completedSecond.derived().attributes[0] == 50
             && reducer.state().findPlayer(first.player)->transform() == spawn(100), "completed native result/safe point mismatch");
         // Repeated completion rejects before construction/persistence.
+        const auto preparations = engine.preparations;
         const auto duplicate = joins.applyCharacterCreation(first.player, catalog,
             {completedFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(5));
         require(std::get<CharacterProfileError>(duplicate) == CharacterProfileError::AlreadyEstablished, "duplicate completion admitted");
+        if (native) require(engine.preparations == preparations
+            && engine.profiles[0] && engine.profiles[1] && campaign.nativeImage == engine.image
+            && *engine.profiles[0] == completedFirst && *engine.profiles[1] == completedSecond
+            && engine.image[2] == std::byte{50}, "native completions did not durably install owned results");
         auto restartedFile = open(path); Persistence restartedPersistence(*restartedFile);
         auto restarted = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
             PlayerIdentityRegistry::create(crypto, restartedPersistence, restartedFile->records()));
@@ -287,9 +450,11 @@ namespace
 int main(int argc, char** argv)
 try
 {
-    require(argc >= 2, "Usage: tes3mp_native_character_tests construction | completion NEW_IDENTITY_FILE");
+    require(argc >= 2, "Usage: tes3mp_native_character_tests construction | discovery | completion NEW_IDENTITY_FILE");
     if (std::string_view(argv[1]) == "construction" && argc == 2) construction();
+    else if (std::string_view(argv[1]) == "discovery" && argc == 2) discovery();
     else if (std::string_view(argv[1]) == "completion" && argc == 3) completion(std::filesystem::absolute(argv[2]));
+    else if (std::string_view(argv[1]) == "completion-native" && argc == 3) completion(std::filesystem::absolute(argv[2]), true);
     else throw std::runtime_error("unknown character test filter");
     std::cout << "PASS native character " << argv[1] << '\n';
     return 0;

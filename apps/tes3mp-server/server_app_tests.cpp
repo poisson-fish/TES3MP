@@ -518,7 +518,68 @@ namespace
             .value();
     }
 
-    void chargenVisibilityBetweenTicks()
+    struct ChargenNativeFixture final : TES3MP::ServerApp::NativeInventoryService
+    {
+        std::array<std::byte, 2> image{std::byte{1}, std::byte{1}};
+        mutable unsigned projected = 0;
+        bool rejectProjection = false;
+        struct Candidate final : PreparedNativeInventory
+        {
+            ChargenNativeFixture& service;
+            std::array<std::byte, 2> before, after;
+            bool consumed = false;
+            Candidate(ChargenNativeFixture& value, PlayerId player)
+                : service(value), before(value.image), after(value.image) { after.at(player.value() - 1) = std::byte{2}; }
+            CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+            {
+                if (consumed || before != service.image) return CanonicalDurabilityResult::Rejected;
+                const auto result = persist(after);
+                if (result == CanonicalDurabilityResult::Committed) { service.image = after; consumed = true; }
+                return result;
+            }
+        };
+        std::unique_ptr<PreparedNativeInventory> prepareInventory(
+            const CanonicalServerState&, const ServerCommandProposal&) override { return {}; }
+        std::unique_ptr<PreparedNativeInventory> prepareCharacterCompletion(
+            const CanonicalServerState&, PlayerId player, const CharacterProfile&, ServerTick) override
+        { return std::make_unique<Candidate>(*this, player); }
+        std::span<const std::byte> inventoryImage() const noexcept override { return image; }
+        bool hasNativeCombat() const noexcept override { return true; }
+        const std::array<std::byte, 2>& values(const PreparedNativeInventory* candidate) const
+        {
+            const auto* staged = dynamic_cast<const Candidate*>(candidate);
+            assert(!candidate || (staged && &staged->service == this && !staged->consumed && staged->before == image));
+            if (staged) ++projected;
+            return staged ? staged->after : image;
+        }
+        std::optional<TES3MP::ServerApp::InventoryInterestDelivery> projectInventory(
+            const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedNativeInventory* candidate = nullptr) const override
+        {
+            if (candidate && rejectProjection) return {};
+            const auto* session = players.findActiveSession(target);
+            if (!session) return {};
+            const auto selected = std::to_integer<uint64_t>(values(candidate).at(session->playerId().value() - 1));
+            return TES3MP::ServerApp::InventoryInterestDelivery{target,
+                {{{target, session->sessionGeneration(), tick, revision}, session->playerId(), id<InventoryRevision>(selected), {}, {}}},
+                {}, {}, std::get<LatestWinsEquipmentSnapshot>(LatestWinsEquipmentSnapshot::create(
+                    target, session->sessionGeneration(), tick, revision, {}))};
+        }
+        std::optional<LatestWinsCombatSnapshot> projectCombat(const CanonicalServerState& players,
+            SessionId target, ServerTick tick, CanonicalRevision revision,
+            const PreparedNativeInventory* candidate = nullptr) const override
+        {
+            const auto* session = players.findActiveSession(target);
+            if (!session) return {};
+            const auto selected = std::to_integer<uint64_t>(values(candidate).at(session->playerId().value() - 1));
+            std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+            for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = static_cast<ReplicatedCombatSkill>(i);
+            auto result = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick, revision,
+                session->playerId(), id<CombatRevision>(selected), float(selected), 2, 1, 1, 1, 1, false, {}, skills);
+            return std::get<LatestWinsCombatSnapshot>(std::move(result));
+        }
+    };
+    void chargenVisibilityBetweenTicks(bool native = false)
     {
         using namespace TES3MP::ServerApp;
         const auto config = parsedConfig();
@@ -551,22 +612,38 @@ namespace
             std::span(&race, 1), std::span(&characterClass, 1), std::span(&birthsign, 1), {}).value();
         CanonicalCommandReducer reducer(std::get<CanonicalServerState>(createCanonicalServerState({}, {})),
             observability, testContentManifest());
+        ChargenNativeFixture engine;
+        struct Durability final : CanonicalDurabilityPort
+        {
+            CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
+                CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+                const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+                const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte> bytes) noexcept override
+            { return bytes.size() == 2 ? CanonicalDurabilityResult::Committed : CanonicalDurabilityResult::Rejected; }
+        } campaign;
+        if (native) assert(reducer.configureDurability(campaign, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &engine));
         auto joins = AuthenticatedJoinCoordinator::create(
             spawn, testContentManifest(), id<SessionId>(1), *identities, reducer).value();
-        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2).value();
+        auto queuePolicy = OutboundQueuePolicy{};
+        if (native) queuePolicy.latestRateBurst = 4;
+        auto queues = OutboundQueueSet::create(queuePolicy, 2).value();
         FakeAuthentication authentication;
-        const std::array capabilities{ characterCreationCapability() };
+        std::vector<CapabilityId> capabilities{ characterCreationCapability() };
+        if (native) { capabilities.push_back(inventoryReplicationCapability()); capabilities.push_back(combatReplicationCapability()); }
+        std::ranges::sort(capabilities);
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
             std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10)), capabilities, {}));
         ConnectionSessionCoordinator sessions(clock, observability,
             SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
-            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &characters);
+            offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &characters,
+            nullptr, native ? &engine : nullptr);
         ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), ServerTick::initial(),
             IngressOrdinal::initial(), TickEpoch::NextTick);
         auto lifecycle = ServerLifecycleCoordinator::create(30'000'000'000, reducer).value();
         FakeRuntime runtime;
-        ServerApplication application(runtime, config,
-            { sessions, joins, *crypto, queues, clock, intake, reducer, lifecycle });
+        ServerApplicationWiring wiring{sessions, joins, *crypto, queues, clock, intake, reducer, lifecycle};
+        wiring.nativeInventory = native ? &engine : nullptr;
+        ServerApplication application(runtime, config, wiring);
         assert(application.start());
         const auto send = [&](uint64_t connection, MessageClass category, MessageKind kind,
                               std::vector<std::byte> payload) {
@@ -591,6 +668,7 @@ namespace
                 encodeAuthenticationRequest(AuthenticationRequest::join(AuthenticationMaterial::create({}).value())));
             assert(application.pump(intake.nextTick()));
             const auto apply = [&](CharacterCreationChoice choice) {
+                assert(identities->characterProfile(id<PlayerId>(player)));
                 auto result = joins.applyCharacterCreation(id<PlayerId>(player), characters,
                     { identities->characterProfile(id<PlayerId>(player))->revision(), std::move(choice) },
                     intake.nextTick());
@@ -609,12 +687,45 @@ namespace
             const ClientCharacterCreationCommand complete{ id<SessionId>(player), SessionGeneration::initial(),
                 CommandSequence::initial(), id<CommandId>(1), before,
                 { identities->characterProfile(id<PlayerId>(player))->revision(), CompleteCharacterCreation{} } };
+            if (native)
+            {
+                engine.rejectProjection = true;
+                const auto encoded = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ClientCharacterCreationCommand, encodeClientCharacterCreationCommand(complete)));
+                const auto failed = sessions.dispatch(id<TransportConnectionId>(player),
+                    {TransportChannel::ReliableOrdered, encoded}, joins, *crypto, intake, intake.nextTick());
+                assert(failed == ConnectionSessionResult::ProtocolRejected
+                    && reducer.canonicalRevision() == before && engine.image.at(player - 1) == std::byte{1}
+                    && identities->characterProfile(id<PlayerId>(player))->lifecycle() == CharacterLifecycle::CreatingCharacter);
+                engine.rejectProjection = false;
+            }
             send(player, MessageClass::ReliableOperation, MessageKind::ClientCharacterCreationCommand,
                 encodeClientCharacterCreationCommand(complete));
             assert(application.pump(intake.nextTick()));
             assert(identities->characterProfile(id<PlayerId>(player))->lifecycle()
                 == CharacterLifecycle::EstablishedCharacter);
             assert(reducer.state().findPlayer(id<PlayerId>(player))->transform() == outside);
+            if (native)
+            {
+                // Refill transport tokens without reaching the next simulation
+                // tick; queued candidate combat must retain its completed values.
+                clock.nanoseconds += 5'000'000;
+                assert(application.pump(intake.nextTick()));
+                bool inventory = false, combat = false;
+                for (size_t i = 0; i < runtime.sent.size(); ++i)
+                {
+                    if (runtime.sentConnections[i].value() != player) continue;
+                    const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[i]));
+                    if (frame.messageKind() == MessageKind::ReliablePlayerInventoryBaseline)
+                        inventory = std::get<ReliablePlayerInventoryBaseline>(decodeReliablePlayerInventoryBaseline(frame.payload())).revision.value() == 2;
+                    if (frame.messageKind() == MessageKind::LatestWinsCombatSnapshot)
+                        combat = std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(frame.payload())).selfHealth() == 2;
+                }
+                if (!inventory || !combat || engine.projected < 4)
+                    std::cerr << "native completion delivery: player=" << player << " inventory=" << inventory
+                        << " combat=" << combat << " projected=" << engine.projected << '\n';
+                assert(inventory && combat && engine.image.at(player - 1) == std::byte{2} && engine.projected >= 4);
+            }
             // Another transport pump still precedes the next simulation tick.
             ++clock.nanoseconds;
             assert(application.pump(intake.nextTick()));
@@ -643,7 +754,8 @@ namespace
             assert(views[0] && views[1] && observations[0] && observations[1]);
         }
         assert(application.stop());
-        std::cout << "chargen-visibility: two staggered completions between ticks publish safe-point views and peer leave/enter\n";
+        std::cout << (native ? "chargen-native-visibility" : "chargen-visibility")
+            << ": two staggered completions publish safe-point views and peer leave/enter\n";
     }
 }
 #ifdef TES3MP_NATIVE_INVENTORY_SCENARIO
@@ -1005,8 +1117,9 @@ int main(int argc, char** argv)
     using namespace TES3MP::ServerApp;
     if (argc > 1)
     {
-        assert(argc == 2 && std::string_view(argv[1]) == "chargen-visibility");
-        chargenVisibilityBetweenTicks();
+        assert(argc == 2 && (std::string_view(argv[1]) == "chargen-visibility"
+            || std::string_view(argv[1]) == "chargen-native-visibility"));
+        chargenVisibilityBetweenTicks(std::string_view(argv[1]) == "chargen-native-visibility");
         return 0;
     }
     chargenVisibilityBetweenTicks();

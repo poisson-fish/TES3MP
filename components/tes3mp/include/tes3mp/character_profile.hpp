@@ -23,6 +23,8 @@ namespace TES3MP
     inline constexpr std::size_t CharacterSkillCount = 27;
     inline constexpr std::size_t MaximumStartingSpells = 64;
     inline constexpr std::size_t MaximumStartingItems = 64;
+    inline constexpr std::size_t MaximumCharacterSelections = 256;
+    inline constexpr std::size_t MaximumRaceAppearances = 1024;
 
     enum class CharacterLifecycle : std::uint8_t
     {

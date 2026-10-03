@@ -26,19 +26,19 @@ reconnect restores loops without transient replay.
 travel needs players; Soultrap needs creatures. Two summons empty; animated ground
 rejects. Bind intervention destinations. Scripts/quests remain M5.
 
-**Chargen construction:** [native provider](../../apps/tes3mp-server/native/character_construction.cpp)
-uses shared OpenMW race/class stats and explicit-store F_PCStart selection.
-Winning records validate choices/stat/spell bounds. Owned values feed atomic
-profile/safe-point completion.
-Synthetic `build/logs/chargen-native-{construction,completion}.log` proves custom
-classes, content specialization/settings, two-player isolation, failed construction/
-write retry, duplicate rejection and identity-file restart/reattach (fake crypto).
-Legacy profiles pass. Inherited `chargen-{protocol,join,visibility}.log`
-remains (visibility: production crypto).
-[Startup](../../apps/tes3mp-server/main.cpp) still rejects legacy chargen configuration
-with native inventory; binding requires established characters. Native selection
-discovery, inventory/actor-image completion and resources remain unwired;
-desktop acceptance is unverified.
+**Chargen:** [native provider](../../apps/tes3mp-server/native/character_construction.cpp)
+shares OpenMW stats/F_PCStart selection and discovers bounded winning playable
+race/body/class/sign choices. Completion stages native candidates with the safe
+point; durability precedes installation/publication. Unavailable preparation rejects.
+Synthetic `build/logs/chargen-native-{construction,completion,discovery,transaction}.log`
+covers construction, discovery overrides/budgets, two-player isolation,
+cancellation/staleness/failure/retry and profile identity-file restart (fake crypto).
+`chargen-native-visibility.log` (synthetic, production crypto) proves projection-failure
+retry and staged inventory/combat delivery between ticks. Legacy profile/visibility checks pass.
+Server build: `chargen-server-build.log`.
+[Startup](../../apps/tes3mp-server/main.cpp) still requires established native characters.
+Discovered-choice startup and concrete inventory/body/stat/spell/resource installation
+remain unwired; desktop acceptance is unverified.
 
 **Inherited desktop acceptance:** V76/capability 35:
 `build/v76-collision-acceptance-10/result.json`: hashes and 23 synthetic vanilla
@@ -49,6 +49,6 @@ ground collision and reload/reconnect. V74:
 Six [stock comparisons](../../scripts/native_spell_presentation_capture.py) verify
 dispatch; pixels/waveforms and V77 remain unverified.
 
-**Next:** discover native choices; stage inventory/actor resources with chargen's
-campaign commit. Then enable fresh native characters and test two-client completion/
-reconnect/restart. V77 latency/jitter/loss acceptance still precedes player physics cutover.
+**Next:** wire discovery and concrete native completion into the campaign hook,
+enable fresh characters, then test two-client completion/reconnect/restart.
+V77 latency/jitter/loss acceptance still precedes player physics cutover.

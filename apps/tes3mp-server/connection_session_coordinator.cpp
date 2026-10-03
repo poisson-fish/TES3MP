@@ -426,6 +426,47 @@ namespace TES3MP::ServerApp
             {
                 const auto& candidateState = pending->candidateState();
                 const auto revision = pending->candidateRevision();
+                if (mNativeInventory && pending->candidateNativeInventory())
+                {
+                    for (const auto& target : candidateState.activeSessions())
+                    {
+                        const auto targetConnection = connectionForSession(target.sessionId());
+                        const auto* targetSession = targetConnection ? session(*targetConnection) : nullptr;
+                        if (!targetConnection || !targetSession || !targetSession->negotiatedHello()) continue;
+                        const auto& capabilities = targetSession->negotiatedHello()->negotiatedCapabilities();
+                        if (std::ranges::binary_search(capabilities, inventoryReplicationCapability()))
+                        {
+                            auto delivery = mNativeInventory->projectInventory(candidateState, target.sessionId(),
+                                tick, revision, pending->candidateNativeInventory());
+                            if (!delivery || !appendInventoryInterestMessages(owned, messages, *targetConnection, *delivery))
+                            {
+                                (void)joins.cancelCharacterCreation(std::move(*pending));
+                                return ConnectionSessionResult::ProtocolRejected;
+                            }
+                        }
+                        if (mNativeInventory->hasNativeCombat()
+                            && std::ranges::binary_search(capabilities, combatReplicationCapability()))
+                        {
+                            auto snapshot = mNativeInventory->projectCombat(candidateState, target.sessionId(),
+                                tick, revision, pending->candidateNativeInventory());
+                            if (!snapshot)
+                            {
+                                (void)joins.cancelCharacterCreation(std::move(*pending));
+                                return ConnectionSessionResult::ProtocolRejected;
+                            }
+                            auto nativeFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                                MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(*snapshot));
+                            auto* frameBytes = std::get_if<std::vector<std::byte>>(&nativeFrame);
+                            if (!frameBytes)
+                            {
+                                (void)joins.cancelCharacterCreation(std::move(*pending));
+                                return ConnectionSessionResult::ProtocolRejected;
+                            }
+                            owned.push_back(std::move(*frameBytes));
+                            messages.push_back({*targetConnection, TransportChannel::LatestWins, owned.back()});
+                        }
+                    }
+                }
                 if (mInventory && pending->candidateInventory())
                 {
                     for (const auto& target : candidateState.activeSessions())

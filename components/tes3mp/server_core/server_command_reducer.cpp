@@ -1,5 +1,6 @@
 #include <tes3mp/movement_policy.hpp>
 #include <tes3mp/server_command_reducer.hpp>
+#include <tes3mp/character_profile.hpp>
 
 #include <algorithm>
 #include <array>
@@ -504,6 +505,21 @@ namespace TES3MP
         return prepared;
     }
 
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareCharacterCompletion(
+        PlayerId player, Transform transform, const CharacterProfile& profile, ServerTick tick)
+    {
+        if (profile.lifecycle() != CharacterLifecycle::EstablishedCharacter || tick < mCheckpointTick)
+            return {};
+        auto prepared = preparePlayerSafePoint(player, transform, tick);
+        if (prepared && mNativeInventory)
+        {
+            prepared->mNativeInventory = mNativeInventory->prepareCharacterCompletion(
+                prepared->candidateState(), player, profile, tick);
+            if (!prepared->mNativeInventory) return {};
+        }
+        return prepared;
+    }
+
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDialogueChoice(
         PlayerId player, DialogueChoiceId choice, const CanonicalWorldState& world, ServerTick tick)
     {
@@ -557,12 +573,21 @@ namespace TES3MP
         prepared.mPublication->mState = prepared.mState;
         prepared.mPublication->mChecksum
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
-        if (mDurability
-            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands,
+        const auto persist = [&](std::span<const std::byte> nativeImage) {
+            if (mNativeInventory && nativeImage.empty()) return CanonicalDurabilityResult::Rejected;
+            return mDurability ? mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands,
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
                    mDurableActors, mDurableWorld, mDurableScriptState,
-                   mNativeInventory ? mNativeInventory->inventoryImage() : std::span<const std::byte>{})
-                != CanonicalDurabilityResult::Committed)
+                   nativeImage) : CanonicalDurabilityResult::Committed;
+        };
+        CanonicalDurabilityResult durable;
+        try
+        {
+            durable = prepared.mNativeInventory ? prepared.mNativeInventory->commit(persist)
+                : persist(mNativeInventory ? mNativeInventory->inventoryImage() : std::span<const std::byte>{});
+        }
+        catch (...) { return false; } // Callback allocation precedes durability and native installation.
+        if (durable != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;

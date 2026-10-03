@@ -215,6 +215,7 @@ namespace TES3MP
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
             CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
+            const PreparedNativeInventory* candidateNativeInventory() const noexcept { return mNativeInventory.get(); }
 
         private:
             friend class CanonicalCommandReducer;
@@ -227,6 +228,7 @@ namespace TES3MP
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
             std::vector<DurableCommandOrder> mDurableCommands;
+            std::unique_ptr<PreparedNativeInventory> mNativeInventory;
         };
 
         // Eligible for later reviewed composition; this type owns no connection,
@@ -304,6 +306,8 @@ namespace TES3MP
         std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
         std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
         std::optional<PreparedLifecycle> preparePlayerSafePoint(PlayerId player, Transform transform, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareCharacterCompletion(
+            PlayerId player, Transform transform, const CharacterProfile& profile, ServerTick tick);
         std::optional<PreparedLifecycle> prepareDialogueChoice(
             PlayerId player, DialogueChoiceId choice, const CanonicalWorldState& world, ServerTick tick);
         std::optional<PreparedLifecycle> prepareExpiration(
