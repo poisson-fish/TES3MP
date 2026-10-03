@@ -777,11 +777,19 @@ namespace MWRender
     public:
         Impl(RenderingManager& rendering, const MWWorld::ESMStore& store, const ESM::RefId& npcRecord,
             MWWorld::CellStore& cell, const ESM::Position& position,
-            std::optional<std::span<const ESM::RefId>> equipment, float scale)
+            std::optional<std::span<const ESM::RefId>> equipment, float scale, const ESM::NPC* body)
             : mRendering(rendering)
+            , mBody(body ? std::optional(*body) : std::nullopt)
             , mReference(store, npcRecord)
             , mPtr(mReference.getPtr().mRef, &cell)
         {
+            if (mBody)
+            {
+                if (mPtr.getType() != ESM::REC_NPC_ || mBody->mId != npcRecord)
+                    throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                // Per-replica ownership keeps winning content and other players untouched.
+                mPtr.get<ESM::NPC>()->mBase = &*mBody;
+            }
             if (mPtr.getType() != ESM::REC_NPC_ && mPtr.getType() != ESM::REC_CREA)
                 throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
             if (!isValidReplicatedActorPose(position) || !std::isfinite(scale) || scale <= 0)
@@ -831,6 +839,7 @@ namespace MWRender
 
     private:
         RenderingManager& mRendering;
+        std::optional<ESM::NPC> mBody;
         MWWorld::ManualRef mReference;
         MWWorld::Ptr mPtr;
         ReplicatedActorResult mCreateResult = ReplicatedActorResult::LifecycleViolation;
@@ -893,7 +902,7 @@ namespace MWRender
 
     ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering, const MWWorld::ESMStore& store,
         const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
-        std::optional<std::span<const ESM::RefId>> equipment, float scale) noexcept
+        std::optional<std::span<const ESM::RefId>> equipment, float scale, const ESM::NPC* body) noexcept
     {
         try
         {
@@ -902,7 +911,7 @@ namespace MWRender
             const int recType = store.find(npcRecord);
             if (recType != ESM::NPC::sRecordId && recType != ESM::Creature::sRecordId)
                 return { ReplicatedActorResult::InvalidAppearanceRecord, nullptr };
-            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position, equipment, scale);
+            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position, equipment, scale, body);
             const ReplicatedActorResult result = impl->createResult();
             return { result, std::unique_ptr<ReplicatedActor>(new ReplicatedActor(std::move(impl))) };
         }

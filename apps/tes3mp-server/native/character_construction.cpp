@@ -1,4 +1,5 @@
 #include "character_construction.hpp"
+#include <tes3mp/character_creation_protocol.hpp>
 
 #include <apps/openmw/mwmechanics/autocalcspell.hpp>
 #include <apps/openmw/mwmechanics/playerconstruction.hpp>
@@ -13,6 +14,8 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <stdexcept>
+#include <cstdio>
 
 namespace TES3MP::Native
 {
@@ -44,9 +47,18 @@ namespace TES3MP::Native
                 if (static_cast<unsigned>(appearance.sex) > 1
                     || mStore.get<ESM::Attribute>().getSize() != CharacterAttributeCount
                     || mStore.get<ESM::Skill>().getSize() != CharacterSkillCount)
-                    return {};
+                    throw std::invalid_argument("Native character stat/sex domain invalid");
                 const auto spellLimit = mStore.get<ESM::GameSetting>().find("iAutoPCSpellMax")->mValue.getInteger();
-                if (spellLimit <= 0 || spellLimit > int(MaximumStartingSpells)) return {};
+                if (spellLimit < 0 || spellLimit > 65536 || mStore.get<ESM::Spell>().getSize() > 65536)
+                    throw std::invalid_argument("Native character starting spell budget invalid");
+                const auto eligible = std::ranges::count_if(mStore.get<ESM::Spell>(), [](const auto& spell) {
+                    return spell.mData.mType == ESM::Spell::ST_Spell && (spell.mData.mFlags & ESM::Spell::F_PCStart);
+                });
+                // Stock uses 100 by default. Bound potential allocation rather
+                // than rejecting that setting when only a few spells qualify.
+                // Zero never reaches the stock replacement branch: all qualify.
+                if ((spellLimit ? std::min<size_t>(size_t(eligible), size_t(spellLimit)) : size_t(eligible)) > MaximumStartingSpells)
+                    throw std::invalid_argument("Native character starting spell selection exceeds budget");
                 const auto* race = resolve<ESM::Race>(mStore, appearance.race);
                 const auto* head = resolve<ESM::BodyPart>(mStore, appearance.head);
                 const auto* hair = resolve<ESM::BodyPart>(mStore, appearance.hair);
@@ -89,14 +101,16 @@ namespace TES3MP::Native
                 std::array<bool, CharacterAttributeCount> attributes{};
                 for (const auto index : selected->mData.mAttribute)
                 {
-                    if (index < 0 || index >= int(attributes.size()) || attributes[index]) return {};
+                    if (index < 0 || index >= int(attributes.size()) || attributes[index])
+                        throw std::invalid_argument("Native character class attribute domain invalid");
                     attributes[index] = true;
                 }
                 std::array<bool, CharacterSkillCount> skills{};
                 for (const auto& pair : selected->mData.mSkills)
                     for (const auto index : pair)
                     {
-                        if (index < 0 || index >= int(skills.size()) || skills[index]) return {};
+                        if (index < 0 || index >= int(skills.size()) || skills[index])
+                            throw std::invalid_argument("Native character class skill domain invalid");
                         skills[index] = true;
                     }
                 // Only sex is needed from the NPC base once race/class are selected.
@@ -139,6 +153,11 @@ namespace TES3MP::Native
                 std::ranges::sort(result.startingSpells);
                 return result;
             }
+            catch (const std::exception& error)
+            {
+                std::fprintf(stderr, "Native character derivation rejected: %.240s\n", error.what());
+                return {};
+            }
             catch (...) { return {}; }
         };
     }
@@ -147,6 +166,78 @@ namespace TES3MP::Native
         const CharacterContentCatalog& selections, const MWWorld::ESMStore& store)
     {
         return selections.withConstruction(std::make_shared<NativeCharacterConstruction>(store));
+    }
+
+    ConstructedCharacter constructNativeCharacter(const CharacterProfile& profile,
+        const ESM::NPC& base, const MWWorld::ESMStore& store)
+    {
+        if (profile.lifecycle() != CharacterLifecycle::EstablishedCharacter || !profile.appearance()
+            || !profile.characterClass() || !profile.birthsign() || !base.mScript.empty())
+            throw std::invalid_argument("Native character completion requires a complete unscripted body");
+        const auto derived = NativeCharacterConstruction(store).derive(*profile.appearance(),
+            *profile.characterClass(), *profile.birthsign());
+        if (!derived || *derived != profile.derived())
+            throw std::invalid_argument("Native character derivation differs from winning content");
+        ConstructedCharacter result{base, MWMechanics::NpcStats(store)};
+        auto& body = result.body;
+        body.mName = profile.name();
+        body.mRace = resolve<ESM::Race>(store, profile.appearance()->race)->mId;
+        body.mHead = resolve<ESM::BodyPart>(store, profile.appearance()->head)->mId;
+        body.mHair = resolve<ESM::BodyPart>(store, profile.appearance()->hair)->mId;
+        body.mFlags = profile.appearance()->sex == CharacterSex::Female ? ESM::NPC::Female : 0;
+        body.mNpdtType = ESM::NPC::NPC_DEFAULT;
+        body.mNpdt.mLevel = 1;
+        body.mModel.clear();
+        body.mFaction = {};
+        body.mInventory.mList.clear();
+        body.mSpells.mList.clear();
+        if (const auto* cls = std::get_if<ClassRecordId>(&*profile.characterClass()))
+            body.mClass = resolve<ESM::Class>(store, *cls)->mId;
+        else
+            // Custom classes stay in the owned profile; do not inherit the
+            // template's class or mutate shared winning content.
+            body.mClass = {};
+        for (auto spell : derived->startingSpells)
+            body.mSpells.mList.push_back(resolve<ESM::Spell>(store, spell)->mId);
+        const float multiplier = store.get<ESM::GameSetting>().find("fPCbaseMagickaMult")->mValue.getFloat();
+        if (!std::isfinite(multiplier) || multiplier < 0 || multiplier > 1000)
+            throw std::invalid_argument("Native player magicka multiplier invalid");
+        result.stats.setLevel(1);
+        for (size_t i = 0; i < derived->attributes.size(); ++i)
+        {
+            MWMechanics::AttributeValue value;
+            value.setBase(derived->attributes[i]);
+            result.stats.setAttribute(ESM::Attribute::indexToRefId(int(i)), value, multiplier);
+        }
+        for (size_t i = 0; i < derived->skills.size(); ++i)
+            result.stats.getSkill(ESM::Skill::indexToRefId(int(i))).setBase(derived->skills[i]);
+        result.stats.updateHealth();
+        result.stats.recalculateMagicka(multiplier);
+        for (int i = 0; i < 3; ++i)
+        {
+            auto value = result.stats.getDynamic(i);
+            value.setCurrent(value.getModified());
+            result.stats.setDynamic(i, value);
+        }
+        return result;
+    }
+
+    std::vector<char> encodeNativeCharacterProfile(PlayerId player, const CharacterProfile& profile)
+    {
+        const auto bytes = encodeReliableCharacterProfile({SessionId::fromValue(1).value(),
+            SessionGeneration::initial(), player, CharacterConfirmationResult::Confirmed, profile});
+        return {reinterpret_cast<const char*>(bytes.data()), reinterpret_cast<const char*>(bytes.data() + bytes.size())};
+    }
+    CharacterProfile decodeNativeCharacterProfile(PlayerId player, std::span<const char> bytes)
+    {
+        auto decoded = decodeReliableCharacterProfile(std::as_bytes(bytes));
+        const auto* value = std::get_if<ReliableCharacterProfile>(&decoded);
+        if (!value || value->playerId != player || value->targetSessionId.value() != 1
+            || value->targetSessionGeneration != SessionGeneration::initial()
+            || value->result != CharacterConfirmationResult::Confirmed
+            || value->profile.lifecycle() != CharacterLifecycle::EstablishedCharacter)
+            throw std::invalid_argument("Native completed profile invalid");
+        return value->profile;
     }
 
     std::optional<CharacterContentCatalog> discoverNativeCharacterContent(ContentManifestId manifest,
@@ -239,7 +330,12 @@ namespace TES3MP::Native
                         HairRecordId::fromValue(style).value(), static_cast<CharacterSex>(sex)});
             }
         // A playable record lacking usable head/hair cannot be faithfully offered.
-        if (std::ranges::any_of(races, [](const auto& race) { return race.appearances.empty(); })) return {};
+        if (std::ranges::any_of(races, [](const auto& race) { return race.appearances.empty(); }))
+        {
+            for (const auto& [record, index] : raceIndexes) if (races[index].appearances.empty())
+                std::fprintf(stderr, "Native character race has no compatible head/hair: %.128s\n", record.getRefIdString().data());
+            return {};
+        }
         std::vector<CharacterClassDefinition> classes;
         for (const auto& entry : store.get<ESM::Class>())
         {
@@ -280,7 +376,7 @@ namespace TES3MP::Native
         }
         auto catalog = CharacterContentCatalog::create(manifest, creationSpawn, completionSpawn,
             races, classes, signs, startingInventory);
-        if (!catalog) return {};
+        if (!catalog) { std::fprintf(stderr, "Native discovered character catalog validation failed\n"); return {}; }
         return withNativeCharacterConstruction(*catalog, store);
     }
     catch (...) { return {}; }

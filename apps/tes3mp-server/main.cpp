@@ -96,7 +96,7 @@ int main(int argc, char** argv)
     if (!config.nativeInventoryFile.empty() && (!config.inventoryContentFile.empty()
         || !config.combatContentFile.empty() || !config.characterContentFile.empty()))
     {
-        std::cerr << "native inventory requires exclusive inventory ownership and established characters; legacy inventory/combat/creation cannot be composed\n";
+        std::cerr << "native inventory requires exclusive inventory ownership; legacy inventory/combat/creation cannot be composed\n";
         return 2;
     }
     resolve(config.combatContentFile);
@@ -527,14 +527,16 @@ int main(int argc, char** argv)
             auto record = std::find_if(identityRecords.begin(), identityRecords.end(), [&](const auto& value) {
                 return value.claim.player == player.playerId() && value.claim.entity == player.entityId()
                     && value.claim.appearance == player.appearanceId()
-                    && value.characterProfile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter;
+                    && (value.characterProfile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter
+                        || characterContent || !config.nativeInventoryFile.empty());
             });
             if (record == identityRecords.end())
             {
                 std::cerr << "persisted canonical player identity mismatch\n";
                 return 2;
             }
-            record->savedPlayer = player;
+            if (record->characterProfile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter)
+                record->savedPlayer = player;
         }
     std::vector<TES3MP::EntityId> actorEntityIds;
     actorEntityIds.reserve(actorCatalog.entries().size());
@@ -574,6 +576,10 @@ int main(int argc, char** argv)
             nativeHost = std::make_unique<TES3MP::Native::InventoryHost>(config.nativeInventoryFile,
                 config.contentManifest, *playerIdentities, *crypto, nativeImage);
             nativeInventory = &nativeHost->service();
+            const auto zero = TES3MP::Turn32::fromValue(0);
+            const TES3MP::Transform characterSpawn(config.spawnCell, config.spawnPositions.front(),
+                TES3MP::Orientation3(zero, zero, zero));
+            characterContent = nativeHost->characterContent(config.contentManifest.id(), characterSpawn, characterSpawn);
             nativeEnvironment = nativeHost->environment();
             if (nativeEnvironment)
             {
@@ -682,9 +688,16 @@ int main(int argc, char** argv)
     optionalCapabilities.erase(
         std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
     std::vector<TES3MP::CapabilityId> requiredCapabilities;
+    if (nativeInventory && characterContent)
+    {
+        requiredCapabilities.push_back(TES3MP::characterCreationCapability());
+        requiredCapabilities.push_back(TES3MP::playerAppearanceCapability());
+        std::erase(optionalCapabilities, TES3MP::characterCreationCapability());
+    }
     if (nativeInventory && nativeInventory->hasNativeDoor())
     {
-        requiredCapabilities = {TES3MP::inventoryReplicationCapability(), TES3MP::nativeDoorCapability()};
+        requiredCapabilities.push_back(TES3MP::inventoryReplicationCapability());
+        requiredCapabilities.push_back(TES3MP::nativeDoorCapability());
         if (nativeInventory->hasActorMotion()) requiredCapabilities.push_back(TES3MP::nativeActorMotionCapability());
         if (nativeInventory->hasNativeCombat())
         {
@@ -709,6 +722,7 @@ int main(int argc, char** argv)
     {
         requiredCapabilities.push_back(TES3MP::actorCastReplicationCapability());
         requiredCapabilities.push_back(TES3MP::playerLifeReplicationCapability());
+        optionalCapabilities.push_back(TES3MP::playerRespawnCapability());
         requiredCapabilities.push_back(TES3MP::committedDeathPresentationCapability());
         optionalCapabilities.push_back(TES3MP::spellApplicationPresentationCapability());
         optionalCapabilities.push_back(TES3MP::extendedSpellSourcesCapability());

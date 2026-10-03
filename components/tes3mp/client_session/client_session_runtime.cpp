@@ -789,6 +789,19 @@ namespace TES3MP
             queued == ClientRuntimeResult::Accepted ? commandId : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queuePlayerRespawn()
+    {
+        if (!mCombatSnapshot || !mCombatSnapshot->selfDead()
+            || !negotiated(mSession->stateMachine(), playerRespawnCapability()))
+            return {ClientRuntimeResult::NotConnected, std::nullopt, std::nullopt};
+        const auto found = std::ranges::find_if(mCombatSnapshot->presentation(), [&](const auto& body) {
+            return body.kind == 1 && body.id == mCombatSnapshot->selfPlayerId().value() && body.dead;
+        });
+        if (found == mCombatSnapshot->presentation().end())
+            return {ClientRuntimeResult::NotConnected, std::nullopt, std::nullopt};
+        return queueReliable(ReliableOperationBody(PlayerRespawnRequest{found->life}));
+    }
+
     ClientRuntimeQueueResult ClientSessionRuntime::queueWaitRest(std::uint8_t hours, WaitRestMode mode)
     {
         const auto& hello = mSession->stateMachine().negotiatedHello();

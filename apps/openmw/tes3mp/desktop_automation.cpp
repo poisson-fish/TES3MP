@@ -318,6 +318,12 @@ namespace TES3MP::OpenMWAdapter
             *mMagicInventoryRevision };
     }
 
+    ProviderResult DesktopAutomation::setPlayerAppearances(bool characterBodies,
+        std::span<const PublicPlayerAppearance> appearances) noexcept
+    {
+        return mPresentation.setPlayerAppearances(characterBodies, appearances);
+    }
+
     ProviderResult DesktopAutomation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
         std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
         const std::optional<LocalLocomotionReconciliation>& localReconciliation) noexcept
@@ -488,6 +494,24 @@ namespace TES3MP::OpenMWAdapter
             if (auto* desktop = dynamic_cast<DesktopPresentation*>(&mPresentation))
             {
                 const auto poses = desktop->actorPoseEvidence();
+                const auto bodies = desktop->renderedPlayerAppearances();
+                if (mEvidenceEvents < MaximumEvidenceEvents
+                    && (!mRenderedPlayerAppearances || *mRenderedPlayerAppearances != bodies))
+                {
+                    mOutput << "{\"event\":\"player_appearance_sample\",\"time_ns\":" << now.nanoseconds() << ",\"bodies\":[";
+                    bool firstBody = true;
+                    for (const auto& body : bodies)
+                    {
+                        if (!firstBody) mOutput << ',';
+                        firstBody = false;
+                        mOutput << "{\"player\":" << body.player.value() << ",\"race\":" << body.appearance.race.value()
+                            << ",\"head\":" << body.appearance.head.value() << ",\"hair\":" << body.appearance.hair.value()
+                            << ",\"sex\":" << unsigned(body.appearance.sex) << '}';
+                    }
+                    mOutput << "]}\n";
+                    mRenderedPlayerAppearances = bodies;
+                    ++mEvidenceEvents;
+                }
                 if (!poses.empty())
                 {
                     mOutput << "{\"event\":\"actor_presentation_frame\",\"time_ns\":" << now.nanoseconds() << ",\"actors\":[";

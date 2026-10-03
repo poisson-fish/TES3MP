@@ -71,6 +71,8 @@ namespace TES3MP::OpenMWAdapter
         void clearSessionState() noexcept override;
         void setDesktopInput(DesktopSemanticInput* input) noexcept { mDesktopInput = input; }
         void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
+        ProviderResult setPlayerAppearances(bool characterBodies,
+            std::span<const PublicPlayerAppearance> appearances) noexcept override;
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
@@ -245,6 +247,7 @@ namespace TES3MP::OpenMWAdapter
         bool mMagicEffectEnded = false;
         bool mMagicEffectActiveAfterResume = false;
         bool mFinished = false;
+        std::optional<std::vector<PublicPlayerAppearance>> mRenderedPlayerAppearances;
     };
 }
 

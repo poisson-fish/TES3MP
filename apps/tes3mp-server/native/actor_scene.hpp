@@ -104,7 +104,7 @@ namespace TES3MP::Native
             std::span<const uint64_t> neighbors, Impl* sharedParent,
             std::span<const DynamicActorBody> dynamic = {}, bool scenery = false);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
-            bindAnimationSources(ESM::RefId actor);
+            bindAnimationSources(ESM::RefId actor, const ESM::NPC* playerBody = nullptr);
     public:
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
@@ -178,10 +178,10 @@ namespace TES3MP::Native
         // source priority. The returned identity must join a combat campaign's
         // content binding before a swing can become authoritative.
         BoundMeleeAnimation bindMeleeAnimation(std::string group, std::string attack, float speed);
-        BoundCastAnimations bindCastAnimations(ESM::RefId actor = {});
+        BoundCastAnimations bindCastAnimations(ESM::RefId actor = {}, const ESM::NPC* playerBody = nullptr);
         void validateActorAnimations(ESM::RefId actor);
-        BoundHitAnimations bindHitAnimations(ESM::RefId actor, bool knockout = false);
-        MeleeAnimation bindWeaponMeleeAnimation(ESM::RefId actor, const ESM::Weapon* weapon, const std::string& attack);
+        BoundHitAnimations bindHitAnimations(ESM::RefId actor, bool knockout = false, const ESM::NPC* playerBody = nullptr);
+        MeleeAnimation bindWeaponMeleeAnimation(ESM::RefId actor, const ESM::Weapon* weapon, const std::string& attack, const ESM::NPC* playerBody = nullptr);
         bool loaded() const noexcept { return bool(mImpl); }
         // Release collision/navigation resources, retaining the exact committed
         // image. Reload validates a freshly bound scene before swapping it in.

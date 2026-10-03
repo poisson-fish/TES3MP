@@ -4,6 +4,7 @@
 #include <tes3mp/protocol_handshake.hpp>
 #include <tes3mp/test_support/manual_clock.hpp>
 #include <tes3mp/test_support/phase4_in_memory_peer.hpp>
+#include "../protocol/generated/reliable_operation_generated.h"
 
 #include <algorithm>
 #include <array>
@@ -317,6 +318,33 @@ namespace
                 ExchangeDecodeErrorCode::InvalidWaitRestHours)
             && hasError(WaitRestRequest::create(1, static_cast<WaitRestMode>(0)),
                 ExchangeDecodeErrorCode::InvalidWaitRestMode);
+    }
+
+    bool player_respawn_requests_are_bounded_and_round_trip()
+    {
+        const auto header = operation(value<SessionId>(1), SessionGeneration::initial()).header();
+        for (const auto life : {uint64_t(1), uint64_t(UINT32_MAX)})
+        {
+            auto created = ReliableOperation::create(header, PlayerRespawnRequest{life});
+            const auto* request = std::get_if<ReliableOperation>(&created);
+            if (!request || decodeReliableOperation(encodeReliableOperation(*request)) != created) return false;
+        }
+        namespace S = TES3MP::Protocol::Schema::Reliable;
+        for (const auto life : {uint64_t(0), uint64_t(UINT32_MAX) + 1, UINT64_MAX})
+        {
+            flatbuffers::FlatBufferBuilder builder;
+            const auto command = S::CreateClientCommandHeader(builder, 1, 1, 1, 1, 1);
+            const auto entity = S::CreateEntityPrecondition(builder, 1, 1, 1);
+            const auto request = S::CreatePlayerRespawnRequest(builder, life);
+            const auto root = S::CreateReliableOperation(builder, command, entity,
+                S::ReliableOperationBody::PlayerRespawnRequest, request.Union());
+            S::FinishSizePrefixedReliableOperationBuffer(builder, root);
+            if (!hasError(decodeReliableOperation({reinterpret_cast<const std::byte*>(builder.GetBufferPointer()),
+                    builder.GetSize()}), ExchangeDecodeErrorCode::InvalidStrongValue)) return false;
+        }
+        return hasError(ReliableOperation::create(header, PlayerRespawnRequest{0}), ExchangeDecodeErrorCode::InvalidStrongValue)
+            && hasError(ReliableOperation::create(header, PlayerRespawnRequest{uint64_t(UINT32_MAX) + 1}),
+                ExchangeDecodeErrorCode::InvalidStrongValue);
     }
 
     bool deterministic_exchange_properties_round_trip()
@@ -764,6 +792,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "player-respawn")
+        return player_respawn_requests_are_bounded_and_round_trip() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--print-golden")
     {
         const auto sessionId = value<SessionId>(21);

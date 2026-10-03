@@ -339,6 +339,16 @@ namespace TES3MP
         return ReliableOperation(header, request);
     }
 
+    std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
+        ReliableOperationHeader header, PlayerRespawnRequest request) noexcept
+    {
+        if (!header.entityPrecondition())
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+        if (!request.life || request.life > UINT32_MAX)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidStrongValue);
+        return ReliableOperation(header, request);
+    }
+
     std::variant<SpatialWorldView, ExchangeDecodeError> SpatialWorldView::create(
         std::span<const SpatialEntitySnapshot> entries)
     {
@@ -413,6 +423,11 @@ namespace TES3MP
                 encodedPosition ? &*encodedPosition : nullptr,
                 encodedOrientation ? &*encodedOrientation : nullptr).Union();
             bodyType = ReliableSchema::ReliableOperationBody::PlayerLocomotionInput;
+        }
+        else if (const auto* respawn = std::get_if<PlayerRespawnRequest>(&value.body()))
+        {
+            body = ReliableSchema::CreatePlayerRespawnRequest(builder, respawn->life).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::PlayerRespawnRequest;
         }
         else if (const auto* request = std::get_if<WaitRestRequest>(&value.body()))
         {
@@ -531,7 +546,8 @@ namespace TES3MP
         if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent
             && root->body_type() != ReliableSchema::ReliableOperationBody::CellTransition
             && root->body_type() != ReliableSchema::ReliableOperationBody::PlayerLocomotionInput
-            && root->body_type() != ReliableSchema::ReliableOperationBody::WaitRestRequest)
+            && root->body_type() != ReliableSchema::ReliableOperationBody::WaitRestRequest
+            && root->body_type() != ReliableSchema::ReliableOperationBody::PlayerRespawnRequest)
         {
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::UnknownBody,
                 static_cast<std::size_t>(root->body_type()));
@@ -604,6 +620,12 @@ namespace TES3MP
                 LocomotionIntent(mode, Turn32::fromValue(input->root_facing()),
                     LinearVelocity3(velocity->x(), velocity->y(), velocity->z()),
                     position, orientation)));
+        }
+        if (root->body_type() == ReliableSchema::ReliableOperationBody::PlayerRespawnRequest)
+        {
+            const auto* request = root->body_as_PlayerRespawnRequest();
+            if (!request) return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingBody);
+            return ReliableOperation::create(header, PlayerRespawnRequest{request->life()});
         }
         if (root->body_type() == ReliableSchema::ReliableOperationBody::WaitRestRequest)
         {

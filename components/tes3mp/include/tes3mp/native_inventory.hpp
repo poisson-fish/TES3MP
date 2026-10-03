@@ -25,6 +25,7 @@ namespace TES3MP
         virtual std::span<const std::pair<PlayerId, Transform>> playerRelocations() const { return {}; }
         virtual bool changesInventory() const noexcept { return true; }
         virtual bool waitRestApplied() const noexcept { return false; }
+        virtual std::optional<std::pair<PlayerId, std::uint64_t>> requestedPlayerRespawn() const { return {}; }
         virtual CanonicalDurabilityResult commit(const NativeInventoryCommit& durability) noexcept = 0;
     };
 
@@ -43,6 +44,8 @@ namespace TES3MP
             const CanonicalServerState& players, const ServerCommandProposal& command) = 0;
         virtual std::unique_ptr<PreparedNativeInventory> prepareMeleeAttack(
             const CanonicalServerState&, const ServerCommandProposal&, ServerTick) { return {}; }
+        virtual std::unique_ptr<PreparedNativeInventory> preparePlayerRespawn(
+            const CanonicalServerState&, const ServerCommandProposal&) { return {}; }
         virtual std::unique_ptr<PreparedNativeInventory> prepareMagicUse(
             const CanonicalServerState&, const ServerCommandProposal&, ServerTick) { return {}; }
         // Append a bounded independent caster to an existing detached candidate.

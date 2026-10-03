@@ -39,7 +39,7 @@ namespace TES3MP::OpenMWAdapter
             nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
             nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(
@@ -369,6 +369,9 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (snapshot)
                     mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence(), now);
+                if (mPendingRespawn && snapshot && snapshot->header().acknowledgedCommandSequence()
+                    && *snapshot->header().acknowledgedCommandSequence() >= *mPendingRespawn)
+                    mPendingRespawn.reset();
                 bool finalizedCellTransition = false;
                 if (snapshot && mPendingCellTransition && snapshot->header().acknowledgedCommandSequence()
                     && *snapshot->header().acknowledgedCommandSequence() >= *mPendingCellTransition)
@@ -438,8 +441,21 @@ namespace TES3MP::OpenMWAdapter
                             ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
                     return;
                 }
+                // Configure public body membership before motion can create a replica.
+                // Until its first equipment image arrives, a chargen peer has no remote bodies.
+                const auto& publicEquipment = mRuntime->session().stateMachine().confirmedEquipmentSnapshot();
+                const auto& negotiated = mRuntime->session().stateMachine().negotiatedHello();
+                const bool awaitingCharacterBodies = !publicEquipment && negotiated && std::ranges::binary_search(
+                    negotiated->negotiatedCapabilities(), playerAppearanceCapability());
+                if (mGameRunning && mPresentation.setPlayerAppearances(publicEquipment ? publicEquipment->characterBodies : awaitingCharacterBodies,
+                        publicEquipment ? std::span<const PublicPlayerAppearance>(publicEquipment->appearances)
+                                        : std::span<const PublicPlayerAppearance>{}) != ProviderResult::Accepted)
+                {
+                    closeForProviderFailure(ProviderResult::ContentMappingFailed);
+                    return;
+                }
                 const bool spatialStateChanged = mPresentationBootstrapPending || advanced.baselineCompleted
-                    || advanced.snapshotApplied || advanced.observationApplied;
+                    || advanced.snapshotApplied || advanced.observationApplied || advanced.equipmentSnapshotApplied;
                 std::optional<LocalLocomotionReconciliation> localReconciliation;
                 if (spatialStateChanged && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
@@ -890,6 +906,24 @@ namespace TES3MP::OpenMWAdapter
             }
 
             bool ownsPlayerLives() const noexcept override { return mOwnsPlayerLives && !mClosed; }
+            bool canRespawn() const noexcept override
+            {
+                if (!mRuntime || !mReady || mClosed || mResuming || !mGameRunning || mPendingRespawn) return false;
+                const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                const auto& combat = mRuntime->confirmedCombatSnapshot();
+                return combat && combat->selfDead() && hello && std::ranges::binary_search(
+                    hello->negotiatedCapabilities(), playerRespawnCapability());
+            }
+            bool submitRespawn() noexcept override
+            try
+            {
+                if (!canRespawn()) return false;
+                const auto queued = mRuntime->queuePlayerRespawn();
+                if (queued.result != ClientRuntimeResult::Accepted) return false;
+                mPendingRespawn = queued.sequence;
+                return true;
+            }
+            catch (...) { return false; }
 
             bool gameStartRequested() const noexcept override { return mReady && !mGameRunning; }
 
@@ -1043,6 +1077,7 @@ namespace TES3MP::OpenMWAdapter
                 mDoorReportSequence = 0;
                 mNextDoorReport.reset();
                 mNextPoseSample.reset();
+                mPendingRespawn.reset();
                 mPendingCellTransition.reset();
                 mDeferredCellTransition.reset();
                 mAwaitingResync = false;
@@ -1251,6 +1286,7 @@ namespace TES3MP::OpenMWAdapter
             uint64_t mDoorReportSequence = 0;
             std::optional<MonotonicInstant> mNextDoorReport;
             std::optional<MonotonicInstant> mNextPoseSample;
+            std::optional<CommandSequence> mPendingRespawn;
             std::optional<ResumeToken> mResumeToken;
             std::optional<MonotonicInstant> mTokenDeadline;
             std::optional<SessionGeneration> mAttemptGeneration;

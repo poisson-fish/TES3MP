@@ -151,6 +151,10 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         virtual ~PresentationProvider() = default;
+        virtual ProviderResult setPlayerAppearances(bool, std::span<const PublicPlayerAppearance>) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept = 0;

@@ -208,13 +208,27 @@ namespace TES3MP
         WaitRestRequest mRequest;
     };
 
+    struct PlayerRespawnCommandProposal
+    {
+        PlayerRespawnRequest request;
+        friend constexpr bool operator==(PlayerRespawnCommandProposal, PlayerRespawnCommandProposal) noexcept = default;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
         PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
-        MeleeAttackCommandProposal, MagicUseCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal>;
+        MeleeAttackCommandProposal, MagicUseCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal,
+        PlayerRespawnCommandProposal>;
 
     class ServerCommandProposal
     {
     public:
+        constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
+            EntityPrecondition entityPrecondition, PlayerRespawnCommandProposal respawn) noexcept
+            : mSessionId(sessionId), mSessionGeneration(sessionGeneration), mCommandSequence(commandSequence),
+              mCommandId(commandId), mObservedCanonicalRevision(observedCanonicalRevision),
+              mEntityPrecondition(entityPrecondition), mPayload(respawn) {}
+
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
             CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
             EntityPrecondition entityPrecondition, PlayerMotionCommandProposal motion) noexcept

@@ -717,6 +717,9 @@ namespace TES3MP
             return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
         if (!mSessionId)
             return InventoryReplicationReceiveResult::SessionNotBound;
+        if (snapshot.characterBodies && !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), playerAppearanceCapability()))
+            return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
         if (snapshot.targetSessionId != *mSessionId)
             return InventoryReplicationReceiveResult::SessionMismatch;
         if (snapshot.targetSessionGeneration != mGeneration)

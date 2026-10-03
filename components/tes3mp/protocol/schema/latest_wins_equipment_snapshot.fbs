@@ -65,11 +65,21 @@ struct NativeActorMotion {
   yaw:float;
 }
 
+struct PlayerAppearance {
+  player_id:ulong;
+  race:ulong;
+  head:ulong;
+  hair:ulong;
+  sex:ubyte;
+}
+
 table LatestWinsEquipmentSnapshot {
   header:EquipmentSnapshotHeader (id: 0);
   members:[EquipmentMember] (id: 1);
   actors:[ActorEquipmentMember] (id: 2);
   motions:[NativeActorMotion] (id: 3);
+  appearances:[PlayerAppearance] (id: 4);
+  character_bodies:bool (id: 5);
 }
 
 root_type LatestWinsEquipmentSnapshot;

@@ -666,10 +666,10 @@ namespace TES3MP::Native
     const PlainEquipmentValues& EquipmentRuntime::PreparedRespawn::values() const { return mState->values; }
     size_t EquipmentRuntime::PreparedRespawn::revision() const { return mState->beforeRevision + 1; }
 
-    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareRespawn(
+    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareInventoryReplacement(
         size_t owner, const PlainEquipmentValues& baseline, ESM::RefNum candidateCounter)
     {
-        if (!mConnected || mRestartActor || mFailedClosed || owner < 2 || owner >= ownerCount()
+        if (!mConnected || mRestartActor || mFailedClosed || owner >= ownerCount()
             || !inventoryStorage(owner) || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
             throw std::invalid_argument("NPC respawn owner or runtime invalid");
         const auto actorId = ownerPtr(owner).getCellRef().getRefNum();
@@ -700,6 +700,7 @@ namespace TES3MP::Native
             mWorld.getPtrRegistryRevision() + 1};
         for (size_t i = 2; i < ownerCount(); ++i)
             values.mContainers.push_back(i == owner ? replacement : installedValues(i));
+        if (owner < 2) values.mActors[owner] = replacement;
         auto& live = storage(owner);
         auto staged = std::make_unique<PreparedRespawn::State>(*this, owner, live);
         staged->counter = counter;
@@ -726,6 +727,21 @@ namespace TES3MP::Native
         if (staged->registry.size() > registryBound())
             throw std::invalid_argument("NPC respawn registry bound exceeded");
         return std::unique_ptr<PreparedRespawn>(new PreparedRespawn(std::move(staged)));
+    }
+
+    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareRespawn(
+        size_t owner, const PlainEquipmentValues& baseline, ESM::RefNum candidateCounter)
+    {
+        if (owner < 2) throw std::invalid_argument("NPC respawn cannot replace a player inventory");
+        return prepareInventoryReplacement(owner, baseline, candidateCounter);
+    }
+
+    std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareCharacterInventory(
+        size_t owner, const PlainEquipmentValues& baseline)
+    {
+        if (owner >= 2 || mNpcStats[owner] || baseline.mNpcStats)
+            throw std::invalid_argument("Character inventory requires the actor campaign stat owner");
+        return prepareInventoryReplacement(owner, baseline, {});
     }
 
     std::unique_ptr<EquipmentRuntime::PreparedRespawn> EquipmentRuntime::prepareWerewolfEquipment(

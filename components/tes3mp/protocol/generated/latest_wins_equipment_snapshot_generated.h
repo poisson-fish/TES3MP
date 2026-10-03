@@ -27,6 +27,8 @@ struct EquipmentSnapshotHeaderBuilder;
 
 struct NativeActorMotion;
 
+struct PlayerAppearance;
+
 struct LatestWinsEquipmentSnapshot;
 struct LatestWinsEquipmentSnapshotBuilder;
 
@@ -362,6 +364,60 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) NativeActorMotion FLATBUFFERS_FINAL_CLASS
 };
 FLATBUFFERS_STRUCT_END(NativeActorMotion, 48);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerAppearance FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t player_id_;
+  uint64_t race_;
+  uint64_t head_;
+  uint64_t hair_;
+  uint8_t sex_;
+  int8_t padding0__;  int16_t padding1__;  int32_t padding2__;
+
+ public:
+  PlayerAppearance()
+      : player_id_(0),
+        race_(0),
+        head_(0),
+        hair_(0),
+        sex_(0),
+        padding0__(0),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  PlayerAppearance(uint64_t _player_id, uint64_t _race, uint64_t _head, uint64_t _hair, uint8_t _sex)
+      : player_id_(::flatbuffers::EndianScalar(_player_id)),
+        race_(::flatbuffers::EndianScalar(_race)),
+        head_(::flatbuffers::EndianScalar(_head)),
+        hair_(::flatbuffers::EndianScalar(_hair)),
+        sex_(::flatbuffers::EndianScalar(_sex)),
+        padding0__(0),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  uint64_t player_id() const {
+    return ::flatbuffers::EndianScalar(player_id_);
+  }
+  uint64_t race() const {
+    return ::flatbuffers::EndianScalar(race_);
+  }
+  uint64_t head() const {
+    return ::flatbuffers::EndianScalar(head_);
+  }
+  uint64_t hair() const {
+    return ::flatbuffers::EndianScalar(hair_);
+  }
+  uint8_t sex() const {
+    return ::flatbuffers::EndianScalar(sex_);
+  }
+};
+FLATBUFFERS_STRUCT_END(PlayerAppearance, 40);
+
 struct EquipmentSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EquipmentSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -440,7 +496,9 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
     VT_HEADER = 4,
     VT_MEMBERS = 6,
     VT_ACTORS = 8,
-    VT_MOTIONS = 10
+    VT_MOTIONS = 10,
+    VT_APPEARANCES = 12,
+    VT_CHARACTER_BODIES = 14
   };
   const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader *>(VT_HEADER);
@@ -454,6 +512,12 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *> *motions() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *> *>(VT_MOTIONS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance *> *appearances() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance *> *>(VT_APPEARANCES);
+  }
+  bool character_bodies() const {
+    return GetField<uint8_t>(VT_CHARACTER_BODIES, 0) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -465,6 +529,9 @@ struct LatestWinsEquipmentSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            verifier.VerifyVector(actors()) &&
            VerifyOffset(verifier, VT_MOTIONS) &&
            verifier.VerifyVector(motions()) &&
+           VerifyOffset(verifier, VT_APPEARANCES) &&
+           verifier.VerifyVector(appearances()) &&
+           VerifyField<uint8_t>(verifier, VT_CHARACTER_BODIES, 1) &&
            verifier.EndTable();
   }
 };
@@ -485,6 +552,12 @@ struct LatestWinsEquipmentSnapshotBuilder {
   void add_motions(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *>> motions) {
     fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_MOTIONS, motions);
   }
+  void add_appearances(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance *>> appearances) {
+    fbb_.AddOffset(LatestWinsEquipmentSnapshot::VT_APPEARANCES, appearances);
+  }
+  void add_character_bodies(bool character_bodies) {
+    fbb_.AddElement<uint8_t>(LatestWinsEquipmentSnapshot::VT_CHARACTER_BODIES, static_cast<uint8_t>(character_bodies), 0);
+  }
   explicit LatestWinsEquipmentSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -501,12 +574,16 @@ inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipm
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember *>> members = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember *>> actors = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *>> motions = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion *>> motions = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance *>> appearances = 0,
+    bool character_bodies = false) {
   LatestWinsEquipmentSnapshotBuilder builder_(_fbb);
+  builder_.add_appearances(appearances);
   builder_.add_motions(motions);
   builder_.add_actors(actors);
   builder_.add_members(members);
   builder_.add_header(header);
+  builder_.add_character_bodies(character_bodies);
   return builder_.Finish();
 }
 
@@ -515,16 +592,21 @@ inline ::flatbuffers::Offset<LatestWinsEquipmentSnapshot> CreateLatestWinsEquipm
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentSnapshotHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember> *members = nullptr,
     const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember> *actors = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion> *motions = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion> *motions = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance> *appearances = nullptr,
+    bool character_bodies = false) {
   auto members__ = members ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::EquipmentMember>(*members) : 0;
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::ActorEquipmentMember>(*actors) : 0;
   auto motions__ = motions ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::NativeActorMotion>(*motions) : 0;
+  auto appearances__ = appearances ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::EquipmentSnapshot::PlayerAppearance>(*appearances) : 0;
   return TES3MP::Protocol::Schema::EquipmentSnapshot::CreateLatestWinsEquipmentSnapshot(
       _fbb,
       header,
       members__,
       actors__,
-      motions__);
+      motions__,
+      appearances__,
+      character_bodies);
 }
 
 inline const TES3MP::Protocol::Schema::EquipmentSnapshot::LatestWinsEquipmentSnapshot *GetLatestWinsEquipmentSnapshot(const void *buf) {

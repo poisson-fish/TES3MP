@@ -2,6 +2,7 @@
 #define TES3MP_NATIVE_INVENTORY_SERVICE_HPP
 
 #include "equipment_runtime.hpp"
+#include <tes3mp/character_profile.hpp>
 #include <apps/openmw/mwscript/compilercontext.hpp>
 #include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include "actor_spawns.hpp"
@@ -185,6 +186,9 @@ namespace TES3MP::Native
         size_t mTravelerCellBudget = 9;
         size_t mTravelerStepBudget = 2;
         std::function<void(bool, const DynamicActorSet&, const ActorSceneWorld&)> mNavigationActivity;
+        bool mCharacterCreation = false;
+        std::array<std::optional<CharacterProfile>, 2> mCharacters;
+        std::array<std::string, 2> mCharacterResources;
         std::vector<const WorldItems*> worldDomains() const
         {
             std::vector<const WorldItems*> result;
@@ -197,6 +201,9 @@ namespace TES3MP::Native
 
     // Derive transient lookup/resource bindings from the durable owned body set.
     // The caller installs this binding only with its actor/inventory transaction.
+    void bindCharacterResources(InventoryServiceBinding& binding, size_t index,
+        std::shared_ptr<const ESM::NPC> body);
+
     void bindDynamicActorSet(InventoryServiceBinding& binding, const DynamicActorSet& actors);
 
     // One long-lived engine service group for all shared inventories. Loaded
@@ -287,7 +294,8 @@ namespace TES3MP::Native
             std::span<const ActorCampaignProjectile> projectiles,
             std::span<const ActorCampaignTimedEffect> timedEffects,
             const std::optional<ActorCampaignCast>& casting = {},
-            const DynamicActorSet* dynamicActors = nullptr) const;
+            const DynamicActorSet* dynamicActors = nullptr,
+            const InventoryServiceBinding* characterBinding = nullptr) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         const InteriorActorScene& collisionScene(CellId cell) const;
@@ -404,6 +412,8 @@ namespace TES3MP::Native
         };
         InventoryService(MWWorld::ESMStore& content, ESM::ReadersCache& readers,
             InventoryServiceBinding binding, bool recovering = false);
+        bool characterCreationEnabled() const { return mBinding.mCharacterCreation; }
+        const InventoryServiceBinding& characterBinding() const { return mBinding; }
         InventoryService(const InventoryService&) = delete;
         InventoryService& operator=(const InventoryService&) = delete;
         PreparedCommand prepare(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command);
@@ -413,6 +423,10 @@ namespace TES3MP::Native
         FileReadResult recover(const std::filesystem::path& path, std::span<const ESM::RefId> references,
             EquipmentBytes& bytes, FileFaults& faults);
         void recover(std::span<const std::byte> image, std::span<const ESM::RefId> references);
+        std::unique_ptr<PreparedNativeInventory> preparePlayerRespawn(
+            const CanonicalServerState&, const ServerCommandProposal&) override;
+        std::unique_ptr<PreparedNativeInventory> prepareCharacterCompletion(
+            const CanonicalServerState& players, PlayerId player, const CharacterProfile& profile, ServerTick tick) override;
         std::unique_ptr<PreparedNativeInventory> prepareInventory(
             const CanonicalServerState& players, const ServerCommandProposal& command) override;
         std::unique_ptr<PreparedNativeInventory> prepareMeleeAttack(

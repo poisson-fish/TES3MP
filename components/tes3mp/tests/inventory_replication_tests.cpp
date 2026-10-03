@@ -10,6 +10,7 @@
 #include <vector>
 #include <string_view>
 #include "../protocol/generated/reliable_ground_item_baseline_generated.h"
+#include "../protocol/generated/latest_wins_equipment_snapshot_generated.h"
 
 namespace
 {
@@ -31,6 +32,63 @@ namespace
     InventoryBaselineHeader header()
     {
         return { id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2), id<CanonicalRevision>(3), 0, 1 };
+    }
+
+    void appearances()
+    {
+        const std::array members{PublicEquipmentMember{id<PlayerId>(1)}, PublicEquipmentMember{id<PlayerId>(2)}};
+        const std::array bodies{
+            PublicPlayerAppearance{id<PlayerId>(1), {id<RaceRecordId>(3), id<HeadRecordId>(4), id<HairRecordId>(5), CharacterSex::Female}},
+            PublicPlayerAppearance{id<PlayerId>(2), {id<RaceRecordId>(6), id<HeadRecordId>(7), id<HairRecordId>(8), CharacterSex::Male}}};
+        const auto create = [&](std::span<const PublicPlayerAppearance> selected, bool enabled = true) {
+            return LatestWinsEquipmentSnapshot::create(id<SessionId>(1), SessionGeneration::initial(),
+                id<ServerTick>(2), id<CanonicalRevision>(3), members, {}, {}, selected, enabled);
+        };
+        auto established = std::get<LatestWinsEquipmentSnapshot>(create(bodies));
+        const auto encoded = encodeLatestWinsEquipmentSnapshot(established);
+        assert(decodeLatestWinsEquipmentSnapshot(encoded) == EquipmentSnapshotDecodeResult(established));
+        const auto fresh = std::get<LatestWinsEquipmentSnapshot>(create({}));
+        assert(fresh.characterBodies && fresh.appearances.empty());
+        assert(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(fresh)) == EquipmentSnapshotDecodeResult(fresh));
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(bodies, false)));
+        auto bad = bodies;
+        bad[1].player = bad[0].player;
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(bad)));
+        bad = bodies; std::swap(bad[0], bad[1]);
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(bad)));
+        bad = bodies; bad[1].player = id<PlayerId>(9);
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(bad)));
+        bad = bodies; bad[1].appearance.sex = static_cast<CharacterSex>(2);
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(bad)));
+        for (size_t size = 0; size < encoded.size(); ++size)
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeLatestWinsEquipmentSnapshot(std::span(encoded).first(size))));
+        for (size_t field = 0; field < 5; ++field)
+        {
+            namespace S = TES3MP::Protocol::Schema::EquipmentSnapshot;
+            flatbuffers::FlatBufferBuilder builder;
+            const auto h = S::CreateEquipmentSnapshotHeader(builder, 1, 1, 2, 3);
+            std::vector<S::PlayerAppearance> raw{{field == 0 ? 0u : 1u, field == 1 ? 0u : 3u,
+                field == 2 ? 0u : 4u, field == 3 ? 0u : 5u, uint8_t(field == 4 ? 2 : 0)}};
+            const auto root = S::CreateLatestWinsEquipmentSnapshotDirect(builder, h, nullptr, nullptr, nullptr, &raw, true);
+            S::FinishSizePrefixedLatestWinsEquipmentSnapshotBuffer(builder, root);
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeLatestWinsEquipmentSnapshot(
+                {reinterpret_cast<const std::byte*>(builder.GetBufferPointer()), builder.GetSize()})));
+        }
+        std::vector<PublicPlayerAppearance> oversized(MaximumEquipmentSnapshotPlayers + 1, bodies[0]);
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(create(oversized)));
+        std::vector<PublicEquipmentMember> maximumMembers;
+        std::vector<PublicPlayerAppearance> maximumBodies;
+        std::vector<PublicActorEquipmentMember> maximumActors;
+        for (size_t i = 1; i <= MaximumEquipmentSnapshotPlayers; ++i)
+        {
+            maximumMembers.push_back({id<PlayerId>(i)});
+            maximumBodies.push_back({id<PlayerId>(i), bodies[0].appearance});
+        }
+        for (size_t i = 1; i <= MaximumEquipmentSnapshotActors; ++i) maximumActors.push_back({id<ContainerId>(i)});
+        assert(std::holds_alternative<InventoryReplicationDecodeError>(LatestWinsEquipmentSnapshot::create(
+            id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2), id<CanonicalRevision>(3),
+            maximumMembers, maximumActors, {}, maximumBodies, true)));
+        std::cout << "PASS appearances: two public bodies, fresh membership, bounded malformed wire\n";
     }
 
     void neighborhoods()
@@ -157,6 +215,7 @@ namespace
 int main(int argc, char** argv)
 {
     using namespace TES3MP;
+    if (argc == 2 && std::string_view(argv[1]) == "appearances") { appearances(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "neighborhoods") { neighborhoods(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "ground-items") { groundItems(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "container-lock")

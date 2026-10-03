@@ -82,11 +82,16 @@ table WaitRestRequest {
   mode:WaitRestMode (id: 1);
 }
 
+table PlayerRespawnRequest {
+  life:ulong (id: 0);
+}
+
 union ReliableOperationBody {
   PlayerMotionIntent = 1,
   CellTransition = 2,
   PlayerLocomotionInput = 3,
-  WaitRestRequest = 4
+  WaitRestRequest = 4,
+  PlayerRespawnRequest = 5
 }
 
 table ReliableOperation {

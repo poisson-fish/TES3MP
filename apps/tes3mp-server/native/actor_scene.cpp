@@ -4,6 +4,7 @@
 #include <components/sceneutil/animationkeys.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/esm3/loadbody.hpp>
 #include "actor_inventory.hpp"
 #include "loadout.hpp"
 #include "actor_spawns.hpp"
@@ -1135,11 +1136,11 @@ namespace TES3MP::Native
         throw std::invalid_argument("Selected NPC lacks the requested melee animation group");
     }
 
-    BoundCastAnimations InteriorActorScene::bindCastAnimations(ESM::RefId actor)
+    BoundCastAnimations InteriorActorScene::bindCastAnimations(ESM::RefId actor, const ESM::NPC* playerBody)
     {
         if (!mImpl)
             throw std::invalid_argument("Selected NPC has no supported cast animation source");
-        const auto [sources, identity] = bindAnimationSources(actor.empty() ? mImpl->mActorBase : actor);
+        const auto [sources, identity] = bindAnimationSources(actor.empty() ? mImpl->mActorBase : actor, playerBody);
         for (auto source = sources.rbegin(); source != sources.rend(); ++source)
         {
             if (!(*source)->hasGroupStart("spellcast")) continue;
@@ -1176,7 +1177,7 @@ namespace TES3MP::Native
     }
 
     std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
-    InteriorActorScene::bindAnimationSources(ESM::RefId actor)
+    InteriorActorScene::bindAnimationSources(ESM::RefId actor, const ESM::NPC* playerBody)
     {
         if (!mImpl || !mImpl->mNavigator)
             throw std::invalid_argument("Native hit resources require initialized actor settings");
@@ -1195,7 +1196,7 @@ namespace TES3MP::Native
         }
         else
         {
-            const auto& npc = *mImpl->mStore.get<ESM::NPC>().find(actor);
+            const auto& npc = playerBody ? *playerBody : *mImpl->mStore.get<ESM::NPC>().find(actor);
             const auto& race = *mImpl->mStore.get<ESM::Race>().find(npc.mRace);
             const bool beast = (race.mData.mFlags & ESM::Race::Beast) != 0;
             const auto& normal = models[beast ? 3 : npc.isMale() ? 1 : 2];
@@ -1210,6 +1211,17 @@ namespace TES3MP::Native
             }
             if (beast && npc.mRace.contains("argonian")) paths.push_back(models[4]);
             identity << "native-hit-resources-1\n" << npc.mId << ':' << npc.mRace << ':' << npc.isMale() << '\n';
+            if (playerBody)
+                for (auto partId : {npc.mHead, npc.mHair})
+                {
+                    const auto& part = *mImpl->mStore.get<ESM::BodyPart>().find(partId);
+                    const auto mesh = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(part.mModel));
+                    if (part.mModel.empty() || mesh.value().size() > 512 || !mImpl->mVfs.exists(mesh))
+                        throw std::invalid_argument("Character appearance mesh unavailable or outside bounds");
+                    auto stream = mImpl->mVfs.get(mesh);
+                    const auto hash = Files::getHash(mesh.value(), *stream);
+                    identity << partId << ':' << mesh.value() << ':' << hash[0] << ':' << hash[1] << '\n';
+                }
         }
         std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>> sources;
         size_t sourceCount = 0;
@@ -1250,9 +1262,9 @@ namespace TES3MP::Native
 
 
 
-    BoundHitAnimations InteriorActorScene::bindHitAnimations(ESM::RefId actor, bool knockout)
+    BoundHitAnimations InteriorActorScene::bindHitAnimations(ESM::RefId actor, bool knockout, const ESM::NPC* playerBody)
     {
-        const auto [owned, identity] = bindAnimationSources(actor);
+        const auto [owned, identity] = bindAnimationSources(actor, playerBody);
         std::vector<const SceneUtil::TextKeyMap*> sources;
         for (const auto& source : owned) sources.push_back(source.get());
         return {readHitAnimations(sources), identity,
@@ -1263,7 +1275,7 @@ namespace TES3MP::Native
 
 
     MeleeAnimation InteriorActorScene::bindWeaponMeleeAnimation(ESM::RefId actor,
-        const ESM::Weapon* weapon, const std::string& attack)
+        const ESM::Weapon* weapon, const std::string& attack, const ESM::NPC* playerBody)
     {
         const auto type = weapon ? weapon->mData.mType : ESM::Weapon::HandToHand;
         const auto* info = MWMechanics::getWeaponType(type);
@@ -1271,7 +1283,7 @@ namespace TES3MP::Native
             && !((info->mWeaponClass == ESM::WeaponType::Ranged || info->mWeaponClass == ESM::WeaponType::Thrown)
                 && attack == "shoot"))
             throw std::invalid_argument("Native ranged execution is not bound");
-        const auto [sources, resourceIdentity] = bindAnimationSources(actor);
+        const auto [sources, resourceIdentity] = bindAnimationSources(actor, playerBody);
         std::string group(info->mLongGroup);
         const auto findGroup = [&](const std::string& name) -> const SceneUtil::TextKeyMap* {
             for (auto it = sources.rbegin(); it != sources.rend(); ++it)

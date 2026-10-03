@@ -1,5 +1,6 @@
 #ifndef TES3MP_NATIVE_INVENTORY_HOST_HPP
 #define TES3MP_NATIVE_INVENTORY_HOST_HPP
+#include <tes3mp/character_profile.hpp>
 #include "../native_inventory_service.hpp"
 #include "../native_environment_service.hpp"
 #include <tes3mp/player_identity.hpp>
@@ -334,6 +335,8 @@ namespace TES3MP::Native
         InventoryHost(const std::filesystem::path& descriptor, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players, CredentialCrypto& crypto, std::span<const std::byte> restored);
         ~InventoryHost();
+        std::optional<CharacterContentCatalog> characterContent(ContentManifestId manifest,
+            Transform creation, Transform completion) const;
         ServerApp::NativeInventoryService& service() noexcept;
         ServerApp::NativeEnvironmentService* environment() noexcept;
     };

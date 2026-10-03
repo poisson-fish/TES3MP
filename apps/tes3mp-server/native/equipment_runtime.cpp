@@ -188,6 +188,13 @@ namespace TES3MP::Native
         {
             mActors[i] = std::make_unique<ManualRef>(content, actors[i].mBase);
             const Ptr actor = mActors[i]->getPtr();
+            if (actors[i].mCharacterBody)
+            {
+                if (actors[i].mNpcStats || actors[i].mCharacterBody->mId != actors[i].mBase)
+                    throw std::invalid_argument("Character body binding invalid");
+                mCharacterBodies[i] = actors[i].mCharacterBody;
+                actor.get<ESM::NPC>()->mBase = mCharacterBodies[i].get();
+            }
             world.registerPtr(actor);
             auto& inventory = mInventories[i];
             inventory.setPtr(actor, world);
@@ -250,7 +257,7 @@ namespace TES3MP::Native
         // All owner identities exist before variable-size character loot. A
         // restart must bind exactly the same owners without generating items.
         for (size_t i = 0; i < actors.size(); ++i)
-            if (actors[i].mBaseInventory && !restartActor)
+            if (actors[i].mBaseInventory && !actors[i].mEmptyInventory && !restartActor)
             {
                 auto& inventory = mInventories[i];
                 inventory.fill(content.get<ESM::NPC>().find(actors[i].mBase)->mInventory, actors[i].mBase, rng,

@@ -806,6 +806,7 @@ tes3mp_verify_target_includes(tes3mp_dialogue_choice_protocol_tests
 add_executable(tes3mp_protocol_exchange_tests tests/protocol_exchange_tests.cpp)
 target_compile_features(tes3mp_protocol_exchange_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_exchange_tests PRIVATE tes3mp_test_support)
+target_include_directories(tes3mp_protocol_exchange_tests SYSTEM PRIVATE "${tes3mp_flatbuffers_SOURCE_DIR}/include")
 set_target_properties(tes3mp_protocol_exchange_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_protocol_exchange_tests)
 

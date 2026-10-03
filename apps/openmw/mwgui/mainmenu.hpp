@@ -69,6 +69,7 @@ namespace MWGui
         void setVisible(bool visible) override;
 
         bool exit() override;
+        void onFrame(float dt) override;
 
     private:
         const VFS::Manager* mVFS;
@@ -77,6 +78,7 @@ namespace MWGui
         MyGUI::TextBox* mVersionText;
         MyGUI::Button* mMultiplayerButton = nullptr;
         MyGUI::Button* mProfileButton = nullptr;
+        MyGUI::Button* mRespawnButton = nullptr;
 
         BackgroundImage* mBackground;
 

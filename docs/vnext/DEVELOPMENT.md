@@ -6,10 +6,8 @@
    [PLAN.md](PLAN.md), and [DECISIONS.md](DECISIONS.md) for boundary/persistence changes.
 2. Inspect owning code/tests and `git status`; they establish behavior. Search
    history/retired documents only for specific unanswered questions.
-3. Advance bounded connected behavior, preserving the migration base and one
-   canonical writer. Do not create another plan.
-   For effects, finish a behavior family using shared OpenMW handlers and reusable,
-   parameterized checks. Session size follows dependencies, not an effect-ID quota.
+3. Advance bounded behavior with one writer; preserve migration. No additional plan.
+   Finish effect families through shared handlers/parameterized checks; follow dependencies.
 4. Run the smallest affected check individually; stop, fix and rerun on failure.
 5. Review the diff. Retire superseded code only after replacement/failure checks.
    Replace CURRENT's handoff for changed behavior, limitations or evidence;
@@ -53,9 +51,8 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTests.test_active_local_links_resolve *> build/logs/docs-links.log
 ```
 
-For C++, inspect the owning target/framework, build that target in an existing
-tree, then run one executable/filter. Add only required missing dependencies;
-never aggregate `_tests_run` targets. Record changed evidence in CURRENT.
+For C++, build the owning target in an existing tree, then run one executable/filter.
+Add required dependencies only; never aggregate `_tests_run`. Update CURRENT evidence.
 
 For shared NPC playtests, bootstrap with the optional final stock navigation settings:
 
@@ -66,6 +63,16 @@ tes3mp_native_bootstrap CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B 1 X:Y:Z NAV_
 This emits V77 with `actors auto`; startup validates actor/cell/resource bounds.
 Registrations must bind the new manifest.
 
+Append `chargen` after `NAV_SETTINGS` to emit V78. Register fresh character
+profiles for both configured players. Startup discovers winning race/body/class/sign
+choices; both creation and completion use the configured safe point. Starting inventory
+is explicitly empty; scripted quest grants remain M5. Legacy V77 registrations still
+require established characters.
+V78 requires current clients with chargen/public-body capabilities 6/36.
+Native desktop captures emit rendered race/head/hair/sex as `player_appearance_sample`.
+Compare distinct profiles through join/reentry/reconnect/restart; creation has no body.
+Wire/native fixtures remain synthetic.
+
 `build_windows.bat -Target server`, `client` and `desktop-evidence` initialize MSVC
 and log to `build/logs`; inspect build cost first. Builds do not prove gameplay.
 Wrappers `protocol`, `server-logic`, `adapter-tests`, `contracts`, `standalone` run
@@ -73,15 +80,14 @@ groups; `baseline`, `checks`, `full`, unfiltered unittest discovery and default
 standalone presets are not narrow defaults. Linux/macOS presets remain in
 root CMakePresets.json.
 
-Captures prove only exercised paths. Record bounded logs, loadout, outcomes and
-failures; distinguish synthetic, real-loadout and live evidence. Old captures
-cannot prove new runtimes. Treat mod data as external input.
+Record bounded logs/loadout/outcomes; distinguish synthetic/loadout/live evidence.
+Captures prove exercised paths only; mod data is external input.
 
 ## Documentation contract
 
 Keep exactly five active Markdown files directly under `docs/vnext`:
 README (vision), CURRENT (state/evidence/next action, at most 850 words), PLAN (sole
 roadmap, at most 1,500), DEVELOPMENT (workflow), DECISIONS (constraints/proposals).
-Combined ceiling: 5,000 words; dependency proofs are a fixed exception. Replace stale
-prose, preserve links and distinguish inherited/new evidence. No nested plans, diaries,
-reports, transcripts or duplicate trackers. Design alone does not change implementation status.
+Combined ceiling: 5,000 words; dependency proofs are exempt. Replace stale prose,
+preserve links and inherited/new evidence. No duplicate trackers/plans/diaries/reports.
+Design does not establish implementation.

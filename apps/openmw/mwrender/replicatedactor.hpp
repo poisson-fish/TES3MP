@@ -13,6 +13,7 @@ namespace ESM
 {
     class RefId;
     struct Position;
+    struct NPC;
 }
 
 namespace MWWorld
@@ -107,7 +108,8 @@ namespace MWRender
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,
             const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
-            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt, float scale = 1.f) noexcept;
+            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt, float scale = 1.f,
+            const ESM::NPC* body = nullptr) noexcept;
 
     private:
         class Impl;

@@ -304,6 +304,18 @@ namespace TES3MP::ServerApp
                 connectionState.lastLocomotionInputSequence = locomotion->inputSequence();
                 return ConnectionSessionResult::CommandSubmitted;
             }
+            if (const auto* respawn = std::get_if<PlayerRespawnRequest>(&operation->body()))
+            {
+                const auto& capabilities = state->negotiatedHello()->negotiatedCapabilities();
+                if (!mNativeInventory || !std::ranges::binary_search(capabilities, playerRespawnCapability())
+                    || !std::ranges::binary_search(capabilities, playerLifeReplicationCapability()))
+                    return ConnectionSessionResult::ProtocolRejected;
+                ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(), header.commandSequence(),
+                    header.commandId(), header.observedCanonicalRevision(), *operation->header().entityPrecondition(),
+                    PlayerRespawnCommandProposal{*respawn});
+                return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                    ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
+            }
             if (const auto* waitRest = std::get_if<WaitRestRequest>(&operation->body()))
             {
                 const auto& capabilities = state->negotiatedHello()->negotiatedCapabilities();

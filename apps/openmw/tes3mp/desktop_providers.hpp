@@ -148,6 +148,8 @@ namespace TES3MP::OpenMWAdapter
         explicit DesktopPresentation(RemoteMotionMetricSink& metrics);
         ~DesktopPresentation() override;
         void configure(DesktopContentMapping mapping);
+        ProviderResult setPlayerAppearances(bool characterBodies,
+            std::span<const PublicPlayerAppearance> appearances) noexcept override;
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
@@ -215,6 +217,7 @@ namespace TES3MP::OpenMWAdapter
         std::vector<MagicProjectilePoseEvidence> magicProjectilePoseEvidence() const;
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
+        std::vector<PublicPlayerAppearance> renderedPlayerAppearances() const;
 
     private:
         class Impl;

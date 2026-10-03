@@ -1280,6 +1280,17 @@ namespace TES3MP
                                             committedDialogueChoice = dialogue->choice();
                                         }
                                     }
+                                    else if (std::holds_alternative<PlayerRespawnCommandProposal>(proposal.payload()))
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        if (mNativeInventory && !prepared.mNativeInventory)
+                                        {
+                                            prepared.mNativeInventory = mNativeInventory->preparePlayerRespawn(*prepared.mState, proposal);
+                                            disposition = prepared.mNativeInventory ? CommandDisposition::Applied
+                                                : CommandDisposition::CombatRejected;
+                                        }
+                                        else disposition = CommandDisposition::CombatRejected;
+                                    }
                                     else if (std::holds_alternative<WaitRestCommandProposal>(proposal.payload()))
                                     {
                                         requiresSpatialAdvance = false;
@@ -1454,6 +1465,8 @@ namespace TES3MP
                 order.fields[8] = interaction->requestedTool() ? interaction->requestedTool()->value() : 0;
             }
             order.disposition = static_cast<std::uint8_t>(record.disposition());
+            if (const auto* respawn = std::get_if<PlayerRespawnCommandProposal>(&commands[index].proposal().payload()))
+                order.fields[6] = respawn->request.life;
             prepared.mDurableCommands.push_back(order);
         }
         prepared.mPublication = std::move(publication);

@@ -414,7 +414,8 @@ namespace TES3MP
     std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> LatestWinsEquipmentSnapshot::create(
         SessionId target, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
         std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors,
-        std::span<const NativeActorMotion> motions)
+        std::span<const NativeActorMotion> motions, std::span<const PublicPlayerAppearance> appearances,
+        bool characterBodies)
     {
         if (members.size() > MaximumEquipmentSnapshotPlayers)
             return error(Code::TooManyEntries, members.size(), MaximumEquipmentSnapshotPlayers);
@@ -442,8 +443,28 @@ namespace TES3MP
                     || !std::isfinite(motion.velocity[axis]) || std::abs(motion.velocity[axis])>4096)
                     return error(Code::InvalidStrongValue);
         }
+        if (appearances.size() > MaximumEquipmentSnapshotPlayers)
+            return error(Code::TooManyEntries, appearances.size(), MaximumEquipmentSnapshotPlayers);
+        // Fixed wire structs plus bounded table/vector alignment; reject a combined
+        // image that fits each individual count but cannot fit one snapshot frame.
+        const size_t payloadBudget = 256 + members.size() * sizeof(EquipmentSchema::EquipmentMember)
+            + actors.size() * sizeof(EquipmentSchema::ActorEquipmentMember)
+            + motions.size() * sizeof(EquipmentSchema::NativeActorMotion)
+            + appearances.size() * sizeof(EquipmentSchema::PlayerAppearance);
+        if (payloadBudget > LatestWinsSnapshotMaximumPayloadBytes)
+            return error(Code::TooManyEntries, payloadBudget, LatestWinsSnapshotMaximumPayloadBytes);
+        if (!characterBodies && !appearances.empty()) return error(Code::InvalidCommandShape);
+        for (size_t i = 0; i < appearances.size(); ++i)
+        {
+            const auto& body = appearances[i];
+            if (static_cast<unsigned>(body.appearance.sex) > 1
+                || (i && appearances[i - 1].player >= body.player)
+                || std::ranges::none_of(members, [&](const auto& member) { return member.player == body.player; }))
+                return error(Code::InvalidCommandShape);
+        }
         return LatestWinsEquipmentSnapshot{ target, generation, tick, revision,
-            { members.begin(), members.end() }, { actors.begin(), actors.end() }, {motions.begin(), motions.end()} };
+            { members.begin(), members.end() }, { actors.begin(), actors.end() }, {motions.begin(), motions.end()},
+            {appearances.begin(), appearances.end()}, characterBodies };
     }
 
     std::vector<std::byte> encodeReliablePlayerInventoryBaseline(const ReliablePlayerInventoryBaseline& input)
@@ -561,8 +582,13 @@ namespace TES3MP
         for (const auto& m : input.motions)
             motions.emplace_back(m.placement, m.tick, m.position[0], m.position[1], m.position[2],
                 m.velocity[0], m.velocity[1], m.velocity[2], m.yaw);
+        std::vector<EquipmentSchema::PlayerAppearance> appearances;
+        for (const auto& body : input.appearances)
+            appearances.emplace_back(body.player.value(), body.appearance.race.value(), body.appearance.head.value(),
+                body.appearance.hair.value(), static_cast<uint8_t>(body.appearance.sex));
         const auto root = EquipmentSchema::CreateLatestWinsEquipmentSnapshotDirect(
-            builder, header, &members, actors.empty() ? nullptr : &actors, motions.empty() ? nullptr : &motions);
+            builder, header, &members, actors.empty() ? nullptr : &actors, motions.empty() ? nullptr : &motions,
+            appearances.empty() ? nullptr : &appearances, input.characterBodies);
         EquipmentSchema::FinishSizePrefixedLatestWinsEquipmentSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -926,8 +952,24 @@ namespace TES3MP
                 motions.push_back({m.placement(), m.tick(), {m.x(),m.y(),m.z()}, {m.vx(),m.vy(),m.vz()}, m.yaw()});
             }
         }
+        std::vector<PublicPlayerAppearance> appearances;
+        if (const auto* encoded = root->appearances())
+        {
+            if (encoded->size() > MaximumEquipmentSnapshotPlayers) return error(Code::TooManyEntries);
+            for (size_t i = 0; i < encoded->size(); ++i)
+            {
+                const auto body = copyStruct(encoded, i);
+                const auto player = PlayerId::fromValue(body.player_id());
+                const auto race = RaceRecordId::fromValue(body.race());
+                const auto head = HeadRecordId::fromValue(body.head());
+                const auto hair = HairRecordId::fromValue(body.hair());
+                if (!player || !race || !head || !hair || body.sex() > 1) return error(Code::InvalidStrongValue);
+                appearances.push_back({*player, {*race, *head, *hair, static_cast<CharacterSex>(body.sex())}});
+            }
+        }
         return LatestWinsEquipmentSnapshot::create(
-            *value(session), *value(generation), *value(tick), *value(revision), members, actors, motions);
+            *value(session), *value(generation), *value(tick), *value(revision), members, actors, motions,
+            appearances, root->character_bodies());
     }
 
     InventoryTransactionCommandDecodeResult decodeClientInventoryTransactionCommand(std::span<const std::byte> payload)

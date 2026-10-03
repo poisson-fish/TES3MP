@@ -5,6 +5,7 @@
 #include <apps/openmw/mwclass/creaturelevlist.hpp>
 #include <components/esm3/loadlevlist.hpp>
 #include "movement_mapping.hpp"
+#include "engine_coordinator.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
@@ -49,6 +50,9 @@
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadbody.hpp>
+#include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadregn.hpp>
@@ -1003,6 +1007,7 @@ namespace TES3MP::OpenMWAdapter
             std::optional<MonotonicInstant> lastAdvance;
             std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)> equipment{};
             bool authoritativeEquipment = false;
+            std::optional<CharacterAppearance> appearance;
 
             Remote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::ReplicatedActor> targetActor,
                 RemoteMotionMetricSink& metrics)
@@ -1056,6 +1061,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<DesktopContentMapping> mapping;
         RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
+        bool characterBodies = false;
+        std::vector<PublicPlayerAppearance> playerAppearances;
+        std::map<PlayerId, ESM::NPC> playerBodies;
         std::map<EntityId, ActorRemote> actorRemotes;
         struct LeveledPresentation
         {
@@ -1103,6 +1111,9 @@ namespace TES3MP::OpenMWAdapter
 
         void clear() noexcept
         {
+            characterBodies = false;
+            playerAppearances.clear();
+            playerBodies.clear();
             sessionBootstrapPending = true;
             predictedMagicSource.reset();
             presentedReflections.clear();
@@ -1222,6 +1233,65 @@ namespace TES3MP::OpenMWAdapter
         {
             iter->second.motion.clear();
             remotes.erase(iter);
+        }
+
+        template<class Record, class Id>
+        const Record* characterRecord(Id id) const
+        {
+            const auto& records = MWBase::Environment::get().getESMStore()->get<Record>();
+            if (records.getSize() > 65536) return nullptr;
+            const Record* result = nullptr;
+            for (const auto& entry : records)
+                if (characterRecordId(entry.mId.getRefIdString()) == id.value())
+                {
+                    const auto* winning = records.search(entry.mId);
+                    if (!winning || (result && result->mId != winning->mId)) return nullptr;
+                    result = winning;
+                }
+            return result;
+        }
+
+        ProviderResult setPlayerAppearances(bool enabled, std::span<const PublicPlayerAppearance> appearances)
+        {
+            if (!mapping || appearances.size() > MaximumEquipmentSnapshotPlayers || (!enabled && !appearances.empty()))
+                return ProviderResult::ContentMappingFailed;
+            if (characterBodies == enabled && std::ranges::equal(appearances, playerAppearances))
+                return ProviderResult::Accepted;
+            const auto& store = *MWBase::Environment::get().getESMStore();
+            const auto* base = store.get<ESM::NPC>().search(refId(mapping->avatarNpc));
+            if (!base) return ProviderResult::ContentMappingFailed;
+            std::map<PlayerId, ESM::NPC> bodies;
+            for (size_t i = 0; i < appearances.size(); ++i)
+            {
+                const auto& selected = appearances[i];
+                const auto& appearance = selected.appearance;
+                if (static_cast<unsigned>(appearance.sex) > 1 || (i && appearances[i - 1].player >= selected.player))
+                    return ProviderResult::ContentMappingFailed;
+                const auto* race = characterRecord<ESM::Race>(appearance.race);
+                const auto* head = characterRecord<ESM::BodyPart>(appearance.head);
+                const auto* hair = characterRecord<ESM::BodyPart>(appearance.hair);
+                const bool female = appearance.sex == CharacterSex::Female;
+                const auto valid = [&](const ESM::BodyPart* part, int type) {
+                    return race && part && part->mRace == race->mId && part->mData.mPart == type
+                        && part->mData.mType == ESM::BodyPart::MT_Skin && !ESM::isFirstPersonBodyPart(*part)
+                        && !(part->mData.mFlags & ESM::BodyPart::BPF_NotPlayable)
+                        && bool(part->mData.mFlags & ESM::BodyPart::BPF_Female) == female;
+                };
+                if (!race || !(race->mData.mFlags & ESM::Race::Playable)
+                    || !valid(head, ESM::BodyPart::MP_Head) || !valid(hair, ESM::BodyPart::MP_Hair))
+                    return ProviderResult::ContentMappingFailed;
+                auto body = *base;
+                body.mRace = race->mId; body.mHead = head->mId; body.mHair = hair->mId;
+                body.mFlags = female ? ESM::NPC::Female : 0;
+                body.mModel.clear(); body.mInventory.mList.clear(); body.mSpells.mList.clear();
+                body.mClass = {}; body.mFaction = {}; body.mScript = {};
+                bodies.emplace(selected.player, std::move(body));
+            }
+            std::vector<PublicPlayerAppearance> staged(appearances.begin(), appearances.end());
+            playerBodies.swap(bodies);
+            playerAppearances.swap(staged);
+            characterBodies = enabled;
+            return ProviderResult::Accepted;
         }
 
         bool equipmentRecords(const LatestWinsEquipmentSnapshot& snapshot, PlayerId player,
@@ -1472,7 +1542,8 @@ namespace TES3MP::OpenMWAdapter
                 auto [actorResult, actor]
                     = MWRender::ReplicatedActor::create(*MWBase::Environment::get().getWorld()->getRenderingManager(),
                         *MWBase::Environment::get().getESMStore(), refId(mapping->avatarNpc), *remote.cell,
-                        toOpenMW(remote.lastObserved->transform()), std::span<const ESM::RefId>(records));
+                        toOpenMW(remote.lastObserved->transform()), std::span<const ESM::RefId>(records), 1.f,
+                        characterBodies ? &playerBodies.at(remote.lastObserved->playerId()) : nullptr);
                 const auto mapped = mapReplicatedActorResult(actorResult);
                 if (mapped != ProviderResult::Accepted || !actor)
                     return mapped;
@@ -1561,17 +1632,24 @@ namespace TES3MP::OpenMWAdapter
                 if (!remoteCell) return ProviderResult::ContentMappingFailed;
                 if (entry->appearanceId() != content.appearanceId)
                     return ProviderResult::ContentMappingFailed;
+                const auto body = playerBodies.find(observed.playerId);
+                if (characterBodies && body == playerBodies.end()) continue;
+                std::optional<CharacterAppearance> appearance;
+                if (characterBodies)
+                    appearance = std::ranges::find(playerAppearances, observed.playerId, &PublicPlayerAppearance::player)->appearance;
                 if (desiredCount == desired.size())
                     return ProviderResult::PresentationFailed;
                 desired[desiredCount++].emplace(observed.entityId);
                 auto found = remotes.find(observed.entityId);
                 const auto position = toOpenMW(entry->transform());
-                if (found == remotes.end() || found->second.cell != remoteCell)
+                if (found == remotes.end() || found->second.cell != remoteCell || found->second.appearance != appearance)
                 {
                     if (found != remotes.end())
                         erase(found);
                     auto [actorResult, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
-                        *MWBase::Environment::get().getESMStore(), refId(content.avatarNpc), *remoteCell, position);
+                        *MWBase::Environment::get().getESMStore(), refId(content.avatarNpc), *remoteCell, position,
+                        characterBodies ? std::optional(std::span<const ESM::RefId>{}) : std::nullopt,
+                        1.f, characterBodies ? &body->second : nullptr);
                     const ProviderResult mappedResult = mapReplicatedActorResult(actorResult);
                     if (mappedResult != ProviderResult::Accepted || !actor)
                     {
@@ -1581,6 +1659,7 @@ namespace TES3MP::OpenMWAdapter
                         return mappedResult;
                     }
                     found = remotes.try_emplace(observed.entityId, remoteCell, std::move(actor), metrics).first;
+                    found->second.appearance = appearance;
                     // Movement/equipment and combat have independent delivery order.
                     // New bodies must sample the retained pose immediately.
                     if (combatSnapshot && applyRemotePlayerCombat(*found->second.actor,
@@ -2173,6 +2252,7 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
             auto player = world->getPlayerPtr();
             auto& playerStats = player.getClass().getCreatureStats(player);
+            const bool wasDead = playerStats.isDead();
             if (actorTimeline.empty()) for (const auto& swing : snapshot.swings())
             {
                 const unsigned phase = swing.interruption ? 0 : swing.phase;
@@ -2199,6 +2279,15 @@ namespace TES3MP::OpenMWAdapter
             playerHealth.setBase(snapshot.selfMaximumHealth());
             playerHealth.setCurrent(snapshot.selfHealth());
             playerStats.setHealth(playerHealth);
+            if (const auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+                coordinator && coordinator->ownsPlayerLives())
+            {
+                const auto windows = MWBase::Environment::get().getWindowManager();
+                if (snapshot.selfDead() && !windows->containsMode(MWGui::GM_MainMenu))
+                    windows->pushGuiMode(MWGui::GM_MainMenu);
+                else if (!snapshot.selfDead() && wasDead)
+                    windows->removeGuiMode(MWGui::GM_MainMenu);
+            }
             auto fatigue = playerStats.getFatigue();
             fatigue.setBase(snapshot.selfMaximumFatigue());
             fatigue.setCurrent(snapshot.selfFatigue(), true, true);
@@ -3662,6 +3751,13 @@ namespace TES3MP::OpenMWAdapter
         mImpl->mapping = std::move(mapping);
     }
 
+    ProviderResult DesktopPresentation::setPlayerAppearances(bool characterBodies,
+        std::span<const PublicPlayerAppearance> appearances) noexcept
+    {
+        try { return mImpl->setPlayerAppearances(characterBodies, appearances); }
+        catch (...) { return ProviderResult::ContentMappingFailed; }
+    }
+
     ProviderResult DesktopPresentation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
         std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
         const std::optional<LocalLocomotionReconciliation>& localReconciliation) noexcept
@@ -4014,6 +4110,23 @@ namespace TES3MP::OpenMWAdapter
         {
             return false;
         }
+    }
+
+    std::vector<PublicPlayerAppearance> DesktopPresentation::renderedPlayerAppearances() const
+    {
+        std::vector<PublicPlayerAppearance> result;
+        for (const auto& [entity, remote] : mImpl->remotes)
+        {
+            if (!remote.lastObserved || !remote.appearance) continue;
+            const auto* body = remote.actor->ptr().get<ESM::NPC>()->mBase;
+            result.push_back({remote.lastObserved->playerId(), {
+                RaceRecordId::fromValue(characterRecordId(body->mRace.getRefIdString()).value()).value(),
+                HeadRecordId::fromValue(characterRecordId(body->mHead.getRefIdString()).value()).value(),
+                HairRecordId::fromValue(characterRecordId(body->mHair.getRefIdString()).value()).value(),
+                body->isMale() ? CharacterSex::Male : CharacterSex::Female}});
+        }
+        std::ranges::sort(result, {}, &PublicPlayerAppearance::player);
+        return result;
     }
 
     void DesktopPresentation::clear() noexcept

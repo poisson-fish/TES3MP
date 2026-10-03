@@ -53,6 +53,12 @@ namespace
                     ESM::RT_Self, 0, 1, 5, 5}, 0});
             store.insertStatic(spell);
         }
+        void exceedSpellBudget()
+        {
+            for (size_t i = 0; i < 65; ++i)
+                spell(("budget_spell_" + std::to_string(i)).c_str(), ESM::Spell::ST_Spell, 1, ESM::Spell::F_PCStart);
+            setting("iAutoPCSpellMax", ESM::Variant(65));
+        }
         Content()
         {
             for (int i = 0; i < ESM::Attribute::Length; ++i)
@@ -158,7 +164,7 @@ namespace
                 != changed.derived().startingSpells.end()
             && std::ranges::find(changed.derived().startingSpells, recordId<SpellRecordId>("strong"))
                 == changed.derived().startingSpells.end(), "starting spell settings leaked across explicit stores/calls");
-        content.setting("iAutoPCSpellMax", ESM::Variant(65));
+        content.exceedSpellBudget();
         const auto failure = applyCharacterCreation(female, catalog, {female.revision(), CompleteCharacterCreation{}});
         require(std::get<CharacterProfileError>(failure) == CharacterProfileError::InvalidInitialState,
             "native spell allocation budget did not reject");
@@ -345,7 +351,7 @@ namespace
         require(open(path)->records()[0].characterProfile == CharacterProfile::fresh(), "review leaked to durable identity");
         const auto reviewFirst = *registry->characterProfile(first.player);
         const auto reviewSecond = *registry->characterProfile(second.player);
-        content.setting("iAutoPCSpellMax", ESM::Variant(65));
+        content.exceedSpellBudget();
         const auto invalid = joins.prepareCharacterCreation(first.player, catalog,
             {reviewFirst.revision(), CompleteCharacterCreation{}}, id<ServerTick>(4));
         require(std::get<CharacterProfileError>(invalid) == CharacterProfileError::InvalidInitialState

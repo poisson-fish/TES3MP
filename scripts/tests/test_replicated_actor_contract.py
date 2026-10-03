@@ -6,6 +6,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReplicatedActorContractTests(unittest.TestCase):
+    def test_character_bodies_are_owned_and_survive_equipment_replacement(self):
+        renderer = (ROOT / "apps/openmw/mwrender/replicatedactor.cpp").read_text(encoding="utf-8")
+        provider = (ROOT / "apps/openmw/tes3mp/desktop_providers.cpp").read_text(encoding="utf-8")
+        adapter = (ROOT / "apps/openmw/tes3mp/adapter.cpp").read_text(encoding="utf-8")
+        constructor = renderer.index("Impl(RenderingManager& rendering")
+        override = renderer.index("mPtr.get<ESM::NPC>()->mBase = &*mBody", constructor)
+        insert = renderer.index("insertReplicatedActor(mPtr, store, equipment)", constructor)
+        self.assertLess(override, insert, "owned body must precede resource construction")
+        self.assertTrue("std::optional<ESM::NPC> mBody;" in renderer, "replica must own its immutable base")
+        self.assertTrue("characterBodies ? &playerBodies.at(remote.lastObserved->playerId()) : nullptr" in provider,
+                        "equipment replacement must retain the selected body")
+        self.assertTrue("if (characterBodies && body == playerBodies.end()) continue;" in provider,
+                        "fresh players must not render template bodies")
+        self.assertTrue("playerAppearances.clear();" in provider and "playerBodies.clear();" in provider,
+                        "disconnect must clear selected bodies")
+        self.assertLess(adapter.index("mPresentation.setPlayerAppearances("), adapter.index("mPresentation.applyAuthoritative("),
+                        "body membership must precede movement setup")
+        self.assertFalse("insertStatic(" in provider, "remote bodies must not edit winning records")
+
     def test_old_transient_npc_initializer_is_removed(self):
         self.assertFalse((ROOT / "apps/openmw/mwrender/transientactorpresentation.cpp").exists())
         self.assertFalse((ROOT / "apps/openmw/mwrender/transientactorpresentation.hpp").exists())

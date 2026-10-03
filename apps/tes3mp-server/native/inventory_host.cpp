@@ -1,5 +1,6 @@
 #include <apps/openmw/mwworld/intervention.hpp>
 #include "inventory_host.hpp"
+#include "character_construction.hpp"
 #include "placement_scene.hpp"
 #include "inventory_service.hpp"
 #include "loadout.hpp"
@@ -78,7 +79,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 77; ++candidate)
+            for (unsigned candidate = 3; candidate <= 78; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -111,7 +112,7 @@ namespace TES3MP::Native
             for (auto player : {*first, *second})
             {
                 const auto* profile = players.characterProfile(player);
-                if (!profile || profile->lifecycle() != CharacterLifecycle::EstablishedCharacter)
+                if (!profile || (descriptorVersion < 78 && profile->lifecycle() != CharacterLifecycle::EstablishedCharacter))
                     throw std::invalid_argument("Native actor binding requires an already registered established character");
                 const auto registered = std::ranges::find_if(players.records(),
                     [player](const auto& value) { return value.claim.player == player; });
@@ -279,6 +280,9 @@ namespace TES3MP::Native
             binding.mStreamExteriors = streaming;
             binding.mRetainTraveler = traveler;
             binding.mTravelerNeighborhood = neighborhood && cells->front().asExterior() != nullptr;
+            binding.mCharacterCreation = descriptorVersion >= 78;
+            if (binding.mCharacterCreation)
+                for (auto& actor : binding.mActors) actor.mEmptyInventory = true;
             binding.mCellActors = descriptorVersion >= 77;
             if (binding.mCellActors) binding.mRetainTraveler = binding.mTravelerNeighborhood = false;
             binding.mMeleeContact = version == "native-inventory-22" || version == "native-inventory-23" || version == "native-inventory-24" || version == "native-inventory-25" || version == "native-inventory-26" || version == "native-inventory-27";
@@ -996,6 +1000,29 @@ namespace TES3MP::Native
                     bindDynamicActorSet(start.binding, actors);
                 }
             }
+            if (start.binding.mCharacterCreation)
+            {
+                std::optional<ActorCampaign> campaign;
+                if (!restored.empty())
+                {
+                    campaign = readActorCampaign({reinterpret_cast<const char*>(restored.data()), restored.size()});
+                    if (!campaign->characters) throw std::invalid_argument("Character campaign version differs from descriptor");
+                }
+                for (size_t i = 0; i < 2; ++i)
+                {
+                    if (!campaign) continue;
+                    if (campaign->characterPlayers[i] != start.binding.mPlayers[i].value())
+                        throw std::invalid_argument("Character campaign player binding changed");
+                    if (campaign->characterProfiles[i].empty()) continue;
+                    auto profile = decodeNativeCharacterProfile(start.binding.mPlayers[i], campaign->characterProfiles[i]);
+                    auto character = constructNativeCharacter(profile,
+                        *loadout.store().get<ESM::NPC>().find(start.binding.mActors[i].mBase), loadout.store());
+                    start.binding.mCharacters[i] = std::move(profile);
+                    bindCharacterResources(start.binding, i, std::make_shared<const ESM::NPC>(std::move(character.body)));
+                    if (!std::ranges::equal(start.binding.mCharacterResources[i], campaign->characterResources[i]))
+                        throw std::invalid_argument("Character resources changed on recovery");
+                }
+            }
             return start.binding;
         }
         Impl(Startup start, ContentManifestId manifest, CredentialCrypto& crypto, std::span<const std::byte> restored)
@@ -1027,7 +1054,32 @@ namespace TES3MP::Native
     };
     InventoryHost::InventoryHost(const std::filesystem::path& descriptor, const ContentManifest& manifest,
         const PlayerIdentityRegistry& players, CredentialCrypto& crypto, std::span<const std::byte> restored)
-        : mImpl(std::make_unique<Impl>(startup(descriptor, manifest, players), manifest.id(), crypto, restored)) {}
+        : mImpl(std::make_unique<Impl>(startup(descriptor, manifest, players), manifest.id(), crypto, restored))
+    {
+        if (mImpl->inventory.characterCreationEnabled())
+            for (size_t i = 0; i < 2; ++i)
+            {
+                const auto& binding = mImpl->inventory.characterBinding();
+                const auto* registered = players.characterProfile(binding.mPlayers[i]);
+                if (!registered || (binding.mCharacters[i] ? *registered != *binding.mCharacters[i]
+                    : registered->lifecycle() == CharacterLifecycle::EstablishedCharacter))
+                    throw std::invalid_argument("Registered profile differs from committed native character");
+            }
+    }
+    std::optional<CharacterContentCatalog> InventoryHost::characterContent(ContentManifestId manifest,
+        Transform creation, Transform completion) const
+    {
+        if (!mImpl->inventory.characterCreationEnabled()) return {};
+        const auto& binding = mImpl->inventory.characterBinding();
+        const auto bound = [&](CellId cell) {
+            return std::ranges::any_of(binding.worldDomains(), [cell](const auto* world) { return world->mCell == cell; });
+        };
+        if (!bound(creation.cell()) || !bound(completion.cell()))
+            throw std::invalid_argument("Character safe point outside native domain");
+        auto result = discoverNativeCharacterContent(manifest, creation, completion, {}, mImpl->loadout.store());
+        if (!result) throw std::invalid_argument("Native character choice discovery unavailable or outside bounds");
+        return result;
+    }
     InventoryHost::~InventoryHost() = default;
     ServerApp::NativeEnvironmentService* InventoryHost::environment() noexcept { return mImpl->environment.get(); }
     ServerApp::NativeInventoryService& InventoryHost::service() noexcept { return mImpl->inventory; }

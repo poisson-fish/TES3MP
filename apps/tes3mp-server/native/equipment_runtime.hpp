@@ -26,6 +26,8 @@ namespace TES3MP::Native
         // diagnostics/descriptors retain their seed and saved owner identities.
         // Fresh base inventories auto-equip; recovery always retains saved slots.
         bool mBaseInventory = false;
+        std::shared_ptr<const ESM::NPC> mCharacterBody;
+        bool mEmptyInventory = false;
     };
 
     struct EquipmentContainerBinding
@@ -60,6 +62,7 @@ namespace TES3MP::Native
         LocalScripts& mScripts;
         const std::string mRuntime;
         const std::array<unsigned char, 32> mContent;
+        std::array<std::shared_ptr<const ESM::NPC>, 2> mCharacterBodies;
         std::array<std::unique_ptr<ManualRef>, 2> mActors;
         std::array<InventoryStore, 2> mInventories;
         std::array<Ptr, 2> mItems;
@@ -249,10 +252,16 @@ namespace TES3MP::Native
             const PlainEquipmentValues& values() const;
             size_t revision() const;
         };
+    private:
+        std::unique_ptr<PreparedRespawn> prepareInventoryReplacement(size_t owner,
+            const PlainEquipmentValues& baseline, ESM::RefNum candidateCounter);
+    public:
         // Rebuild one placed actor's starting inventory with fresh item identities.
         // The caller persists image() with the actor life and frame before install.
         std::unique_ptr<PreparedRespawn> prepareRespawn(size_t owner, const PlainEquipmentValues& baseline,
             ESM::RefNum candidateCounter = {});
+        std::unique_ptr<PreparedRespawn> prepareCharacterInventory(size_t owner,
+            const PlainEquipmentValues& baseline);
         // Replace a player's slots and transformation robe in one detached image.
         // Ordinary item identities and their object state are retained.
         std::unique_ptr<PreparedRespawn> prepareWerewolfEquipment(size_t owner, bool transformed);

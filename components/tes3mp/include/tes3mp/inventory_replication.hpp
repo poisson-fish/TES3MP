@@ -4,6 +4,7 @@
 #include "native_door.hpp"
 
 #include "inventory_world.hpp"
+#include "character_profile.hpp"
 
 #include <array>
 #include <cstddef>
@@ -179,6 +180,14 @@ namespace TES3MP
         friend bool operator==(const NativeActorMotion&, const NativeActorMotion&) = default;
     };
 
+    // Established public body only; no class, stats, sources or private inventory.
+    struct PublicPlayerAppearance
+    {
+        PlayerId player;
+        CharacterAppearance appearance;
+        friend bool operator==(const PublicPlayerAppearance&, const PublicPlayerAppearance&) = default;
+    };
+
     struct LatestWinsEquipmentSnapshot
     {
         SessionId targetSessionId;
@@ -188,11 +197,14 @@ namespace TES3MP
         std::vector<PublicEquipmentMember> members;
         std::vector<PublicActorEquipmentMember> actors;
         std::vector<NativeActorMotion> motions;
+        std::vector<PublicPlayerAppearance> appearances;
+        bool characterBodies = false;
 
         static std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> create(SessionId target,
             SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
             std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors = {},
-            std::span<const NativeActorMotion> motions = {});
+            std::span<const NativeActorMotion> motions = {},
+            std::span<const PublicPlayerAppearance> appearances = {}, bool characterBodies = false);
         friend bool operator==(const LatestWinsEquipmentSnapshot&, const LatestWinsEquipmentSnapshot&) noexcept
             = default;
     };

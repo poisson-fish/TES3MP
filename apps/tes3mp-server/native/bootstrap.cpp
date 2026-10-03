@@ -130,9 +130,9 @@ try
         if (inspectArea) std::cout << "Read-only inspection at level 1, seed 0; runtime startup is still required.\n";
         return 0;
     }
-    if (argc < 6 || argc > 9)
+    if (argc < 6 || argc > 10)
     {
-        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS]\n"
+        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [chargen]\n"
             "tes3mp_native_bootstrap --list-cells OPENMW_CONFIG_DIR NAME_FILTER (at most 64 results)\n"
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
             "START is an interior name or exterior:X:Y; exterior radius defaults to 1 (maximum 7).\n"
@@ -142,7 +142,8 @@ try
             "Spawn uses a discovered incoming door destination, or explicit OpenMW coordinates.\n"
             "NAV_SETTINGS enables native-inventory-77 shared NPC simulation: at most 37 placed actors,\n"
             "one exterior 3x3 and connected interiors; scripted/leveled actors require later services.\n"
-            "Set the two established player IDs in native.txt; their registrations must bind manifest.txt.\n"
+            "The final chargen option enables V78 discovered choices and empty fresh inventories.\n"
+            "Set the two registered player IDs in native.txt; their registrations must bind manifest.txt.\n"
             "Add connection/password/player_identity_file settings to server-content.cfg before launch.\n";
         return argc == 2 && std::string_view(argv[1]) == "--help" ? 0 : 2;
     }
@@ -173,8 +174,10 @@ try
     }
     spawnPosition = loadout.playerSpawn(start, cells, spawnPosition);
     std::ostringstream material;
-    const bool cellActors = argc == 9;
-    const auto version = cellActors ? "native-inventory-77" : "native-inventory-15";
+    const bool characterCreation = argc == 10 && std::string_view(argv[9]) == "chargen";
+    if (argc == 10 && !characterCreation) throw std::invalid_argument("Expected chargen as final bootstrap option");
+    const bool cellActors = argc >= 9;
+    const auto version = characterCreation ? "native-inventory-78" : cellActors ? "native-inventory-77" : "native-inventory-15";
     const auto navigationSettings = cellActors ? std::filesystem::absolute(std::filesystem::u8path(argv[8]))
         : std::filesystem::path{};
     if (cellActors && (!std::filesystem::is_regular_file(navigationSettings) || radius > 1))

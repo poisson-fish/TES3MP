@@ -174,8 +174,14 @@ namespace TES3MP
         WaitRestMode mMode;
     };
 
+    struct PlayerRespawnRequest
+    {
+        std::uint64_t life = 0;
+        friend constexpr bool operator==(PlayerRespawnRequest, PlayerRespawnRequest) noexcept = default;
+    };
+
     using ReliableOperationBody
-        = std::variant<PlayerMotionIntent, CellTransition, PlayerLocomotionInput, WaitRestRequest>;
+        = std::variant<PlayerMotionIntent, CellTransition, PlayerLocomotionInput, WaitRestRequest, PlayerRespawnRequest>;
 
     class ReliableOperation
     {
@@ -188,6 +194,8 @@ namespace TES3MP
             ReliableOperationHeader header, PlayerLocomotionInput input) noexcept;
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
             ReliableOperationHeader header, WaitRestRequest request) noexcept;
+        static std::variant<ReliableOperation, ExchangeDecodeError> create(
+            ReliableOperationHeader header, PlayerRespawnRequest request) noexcept;
 
         constexpr const ReliableOperationHeader& header() const noexcept { return mHeader; }
         constexpr const ReliableOperationBody& body() const noexcept { return mBody; }

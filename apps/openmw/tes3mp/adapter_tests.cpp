@@ -50,7 +50,8 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
-        bool weather = false, bool worldTime = false, bool waitRest = false, bool instantMagic = false)
+        bool weather = false, bool worldTime = false, bool waitRest = false, bool instantMagic = false,
+        bool playerAppearances = false, bool respawn = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -62,8 +63,15 @@ namespace
             capabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
         if (inventory)
             capabilities.push_back(TES3MP::inventoryReplicationCapability());
+        if (playerAppearances)
+            capabilities.push_back(TES3MP::playerAppearanceCapability());
         if (combat)
             capabilities.push_back(TES3MP::combatReplicationCapability());
+        if (respawn)
+        {
+            capabilities.push_back(TES3MP::playerLifeReplicationCapability());
+            capabilities.push_back(TES3MP::playerRespawnCapability());
+        }
         if (dialogueChoices)
             capabilities.push_back(TES3MP::dialogueChoiceCapability());
         if (weather)
@@ -522,11 +530,21 @@ namespace
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
     {
     public:
+        TES3MP::OpenMWAdapter::ProviderResult setPlayerAppearances(bool enabled,
+            std::span<const TES3MP::PublicPlayerAppearance> appearances) noexcept override
+        {
+            characterBodies = enabled;
+            publicAppearances.assign(appearances.begin(), appearances.end());
+            appearanceConfigured = true;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
             std::span<const TES3MP::ObservedPlayer> observed, bool allowLocalCellCorrection, TES3MP::MonotonicInstant,
             const std::optional<TES3MP::LocalLocomotionReconciliation>&) noexcept override
         {
             ++calls;
+            appearanceBeforeMotion = appearanceConfigured;
+            motionAppearances = publicAppearances;
             lastObservedPlayers = observed.size();
             lastAllowLocalCellCorrection = allowLocalCellCorrection;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
@@ -628,6 +646,8 @@ namespace
             objectRevisions.clear();
         }
         unsigned calls = 0;
+        bool characterBodies = false, appearanceConfigured = false, appearanceBeforeMotion = false;
+        std::vector<TES3MP::PublicPlayerAppearance> publicAppearances, motionAppearances;
         std::size_t lastObservedPlayers = 0;
         bool lastAllowLocalCellCorrection = false;
         unsigned advances = 0;
@@ -724,7 +744,8 @@ namespace
 
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
-void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false)
+void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false,
+    bool bodyProgress = false, bool respawnProgress = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -739,7 +760,11 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     const ReconnectConfiguration reconnect{endpoint, timeouts, outbound, testContentManifestId()};
     auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(
         ClientSessionRuntime::create(*transport, *clock, timeouts, SessionGeneration::initial(), outbound));
-    const std::array capabilities{inventoryReplicationCapability()};
+    std::vector capabilities{inventoryReplicationCapability()};
+    if (bodyProgress) capabilities.push_back(playerAppearanceCapability());
+    if (respawnProgress)
+        for (const auto cap : {combatReplicationCapability(), playerLifeReplicationCapability(), playerRespawnCapability()})
+            capabilities.push_back(cap);
     auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
         std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1,2,2)), capabilities, {}));
     const std::array passwordBytes{std::byte{1}};
@@ -749,7 +774,7 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         reconnect, input, presentation, status);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false,false,false,true)), TransportChannel::ReliableOrdered);
+        encodeServerHello(serverHello(false,false,false,true,respawnProgress,2,false,false,false,false,false,bodyProgress,respawnProgress)), TransportChannel::ReliableOrdered);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         encodeAuthenticationAccepted(accepted(std::byte{7})), TransportChannel::ReliableOrdered);
@@ -779,6 +804,77 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (respawnProgress)
+    {
+        const auto sendCombat = [&](uint64_t tick, bool dead, uint64_t life) {
+            ActorPresentationSnapshot body; body.kind = 1; body.id = 1; body.life = life; body.dead = dead;
+            std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+            for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = static_cast<ReplicatedCombatSkill>(i);
+            auto created = LatestWinsCombatSnapshot::create(value<SessionId>(1), generation, value<ServerTick>(tick),
+                value<CanonicalRevision>(tick), value<PlayerId>(1), value<CombatRevision>(tick),
+                dead ? 0.f : 100.f, 100.f, 100.f, 100.f, 100.f, 100.f, dead, {}, skills, {}, {}, {}, {}, std::span(&body, 1));
+            require(std::holds_alternative<LatestWinsCombatSnapshot>(created));
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsCombatSnapshot,
+                encodeLatestWinsCombatSnapshot(std::get<LatestWinsCombatSnapshot>(created)), TransportChannel::LatestWins);
+            coordinator->frame(.01f);
+        };
+        require(coordinator->ownsPlayerLives() && !coordinator->canRespawn() && !coordinator->submitRespawn());
+        sendCombat(2, false, 1);
+        require(!coordinator->canRespawn());
+        sendCombat(3, true, 1);
+        require(coordinator->canRespawn() && coordinator->submitRespawn()
+            && !coordinator->canRespawn() && !coordinator->submitRespawn());
+        coordinator->frame(.01f);
+        std::optional<CommandSequence> sequence;
+        for (const auto& sent : wire->sentFrames)
+        {
+            const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(sent));
+            if (frame.messageKind() != MessageKind::ReliableOperation) continue;
+            const auto operation = std::get<ReliableOperation>(decodeReliableOperation(frame.payload()));
+            if (const auto* request = std::get_if<PlayerRespawnRequest>(&operation.body()))
+            {
+                require(request->life == 1 && !sequence);
+                sequence = operation.header().commandHeader().commandSequence();
+            }
+        }
+        require(sequence);
+        // An acknowledged rejection makes the button available for retry.
+        wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(selfSnapshot(generation, false, 4, 4, sequence->value())), TransportChannel::LatestWins);
+        coordinator->frame(.01f);
+        require(coordinator->canRespawn());
+        sendCombat(5, false, 2);
+        require(!coordinator->canRespawn() && !coordinator->submitRespawn());
+        std::cout << "PASS player-respawn: dead life request; duplicate clicks gated; rejected ack retries; revival disables\n";
+        return;
+    }
+    if (bodyProgress)
+    {
+        const auto sendBodies = [&](uint64_t revision, std::span<const PublicPlayerAppearance> bodies) {
+            auto equipment = equipmentSnapshot(generation, revision, revision);
+            equipment.characterBodies = true;
+            equipment.appearances.assign(bodies.begin(), bodies.end());
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+                encodeLatestWinsEquipmentSnapshot(equipment), TransportChannel::LatestWins);
+        };
+        sendBodies(2, {}); coordinator->frame(.01f);
+        require(presentation.characterBodies && presentation.publicAppearances.empty() && presentation.appearanceBeforeMotion);
+        const std::array bodies{PublicPlayerAppearance{value<PlayerId>(1),
+            {value<RaceRecordId>(10), value<HeadRecordId>(11), value<HairRecordId>(12), CharacterSex::Female}}};
+        sendBodies(3, bodies); coordinator->frame(.01f);
+        require(presentation.publicAppearances == std::vector(bodies.begin(), bodies.end())
+            && presentation.motionAppearances == presentation.publicAppearances && presentation.appearanceBeforeMotion);
+        sendBodies(2, {}); coordinator->frame(.01f);
+        require(presentation.publicAppearances == std::vector(bodies.begin(), bodies.end()));
+        // Identical retry is idempotent; a newer empty membership removes the body.
+        sendBodies(3, bodies); coordinator->frame(.01f);
+        require(presentation.publicAppearances == std::vector(bodies.begin(), bodies.end()));
+        sendBodies(4, {}); coordinator->frame(.01f);
+        require(presentation.characterBodies && presentation.publicAppearances.empty()
+            && presentation.motionAppearances.empty() && coordinator->multiplayerState() == MultiplayerState::Ready);
+        std::cout << "PASS player-appearances: membership before motion; fresh/complete/remove; stale and retry safe\n";
+        return;
+    }
     if (doorProgress)
     {
         const auto sendDoor = [&](uint64_t revision, CellId cell, float angle, uint8_t direction, bool blocked) {
@@ -1150,23 +1246,35 @@ int main(int argc, char** argv)
             nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
             magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(),
-            committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability() };
+            committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability() };
         std::ranges::sort(required);
         required.erase(std::unique(required.begin(), required.end()), required.end());
         const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(
             versions, {}, required, testContentManifestId()));
         require(std::holds_alternative<ServerHello>(negotiateClientHello(makeClientHello(testContentManifestId()), server)));
+        std::vector oldCapabilities(required);
+        std::erase(oldCapabilities, playerAppearanceCapability());
+        oldCapabilities.push_back(characterCreationCapability());
+        std::ranges::sort(oldCapabilities);
+        const auto oldOffer = std::get<CapabilityOffer>(CapabilityOffer::create(
+            versions, oldCapabilities, {}, testContentManifestId()));
+        require(!std::holds_alternative<ServerHello>(negotiateClientHello(ClientHello::fromOffer(oldOffer), server)));
+        std::cout << "PASS native-capabilities: current desktop admitted, missing player appearance rejected\n";
         return 0;
     }
     if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
         || std::string_view(argv[1]) == "inventory-pickup-barrier"
         || std::string_view(argv[1]) == "native-door-presentation"
-        || std::string_view(argv[1]) == "travel-discontinuity-resync"))
+        || std::string_view(argv[1]) == "travel-discontinuity-resync"
+        || std::string_view(argv[1]) == "player-appearances"
+        || std::string_view(argv[1]) == "player-respawn"))
     {
         teleportPresentation(std::string_view(argv[1]) == "inventory-pickup-barrier",
             std::string_view(argv[1]) == "native-door-presentation",
-            std::string_view(argv[1]) == "travel-discontinuity-resync");
+            std::string_view(argv[1]) == "travel-discontinuity-resync",
+            std::string_view(argv[1]) == "player-appearances",
+            std::string_view(argv[1]) == "player-respawn");
         return 0;
     }
 

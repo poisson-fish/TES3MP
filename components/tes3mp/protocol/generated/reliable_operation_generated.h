@@ -50,6 +50,10 @@ struct WaitRestRequest;
 struct WaitRestRequestBuilder;
 struct WaitRestRequestT;
 
+struct PlayerRespawnRequest;
+struct PlayerRespawnRequestBuilder;
+struct PlayerRespawnRequestT;
+
 struct ReliableOperation;
 struct ReliableOperationBuilder;
 struct ReliableOperationT;
@@ -165,35 +169,38 @@ enum class ReliableOperationBody : uint8_t {
   CellTransition = 2,
   PlayerLocomotionInput = 3,
   WaitRestRequest = 4,
+  PlayerRespawnRequest = 5,
   MIN = NONE,
-  MAX = WaitRestRequest
+  MAX = PlayerRespawnRequest
 };
 
-inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[5] {
+inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[6] {
   static const ReliableOperationBody values[] = {
     ReliableOperationBody::NONE,
     ReliableOperationBody::PlayerMotionIntent,
     ReliableOperationBody::CellTransition,
     ReliableOperationBody::PlayerLocomotionInput,
-    ReliableOperationBody::WaitRestRequest
+    ReliableOperationBody::WaitRestRequest,
+    ReliableOperationBody::PlayerRespawnRequest
   };
   return values;
 }
 
 inline const char * const *EnumNamesReliableOperationBody() {
-  static const char * const names[6] = {
+  static const char * const names[7] = {
     "NONE",
     "PlayerMotionIntent",
     "CellTransition",
     "PlayerLocomotionInput",
     "WaitRestRequest",
+    "PlayerRespawnRequest",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameReliableOperationBody(ReliableOperationBody e) {
-  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::WaitRestRequest)) return "";
+  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::PlayerRespawnRequest)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesReliableOperationBody()[index];
 }
@@ -218,6 +225,10 @@ template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable
   static const ReliableOperationBody enum_value = ReliableOperationBody::WaitRestRequest;
 };
 
+template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerRespawnRequest;
+};
+
 template<typename T> struct ReliableOperationBodyUnionTraits {
   static const ReliableOperationBody enum_value = ReliableOperationBody::NONE;
 };
@@ -236,6 +247,10 @@ template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Rel
 
 template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT> {
   static const ReliableOperationBody enum_value = ReliableOperationBody::WaitRestRequest;
+};
+
+template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerRespawnRequest;
 };
 
 struct ReliableOperationBodyUnion {
@@ -299,6 +314,14 @@ struct ReliableOperationBodyUnion {
   const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *AsWaitRestRequest() const {
     return type == ReliableOperationBody::WaitRestRequest ?
       reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value) : nullptr;
+  }
+  TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *AsPlayerRespawnRequest() {
+    return type == ReliableOperationBody::PlayerRespawnRequest ?
+      reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *>(value) : nullptr;
+  }
+  const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *AsPlayerRespawnRequest() const {
+    return type == ReliableOperationBody::PlayerRespawnRequest ?
+      reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *>(value) : nullptr;
   }
 };
 
@@ -915,6 +938,59 @@ inline ::flatbuffers::Offset<WaitRestRequest> CreateWaitRestRequest(
 
 ::flatbuffers::Offset<WaitRestRequest> CreateWaitRestRequest(::flatbuffers::FlatBufferBuilder &_fbb, const WaitRestRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct PlayerRespawnRequestT : public ::flatbuffers::NativeTable {
+  typedef PlayerRespawnRequest TableType;
+  uint64_t life = 0;
+};
+
+struct PlayerRespawnRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PlayerRespawnRequestT NativeTableType;
+  typedef PlayerRespawnRequestBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_LIFE = 4
+  };
+  uint64_t life() const {
+    return GetField<uint64_t>(VT_LIFE, 0);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_LIFE, 8) &&
+           verifier.EndTable();
+  }
+  PlayerRespawnRequestT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(PlayerRespawnRequestT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<PlayerRespawnRequest> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerRespawnRequestT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct PlayerRespawnRequestBuilder {
+  typedef PlayerRespawnRequest Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_life(uint64_t life) {
+    fbb_.AddElement<uint64_t>(PlayerRespawnRequest::VT_LIFE, life, 0);
+  }
+  explicit PlayerRespawnRequestBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<PlayerRespawnRequest> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<PlayerRespawnRequest>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<PlayerRespawnRequest> CreatePlayerRespawnRequest(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t life = 0) {
+  PlayerRespawnRequestBuilder builder_(_fbb);
+  builder_.add_life(life);
+  return builder_.Finish();
+}
+
+::flatbuffers::Offset<PlayerRespawnRequest> CreatePlayerRespawnRequest(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerRespawnRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct ReliableOperationT : public ::flatbuffers::NativeTable {
   typedef ReliableOperation TableType;
   std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ClientCommandHeaderT> command_header{};
@@ -960,6 +1036,9 @@ struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *body_as_WaitRestRequest() const {
     return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::WaitRestRequest ? static_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(body()) : nullptr;
   }
+  const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest *body_as_PlayerRespawnRequest() const {
+    return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::PlayerRespawnRequest ? static_cast<const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest *>(body()) : nullptr;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -991,6 +1070,10 @@ template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInpu
 
 template<> inline const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::WaitRestRequest>() const {
   return body_as_WaitRestRequest();
+}
+
+template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest>() const {
+  return body_as_PlayerRespawnRequest();
 }
 
 struct ReliableOperationBuilder {
@@ -1270,6 +1353,32 @@ inline ::flatbuffers::Offset<WaitRestRequest> WaitRestRequest::Pack(::flatbuffer
       _mode);
 }
 
+inline PlayerRespawnRequestT *PlayerRespawnRequest::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<PlayerRespawnRequestT>(new PlayerRespawnRequestT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void PlayerRespawnRequest::UnPackTo(PlayerRespawnRequestT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = life(); _o->life = _e; }
+}
+
+inline ::flatbuffers::Offset<PlayerRespawnRequest> CreatePlayerRespawnRequest(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerRespawnRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return PlayerRespawnRequest::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<PlayerRespawnRequest> PlayerRespawnRequest::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerRespawnRequestT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const PlayerRespawnRequestT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _life = _o->life;
+  return TES3MP::Protocol::Schema::Reliable::CreatePlayerRespawnRequest(
+      _fbb,
+      _life);
+}
+
 inline ReliableOperationT::ReliableOperationT(const ReliableOperationT &o)
       : command_header((o.command_header) ? new TES3MP::Protocol::Schema::Reliable::ClientCommandHeaderT(*o.command_header) : nullptr),
         entity_precondition((o.entity_precondition) ? new TES3MP::Protocol::Schema::Reliable::EntityPreconditionT(*o.entity_precondition) : nullptr),
@@ -1340,6 +1449,10 @@ inline bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &veri
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case ReliableOperationBody::PlayerRespawnRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1376,6 +1489,10 @@ inline void *ReliableOperationBodyUnion::UnPack(const void *obj, ReliableOperati
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(obj);
       return ptr->UnPack(resolver);
     }
+    case ReliableOperationBody::PlayerRespawnRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequest *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1399,6 +1516,10 @@ inline ::flatbuffers::Offset<void> ReliableOperationBodyUnion::Pack(::flatbuffer
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value);
       return CreateWaitRestRequest(_fbb, ptr, _rehasher).Union();
     }
+    case ReliableOperationBody::PlayerRespawnRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *>(value);
+      return CreatePlayerRespawnRequest(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1419,6 +1540,10 @@ inline ReliableOperationBodyUnion::ReliableOperationBodyUnion(const ReliableOper
     }
     case ReliableOperationBody::WaitRestRequest: {
       value = new TES3MP::Protocol::Schema::Reliable::WaitRestRequestT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(u.value));
+      break;
+    }
+    case ReliableOperationBody::PlayerRespawnRequest: {
+      value = new TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *>(u.value));
       break;
     }
     default:
@@ -1445,6 +1570,11 @@ inline void ReliableOperationBodyUnion::Reset() {
     }
     case ReliableOperationBody::WaitRestRequest: {
       auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value);
+      delete ptr;
+      break;
+    }
+    case ReliableOperationBody::PlayerRespawnRequest: {
+      auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerRespawnRequestT *>(value);
       delete ptr;
       break;
     }

@@ -65,6 +65,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t BodyCampaignMagic = 0x6550434154335354;
     inline constexpr uint64_t TargetCampaignMagic = 0x6850434154335354;
     inline constexpr uint64_t CellActorsCampaignMagic = 0x6950434154335354;
+    inline constexpr uint64_t CharacterCampaignMagic = 0x6a50434154335354;
     inline void putActorProcessingCell(std::vector<char>& bytes, CellId cell)
     {
         putAreaWord(bytes, uint64_t(cell.kind()));
@@ -290,6 +291,7 @@ namespace TES3MP::Native
         static constexpr size_t MaximumConditionSources = 128;
         std::vector<ConditionSource> conditions;
         static constexpr size_t StatCount = 8 + 3 + 27;
+        bool constructedPlayers = false; // Derived from the V78 envelope, never a second durable field.
         using Stats = std::array<std::array<float, 5>, StatCount>;
         struct PlayerLife
         {
@@ -398,12 +400,45 @@ namespace TES3MP::Native
         std::string castResource;
         std::optional<ActorCampaignCast> casting;
         std::span<const char> dynamicActors;
+        bool characters = false;
+        std::array<uint64_t, 2> characterPlayers{};
+        std::array<std::span<const char>, 2> characterProfiles, characterResources;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
         const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr, bool genericTargets = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == CharacterCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested character envelope");
+            std::array<uint64_t, 2> players{};
+            std::array<std::span<const char>, 2> profiles, resources;
+            for (size_t i = 0; i < 2; ++i)
+            {
+                players[i] = getAreaWord(bytes, offset);
+                if (!players[i] || (i && players[i] == players[0]))
+                    throw std::invalid_argument("Character player domain invalid");
+                for (auto* field : {&profiles[i], &resources[i]})
+                {
+                    const auto length = getAreaWord(bytes, offset);
+                    if (length > 32768 || length > bytes.size() - offset)
+                        throw std::invalid_argument("Character field exceeds bound");
+                    *field = bytes.subspan(offset, size_t(length)); offset += size_t(length);
+                }
+                if (profiles[i].empty() != resources[i].empty())
+                    throw std::invalid_argument("Character resource binding absent");
+            }
+            size_t innerOffset = 0;
+            if (getAreaWord(bytes.subspan(offset), innerOffset) != CellActorsCampaignMagic)
+                throw std::invalid_argument("Character campaign inner version invalid");
+            auto result = readActorCampaign(bytes.subspan(offset));
+            if (result.characters || !result.combat || !result.combat->cellActors)
+                throw std::invalid_argument("Character campaign requires shared cell combat");
+            result.characters = true; result.combat->constructedPlayers = true; result.characterPlayers = players;
+            result.characterProfiles = profiles; result.characterResources = resources;
+            return result;
+        }
         if (magic == CellActorsCampaignMagic)
         {
             if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested cell actor envelope");

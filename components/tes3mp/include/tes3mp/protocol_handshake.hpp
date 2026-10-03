@@ -52,6 +52,8 @@ namespace TES3MP
     inline constexpr std::uint32_t CommittedDeathPresentationCapabilityValue = 33;
     inline constexpr std::uint32_t SpellApplicationPresentationCapabilityValue = 34;
     inline constexpr std::uint32_t ExtendedSpellSourcesCapabilityValue = 35;
+    inline constexpr std::uint32_t PlayerAppearanceCapabilityValue = 36;
+    inline constexpr std::uint32_t PlayerRespawnCapabilityValue = 37;
 
     class CapabilityId
     {
@@ -162,6 +164,13 @@ namespace TES3MP
     {
         return *CapabilityId::fromValue(CharacterCreationCapabilityValue);
     }
+
+    inline constexpr CapabilityId playerAppearanceCapability() noexcept
+    {
+        return *CapabilityId::fromValue(PlayerAppearanceCapabilityValue);
+    }
+    inline constexpr CapabilityId playerRespawnCapability() noexcept
+    { return *CapabilityId::fromValue(PlayerRespawnCapabilityValue); }
 
     inline constexpr CapabilityId dialogueChoiceCapability() noexcept
     {

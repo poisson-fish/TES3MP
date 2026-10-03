@@ -18,6 +18,8 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/globals.hpp"
+#include "../mwworld/class.hpp"
+#include "../mwmechanics/creaturestats.hpp"
 #include "../tes3mp/engine_coordinator.hpp"
 #include "../tes3mp/player_profile_manager.hpp"
 
@@ -157,6 +159,8 @@ namespace MWGui
                 else
                     MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mButtons["newgame"]);
             }
+            else if (mRespawnButton && mRespawnButton->getVisible())
+                MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mRespawnButton);
             else
                 MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mButtons["return"]);
         }
@@ -188,6 +192,11 @@ namespace MWGui
         winMgr->playSound(ESM::RefId::stringRefId("Menu Click"));
         if (name == "return")
             winMgr->removeGuiMode(GM_MainMenu);
+        else if (name == "respawn")
+        {
+            auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            if (multiplayer && multiplayer->submitRespawn()) mRespawnButton->setEnabled(false);
+        }
         else if (name == "credits")
             winMgr->playVideo("mw_credits.bik", true);
         else if (name == "exitgame")
@@ -320,7 +329,31 @@ namespace MWGui
             return false;
         }
 
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_Running
+            && multiplayer && multiplayer->ownsPlayerLives())
+        {
+            const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            if (player.getClass().getCreatureStats(player).isDead()) return false;
+        }
         return MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_Running;
+    }
+
+    void MainMenu::onFrame(float)
+    {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (mRespawnButton
+            && MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_Running
+            && multiplayer && multiplayer->ownsPlayerLives())
+        {
+            const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            if (mRespawnButton->getVisible() != player.getClass().getCreatureStats(player).isDead())
+                updateMenu();
+        }
+        if (mRespawnButton && mRespawnButton->getVisible())
+        {
+            mRespawnButton->setEnabled(multiplayer && multiplayer->canRespawn());
+        }
     }
 
     void MainMenu::updateMenu()
@@ -336,6 +369,21 @@ namespace MWGui
         MWBase::StateManager::State state = MWBase::Environment::get().getStateManager()->getState();
 
         auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        const bool multiplayerDeath = state == MWBase::StateManager::State_Running && multiplayer
+            && multiplayer->ownsPlayerLives() && [&] {
+                const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+                return player.getClass().getCreatureStats(player).isDead();
+            }();
+        if (!mRespawnButton)
+        {
+            mRespawnButton = mButtonBox->createWidget<MyGUI::Button>(
+                "MW_Button", MyGUI::IntCoord(0, 0, 180, 28), MyGUI::Align::Default);
+            mRespawnButton->setCaption("#{OMWEngine:Respawn}");
+            mRespawnButton->setUserData(std::string("respawn"));
+            mRespawnButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::onButtonClicked);
+        }
+        mRespawnButton->setVisible(multiplayerDeath);
+        mRespawnButton->setEnabled(multiplayerDeath && multiplayer->canRespawn());
         const bool showMultiplayer = state == MWBase::StateManager::State_NoGame && multiplayer
             && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Connecting
             && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Ready;
@@ -368,17 +416,17 @@ namespace MWGui
 
         std::vector<std::string> buttons;
 
-        if (state == MWBase::StateManager::State_Running)
+        if (state == MWBase::StateManager::State_Running && !multiplayerDeath)
             buttons.emplace_back("return");
 
-        buttons.emplace_back("newgame");
+        if (!multiplayerDeath) buttons.emplace_back("newgame");
 
-        if (state == MWBase::StateManager::State_Running
+        if (state == MWBase::StateManager::State_Running && !multiplayerDeath
             && MWBase::Environment::get().getWorld()->getGlobalInt(MWWorld::Globals::sCharGenState) == -1
             && MWBase::Environment::get().getWindowManager()->isSavingAllowed())
             buttons.emplace_back("savegame");
 
-        if (MWBase::Environment::get().getStateManager()->characterBegin()
+        if (!multiplayerDeath && MWBase::Environment::get().getStateManager()->characterBegin()
             != MWBase::Environment::get().getStateManager()->characterEnd())
             buttons.emplace_back("loadgame");
 
@@ -438,6 +486,16 @@ namespace MWGui
             curH += static_cast<int>(height / scale - 16);
         }
 
+        if (multiplayerDeath)
+        {
+            mRespawnButton->setCoord((maxwidth - 180) / 2, 0, 180, 28);
+            for (const auto& id : buttons)
+            {
+                const auto coord = mButtons[id]->getCoord();
+                mButtons[id]->setPosition(coord.left, coord.top + 36);
+            }
+            curH += 36;
+        }
         if (showMultiplayer)
         {
             mMultiplayerButton->setCoord((maxwidth - 180) / 2, curH + 4, 180, 28);

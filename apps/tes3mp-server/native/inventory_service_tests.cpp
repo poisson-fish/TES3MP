@@ -10,6 +10,10 @@
 #include <apps/openmw/mwmechanics/weapontype.hpp>
 #include <apps/openmw/mwmechanics/airating.hpp>
 #include "inventory_service.hpp"
+#include "character_construction.hpp"
+#include <components/esm3/loadbody.hpp>
+#include <components/esm3/loadclas.hpp>
+#include <components/esm3/loadbsgn.hpp>
 #include "inventory_host.hpp"
 #include "actor_campaign.hpp"
 #include "magic_runtime.hpp"
@@ -5587,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool cellActors = effectFamily == "cell-actors";
+        const bool characterCreation = effectFamily == "chargen-installer";
+        const bool cellActors = characterCreation || effectFamily == "cell-actors";
         const bool worldCollision = effectFamily == "world-collision";
         const bool sneakDetection = effectFamily == "sneak-detection";
         const bool landingRecovery = effectFamily == "movement-fall";
@@ -5601,7 +5606,8 @@ namespace TES3MP::Native::Testing
         const bool genericTargets = effectFamily == "target-recipients" || cellActors;
         const bool spellCompleteness = genericTargets || effectFamily == "spell-completeness";
         const bool committedBodies = spellCompleteness || effectFamily == "actor-bodies";
-        const bool playerLives = effectFamily == "player-lives" || committedBodies;
+        const bool manualRespawn = effectFamily == "player-respawn";
+        const bool playerLives = manualRespawn || effectFamily == "player-lives" || committedBodies;
         const bool summons = mixedPassives || playerLives || effectFamily.starts_with("summons-integrated");
         const auto summonProfile = effectFamily;
         const auto summonEffect = summonProfile == "summons-integrated-quadruped" ? ESM::MagicEffect::SummonClannfear
@@ -7060,6 +7066,20 @@ namespace TES3MP::Native::Testing
             }
             if (participantHits)
             {
+                if (characterCreation)
+                    for (bool femalePart : {false, true})
+                        for (const auto& part : base.store().get<ESM::BodyPart>())
+                            if (part.mRace == ESM::RefId::stringRefId("breton") && part.mData.mPart == ESM::BodyPart::MP_Head
+                                && part.mData.mType == ESM::BodyPart::MT_Skin && !ESM::isFirstPersonBodyPart(part)
+                                && !(part.mData.mFlags & ESM::BodyPart::BPF_NotPlayable)
+                                && bool(part.mData.mFlags & ESM::BodyPart::BPF_Female) == femalePart)
+                            {
+                                auto missing = part;
+                                missing.mId = ESM::RefId::stringRefId(femalePart ? "chargen_missing_head_f" : "chargen_missing_head_m");
+                                missing.mModel = "chargen_missing_appearance.nif";
+                                out.startRecord(ESM::BodyPart::sRecordId, 0); missing.save(out); out.endRecord(ESM::BodyPart::sRecordId);
+                                break;
+                            }
                 auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
                 auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
                 if (boundEquipment || aiDisposition || effectFamily == "ai-creature")
@@ -7074,6 +7094,7 @@ namespace TES3MP::Native::Testing
                 {
                     auto race = *base.store().get<ESM::Race>().find(female.mRace);
                     race.mId = ESM::RefId::stringRefId("completeness_race");
+                    if (characterCreation) race.mData.mFlags &= ~ESM::Race::Playable;
                     ESM::Spell ability; ability.blank(); ability.mId = ESM::RefId::stringRefId("completeness_racial_ability");
                     ability.mData.mType = ESM::Spell::ST_Ability;
                     ability.mEffects.populate({{ESM::MagicEffect::FireDamage, {}, {}, ESM::RT_Touch, 0, 1, 10, 10},
@@ -7551,6 +7572,15 @@ namespace TES3MP::Native::Testing
                     }
                 }
             }
+            if (characterCreation)
+            {
+                auto placedNpc = npc;
+                placedNpc.mId = ESM::RefId::stringRefId("chargen_autocalc_npc");
+                placedNpc.mNpdtType = ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS;
+                placedNpc.mFlags |= ESM::NPC::Autocalc;
+                placedNpc.mAiData.mFight = 0;
+                out.startRecord(ESM::NPC::sRecordId, 0); placedNpc.save(out); out.endRecord(ESM::NPC::sRecordId);
+            }
             if (deepMovement)
             {
                 auto breath = *base.store().get<ESM::GameSetting>().find("fHoldBreathTime");
@@ -7690,6 +7720,12 @@ namespace TES3MP::Native::Testing
                     ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                     placed.mPos = {{x, y, 1}, {0, 0, 0}}; placed.save(out);
                 }
+            if (characterCreation)
+            {
+                ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                placed.mRefID = ESM::RefId::stringRefId("chargen_autocalc_npc");
+                placed.mPos = {{-200, -400, 1}, {0, 0, 0}}; placed.save(out);
+            }
             out.endRecord(ESM::Cell::sRecordId);
             if (aiDisposition)
             {
@@ -9105,12 +9141,13 @@ namespace TES3MP::Native::Testing
         {
             CredentialDigest digest; digest.bytes.fill(std::byte(i));
             records.push_back({{id<PlayerId>(i),id<EntityId>(i == 1 ? 111 : 222),id<AppearanceId>(1),testContentManifestId()},
-                digest, *authority.findPlayer(id<PlayerId>(i)), profile});
+                digest, characterCreation ? std::optional<CanonicalPlayerEntityState>{} : std::optional{*authority.findPlayer(id<PlayerId>(i))},
+                characterCreation ? CharacterProfile::fresh() : profile});
         }
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9183,6 +9220,201 @@ namespace TES3MP::Native::Testing
         InventoryHost host(descriptor, manifest, *registry, *crypto, {});
         require(host.environment() != nullptr, "V17 lost the native time/weather owner");
         auto& service = host.service(); service.synchronizeCells(authority);
+        if (characterCreation)
+        {
+            auto& native = dynamic_cast<InventoryService&>(service);
+            const auto checkpoint = authority.players().front().transform();
+            require(host.characterContent(manifest.id(), checkpoint, checkpoint).has_value(), "Native startup discovery unavailable");
+            require(!native.allowsPlayerMovement(id<PlayerId>(1)) && !native.allowsPlayerMovement(id<PlayerId>(2)),
+                "Fresh native characters can enter gameplay");
+            const auto configArgument = (scratch / "openmw").string();
+            const char* arguments[]{"chargen-installer", "--config", configArgument.c_str()};
+            Loadout source(readLoadoutOptions(3, arguments));
+            require(source.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("chargen_autocalc_npc"))->mNpdtType
+                == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS, "Headless autocalculated NPC fixture absent");
+            ESM::RefId shirt;
+            for (const auto& item : source.store().get<ESM::Clothing>())
+                if (item.mData.mType == ESM::Clothing::Shirt && item.mScript.empty() && item.mEnchant.empty())
+                { shirt = item.mId; break; }
+            require(!shirt.empty(), "Character starting shirt fixture absent");
+            const StartingItem starting{id<ItemPrototypeId>(MWWorld::inventoryRecordId(shirt)), 1,
+                uint8_t(MWWorld::InventoryStore::Slot_Shirt)};
+            auto catalog = discoverNativeCharacterContent(manifest.id(), checkpoint, checkpoint,
+                std::span(&starting, 1), source.store());
+            require(bool(catalog), "Native character fixture choices unavailable");
+            const CharacterRaceDefinition* race = nullptr;
+            for (const auto& value : source.store().get<ESM::Race>())
+                if (auto found = value.mId == ESM::RefId::stringRefId("breton")
+                    ? catalog->find(id<RaceRecordId>(*characterRecordId(value.mId.getRefIdString()))) : nullptr;
+                    found && found->appearances.size() >= 2) { race = found; break; }
+            const CharacterClassDefinition* cls = nullptr;
+            for (const auto& value : source.store().get<ESM::Class>())
+                if (auto found = catalog->find(id<ClassRecordId>(*characterRecordId(value.mId.getRefIdString())))) { cls = found; break; }
+            std::optional<BirthsignRecordId> sign;
+            for (const auto& value : source.store().get<ESM::BirthSign>())
+                if (value.mId == ESM::RefId::stringRefId("Elfborn")) sign = id<BirthsignRecordId>(*characterRecordId(value.mId.getRefIdString()));
+            require(race && cls && sign && catalog->find(*sign), "Character selection fixture incomplete");
+            std::array<CharacterProfile, 2> completed{CharacterProfile::fresh(), CharacterProfile::fresh()};
+            for (size_t index = 0; index < 2; ++index)
+            {
+                const auto choose = [&](CharacterCreationChoice choice) {
+                    const auto kind = choice.index();
+                    auto changed = applyCharacterCreation(completed[index], *catalog, {completed[index].revision(), std::move(choice)});
+                    if (const auto* error = std::get_if<CharacterProfileError>(&changed))
+                        std::cerr << "Native fixture choice " << kind << " failed: " << int(*error) << '\n';
+                    require(std::holds_alternative<CharacterProfile>(changed), "Native fixture character choice rejected");
+                    completed[index] = std::get<CharacterProfile>(std::move(changed));
+                };
+                choose(SetCharacterName{index ? "Second native character" : "First native character"});
+                const auto missingHead = [](CharacterSex sex) { return id<HeadRecordId>(*characterRecordId(
+                    sex == CharacterSex::Female ? "chargen_missing_head_f" : "chargen_missing_head_m")); };
+                auto appearance = *std::ranges::find_if(race->appearances, [&](auto value) { return value.head != missingHead(value.sex); });
+                if (index) for (auto other : race->appearances)
+                    if (other.sex != appearance.sex && other.head != missingHead(other.sex)) { appearance = other; break; }
+                choose(SetCharacterAppearance{appearance});
+                if (index) choose(SetCharacterClass{CustomClassDefinition{"Scholar", {}, ClassSpecialization::Magic,
+                    {0, 1}, {2, 3, 4, 5, 6}, {7, 8, 9, 10, 11}}});
+                else choose(SetCharacterClass{cls->id});
+                choose(SetCharacterBirthsign{*sign}); choose(CompleteCharacterCreation{});
+            }
+            const auto image = [](const auto& owner) { return std::vector(owner.inventoryImage().begin(), owner.inventoryImage().end()); };
+            CanonicalWorldTimeState worldTime; worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
+            const auto world = CanonicalWorldState::initial(worldTime, GlobalVariableCatalog::create({}).value(),
+                QuestJournalCatalog::create(testContentManifestId(), {}, {}).value(),
+                FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value()).value();
+            auto initialized = native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {}, &world);
+            require(initialized && initialized->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Fresh character campaign could not initialize a frozen tick");
+            const auto fresh = image(service);
+            auto unavailableAppearance = *completed[0].appearance();
+            unavailableAppearance.head = id<HeadRecordId>(*characterRecordId(unavailableAppearance.sex == CharacterSex::Female
+                ? "chargen_missing_head_f" : "chargen_missing_head_m"));
+            auto unavailable = CharacterProfile::restore(completed[0].lifecycle(), completed[0].phase(), completed[0].name(),
+                unavailableAppearance, completed[0].characterClass(), completed[0].birthsign(), completed[0].derived(),
+                std::vector(completed[0].startingInventory().begin(), completed[0].startingInventory().end()), completed[0].revision());
+            require(unavailable && !native.prepareCharacterCompletion(authority, id<PlayerId>(1), *unavailable, id<ServerTick>(2))
+                && image(service) == fresh, "Missing selected appearance mesh completed or mutated a character");
+            auto abandoned = native.prepareCharacterCompletion(authority, id<PlayerId>(1), completed[0], id<ServerTick>(2));
+            require(bool(abandoned), "Concrete native completion did not prepare");
+            auto preview = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2), abandoned.get());
+            require(preview && preview->playerInventory.front().stacks.size() == 1, "Completion inventory missing from staged projection");
+            require(preview->equipment && preview->equipment->characterBodies
+                && preview->equipment->appearances == std::vector<PublicPlayerAppearance>{{id<PlayerId>(1), *completed[0].appearance()}},
+                "Staged completion did not project only the established public body");
+            require(image(service) == fresh && !native.characterBinding().mCharacters[0], "Completion preparation leaked a body");
+            abandoned.reset();
+            const auto cancelledView = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2));
+            require(cancelledView && cancelledView->equipment->characterBodies && cancelledView->equipment->appearances.empty(),
+                "Cancelled completion leaked public appearance");
+            auto pending = native.prepareCharacterCompletion(authority, id<PlayerId>(1), completed[0], id<ServerTick>(2));
+            require(pending && pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                && image(service) == fresh, "Rejected native completion leaked state");
+            require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Rejected completion could not retry");
+            require(native.allowsPlayerMovement(id<PlayerId>(1)) && !native.allowsPlayerMovement(id<PlayerId>(2)),
+                "Completion leaked another player's lifecycle");
+            require(!native.prepareCharacterCompletion(authority, id<PlayerId>(1), completed[0], id<ServerTick>(3)),
+                "Established native body accepted duplicate completion");
+            const auto first = image(service);
+            service.synchronizeCells(authority);
+            auto completionTick = native.prepareNativeTick(authority, id<ServerTick>(2), 1.f/30, {}, &world);
+            require(completionTick && completionTick->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed,
+                "Chargen consumed the pending scheduler tick and stopped replication");
+            auto stale = native.prepareCharacterCompletion(authority, id<PlayerId>(2), completed[1], id<ServerTick>(3));
+            auto second = native.prepareCharacterCompletion(authority, id<PlayerId>(2), completed[1], id<ServerTick>(3));
+            require(second && second->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Second native character completion failed");
+            auto saved = image(service);
+            require(stale && stale->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected
+                && image(service) == saved, "Stale native completion overwrote another installation");
+            service.synchronizeCells(authority);
+            auto secondCompletionTick = native.prepareNativeTick(authority, id<ServerTick>(3), 1.f/30, {}, &world);
+            require(secondCompletionTick && secondCompletionTick->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                == CanonicalDurabilityResult::Committed, "Second completion consumed the pending scheduler tick");
+            service.synchronizeCells(authority);
+            auto gameplay = native.prepareNativeTick(authority, id<ServerTick>(4), 1.f/30, {}, &world);
+            require(gameplay && gameplay->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                "Completed native characters could not enter simulation");
+            const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            service.synchronizeCells(offline);
+            require(native.activeActorCollisionBodies() == 0, "Completed characters kept offline simulation loaded");
+            const auto& weapon = *source.store().get<ESM::Weapon>().find(ESM::RefId::stringRefId("iron shortsword"));
+            require(!native.characterBinding().mPlayerMelee[0](&weapon, "thrust").identity().empty(),
+                "Selected character weapon resources failed while unloaded");
+            service.synchronizeCells(authority);
+            saved = image(service);
+            for (size_t index = 0; index < 2; ++index)
+            {
+                const auto& body = *native.characterBinding().mActors[index].mCharacterBody;
+                require(body.mName == completed[index].name() && body.mSpells.mList.size() == completed[index].derived().startingSpells.size(),
+                    "Completed body/name/known spells differ from profile");
+                require(index ? body.mClass.empty() : characterRecordId(body.mClass.getRefIdString()) == cls->id.value(),
+                    "Completed body inherited the template class");
+                records[index].characterProfile = completed[index]; records[index].savedPlayer = authority.players()[index];
+            }
+            auto established = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+            InventoryHost restarted(descriptor, manifest, *established, *crypto, saved);
+            require(image(restarted.service()) == saved, "Concrete character restart changed durable inventory/body/resources");
+            auto originalView = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(4));
+            auto restartedView = restarted.service().projectInventory(authority, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(4));
+            require(originalView && restartedView && originalView->playerInventory == restartedView->playerInventory,
+                "Character restart regenerated starting item identities");
+            const std::vector expectedAppearances{PublicPlayerAppearance{id<PlayerId>(1), *completed[0].appearance()},
+                PublicPlayerAppearance{id<PlayerId>(2), *completed[1].appearance()}};
+            require(originalView->equipment->appearances == expectedAppearances
+                && restartedView->equipment->appearances == expectedAppearances && restartedView->equipment->characterBodies,
+                "Restart lost established public body selections");
+            auto separatedPlayers = std::vector(authority.players().begin(), authority.players().end());
+            const auto& other = separatedPlayers[1];
+            separatedPlayers[1] = CanonicalPlayerEntityState(other.playerId(), other.entityId(), other.appearanceId(),
+                Transform(CellId::interior(id<CellSpaceId>(8)), other.transform().position(), other.transform().orientation()), other.linearVelocity(),
+                other.entityRevision(), other.authorityEpoch(), other.lastSpatialChangeTick(), other.locomotionMode());
+            const auto separated = std::get<CanonicalServerState>(createCanonicalServerState(separatedPlayers, authority.activeSessions()));
+            const auto separatedView = service.projectInventory(separated, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(4));
+            require(separatedView && separatedView->equipment->appearances == std::vector<PublicPlayerAppearance>{expectedAppearances[0]},
+                "Public body escaped cell interest filtering");
+            const auto decoded = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+            require(decoded.characters && !decoded.characterProfiles[0].empty() && !decoded.characterProfiles[1].empty(),
+                "Native completion did not persist both profiles");
+            for (size_t index = 0; index < 2; ++index)
+            {
+                float bonus = 0;
+                for (const auto& effect : decoded.timedEffects)
+                    if (effect.actor == index && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::FortifyMaximumMagicka)))
+                        bonus += effect.magnitude;
+                const auto& stats = decoded.combat->actors[index];
+                const auto multiplier = source.store().get<ESM::GameSetting>().find("fPCbaseMagickaMult")->mValue.getFloat();
+                require(bonus > 0 && stats[9][0] == (stats[1][0] + stats[1][1]) * (multiplier + .1f * bonus)
+                    && stats[9][2] == stats[9][0] + stats[9][1], "Character sources used NPC magicka context or unfilled resources");
+            }
+            size_t inner = 8;
+            for (size_t index = 0; index < 2; ++index)
+            {
+                getAreaWord({reinterpret_cast<const char*>(saved.data()), saved.size()}, inner);
+                for (size_t field = 0; field < 2; ++field)
+                    inner += size_t(getAreaWord({reinterpret_cast<const char*>(saved.data()), saved.size()}, inner));
+            }
+            auto nested = saved;
+            for (size_t i = 0; i < 8; ++i) nested[inner + i] = std::byte(CharacterCampaignMagic >> (i * 8));
+            bool nestedRejected = false;
+            try { readActorCampaign({reinterpret_cast<const char*>(nested.data()), nested.size()}); }
+            catch (const std::exception&) { nestedRejected = true; }
+            require(nestedRejected, "Recursive character envelope accepted");
+            auto corrupt = saved; corrupt[32] ^= std::byte{1};
+            bool invalid = false;
+            try { InventoryHost bad(descriptor, manifest, *established, *crypto, corrupt); }
+            catch (const std::exception&) { invalid = true; }
+            require(invalid, "Malformed native character metadata accepted");
+            auto partialRecords = records; partialRecords[1].characterProfile = CharacterProfile::fresh(); partialRecords[1].savedPlayer.reset();
+            auto partialRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, partialRecords));
+            InventoryHost partial(descriptor, manifest, *partialRegistry, *crypto, first);
+            auto uncertain = partial.service().prepareCharacterCompletion(authority, id<PlayerId>(2), completed[1], id<ServerTick>(3));
+            require(uncertain && uncertain->commit([](auto) { return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                && partial.service().inventoryImage().empty(), "Uncertain completion did not close native gameplay");
+            std::cout << "chargen native installer: two bodies isolated; inventory/stats/spells/resources staged; cancel/reject/retry/stale atomic; restart exact; uncertain closed (synthetic)\n";
+            return;
+        }
         if (cellActors)
         {
             auto& native = dynamic_cast<InventoryService&>(service);
@@ -9666,15 +9898,59 @@ namespace TES3MP::Native::Testing
                 require(image(deadRestart.service()) == deadBytes, "Dead-life recovery changed consequences");
             }
             const auto deadline = dead.combat->playerLives[0].respawnTick;
-            while (tick + 1 < deadline) { auto next = prepare(reducer); commit(reducer, native, next); }
+            if (!manualRespawn)
+                while (tick + 1 < deadline) { auto next = prepare(reducer); commit(reducer, native, next); }
             const auto deadEpoch = reducer.state().findPlayer(id<PlayerId>(1))->authorityEpoch();
-            auto respawn = prepare(reducer);
+            const auto makeRespawn = [&](const auto& owner, uint64_t life) {
+                const auto* session = owner.state().findActiveSession(id<SessionId>(1));
+                const auto* player = owner.state().findPlayer(id<PlayerId>(1));
+                const auto sequence = session->highestContiguousFinalizedCommand()
+                    ? *session->highestContiguousFinalizedCommand()->next() : CommandSequence::initial();
+                return ServerCommandProposal(session->sessionId(), session->sessionGeneration(), sequence,
+                    id<CommandId>(tick + 9000), owner.canonicalRevision(),
+                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                    PlayerRespawnCommandProposal{PlayerRespawnRequest{life}});
+            };
+            auto request = makeRespawn(reducer, dead.combat->playerLives[0].generation);
+            if (manualRespawn)
+            {
+                const auto wrongLife = makeRespawn(reducer, dead.combat->playerLives[0].generation + 1);
+                const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(reducer.state().players(), {}));
+                require(!native.preparePlayerRespawn(reducer.state(), wrongLife)
+                    && !native.preparePlayerRespawn(offline, request) && image(native) == deadBytes,
+                    "Wrong-life/offline respawn admitted or mutated the dead body");
+                require(tick + 1 < deadline, "Manual respawn waited for automatic deadline");
+            }
+            auto respawn = prepare(reducer, manualRespawn ? &request : nullptr);
             require(respawn.candidateState().findPlayer(id<PlayerId>(1))->authorityEpoch() != deadEpoch
                 && respawn.candidateState().findPlayer(id<PlayerId>(1))->transform() == origin.transform()
                 && respawn.candidateState().findPlayer(id<PlayerId>(1))->linearVelocity() == LinearVelocity3(0, 0, 0),
                 "Respawn did not compose canonical relocation and zero velocity");
-            commit(reducer, native, respawn, true);
+            if (manualRespawn)
+            {
+                const auto publication = reducer.latestPublication();
+                port.outcome = CanonicalDurabilityResult::Rejected;
+                require(!reducer.commit(std::move(respawn)) && image(native) == deadBytes
+                    && reducer.latestPublication() == publication, "Rejected manual respawn leaked a new life");
+                port.outcome = CanonicalDurabilityResult::Committed;
+                auto retry = prepare(reducer, &request);
+                require(retry.result().dispositions()[0].disposition() == CommandDisposition::Applied,
+                    "Manual respawn retry was not admitted");
+                commit(reducer, native, retry);
+            }
+            else commit(reducer, native, respawn, true);
             const auto alive = state(native);
+            if (manualRespawn)
+            {
+                const auto currentLife = makeRespawn(reducer, alive.combat->playerLives[0].generation);
+                require(!native.preparePlayerRespawn(reducer.state(), request)
+                    && !native.preparePlayerRespawn(reducer.state(), currentLife), "Living/stale life respawn accepted");
+                auto duplicate = prepare(reducer, &request);
+                require(duplicate.result().dispositions()[0].disposition() != CommandDisposition::Applied,
+                    "Duplicate manual respawn reapplied");
+                commit(reducer, native, duplicate);
+                require(state(native).combat->playerLives[0].generation == 2, "Duplicate respawn advanced generation");
+            }
             if (committedBodies) require(alive.combat->deathBodies[0] == ActorCampaignCombat::DeathBody{},
                 "Respawn retained the previous life's death clip");
             require(alive.combat->playerLives[0].generation == 2 && !alive.combat->playerLives[0].respawnTick
